@@ -1,0 +1,9 @@
+category: Auto-Generated
+description: The repository follows a flat/modular package layout with Python as the
+  sole language. It includes components for kernel management, component registration,
+  and event handling. The code uses spaces for indentation and has a consistent logging
+  setup across files.
+name: auto-core
+tags:
+- core
+- auto-generated

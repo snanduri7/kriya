@@ -1,0 +1,10 @@
+Rule 1: Use spaces for indentation
+Rule 2: Class names should use PascalCase
+Rule 3: Function and method names should use snake_case
+Rule 4: Variable names should use snake_case
+Rule 5: Organize imports into standard, third-party, and local sections
+Rule 6: Sort imports alphabetically within each section
+Rule 7: Use absolute imports for clarity
+Rule 8: Document classes and functions with docstrings
+Rule 9: Place constants at the top of modules if necessary
+Rule 10: Configure loggers at the module level using `logger = logging.getLogger(__name__)`

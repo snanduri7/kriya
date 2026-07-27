@@ -16,7 +16,7 @@ async def test_base_agent_complete():
     res = await planner.run("Plan a math library")
     
     assert res == "Mock response text"
-    llm.complete.assert_called_once_with(planner.system_prompt, "Plan a math library")
+    llm.complete.assert_called_once_with(planner.system_prompt, "Plan a math library", stream_callback=None)
 
 @pytest.mark.asyncio
 async def test_developer_agent_json_parsing():

@@ -1,7 +1,7 @@
 import json
 import logging
 from abc import ABC
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Callable
 
 from kriya.core.llm import LLMClient
 
@@ -22,9 +22,9 @@ class BaseAgent(ABC):
     def system_prompt(self) -> str:
         raise NotImplementedError
 
-    async def run(self, prompt: str) -> str:
+    async def run(self, prompt: str, stream_callback: Optional[Callable[[str], None]] = None) -> str:
         """Execute a text completion request using the LLM Client."""
-        return await self.llm.complete(self.system_prompt, prompt)
+        return await self.llm.complete(self.system_prompt, prompt, stream_callback=stream_callback)
 
 
 # =====================================================================
@@ -69,7 +69,13 @@ class DeveloperAgent(BaseAgent):
             "]"
         )
 
-    async def run_generation(self, task_description: str, design_context: str, existing_code_context: str) -> List[Dict[str, str]]:
+    async def run_generation(
+        self, 
+        task_description: str, 
+        design_context: str, 
+        existing_code_context: str,
+        stream_callback: Optional[Callable[[str], None]] = None
+    ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design."""
         prompt = (
             f"=== User Request & Task ===\n{task_description}\n\n"
@@ -78,7 +84,7 @@ class DeveloperAgent(BaseAgent):
             "Please generate the complete, production-grade files. Return ONLY the JSON list of files."
         )
         
-        response_str = await self.run(prompt)
+        response_str = await self.run(prompt, stream_callback=stream_callback)
         
         # Clean any accidental markdown codeblock wrappers (e.g. ```json ... ```)
         cleaned = response_str.strip()

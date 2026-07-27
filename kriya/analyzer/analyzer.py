@@ -417,3 +417,67 @@ class RepositoryAnalyzer:
         # 4. Save persistent cache index
         store.save()
         logger.info("Semantic repository indexing completed.")
+        
+        # 5. Auto-Generate Codebase Conventions Skill
+        repo_slug = os.path.basename(self.root_path).lower().strip(".")
+        if not repo_slug:
+            repo_slug = "root"
+            
+        skills_dir = getattr(cfg.paths, "skills", "./skills")
+        auto_skill_dir = os.path.join(skills_dir, f"auto-{repo_slug}")
+        
+        if not os.path.exists(auto_skill_dir):
+            import click
+            import yaml
+            from kriya.core.llm import LLMClient
+            from kriya.agents.extractor import ConventionsExtractorAgent
+            
+            click.secho("\nAnalyzing repository style guidelines and patterns...", bold=True, fg="yellow")
+            
+            # Gather sample code files (first 3 files)
+            samples = []
+            for fp in files_to_index[:3]:
+                rel = os.path.relpath(fp, self.root_path)
+                try:
+                    with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                        head = f.read(1500)
+                    samples.append(f"=== File: {rel} ===\n{head}\n")
+                except Exception:
+                    pass
+            samples_str = "\n".join(samples)
+            
+            try:
+                model = self.analyze()
+                struct_str = model.model_dump_json(indent=2)
+                
+                llm = LLMClient(cfg)
+                extractor = ConventionsExtractorAgent("extractor", llm)
+                
+                res = await extractor.extract_conventions(struct_str, samples_str)
+                
+                os.makedirs(auto_skill_dir, exist_ok=True)
+                os.makedirs(os.path.join(auto_skill_dir, "examples"), exist_ok=True)
+                
+                yaml_content = {
+                    "name": f"auto-{repo_slug}",
+                    "description": res.get("description", f"Auto-generated conventions for {repo_slug}"),
+                    "category": "Auto-Generated",
+                    "tags": [repo_slug, "auto-generated"]
+                }
+                with open(os.path.join(auto_skill_dir, "skill.yaml"), "w", encoding="utf-8") as f:
+                    yaml.safe_dump(yaml_content, f, default_flow_style=False)
+                    
+                with open(os.path.join(auto_skill_dir, "instructions.md"), "w", encoding="utf-8") as f:
+                    f.write(res.get("instructions", "# Auto-conventions\n"))
+                    
+                rules_text = "\n".join(res.get("rules", ["Follow project conventions."]))
+                with open(os.path.join(auto_skill_dir, "rules.txt"), "w", encoding="utf-8") as f:
+                    f.write(rules_text)
+                    
+                click.secho(f"Success: Auto-generated engineering skill created for repository '{repo_slug}'!", fg="green")
+                click.echo("You can inspect and tweak the conventions at:")
+                click.echo(f"  - Rules: [rules.txt](file://{os.path.abspath(os.path.join(auto_skill_dir, 'rules.txt'))})")
+                click.echo(f"  - Instructions: [instructions.md](file://{os.path.abspath(os.path.join(auto_skill_dir, 'instructions.md'))})")
+            except Exception as ex:
+                logger.error(f"Failed to auto-generate skill conventions: {ex}", exc_info=True)
+                click.secho(f"Failed to auto-generate skill conventions: {ex}", fg="red")

@@ -352,9 +352,15 @@ def generate(ctx: click.Context, goal: str) -> None:
     kernel = Kernel(config=cfg)
     we = WorkflowEngine(kernel, llm)
     
-    def on_step(step_name: str, content: str):
-        click.secho(f"\n>>> Step: {step_name} <<<", bold=True, fg="green")
-        click.echo(content)
+    current_step = None
+
+    def on_stream(step_name: str, token: str):
+        nonlocal current_step
+        if current_step != step_name:
+            current_step = step_name
+            click.secho(f"\n>>> Step: {step_name} <<<", bold=True, fg="green")
+        click.echo(token, nl=False)
+        sys.stdout.flush()
 
     def on_approval(files: List[Dict[str, str]], reason: str) -> bool:
         click.secho(f"\n[Escalation Review Needed] Reason: {reason}", bold=True, fg="yellow")
@@ -373,8 +379,8 @@ def generate(ctx: click.Context, goal: str) -> None:
         res = await we.run_generation_workflow(
             goal=goal, 
             workspace_path=os.getcwd(), 
-            step_callback=on_step,
-            approval_callback=on_approval
+            approval_callback=on_approval,
+            stream_callback=on_stream
         )
         await kernel.stop()
         

@@ -28,9 +28,10 @@ class WorkflowEngine:
         goal: str, 
         workspace_path: str,
         step_callback: Optional[Callable[[str, str], None]] = None,
-        approval_callback: Optional[Callable[[List[Dict[str, str]], str], Any]] = None
+        approval_callback: Optional[Callable[[List[Dict[str, str]], str], Any]] = None,
+        stream_callback: Optional[Callable[[str, str], None]] = None
     ) -> Dict[str, Any]:
-        """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop."""
+        """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming)."""
         
         # 1. Analyze repository context
         logger.info("Analyzing workspace context...")
@@ -38,15 +39,48 @@ class WorkflowEngine:
         repo_model = analyzer.analyze()
         repo_context = repo_model.model_dump_json(indent=2)
         
+        # Load local workspace conventions if present
+        from kriya.skills.skill import SkillEngine
+        repo_slug = os.path.basename(workspace_path).lower().strip(".")
+        if not repo_slug:
+            repo_slug = "root"
+            
+        skills_dir = self.kernel.config.paths.skills
+        se = SkillEngine(skills_dir)
+        se.discover_and_load()
+        
+        convention_prompt = ""
+        try:
+            skill = se.get_skill(f"auto-{repo_slug}")
+            if skill.rules or skill.instructions:
+                convention_prompt = "\n\n=== Project Coding Conventions & Rules ===\n"
+                if skill.rules:
+                    convention_prompt += "Rules:\n" + "\n".join(f"- {r}" for r in skill.rules) + "\n"
+                if skill.instructions:
+                    convention_prompt += f"Instructions:\n{skill.instructions}\n"
+                logger.info(f"Loaded dynamic workspace skill conventions for repository '{repo_slug}'.")
+        except KeyError:
+            pass
+        
         # 2. Plan
         logger.info("Planner Agent drafting execution steps...")
-        plan = await self.planner.run(f"Goal: {goal}\n\nWorkspace Context:\n{repo_context}")
+        plan_stream = (lambda token: stream_callback("Planning", token)) if stream_callback else None
+        plan_prompt = f"Goal: {goal}\n\nWorkspace Context:\n{repo_context}" + convention_prompt
+        plan = await self.planner.run(
+            plan_prompt, 
+            stream_callback=plan_stream
+        )
         if step_callback:
             step_callback("Plan", plan)
 
         # 3. Architect
         logger.info("Architect Agent defining interface designs...")
-        design = await self.architect.run(f"Plan:\n{plan}\n\nWorkspace Context:\n{repo_context}")
+        architect_stream = (lambda token: stream_callback("Architect Design", token)) if stream_callback else None
+        design_prompt = f"Plan:\n{plan}\n\nWorkspace Context:\n{repo_context}" + convention_prompt
+        design = await self.architect.run(
+            design_prompt, 
+            stream_callback=architect_stream
+        )
         if step_callback:
             step_callback("Design", design)
 
@@ -64,10 +98,12 @@ class WorkflowEngine:
                     task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
 
                 # Generate code files
+                dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
                 files = await self.developer.run_generation(
                     task_description=task_desc,
                     design_context=design,
-                    existing_code_context=""
+                    existing_code_context=convention_prompt,
+                    stream_callback=dev_stream
                 )
                 
                 # Sensitive paths & risk threshold validation checks
@@ -195,7 +231,8 @@ class WorkflowEngine:
             except Exception:
                 pass
                 
-        review = await self.reviewer.run(review_prompt)
+        reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
+        review = await self.reviewer.run(review_prompt, stream_callback=reviewer_stream)
         if step_callback:
             step_callback("Review", review)
 
