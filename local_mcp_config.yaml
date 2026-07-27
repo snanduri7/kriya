@@ -1,0 +1,3 @@
+mcp:
+  local_mcp:
+    command: "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/.venv/bin/kriya-mcp"

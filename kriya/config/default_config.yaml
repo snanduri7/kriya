@@ -1,0 +1,39 @@
+# Kriya Default Configuration
+
+llm:
+  provider: "openai"
+  model: "qwen2.5-coder:32b"
+  api_key: "local-key"
+  base_url: "http://localhost:11434/v1"
+  temperature: 0.2
+  max_tokens: 4096
+
+plugins:
+  directory: "./plugins"
+  enabled: []
+
+paths:
+  skills: "./skills"
+  memory: "./memory"
+  logs: "./logs"
+
+logging:
+  level: "INFO"
+  file: "./logs/kriya.log"
+
+mcp: {}
+
+embedding:
+  model: "nomic-embed-text:latest"
+  base_url: "http://localhost:11434/v1"
+
+autonomy:
+  mode: "human-in-the-loop"
+  sensitive_paths:
+    - ".*\\.env$"
+    - ".*secrets.*"
+    - "\\.github/workflows/.*"
+    - "Jenkinsfile"
+    - ".*credentials.*"
+    - ".*password.*"
+  risk_threshold_lines: 500

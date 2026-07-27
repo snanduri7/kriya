@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kriya"
+version = "0.1.0"
+description = "Kriya AI Engineering Platform"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "openai>=1.0.0",
+    "jinja2>=3.0.0",
+    "mcp>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.20.0",
+]
+
+[project.scripts]
+kriya = "kriya.cli:main"
+kriya-mcp = "kriya.mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["kriya*"]

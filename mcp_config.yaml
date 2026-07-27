@@ -1,0 +1,4 @@
+mcp:
+  mock_svc:
+    command: "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/.venv/bin/python3"
+    args: ["/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tests/mock_mcp_server.py"]
