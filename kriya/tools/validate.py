@@ -51,16 +51,34 @@ class PolymorphicValidator:
             return {"success": True, "output": "Python files compiled successfully."}
 
         elif self.stack == "java":
-            # Run javac syntax compile check on Java files
+            # 1. Run Maven compile if pom.xml exists
+            if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
+                try:
+                    res = subprocess.run(["mvn", "compile"], cwd=self.workspace_path, capture_output=True, text=True)
+                    if res.returncode == 0:
+                        return {"success": True, "output": "Maven compilation succeeded."}
+                    return {"success": False, "output": f"Maven compilation failed:\n{res.stdout}\n{res.stderr}"}
+                except Exception as e:
+                    logger.warning(f"Failed to invoke mvn compile: {e}")
+                    
+            # 2. Run Gradle compile if build.gradle exists
+            if os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
+                try:
+                    gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
+                    res = subprocess.run([gradle_cmd, "compileJava"], cwd=self.workspace_path, capture_output=True, text=True)
+                    if res.returncode == 0:
+                        return {"success": True, "output": "Gradle compilation succeeded."}
+                    return {"success": False, "output": f"Gradle compilation failed:\n{res.stdout}\n{res.stderr}"}
+                except Exception as e:
+                    logger.warning(f"Failed to invoke gradle compileJava: {e}")
+            
+            # 3. Fallback to raw javac syntax check (for simple single-class projects)
             java_files = [os.path.join(self.workspace_path, f) for f in files if f.endswith(".java")]
             if not java_files:
                 return {"success": True, "output": "No Java files to compile."}
                 
-            # Execute javac -help-like syntactic check
             cmd = ["javac", "-proc:none", "-d", os.path.join(self.workspace_path, "build")]
             cmd.extend(java_files)
-            
-            # Ensure build directory exists
             os.makedirs(os.path.join(self.workspace_path, "build"), exist_ok=True)
             
             try:
@@ -69,13 +87,6 @@ class PolymorphicValidator:
                     return {"success": False, "output": f"Java compilation failed:\n{res.stderr}"}
                 return {"success": True, "output": "Java classes compiled successfully."}
             except Exception as e:
-                # If javac is not installed, fallback to Maven if pom.xml exists
-                if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
-                    try:
-                        res = subprocess.run(["mvn", "compile"], cwd=self.workspace_path, capture_output=True, text=True)
-                        return {"success": res.returncode == 0, "output": res.stdout + "\n" + res.stderr}
-                    except Exception:
-                        pass
                 return {"success": False, "output": f"Javac compilation tool invocation failed: {e}"}
 
         elif self.stack == "ruby":

@@ -343,8 +343,9 @@ def skills_create(ctx: click.Context, skill_name: str) -> None:
 
 @main.command()
 @click.argument('goal')
+@click.option('--yes', '-y', is_flag=True, default=False, help="Auto-approve all proposed code changes.")
 @click.pass_context
-def generate(ctx: click.Context, goal: str) -> None:
+def generate(ctx: click.Context, goal: str, yes: bool) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     cfg: AppConfig = ctx.obj['config']
     
@@ -363,6 +364,10 @@ def generate(ctx: click.Context, goal: str) -> None:
         sys.stdout.flush()
 
     def on_approval(files: List[Dict[str, str]], reason: str) -> bool:
+        if yes:
+            click.secho(f"\n[Auto-Approving] Reason: {reason}", bold=True, fg="green")
+            return True
+            
         click.secho(f"\n[Escalation Review Needed] Reason: {reason}", bold=True, fg="yellow")
         for f in files:
             filepath = f.get("filepath", "")
@@ -375,6 +380,28 @@ def generate(ctx: click.Context, goal: str) -> None:
         return click.confirm("\nDo you approve applying these changes to the codebase?")
 
     async def run_workflow():
+        nonlocal goal
+        rag_context = ""
+        index_path = os.path.join(cfg.paths.memory, "web_knowledge.json")
+        if os.path.exists(index_path):
+            try:
+                from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+                embed_client = OllamaEmbeddingClient(
+                    base_url=cfg.embedding.base_url,
+                    model=cfg.embedding.model
+                )
+                vector_store = LocalVectorStore(index_path)
+                query_emb = await embed_client.get_embedding(goal)
+                matches = vector_store.query(query_emb, top_k=5)
+                good_matches = [m for m in matches if m["score"] > 0.4]
+                if good_matches:
+                    rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
+            except Exception as e:
+                logger.warning(f"Failed to query RAG database in workflow: {e}")
+                
+        if rag_context:
+            goal = f"{goal}\n\n=== Web Reference Documentation Context ===\n{rag_context}"
+
         await kernel.start()
         res = await we.run_generation_workflow(
             goal=goal, 
@@ -477,6 +504,183 @@ def review(ctx: click.Context, file_path: str) -> None:
         click.echo()
     except Exception as e:
         click.secho(f"Review failed: {e}", fg="red")
+        sys.exit(1)
+
+@main.command(name="ask")
+@click.argument('question')
+@click.pass_context
+def ask(ctx: click.Context, question: str) -> None:
+    """Ask Kriya questions about the codebase."""
+    cfg: AppConfig = ctx.obj['config']
+    
+    from kriya.analyzer.analyzer import RepositoryAnalyzer
+    analyzer = RepositoryAnalyzer(os.getcwd())
+    repo_model = analyzer.analyze()
+    repo_context = repo_model.model_dump_json(indent=2)
+    
+    # Extract key file contents (pom.xml, beans.xml, main files, readmes) to provide local content context
+    key_files_context = ""
+    for root, dirs, files_list in os.walk(os.getcwd()):
+        dirs[:] = [d for d in dirs if d not in {".git", ".venv", "venv", "node_modules", "target", "build", "__pycache__", ".pytest_cache"}]
+        for file in files_list:
+            _, ext = os.path.splitext(file)
+            if file in {"pom.xml", "beans.xml", "build.gradle", "README.md", "package.json"} or ext.lower() in {".java", ".py", ".rb", ".xml", ".json", ".yaml", ".yml"}:
+                full_path = os.path.join(root, file)
+                try:
+                    if os.path.getsize(full_path) > 20480:
+                        continue
+                    rel_path = os.path.relpath(full_path, os.getcwd())
+                    with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                        file_content = fh.read()
+                    
+                    # For java/py/ruby source files, prioritize main entry points or smaller scripts
+                    if ext.lower() in {".java", ".py", ".rb"} and "public static void main" not in file_content and len(file_content) > 3000:
+                        continue
+                        
+                    if len(key_files_context) < 30000:
+                        key_files_context += f"\n=== File: {rel_path} ===\n{file_content}\n"
+                except Exception:
+                    pass
+
+    llm = LLMClient(cfg)
+    
+    system_prompt = (
+        "You are Kriya, an expert codebase Q&A assistant.\n"
+        "Your task is to answer the user's question about the repository based on the project layout, metadata, files context, and any web documentation context provided.\n"
+        "If the user asks about a specific version of a framework/tool (e.g., Ignite 2.18.0) and you do not have local memory context or built-in specifics for it, state that you do not have its exact details and suggest they use 'kriya learn -u <url>' to teach you.\n"
+        "Be concise, clear, and explain run/build scripts if requested."
+    )
+    
+    import sys
+    def on_stream(token: str):
+        click.echo(token, nl=False)
+        sys.stdout.flush()
+        
+    async def run_query():
+        rag_context = ""
+        index_path = os.path.join(cfg.paths.memory, "web_knowledge.json")
+        if os.path.exists(index_path):
+            try:
+                from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+                embed_client = OllamaEmbeddingClient(
+                    base_url=cfg.embedding.base_url,
+                    model=cfg.embedding.model
+                )
+                vector_store = LocalVectorStore(index_path)
+                query_emb = await embed_client.get_embedding(question)
+                matches = vector_store.query(query_emb, top_k=5)
+                good_matches = [m for m in matches if m["score"] > 0.4]
+                if good_matches:
+                    rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
+            except Exception as e:
+                pass
+                
+        user_prompt = (
+            f"=== Repository Context ===\n{repo_context}\n\n"
+            f"=== Key Files Context ===\n{key_files_context}\n\n"
+            f"=== Web Resources Context ===\n{rag_context}\n\n"
+            f"User Question: {question}"
+        )
+        return await llm.complete(system_prompt, user_prompt, stream_callback=on_stream)
+        
+    try:
+        asyncio.run(run_query())
+        click.echo()
+    except Exception as e:
+        click.secho(f"Failed to fetch answer: {e}", fg="red")
+        sys.exit(1)
+
+@main.command(name="learn")
+@click.option('--url', '-u', multiple=True, help="URL to read and persist in local memory.")
+@click.option('--file', '-f', multiple=True, type=click.Path(exists=True, dir_okay=False), help="Local plain-text file containing reference documentation.")
+@click.option('--text', '-t', multiple=True, help="Raw text rules to index directly.")
+@click.pass_context
+def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) -> None:
+    """Index web pages, local files, or raw inline text into Kriya's local RAG memory."""
+    if not url and not file and not text:
+        click.secho("Error: Must provide at least one of --url (-u), --file (-f), or --text (-t).", fg="red")
+        sys.exit(1)
+        
+    cfg: AppConfig = ctx.obj['config']
+    
+    from kriya.tools.web import fetch_url_text
+    from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+    
+    embed_client = OllamaEmbeddingClient(
+        base_url=cfg.embedding.base_url,
+        model=cfg.embedding.model
+    )
+    
+    os.makedirs(cfg.paths.memory, exist_ok=True)
+    index_path = os.path.join(cfg.paths.memory, "web_knowledge.json")
+    vector_store = LocalVectorStore(index_path)
+    
+    async def index_text_content(source_name: str, content: str):
+        chunks = []
+        chunk_size = 1000
+        overlap = 150
+        start = 0
+        while start < len(content):
+            chunks.append(content[start:start+chunk_size])
+            start += chunk_size - overlap
+            
+        click.echo(f"Generating embeddings for {len(chunks)} chunks of {source_name}...")
+        embeddings = await embed_client.get_embeddings(chunks)
+        
+        for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+            vector_store.add_document(
+                filepath=source_name,
+                text=chunk,
+                embedding=emb,
+                chunk_index=idx
+            )
+        click.secho(f"Successfully indexed: {source_name}", fg="green")
+        
+    async def process_sources():
+        # 1. Process URL Web Sources
+        for u in url:
+            click.echo(f"Fetching and parsing web URL: {u}")
+            try:
+                content = await fetch_url_text(u)
+                if not content:
+                    click.secho(f"Empty content parsed from {u}", fg="yellow")
+                    continue
+                await index_text_content(u, content)
+            except Exception as e:
+                click.secho(f"Failed to index URL {u}: {e}", fg="red")
+
+        # 2. Process Local File Sources
+        for fp in file:
+            click.echo(f"Reading local file: {fp}")
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+                    content = fh.read()
+                if not content.strip():
+                    click.secho(f"Empty content in file {fp}", fg="yellow")
+                    continue
+                await index_text_content(fp, content)
+            except Exception as e:
+                click.secho(f"Failed to index file {fp}: {e}", fg="red")
+
+        # 3. Process Direct Text Rules
+        for t_idx, txt in enumerate(text, 1):
+            if not txt.strip():
+                continue
+            src_name = f"Manual Entry {t_idx}"
+            click.echo(f"Indexing inline text: {src_name}")
+            try:
+                await index_text_content(src_name, txt)
+            except Exception as e:
+                click.secho(f"Failed to index text entry: {e}", fg="red")
+
+        # Persist index changes
+        vector_store.save()
+        
+    try:
+        asyncio.run(process_sources())
+        click.secho("Local knowledge base updated successfully.", bold=True, fg="green")
+    except Exception as e:
+        click.secho(f"Learning process failed: {e}", fg="red")
         sys.exit(1)
 
 if __name__ == '__main__':

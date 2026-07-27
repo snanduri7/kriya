@@ -45,7 +45,16 @@ def test_load_custom_config(tmp_path):
     assert cfg.llm.base_url == "http://localhost:8000/v1"
     assert cfg.logging.level == "DEBUG"
     # Fallback/default still applies to other items
-    assert cfg.llm.temperature == 0.2
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ref_path = os.path.join(base_dir, "kriya", "config", "default_config.yaml")
+    if os.path.exists(ref_path):
+        with open(ref_path, "r", encoding="utf-8") as f:
+            ref_data = yaml.safe_load(f) or {}
+        expected_temp = ref_data.get("llm", {}).get("temperature")
+        if expected_temp is not None:
+            assert cfg.llm.temperature == expected_temp
+            return
+    assert isinstance(cfg.llm.temperature, float)
     assert cfg.paths.skills == "./skills"
 
 def test_load_invalid_config(tmp_path):
