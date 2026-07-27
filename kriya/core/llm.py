@@ -33,6 +33,8 @@ class LLMClient:
         completion_tokens = 0
         start_time = time.time()
         
+        extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
+        
         try:
             if stream_callback:
                 try:
@@ -45,7 +47,8 @@ class LLMClient:
                         temperature=self.temperature,
                         max_tokens=self.max_tokens,
                         stream=True,
-                        stream_options={"include_usage": True}
+                        stream_options={"include_usage": True},
+                        extra_body=extra_body
                     )
                 except Exception:
                     response = await self.client.chat.completions.create(
@@ -56,7 +59,8 @@ class LLMClient:
                         ],
                         temperature=self.temperature,
                         max_tokens=self.max_tokens,
-                        stream=True
+                        stream=True,
+                        extra_body=extra_body
                     )
                 
                 chunks = []
@@ -77,7 +81,8 @@ class LLMClient:
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=self.temperature,
-                    max_tokens=self.max_tokens
+                    max_tokens=self.max_tokens,
+                    extra_body=extra_body
                 )
                 if hasattr(response, "usage") and response.usage:
                     prompt_tokens = response.usage.prompt_tokens

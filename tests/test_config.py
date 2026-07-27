@@ -9,7 +9,19 @@ def test_load_default_config():
     assert isinstance(cfg, AppConfig)
     assert cfg.llm.provider == "openai"
     assert cfg.llm.base_url == "http://localhost:11434/v1"
-    assert cfg.llm.model == "qwen2.5-coder:32b"
+    
+    # Read default_config.yaml dynamically as a reference to check
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ref_path = os.path.join(base_dir, "kriya", "config", "default_config.yaml")
+    if os.path.exists(ref_path):
+        with open(ref_path, "r", encoding="utf-8") as f:
+            ref_data = yaml.safe_load(f) or {}
+        expected_model = ref_data.get("llm", {}).get("model")
+        if expected_model:
+            assert cfg.llm.model == expected_model
+            return
+            
+    assert isinstance(cfg.llm.model, str) and len(cfg.llm.model) > 0
 
 def test_load_custom_config(tmp_path):
     custom_yaml = {

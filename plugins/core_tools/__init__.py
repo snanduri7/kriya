@@ -350,11 +350,13 @@ class CoreToolsPlugin(BasePlugin):
         return "1.0.0"
 
     async def initialize(self) -> None:
+        from .validation_tool import ValidationTool
         self.kernel.registry.register("tool", "filesystem", FilesystemTool())
         self.kernel.registry.register("tool", "shell", ShellTool())
         self.kernel.registry.register("tool", "git", GitTool())
         self.kernel.registry.register("tool", "search", SearchTool())
         self.kernel.registry.register("tool", "ast", ASTTool())
+        self.kernel.registry.register("tool", "validate_refactor", ValidationTool())
 
     async def shutdown(self) -> None:
         self.kernel.registry.unregister("tool", "filesystem")
@@ -362,3 +364,4 @@ class CoreToolsPlugin(BasePlugin):
         self.kernel.registry.unregister("tool", "git")
         self.kernel.registry.unregister("tool", "search")
         self.kernel.registry.unregister("tool", "ast")
+        self.kernel.registry.unregister("tool", "validate_refactor")

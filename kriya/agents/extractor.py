@@ -25,7 +25,7 @@ class ConventionsExtractorAgent(BaseAgent):
             "}"
         )
 
-    async def extract_conventions(self, repo_structure: str, sample_contents: str) -> Dict[str, Any]:
+    async def extract_conventions(self, repo_structure: str, sample_contents: str, stream_callback = None) -> Dict[str, Any]:
         """Extract conventions and rules from structure and code snippets."""
         prompt = (
             f"=== Repository Structure ===\n{repo_structure}\n\n"
@@ -33,7 +33,7 @@ class ConventionsExtractorAgent(BaseAgent):
             "Please analyze the structure and files, and return the Kriya Skill rules and instructions JSON."
         )
         
-        response_str = await self.run(prompt)
+        response_str = await self.run(prompt, stream_callback=stream_callback)
         cleaned = response_str.strip()
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()

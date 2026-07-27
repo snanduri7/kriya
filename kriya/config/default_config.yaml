@@ -2,7 +2,7 @@
 
 llm:
   provider: "openai"
-  model: "qwen2.5-coder:32b"
+  model: "qwen3-coder:30b"
   api_key: "local-key"
   base_url: "http://localhost:11434/v1"
   temperature: 0.2

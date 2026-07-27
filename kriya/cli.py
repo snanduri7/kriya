@@ -464,12 +464,17 @@ def review(ctx: click.Context, file_path: str) -> None:
             except Exception as e:
                 click.secho(f"Failed to read file {rel}: {e}", fg="yellow")
 
+        import sys
+        def on_stream(token: str):
+            click.echo(token, nl=False)
+            sys.stdout.flush()
+
         async def run_review():
-            return await reviewer.run(review_prompt)
+            click.secho(f"\n=== Code Review Report ===", bold=True, fg="cyan")
+            return await reviewer.run(review_prompt, stream_callback=on_stream)
             
         res = asyncio.run(run_review())
-        click.secho(f"\n=== Code Review Report ===", bold=True, fg="cyan")
-        click.echo(res)
+        click.echo()
     except Exception as e:
         click.secho(f"Review failed: {e}", fg="red")
         sys.exit(1)

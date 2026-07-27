@@ -342,8 +342,12 @@ class RepositoryAnalyzer:
         store = LocalVectorStore(vector_index_path)
         client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=cfg.embedding.model)
         
+        from kriya.analyzer.graph import DependencyGraph
+        db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
+        graph = DependencyGraph(db_path)
+        
         # 2. Find target files
-        target_extensions = {".py", ".java", ".xml"}
+        target_extensions = {".py", ".java", ".xml", ".rb"}
         ignore_dirs = {
             ".git", ".venv", "venv", "node_modules", "__pycache__", 
             ".pytest_cache", "build", "dist", ".egg-info", "eggs", "bin", "obj"
@@ -372,10 +376,11 @@ class RepositoryAnalyzer:
                 # Check modified time (mtime)
                 mtime = os.path.getmtime(filepath)
                 cached_mtime = store.file_metadata.get(rel_path, {}).get("mtime")
+                cached_graph_mtime = graph.get_cached_mtime(rel_path)
                 
-                if cached_mtime == mtime:
+                if cached_mtime == mtime and cached_graph_mtime == mtime:
                     if progress_callback:
-                        progress_callback(f"{rel_path} [Up-to-date]", idx, total_files)
+                         progress_callback(f"{rel_path} [Up-to-date]", idx, total_files)
                     continue
 
                 if progress_callback:
@@ -386,6 +391,9 @@ class RepositoryAnalyzer:
                 
                 with open(filepath, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read()
+                
+                # Index in dependency graph
+                graph.index_file(rel_path, content, mtime)
                 
                 # Chunk file syntactically with overlap (increased size to 120 lines to reduce call counts)
                 chunks = chunk_file_syntactically(content, max_lines=120, overlap=15)
@@ -413,6 +421,7 @@ class RepositoryAnalyzer:
             if cached_file not in current_rel_paths:
                 logger.info(f"Removing deleted file from index cache: {cached_file}")
                 store.remove_file(cached_file)
+                graph.clear_file(cached_file)
                 
         # 4. Save persistent cache index
         store.save()
@@ -453,7 +462,13 @@ class RepositoryAnalyzer:
                 llm = LLMClient(cfg)
                 extractor = ConventionsExtractorAgent("extractor", llm)
                 
-                res = await extractor.extract_conventions(struct_str, samples_str)
+                import sys
+                def extractor_stream(token: str):
+                    click.echo(token, nl=False)
+                    sys.stdout.flush()
+                    
+                res = await extractor.extract_conventions(struct_str, samples_str, stream_callback=extractor_stream)
+                click.echo()
                 
                 os.makedirs(auto_skill_dir, exist_ok=True)
                 os.makedirs(os.path.join(auto_skill_dir, "examples"), exist_ok=True)

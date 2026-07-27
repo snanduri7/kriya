@@ -164,49 +164,21 @@ class WorkflowEngine:
                     files_written.append(filepath)
                     logger.info(f"Wrote generated file to: {filepath}")
 
-                # Quality Gates: Compilation Checks
-                logger.info("Quality Gates: Running compilation syntax checks...")
-                compilation_errors = []
-                for filepath in files_written:
-                    if filepath.endswith(".py"):
-                        full_path = os.path.join(workspace_path, filepath)
-                        try:
-                            with open(full_path, "r", encoding="utf-8") as f:
-                                source = f.read()
-                            compile(source, filepath, "exec")
-                        except SyntaxError as se:
-                            compilation_errors.append(
-                                f"Syntax error in {filepath} line {se.lineno}: {se.text.strip() if se.text else ''} ({se.msg})"
-                            )
-
-                if compilation_errors:
-                    raise ValueError("\n".join(compilation_errors))
-
-                # Quality Gates: Unit Tests (pytest)
-                # If pytest is in dependencies and test files exist, execute them
-                test_files = [f for f in files_written if "test" in f.lower() and f.endswith(".py")]
-                if test_files:
-                    logger.info("Quality Gates: Running Pytest suite...")
-                    # We can use the shell tool directly or execute pytest as subprocess
-                    import subprocess
-                    # Run within our virtual env pytest if possible
-                    venv_pytest = os.path.join(workspace_path, ".venv", "bin", "pytest")
-                    pytest_cmd = venv_pytest if os.path.exists(venv_pytest) else "pytest"
+                # Quality Gates: Polymorphic compile & test checks
+                logger.info("Quality Gates: Running polymorphic compiler and test checks...")
+                from kriya.tools.validate import PolymorphicValidator
+                validator = PolymorphicValidator(workspace_path)
+                
+                compile_res = validator.run_compile_check(files_written)
+                if not compile_res["success"]:
+                    raise ValueError(f"COMPILATION FAILURE:\n{compile_res['output']}")
                     
-                    # Run subprocess
-                    result = subprocess.run(
-                        [pytest_cmd],
-                        cwd=workspace_path,
-                        capture_output=True,
-                        text=True
-                    )
-                    
-                    if result.returncode != 0:
-                        raise ValueError(
-                            f"Pytest suite execution failed (Exit code: {result.returncode}):\n"
-                            f"=== stdout ===\n{result.stdout}\n"
-                            f"=== stderr ===\n{result.stderr}"
-                        )
+                test_written = any("test" in f.lower() or "spec" in f.lower() for f in files_written)
+                if test_written:
+                    logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
+                    test_res = validator.run_tests()
+                    if not test_res["success"]:
+                        raise ValueError(f"TEST FAILURE:\n{test_res['output']}")
                 
                 # If we made it here, Quality Gates passed successfully!
                 logger.info("Quality Gates check PASSED.")

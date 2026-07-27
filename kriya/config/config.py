@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import yaml
 from pydantic import BaseModel, Field
 
@@ -10,6 +10,7 @@ class LLMConfig(BaseModel):
     base_url: str = Field(default="http://localhost:11434/v1")
     temperature: float = Field(default=0.2)
     max_tokens: int = Field(default=4096)
+    extra_body: Dict[str, Any] = Field(default_factory=dict)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
