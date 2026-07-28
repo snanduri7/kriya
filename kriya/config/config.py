@@ -42,8 +42,16 @@ class AutonomyConfig(BaseModel):
     ])
     risk_threshold_lines: int = Field(default=500)
 
+class FallbackModelConfig(BaseModel):
+    model: str
+    base_url: str = Field(default="http://localhost:11434/v1")
+    api_key: str = Field(default="local-key")
+    temperature: float = Field(default=0.2)
+    max_tokens: int = Field(default=4096)
+
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

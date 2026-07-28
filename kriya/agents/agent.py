@@ -74,7 +74,10 @@ class DeveloperAgent(BaseAgent):
         task_description: str, 
         design_context: str, 
         existing_code_context: str,
-        stream_callback: Optional[Callable[[str], None]] = None
+        stream_callback: Optional[Callable[[str], None]] = None,
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design."""
         prompt = (
@@ -84,7 +87,15 @@ class DeveloperAgent(BaseAgent):
             "Please generate the complete, production-grade files. Return ONLY the JSON list of files."
         )
         
-        response_str = await self.run(prompt, stream_callback=stream_callback)
+        response_str = await self.llm.complete(
+            self.system_prompt, 
+            prompt, 
+            stream_callback=stream_callback,
+            json_mode=True,
+            model_override=model_override,
+            base_url_override=base_url_override,
+            api_key_override=api_key_override
+        )
         
         # Clean any accidental markdown codeblock wrappers (e.g. ```json ... ```)
         cleaned = response_str.strip()

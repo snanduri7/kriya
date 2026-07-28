@@ -67,6 +67,79 @@ class WorkflowEngine:
                         convention_prompt += f"Instructions:\n{skill.instructions}\n"
                     logger.info(f"Loaded engineering skill '{skill.name}' for generation context.")
         
+        # 1.5. Graph RAG Context Retrieval
+        graph_rag_context = ""
+        try:
+            vector_index_path = os.path.join(self.kernel.config.paths.memory, "vector_index.json")
+            db_path = os.path.join(self.kernel.config.paths.memory, "dependency_graph.db")
+            
+            if os.path.exists(vector_index_path):
+                from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+                embed_client = OllamaEmbeddingClient(
+                    base_url=self.kernel.config.embedding.base_url,
+                    model=self.kernel.config.embedding.model
+                )
+                vector_store = LocalVectorStore(vector_index_path)
+                
+                query_emb = await embed_client.get_embedding(goal)
+                matches = vector_store.query(query_emb, top_k=5)
+                good_matches = [m for m in matches if m["score"] > 0.35]
+                
+                if good_matches:
+                    graph_rag_context += "\n\n=== Codebase Semantic Reference Context ===\n"
+                    matched_files = list(dict.fromkeys([m["filepath"] for m in good_matches]))
+                    for file in matched_files:
+                        full_p = os.path.join(workspace_path, file)
+                        if os.path.exists(full_p):
+                            try:
+                                with open(full_p, "r", encoding="utf-8") as fh:
+                                    content = fh.read()
+                                if len(content) > 2000:
+                                    content = content[:2000] + "\n... (truncated)"
+                                graph_rag_context += f"\nFile: {file}\n{content}\n"
+                            except Exception:
+                                pass
+                                
+                    if os.path.exists(db_path):
+                        from kriya.analyzer.graph import DependencyGraph
+                        graph = DependencyGraph(db_path)
+                        
+                        related_files = set()
+                        for file in matched_files:
+                            sym_name = os.path.splitext(os.path.basename(file))[0]
+                            
+                            for caller in graph.get_callers(sym_name):
+                                if caller.get("filepath"):
+                                    related_files.add(caller["filepath"])
+                                    
+                            for callee in graph.get_callees(sym_name):
+                                if callee.get("filepath"):
+                                    related_files.add(callee["filepath"])
+                                    
+                            for imp in graph.get_imports(file):
+                                if imp.startswith(workspace_path) or os.path.exists(os.path.join(workspace_path, imp)):
+                                    related_files.add(os.path.relpath(imp, workspace_path))
+                                    
+                        related_files = [f for f in related_files if f not in matched_files]
+                        if related_files:
+                            graph_rag_context += "\n=== Related AST Graph Files (Callers/Callees) ===\n"
+                            for f in related_files[:3]:
+                                full_p = os.path.join(workspace_path, f)
+                                if os.path.exists(full_p):
+                                    try:
+                                        with open(full_p, "r", encoding="utf-8") as fh:
+                                            content = fh.read()
+                                        if len(content) > 1500:
+                                            content = content[:1500] + "\n... (truncated)"
+                                        graph_rag_context += f"\nFile: {f}\n{content}\n"
+                                    except Exception:
+                                        pass
+        except Exception as ex:
+            logger.warning(f"Failed to query Graph RAG: {ex}")
+            
+        if graph_rag_context:
+            convention_prompt += graph_rag_context
+            
         # 2. Plan
         logger.info("Planner Agent drafting execution steps...")
         plan_stream = (lambda token: stream_callback("Planning", token)) if stream_callback else None
@@ -91,7 +164,8 @@ class WorkflowEngine:
 
         # 4. Developer & Quality Gates (Auto-debugging loop)
         logger.info("Developer Agent implementing source files...")
-        max_retries = 3
+        chain = self.kernel.config.llm_chain
+        max_retries = 1 + len(chain) if chain else 3
         retry_count = 0
         error_context = ""
         files_written = []
@@ -102,13 +176,28 @@ class WorkflowEngine:
                 if error_context:
                     task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
 
+                # Configure model overrides if escalating in the chain
+                model_override = None
+                base_url_override = None
+                api_key_override = None
+                if retry_count > 0 and chain:
+                    fallback_idx = min(retry_count - 1, len(chain) - 1)
+                    fallback = chain[fallback_idx]
+                    model_override = fallback.model
+                    base_url_override = fallback.base_url
+                    api_key_override = fallback.api_key
+                    logger.info(f"Escalating compilation attempt to fallback model: {model_override}")
+
                 # Generate code files
                 dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
                 files = await self.developer.run_generation(
                     task_description=task_desc,
                     design_context=design,
                     existing_code_context=convention_prompt,
-                    stream_callback=dev_stream
+                    stream_callback=dev_stream,
+                    model_override=model_override,
+                    base_url_override=base_url_override,
+                    api_key_override=api_key_override
                 )
                 
                 # Sensitive paths & risk threshold validation checks
@@ -187,6 +276,51 @@ class WorkflowEngine:
                 
                 # If we made it here, Quality Gates passed successfully!
                 logger.info("Quality Gates check PASSED.")
+                
+                # Autonomous Skill Accrual / Lesson extraction
+                if retry_count > 0 and chain:
+                    try:
+                        logger.info("Escalation model successfully resolved the compilation/test issue! Extracting lessons learned...")
+                        extract_prompt = (
+                            f"A compilation/test error occurred:\n{error_context}\n\n"
+                            f"The files were successfully fixed with this final content:\n"
+                        )
+                        for filepath in files_written:
+                            full_path = os.path.join(workspace_path, filepath)
+                            try:
+                                with open(full_path, "r", encoding="utf-8") as fh:
+                                    extract_prompt += f"=== File: {filepath} ===\n{fh.read()}\n"
+                            except Exception:
+                                pass
+                        extract_prompt += "\nExtract a single, concise coding rule (maximum 1 sentence) explaining the fix so that future models can avoid the same error. Do not output anything else, just the sentence starting with a capital letter."
+                        
+                        lesson = await self.llm.complete(
+                            system_prompt="You are a senior compiler architect. Extract the core rule/lesson from this compile/test error resolution.",
+                            user_prompt=extract_prompt,
+                            model_override=model_override,
+                            base_url_override=base_url_override,
+                            api_key_override=api_key_override
+                        )
+                        lesson = lesson.strip().strip('"').strip("'")
+                        if lesson:
+                            logger.info(f"Extracted lesson: {lesson}")
+                            skills_dir = self.kernel.config.paths.skills
+                            skill_folder = os.path.join(skills_dir, f"auto-{repo_slug}")
+                            os.makedirs(skill_folder, exist_ok=True)
+                            rules_file = os.path.join(skill_folder, "rules.txt")
+                            
+                            existing_rules = []
+                            if os.path.exists(rules_file):
+                                with open(rules_file, "r", encoding="utf-8") as rf:
+                                    existing_rules = [line.strip() for line in rf if line.strip()]
+                            
+                            if lesson not in existing_rules and not any(lesson.lower() in r.lower() for r in existing_rules):
+                                with open(rules_file, "a", encoding="utf-8") as rf:
+                                    rf.write(f"\n{lesson}")
+                                logger.info(f"Appended extracted lesson rule to {rules_file}")
+                    except Exception as ex:
+                        logger.warning(f"Failed to extract lesson or update skills: {ex}")
+
                 break
 
             except Exception as e:

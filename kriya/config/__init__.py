@@ -1,4 +1,4 @@
-from kriya.config.config import AppConfig, LLMConfig, PluginsConfig, PathsConfig, LoggingConfig, MCPServerConfig, load_config
+from kriya.config.config import AppConfig, LLMConfig, PluginsConfig, PathsConfig, LoggingConfig, MCPServerConfig, FallbackModelConfig, load_config
 
 __all__ = [
     "AppConfig",
@@ -7,5 +7,6 @@ __all__ = [
     "PathsConfig",
     "LoggingConfig",
     "MCPServerConfig",
+    "FallbackModelConfig",
     "load_config"
 ]
