@@ -1,0 +1,12 @@
+# Add architectural rules here (one per line)
+# Strict Rules for Apache Ignite on Java 17
+Use Apache Ignite version 2.18.0.
+Always include both ignite-core and ignite-spring Maven dependencies when setting up Ignite with Spring XML.
+Always add the mandatory --add-opens flags for java.base (lang, reflect, io, util, concurrent, nio, net, concurrent.locks) to JVM execution configuration.
+Enable peer class loading in Spring XML configuration if dynamic tasks/classes are run.
+Use Java 17 source and target compatibility in the Maven Compiler Plugin.
+Cache operations like getOrCreateCache must be called on an Ignite instance (returned by Ignition.start), never on the Ignition utility class.
+Do not pass a Spring ApplicationContext object to Ignition.start().
+To start Ignite using Spring XML, either use:
+1) Direct Ignition: Ignite ignite = Ignition.start("ignite-config.xml");
+2) Spring Bean: Define org.apache.ignite.IgniteSpringBean in the XML and fetch it from ApplicationContext using: Ignite ignite = context.getBean(Ignite.class);

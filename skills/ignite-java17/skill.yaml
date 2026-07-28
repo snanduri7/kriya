@@ -1,0 +1,11 @@
+category: General
+description: Custom template skill for ignite-java17.
+name: ignite-java17
+description: Coding guidelines and configurations for Apache Ignite 2.18.0 on Java 17 using Maven.
+category: Database
+tags:
+  - java
+  - maven
+  - ignite
+  - spring
+  - java-17

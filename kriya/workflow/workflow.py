@@ -50,17 +50,22 @@ class WorkflowEngine:
         se.discover_and_load()
         
         convention_prompt = ""
-        try:
-            skill = se.get_skill(f"auto-{repo_slug}")
-            if skill.rules or skill.instructions:
-                convention_prompt = "\n\n=== Project Coding Conventions & Rules ===\n"
-                if skill.rules:
-                    convention_prompt += "Rules:\n" + "\n".join(f"- {r}" for r in skill.rules) + "\n"
-                if skill.instructions:
-                    convention_prompt += f"Instructions:\n{skill.instructions}\n"
-                logger.info(f"Loaded dynamic workspace skill conventions for repository '{repo_slug}'.")
-        except KeyError:
-            pass
+        for skill in se.list_skills():
+            # Match skill if its name or tags are mentioned in the goal (case-insensitive),
+            # or if it's the auto-generated convention for this repository.
+            is_relevant = (
+                skill.name.lower() in goal.lower() or
+                any(tag.lower() in goal.lower() for tag in skill.tags) or
+                skill.name.lower() == f"auto-{repo_slug}"
+            )
+            if is_relevant:
+                if skill.rules or skill.instructions:
+                    convention_prompt += f"\n\n=== Engineering Skill Conventions: {skill.name} ===\n"
+                    if skill.rules:
+                        convention_prompt += "Rules:\n" + "\n".join(f"- {r}" for r in skill.rules) + "\n"
+                    if skill.instructions:
+                        convention_prompt += f"Instructions:\n{skill.instructions}\n"
+                    logger.info(f"Loaded engineering skill '{skill.name}' for generation context.")
         
         # 2. Plan
         logger.info("Planner Agent drafting execution steps...")
