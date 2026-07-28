@@ -1,6 +1,7 @@
 import os
 import subprocess
 import logging
+import sys
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -107,35 +108,51 @@ class PolymorphicValidator:
 
         return {"success": True, "output": "Unsupported tech stack compilation check skipped."}
 
-    def run_tests(self) -> Dict[str, Any]:
+    def run_tests(self, target_test: Optional[str] = None) -> Dict[str, Any]:
         """Runs tech-stack specific test execution suite."""
         try:
             if self.stack == "python":
-                venv_pytest = os.path.join(self.workspace_path, ".venv", "bin", "pytest")
-                cmd = [venv_pytest] if os.path.exists(venv_pytest) else ["pytest"]
+                cmd = [
+                    sys.executable,
+                    "-c",
+                    "import sys, os; sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; import pytest; sys.exit(pytest.main(sys.argv[1:]))",
+                    "--"
+                ]
+                if target_test:
+                    cmd.append(target_test)
                 res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
-                return {"success": res.returncode == 0, "output": res.stdout + "\n" + res.stderr}
-
+                return {"success": res.returncode in (0, 5), "output": res.stdout + "\n" + res.stderr}
+ 
             elif self.stack == "java":
                 if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
-                    res = subprocess.run(["mvn", "test"], cwd=self.workspace_path, capture_output=True, text=True)
+                    cmd = ["mvn", "test"]
+                    if target_test:
+                        cmd.append(f"-Dtest={target_test}")
+                    res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
                     return {"success": res.returncode == 0, "output": res.stdout + "\n" + res.stderr}
                 elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
-                    res = subprocess.run([gradle_cmd, "test"], cwd=self.workspace_path, capture_output=True, text=True)
+                    cmd = [gradle_cmd, "test"]
+                    if target_test:
+                        cmd.extend(["--tests", target_test])
+                    res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
                     return {"success": res.returncode == 0, "output": res.stdout + "\n" + res.stderr}
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
-
+ 
             elif self.stack == "ruby":
                 cmd = ["bundle", "exec", "rspec"]
-                # Fallback if bundler is not used
+                if target_test:
+                    cmd.append(target_test)
                 try:
                     res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
                 except Exception:
-                    res = subprocess.run(["rspec"], cwd=self.workspace_path, capture_output=True, text=True)
+                    cmd = ["rspec"]
+                    if target_test:
+                        cmd.append(target_test)
+                    res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
                 return {"success": res.returncode == 0, "output": res.stdout + "\n" + res.stderr}
-
+ 
         except Exception as e:
             return {"success": False, "output": f"Failed to execute local test suite: {e}"}
-
+ 
         return {"success": True, "output": "Stack test execution skipped."}

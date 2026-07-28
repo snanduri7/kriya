@@ -12,12 +12,17 @@ Kriya coordinates local analysis, hybrid vector-lexical indexing, and relational
 graph TD
     CLI[Kriya CLI Command] --> Kernel[Platform Kernel]
     Kernel --> Config[Configuration & Egress Manager]
-    Kernel --> SQLite[(SQLite DB: AST + sqlite-vec + FTS5)]
+    Kernel --> SQLite[(SQLite DB: AST + sqlite-vec + FTS5 + WAL)]
     Kernel --> Workflow[Workflow Engine]
-    Workflow --> ASTParser[Tree-Sitter Java & Python / Spring XML Parser]
+    Workflow --> ASTParser[Tree-Sitter Java \/ Python \/ Spring XML Parser]
     Workflow --> Budget[Context Budget Allocator]
     Workflow --> Escalation[Model Escalation Chain]
     Escalation --> LLMClient[LLM Client]
+    Workflow --> Sandbox[Persistent Worktree Sandbox]
+    Sandbox --> Gates[Fast-Fail Quality Gates]
+    Gates --> Targeted[Targeted Test Selection]
+    Gates --> FullSuite[Full Suite Regression]
+    Workflow --> Approval[TTY-Isolated Human Gate]
 ```
 
 ### System Architecture Flow
@@ -36,8 +41,9 @@ When running repository workflows:
 Rather than keeping document chunk vectors in memory-heavy JSON files (`vector_index.json`), Kriya uses a unified SQLite database:
 *   **Vector Engine (`sqlite-vec`)**: Anchors float vector embeddings (768 dimensions for Nomic, 1536 for OpenAI) directly in virtual tables. This supports disk-backed, memory-mapped incremental writes and deletes.
 *   **Metadata Integration**: Links vectors directly to the `symbols` and `relations` tables, permitting single-query joins like *"find symbols semantic to X AND located under package Y AND modified within the last 5 commits"*.
-*   **Model Invalidation**: Each index record holds the generator model name and dimension. If `embedding.model` changes in the config, Kriya invalidates the vector index, marking it as dirty, and alerts the user to run an explicit rebuild rather than triggering a silent, multi-minute blocking job.
-*   **Lexical Index (FTS5)**: SQLite FTS5 indexes identifiers, class names, method signatures, and imports to ensure precise lexical matching.
+*   **Model Invalidation & Degraded Search**: Each index record holds the generator model name and dimension. If `embedding.model` changes in the config, Kriya invalidates the vector index, marking it as dirty, alerts the user with a visible console warning, and gracefully degrades queries to lexical-only FTS matching.
+*   **Lexical Index (FTS5) & camelCase Splitting**: SQLite FTS5 indexes identifiers, class names, method signatures, and imports. During indexing, Kriya splits camelCase and snake_case tokens to populate a helper `split_text` column. Lexical queries automatically construct `OR` matches between the raw token and its sub-tokens to route query symbol matches.
+*   **Concurrency Conformance (WAL & timeout)**: Database connections enforce Write-Ahead Logging (`PRAGMA journal_mode=WAL;`) and a `30.0` second busy timeout. This allows multiple concurrent readers and handles indexing/run updates without throwing "database is locked" errors.
 
 ### 2.2 The Learning & Vector RAG Engine
 The `learn` command enables Kriya to ingest external documents and accumulate local project knowledge.
@@ -71,16 +77,19 @@ To guarantee that the Developer Agent always returns valid code modifications:
 *   **Grammar Constraints**: For local backends (Ollama, llama.cpp), Kriya passes GBNF grammar files or JSON schemas to restrict the token sampler to output the exact schema format.
 *   **Capability Probing (`kriya doctor`)**: At startup, Kriya probes the API endpoint. If the endpoint silently ignores OpenAI's `response_format` (common in older Ollama API versions), Kriya falls back to grammar constraints and regex fences.
 *   **Pydantic Schema Validation**: Every output from the Developer Agent is loaded and validated against a Pydantic schema before parsing. If validation fails, Kriya routes the error message back to the model for a single, bounded retry.
-*   **Anchored Find/Replace**: For codebase modifications, Developer Agent is instructed to emit anchored find/replace blocks (identifying unique code headers and replacements) rather than unified diffs, because models frequently fail to output correct line numbers.
+*   **Strict Anchored Find/Replace Verification**: For codebase modifications, Developer Agent can emit anchored search/replace blocks. Before applying any write, Kriya normalizes whitespaces and enforces that the search anchor matches **exactly one** segment in the target file (0 or multiple matches trigger a hard failure, which is routed back to the model for correction). Additionally, Kriya verifies that the search block does not anchor on code elided from the model's skeletonized view, preventing blind modifications.
+*   **Whitespace Normalization**: Whitespace and line breaks are explicitly normalized (collapsing blanks and leading indent variations) during pattern matching.
 
 ### 2.5 Context Budget Allocator & Skeletonization
 To prevent context overflow, Kriya splits the LLM's context window:
 *   **Window vs Output Separation**: The configuration differentiates the input context window (e.g. `context_window: 32768` for Qwen3-30B) from the output limits (`max_tokens: 4096`).
 *   **Prioritized Allocation**: Distributes tokens between instructions, workspace files, history, and reference docs.
+*   **Method-Level Syntactic Chunking**: Repository analysis decomposes files into individual functions/methods for Python, Java, and Spring XML configs. Each chunk is prepended with contextual metadata headers (including enclosing class, package declaration, class javadocs, and file path) before indexing.
 *   **Skeletonization Tiers**: If files exceed the budget, they are degraded:
     *   *Full Content*: Shows the whole file.
     *   *Skeleton*: Extracts classes, methods, and javadocs, eliding method bodies (e.g., replacement of method body with `// ... implementation elided ...`).
     *   *Signature*: Shows imports and class definitions only.
+*   **Escalated Budget Re-allocation**: When a Quality Gate failure triggers model escalation in the fallback chain, the Context Budget Allocator is re-run dynamically to scale up the skeletonized context according to the escalated model's larger native context window.
 *   **Capability Probing**: `kriya doctor` queries the local API to verify the effective input context size, and configures the allocator accordingly.
 
 ### 2.6 The Agent Roster
@@ -119,15 +128,16 @@ Kriya builds its AST and vector indices incrementally using **Content-Hash Keyin
 7.  **Apply / Rollback**: The user approves, rejects, or amends the changes.
 
 ### 3.3 The Fix Pipeline (`kriya fix`)
-1.  **Reproduce**: Runs the build or execution log.
-2.  **Localize**: Inspects stack frames and extracts relevant files via graph retrieval.
-3.  **Hypothesize**: Writes a root-cause explanation.
-4.  **Patch**: Generates find/replace blocks and applies them in the worktree.
-5.  **Verify & Classify**: Re-runs test gates and outputs classification:
+1.  **Reproduce & Localize**: Runs the build/execution log, inspects stack frames, and extracts relevant files via graph retrieval.
+2.  **Hypothesize & Patch**: Generates anchored find/replace blocks and applies them in a persistent worktree.
+3.  **Persistent Worktree Sandbox**: Reuses a persistent `.kriya/worktree` sandbox to avoid cold build compile latency (D3 latency win). The worktree is cleanly reset using git checkout and clean before and after every execution.
+4.  **Polymorphic fast-fail Quality Gates**: Run compilation checks first. If a compilation succeeds, run targeted tests (extracted from the compiler output or modified test files) first to fail fast. The full regression test suite is run only once at the end of the workflow.
+5.  **TTY-Isolated Human Approval Gate**: Prompts the user to approve applied changes before they are synced to the active repository. Click prompts are isolated to read from `/dev/tty` so piped error streams do not conflict with terminal inputs. Under non-TTY (piped) execution environments, the workflow halts with a warning unless `--yes` is specified.
+6.  **Verify & Classify**: Re-runs test gates and outputs classification:
     *   `Verified`: Test fails before, compiles and passes after.
     *   `Plausible Unverified`: Code compiles but no test verified it.
     *   `Needs Human Intervention`: Error could not be resolved within bounds.
-6.  **Repair Loop Bounds**: Restricts loop execution to a maximum of 4 iterations, 15 minutes, or 5 modified files to prevent resource thrashing.
+7.  **Repair Loop Bounds**: Restricts loop execution to a maximum of 4 iterations, 15 minutes, or 5 modified files to prevent resource thrashing.
 
 ### 3.4 The Ask Pipeline (`kriya ask`)
 1.  **Hybrid RAG Query**: Fetches semantic chunks from `vector_index.json` and lexical matches from FTS5.
@@ -158,5 +168,5 @@ Kriya fully supports Java and Python:
 *   **Promotion**: Rules require manual confirmation (`kriya skills approve <skill>`) before appending to `rules.txt`.
 
 ### 4.4 Concurrency & Observability
-*   **Run Traces**: Every run stores a trace record (`traces.db`) logging the goal, timestamp, duration, status, and files modified, accessible via the CLI command `kriya traces`.
+*   **Persistent Run Audit Traces**: Every generation or fix workflow records detailed audit trace fields to `traces.db`. This includes the run goal, duration, status, modified files, active engineering skills, a JSON array of retrieved semantic chunks (with cosine scores and files), the rendered text prompt, model overrides used per debug hop, and specific compiler/test quality gate outcomes per attempt.
 *   **Evaluation Harness**: Pre-configured evaluation tests run reference coding tasks against the local repository to track recall and quality.

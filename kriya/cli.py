@@ -391,7 +391,7 @@ def generate(ctx: click.Context, goal: str, yes: bool) -> None:
                     model=cfg.embedding.model
                 )
                 vector_store = LocalVectorStore(index_path)
-                query_emb = await embed_client.get_embedding(goal)
+                query_emb = await embed_client.get_embedding(goal, is_query=True)
                 matches = vector_store.query(query_emb, top_k=5)
                 good_matches = [m for m in matches if m["score"] > 0.4]
                 if good_matches:
@@ -567,7 +567,7 @@ def ask(ctx: click.Context, question: str) -> None:
                     model=cfg.embedding.model
                 )
                 vector_store = LocalVectorStore(index_path)
-                query_emb = await embed_client.get_embedding(question)
+                query_emb = await embed_client.get_embedding(question, is_query=True)
                 matches = vector_store.query(query_emb, top_k=5)
                 good_matches = [m for m in matches if m["score"] > 0.4]
                 if good_matches:
@@ -693,15 +693,21 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
 @main.command(name="fix")
 @click.option('--error', '-e', help="Compilation or test error log string. If omitted, reads from stdin.")
 @click.option('--workspace', '-w', default=".", type=click.Path(exists=True, file_okay=False), help="Workspace directory path.")
+@click.option('--yes', '-y', is_flag=True, help="Auto-approve patch application without prompting.")
 @click.pass_context
-def fix(ctx: click.Context, error: Optional[str], workspace: str) -> None:
+def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool) -> None:
     """Diagnose and automatically apply patches for compiler or test errors."""
+    piped_stdin = not sys.stdin.isatty()
     if not error:
-        if not sys.stdin.isatty():
+        if piped_stdin:
             error = sys.stdin.read()
         else:
             click.secho("Error: Must provide --error (-e) or pipe error log to stdin.", fg="red")
             sys.exit(1)
+            
+    if piped_stdin and not yes:
+        click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve patch application.", fg="red")
+        sys.exit(1)
             
     cfg: AppConfig = ctx.obj['config']
     kernel = Kernel(config=cfg)
@@ -720,7 +726,17 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str) -> None:
             for diff in diffs:
                 click.secho(f"File: {diff['filepath']}", bold=True)
                 click.echo(diff['content'])
-            return click.confirm("Apply these changes to your active workspace?", default=True)
+            if yes:
+                click.secho("Auto-approving patch application (-y / --yes specified).", fg="green")
+                return True
+            try:
+                with open("/dev/tty", "r") as tty:
+                    sys.stdout.write("Apply these changes to your active workspace? [Y/n]: ")
+                    sys.stdout.flush()
+                    val = tty.readline().strip().lower()
+                    return not val or val.startswith("y")
+            except Exception:
+                return click.confirm("Apply these changes to your active workspace?", default=True)
 
         res = await we.run_generation_workflow(
             goal="Fix compilation/test failure",

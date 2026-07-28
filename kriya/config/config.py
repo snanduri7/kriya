@@ -11,6 +11,8 @@ class LLMConfig(BaseModel):
     temperature: float = Field(default=0.2)
     max_tokens: int = Field(default=4096)
     extra_body: Dict[str, Any] = Field(default_factory=dict)
+    reasoning: bool = Field(default=False)
+    context_window: int = Field(default=32768)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
@@ -49,6 +51,8 @@ class FallbackModelConfig(BaseModel):
     api_key: str = Field(default="local-key")
     temperature: float = Field(default=0.2)
     max_tokens: int = Field(default=4096)
+    reasoning: bool = Field(default=False)
+    context_window: int = Field(default=32768)
 
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)

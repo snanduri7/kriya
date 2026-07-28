@@ -1,6 +1,17 @@
 import os
 import re
 import sqlite3
+_orig_connect = sqlite3.connect
+def wal_connect(*args, **kwargs):
+    kwargs["timeout"] = 30.0
+    conn = _orig_connect(*args, **kwargs)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except Exception:
+        pass
+    return conn
+sqlite3.connect = wal_connect
+
 import logging
 import ast
 from typing import Dict, List, Any, Optional

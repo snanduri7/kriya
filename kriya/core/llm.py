@@ -1,6 +1,7 @@
 import socket
 import ipaddress
 import logging
+import re
 from urllib.parse import urlparse
 from typing import Optional, Callable
 from openai import AsyncOpenAI
@@ -77,16 +78,24 @@ class LLMClient:
                 base_url=base_url_override or self.config.llm.base_url
             )
             
-        logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}]")
+        is_reasoning = self.config.llm.reasoning
+        if model_override:
+            for fb in self.config.llm_chain:
+                if fb.model == model_override:
+                    is_reasoning = fb.reasoning
+                    break
+
+        max_tokens = max(self.max_tokens, 12288) if is_reasoning else self.max_tokens
+        extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
+        response_format = None if is_reasoning else ({"type": "json_object"} if json_mode else None)
+        
+        logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}, Reasoning: {is_reasoning}]")
         import time
         import click
         
         prompt_tokens = 0
         completion_tokens = 0
         start_time = time.time()
-        
-        extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
-        response_format = {"type": "json_object"} if json_mode else None
         
         try:
             if stream_callback:
@@ -98,7 +107,7 @@ class LLMClient:
                             {"role": "user", "content": user_prompt}
                         ],
                         temperature=self.temperature,
-                        max_tokens=self.max_tokens,
+                        max_tokens=max_tokens,
                         stream=True,
                         stream_options={"include_usage": True},
                         extra_body=extra_body,
@@ -112,7 +121,7 @@ class LLMClient:
                             {"role": "user", "content": user_prompt}
                         ],
                         temperature=self.temperature,
-                        max_tokens=self.max_tokens,
+                        max_tokens=max_tokens,
                         stream=True,
                         extra_body=extra_body,
                         response_format=response_format
@@ -136,7 +145,7 @@ class LLMClient:
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=self.temperature,
-                    max_tokens=self.max_tokens,
+                    max_tokens=max_tokens,
                     extra_body=extra_body,
                     response_format=response_format
                 )
@@ -145,6 +154,9 @@ class LLMClient:
                     completion_tokens = response.usage.completion_tokens
                 content = response.choices[0].message.content or ""
                 content = content.strip()
+                
+            if is_reasoning:
+                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
                 
             elapsed_time = time.time() - start_time
             if prompt_tokens == 0:

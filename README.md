@@ -18,16 +18,14 @@ Kriya runs entirely on **local infrastructure** — local LLMs, local tools, loc
 
 ## 2. Key Features
 
-- **Multi-Agent Workflow**: Coordinates Planner, Architect, Developer, and Reviewer agents to satisfy feature requests.
-- **Incremental Codebase Indexing**: Syntactically chunks Python/Java/XML files, fetches local Ollama vector embeddings, and builds a disk cache (`memory/vector_index.json`). Bypasses unchanged files using modified-time (`mtime`) checks.
-- **Syntactic Chunker**: Chunk boundaries align to code structures (class headers, function headers, method signatures) instead of arbitrary characters.
-- **Static Analysis Tools**:
-  - **Python AST**: Extracts class and function declarations.
-  - **Java AST**: Extracts Java package info, classes, methods, and Spring Framework annotations (`@Component`, `@Service`, `@Autowired`, etc.).
-  - **Spring XML Parser**: Scans bean IDs and classes from configuration XMLs.
+- **Multi-Agent Workflow**: Coordinates Planner, Architect, Developer, and Reviewer agents to satisfy feature requests and run auto-repair loops.
+- **Incremental Codebase Indexing**: Syntactically chunks Python/Java/XML files, fetches local Ollama vector embeddings, and builds a SQLite database with WAL and timeout lock safety. Bypasses unchanged files using content hashes (git blob SHA-1).
+- **Method-Level Syntactic Chunker**: Chunk boundaries align to code structures (class headers, function headers, method signatures), prepending enclosure package, class javadocs, and path headers.
+- **Hybrid RAG & camelCase Splitting**: Joins cosine vector similarity with FTS5 lexical searches, splitting camelCase/snake_case tokens during indexing to route symbol name matches.
+- **Fast-Fail Quality Gates**: Compiles and runs targeted tests first inside a persistent git worktree sandbox (.kriya/worktree) to preserve compilation caches and reduce latencies.
 - **Autonomy Guardrails**:
   - Automatically flags modifications touching sensitive paths (e.g. `.env`, credentials, workflows).
-  - Triggers interactive `[y/n]` confirmation in the CLI if risk thresholds (line limits or sensitive paths) are hit.
+  - Triggers interactive TTY-isolated `[y/n]` confirmation in the CLI if risk thresholds (line limits or sensitive paths) are hit, bypassing piped stream collisions.
 - **FastMCP Tool Server**: Integrates native tool sets into workspace workflows as a standardized MCP server.
 
 ---
@@ -44,7 +42,7 @@ graph TD
     PM --> CoreTools[Core Tools: FS, Git, Search, AST]
     Workflow[Workflow Engine] --> Kernel
     Workflow --> LLM[Local LLM Client]
-    Workflow --> Memory[Local Vector Store Index]
+    Workflow --> Memory[Local SQLite DB: AST + sqlite-vec + FTS5 + WAL]
 ```
 
 ---

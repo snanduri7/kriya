@@ -32,6 +32,185 @@ EXTENSION_MAP = {
     ".swift": "Swift"
 }
 
+def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[str, Any]]:
+    _, ext = os.path.splitext(rel_path)
+    ext = ext.lower()
+    
+    chunks = []
+    
+    if ext == ".py":
+        package = rel_path.replace("/", ".").replace(".py", "")
+        lines = content.splitlines()
+        
+        module_decl = []
+        i = 0
+        while i < len(lines):
+            line_strip = lines[i].strip()
+            if line_strip.startswith("class ") or line_strip.startswith("def "):
+                break
+            module_decl.append(lines[i])
+            i += 1
+        if module_decl:
+            chunks.append({
+                "text": f"File: {rel_path}\nModule: {package}\n=== Module Declarations ===\n" + "\n".join(module_decl),
+                "start": 1,
+                "end": i
+            })
+            
+        current_class = ""
+        current_class_javadoc = ""
+        
+        while i < len(lines):
+            line = lines[i]
+            line_strip = line.strip()
+            
+            class_match = re.match(r"^class\s+(\w+)", line_strip)
+            if class_match:
+                current_class = class_match.group(1)
+                doc_lines = []
+                if i + 1 < len(lines) and (lines[i+1].strip().startswith('"""') or lines[i+1].strip().startswith("'''")):
+                    j = i + 1
+                    doc_lines.append(lines[j])
+                    if not (lines[j].strip().endswith('"""') and len(lines[j].strip()) > 3):
+                        j += 1
+                        while j < len(lines):
+                            doc_lines.append(lines[j])
+                            if '"""' in lines[j] or "'''" in lines[j]:
+                                break
+                            j += 1
+                    i = j
+                current_class_javadoc = "\n".join(doc_lines).strip()
+                header = f"File: {rel_path}\nModule: {package}\nClass: {current_class}\nDocstring: {current_class_javadoc}\n=== Class Declaration ===\n"
+                chunks.append({
+                    "text": header + line + ("\n" + current_class_javadoc if current_class_javadoc else ""),
+                    "start": i + 1,
+                    "end": i + 1
+                })
+                i += 1
+                continue
+                
+            method_match = re.match(r"^def\s+(\w+)", line_strip)
+            if not method_match and current_class:
+                method_match = re.match(r"^\s+def\s+(\w+)", line)
+                
+            if method_match:
+                method_name = method_match.group(1)
+                method_indent = len(line) - len(line.lstrip())
+                method_lines = [line]
+                start_idx = i
+                
+                i += 1
+                while i < len(lines):
+                    if not lines[i].strip():
+                        method_lines.append(lines[i])
+                        i += 1
+                        continue
+                    indent = len(lines[i]) - len(lines[i].lstrip())
+                    if indent <= method_indent:
+                        break
+                    method_lines.append(lines[i])
+                    i += 1
+                
+                header = f"File: {rel_path}\nModule: {package}\n"
+                if current_class:
+                    header += f"Class: {current_class}\nClass Docstring: {current_class_javadoc}\n"
+                header += f"Method: {method_name}\n=== Method Body ===\n"
+                
+                chunks.append({
+                    "text": header + "\n".join(method_lines),
+                    "start": start_idx + 1,
+                    "end": i
+                })
+                continue
+                
+            i += 1
+            
+    elif ext == ".java":
+        pkg_match = re.search(r"package\s+([\w\.]+);", content)
+        package = pkg_match.group(1) if pkg_match else "default"
+        
+        lines = content.splitlines()
+        current_class = ""
+        current_class_javadoc = ""
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            line_strip = line.strip()
+            
+            class_match = re.search(r"\bclass\s+(\w+)", line_strip)
+            if class_match:
+                current_class = class_match.group(1)
+                javadoc_lines = []
+                j = i - 1
+                if j >= 0 and "*/" in lines[j]:
+                    while j >= 0:
+                        javadoc_lines.insert(0, lines[j])
+                        if "/**" in lines[j]:
+                            break
+                        j -= 1
+                current_class_javadoc = "\n".join(javadoc_lines).strip()
+                
+                header = f"File: {rel_path}\nPackage: {package}\nClass: {current_class}\nClass Javadoc: {current_class_javadoc}\n=== Class Declaration ===\n"
+                chunks.append({
+                    "text": header + line,
+                    "start": i + 1,
+                    "end": i + 1
+                })
+                i += 1
+                continue
+                
+            method_match = re.search(r'(?:public|protected|private|static|\s)+[\w<>]+\s+(\w+)\s*\([^\)]*\)(?:\s+throws\s+[\w\s,]+)?\s*\{', line_strip)
+            if method_match and current_class:
+                method_name = method_match.group(1)
+                if method_name not in {"class", "interface", "enum", "if", "for", "while", "switch", "catch"}:
+                    method_lines = [line]
+                    start_idx = i
+                    
+                    brace_count = 1
+                    i += 1
+                    while i < len(lines) and brace_count > 0:
+                        l = lines[i]
+                        method_lines.append(l)
+                        brace_count += l.count("{") - l.count("}")
+                        i += 1
+                        
+                    header = f"File: {rel_path}\nPackage: {package}\nClass: {current_class}\nClass Javadoc: {current_class_javadoc}\nMethod: {method_name}\n=== Method Body ===\n"
+                    chunks.append({
+                        "text": header + "\n".join(method_lines),
+                        "start": start_idx + 1,
+                        "end": i
+                    })
+                    continue
+            i += 1
+            
+    elif ext == ".xml":
+        import xml.etree.ElementTree as ET
+        try:
+            cleaned_content = re.sub(r'\sxmlns="[^"]+"', '', content)
+            cleaned_content = re.sub(r'\sxmlns:[^=]+="[^"]+"', '', cleaned_content)
+            cleaned_content = re.sub(r'<beans[^>]*>', '<beans>', cleaned_content)
+            
+            root = ET.fromstring(cleaned_content)
+            for idx, bean in enumerate(root.findall(".//bean"), 1):
+                bean_id = bean.get("id") or bean.get("name") or f"bean_{idx}"
+                bean_xml = ET.tostring(bean, encoding="utf-8").decode("utf-8")
+                header = f"File: {rel_path}\nSpring Bean: {bean_id}\n=== Bean Configuration ===\n"
+                chunks.append({
+                    "text": header + bean_xml,
+                    "start": 1,
+                    "end": 1
+                })
+        except Exception:
+            pass
+            
+    if not chunks:
+        chunks = chunk_file_syntactically(content)
+        for c in chunks:
+            c["text"] = f"File: {rel_path}\n=== Code Content ===\n" + c["text"]
+            
+    return chunks
+
 def chunk_file_syntactically(content: str, max_lines: int = 100, overlap: int = 15) -> List[Dict[str, Any]]:
     """Chunks a code file into blocks of max_lines with overlap, aligning boundaries with classes/methods."""
     lines = content.splitlines()
@@ -378,7 +557,7 @@ class RepositoryAnalyzer:
         from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
         
         # 1. Resolve storage paths
-        vector_index_path = os.path.join(cfg.paths.memory, "vector_index.json")
+        vector_index_path = os.path.join(cfg.paths.memory, "vector_index.db")
         store = LocalVectorStore(vector_index_path)
         client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=cfg.embedding.model)
         
@@ -446,8 +625,8 @@ class RepositoryAnalyzer:
                 # Index in dependency graph
                 graph.index_file(rel_path, content, mtime, file_hash)
                 
-                # Chunk file syntactically with overlap (increased size to 120 lines to reduce call counts)
-                chunks = chunk_file_syntactically(content, max_lines=120, overlap=15)
+                # Chunk file with metadata headers
+                chunks = chunk_file_with_metadata_headers(content, rel_path)
                 
                 chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
                 if chunk_texts:
