@@ -53,14 +53,14 @@ class MCPClient:
             # Start background stdout reader
             self._read_task = asyncio.create_task(self._read_stdout())
             # Start background stderr logging reader
-            asyncio.create_task(self._read_stderr())
+            self._read_stderr_task = asyncio.create_task(self._read_stderr())
 
             # Perform MCP Handshake
             await self._handshake()
             
         except Exception as e:
             logger.error(f"Failed to start MCP server '{self.name}': {e}", exc_info=True)
-            self._is_running = False
+            await self.stop()
             raise e
 
     async def stop(self) -> None:
@@ -73,6 +73,16 @@ class MCPClient:
         
         if self._read_task:
             self._read_task.cancel()
+            try:
+                await self._read_task
+            except asyncio.CancelledError:
+                pass
+        if hasattr(self, "_read_stderr_task") and self._read_stderr_task:
+            self._read_stderr_task.cancel()
+            try:
+                await self._read_stderr_task
+            except asyncio.CancelledError:
+                pass
             
         if self._process:
             try:
@@ -125,11 +135,13 @@ class MCPClient:
         future = asyncio.get_running_loop().create_future()
         self._pending_requests[req_id] = future
         
-        message = json.dumps(payload) + "\n"
-        self._process.stdin.write(message.encode("utf-8"))
-        await self._process.stdin.drain()
-        
-        return await future
+        try:
+            message = json.dumps(payload) + "\n"
+            self._process.stdin.write(message.encode("utf-8"))
+            await self._process.stdin.drain()
+            return await future
+        finally:
+            self._pending_requests.pop(req_id, None)
 
     async def _send_notification(self, method: str, params: Dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no id, does not block for response)."""
@@ -288,6 +300,7 @@ class MCPManager:
     def __init__(self, kernel: Kernel) -> None:
         self.kernel = kernel
         self.clients: Dict[str, MCPClient] = {}
+        self.registered_tools: Dict[str, List[str]] = {}
 
     async def start_all(self, mcp_configs: Dict[str, Any]) -> None:
         """Start all configured MCP subprocess servers and register their tools."""
@@ -310,20 +323,31 @@ class MCPManager:
                 
                 # Fetch and register tools
                 tools = await client.list_tools()
+                self.registered_tools[server_name] = []
                 for t in tools:
                     mcp_tool = MCPTool(client, t)
                     # Register under 'tool' category in kernel registry
                     self.kernel.registry.register("tool", mcp_tool.name, mcp_tool)
+                    self.registered_tools[server_name].append(mcp_tool.name)
                     logger.info(f"Registered MCP tool '{mcp_tool.name}' from server '{server_name}'")
                     
             except Exception as e:
                 logger.error(f"Failed to load MCP server '{server_name}': {e}", exc_info=True)
 
     async def shutdown_all(self) -> None:
-        """Shutdown all active servers."""
-        for client in list(self.clients.values()):
+        """Shutdown all active servers and unregister their tools."""
+        for server_name, client in list(self.clients.items()):
             try:
                 await client.stop()
             except Exception:
                 pass
+            
+            # Unregister tools from registry
+            tool_names = self.registered_tools.pop(server_name, [])
+            for tool_name in tool_names:
+                try:
+                    self.kernel.registry.unregister("tool", tool_name)
+                except Exception as e:
+                    logger.warning(f"Failed to unregister tool '{tool_name}': {e}")
+                    
         self.clients.clear()

@@ -627,6 +627,9 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         click.echo(f"Generating embeddings for {len(chunks)} chunks of {source_name}...")
         embeddings = await embed_client.get_embeddings(chunks)
         
+        # Clear existing document chunks to prevent trailing chunk memory/index leaks
+        vector_store.remove_file(source_name)
+        
         for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
             vector_store.add_document(
                 filepath=source_name,
