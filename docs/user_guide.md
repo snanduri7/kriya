@@ -128,26 +128,33 @@ kriya -c kriya.yaml generate "Create a Spring-XML Java 17 app running Ignite 2.1
 ### 3.5 Fix Bugs (`fix`)
 Locate and repair bugs in your project using reproduced test outputs or stack traces:
 ```bash
-kriya -c kriya.yaml fix "Repair the Ignite node shutdown issue in App.java" --trace-file logs/error.log
+# Fix an issue by passing the error log string directly
+kriya -c kriya.yaml fix -e "SyntaxError: invalid syntax in App.java line 12"
+
+# Or pipe build output directly into the fix command
+mvn clean compile | kriya -c kriya.yaml fix
 ```
 
 ---
 
 ## 4. Engineering Skills
 
-### 4.1 Create a Skill
-Create a skill directory with a template:
+### 4.1 Listing and Viewing Staged Rules
+Verify all discovered skills and check for pending staged rules extracted during auto-debugging escalations:
 ```bash
-kriya -c kriya.yaml skills create ignite-java17
+kriya -c kriya.yaml skills list
 ```
-*   **`skill.yaml`**: Add activation criteria and dependencies mapping.
-*   **`rules.txt`**: Add strict constraints, one per line.
-*   **`instructions.md`**: Markdown containing structural guides and configuration snippets.
 
 ### 4.2 Promoting Accrued Rules
-When Kriya's escalation engine extracts a lesson learned from a bug fix, it writes it to a temporary staging file. To promote it to a permanent rule:
+When Kriya stages a lesson rule from a bug fix, approve it to promote it to active skill guidelines:
 ```bash
-kriya -c kriya.yaml skills promote --rule-id [rule-id]
+kriya -c kriya.yaml skills approve [skill_name]
+```
+
+### 4.3 Viewing Past Runs (`traces`)
+Inspect traces of all past generation and repair runs:
+```bash
+kriya -c kriya.yaml traces
 ```
 
 ---

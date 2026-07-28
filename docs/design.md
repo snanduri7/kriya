@@ -154,12 +154,9 @@ Kriya fully supports Java and Python:
 *   **Quality Gates**: Automatically detects the build system (Maven for Java; pip/poetry for Python) and runs corresponding validation engines (`mvn clean compile test` or `poetry run pytest`).
 
 ### 4.3 Staged Skill Accrual
-*   **Rule Staging**: Extracted rules are written to `staging_rules.json`.
-*   **Promotion**: Rules require manual confirmation (`kriya skills promote`) before appending to `rules.txt`.
-*   **Decay Engine**: Tracks statistics (times applied, successes, failures). Staged rules expire if not promoted within 30 days.
+*   **Rule Staging**: Extracted rules are written to `staged_rules.txt` inside the skill directory.
+*   **Promotion**: Rules require manual confirmation (`kriya skills approve <skill>`) before appending to `rules.txt`.
 
 ### 4.4 Concurrency & Observability
-*   **SQLite WAL Mode**: SQLite runs in Write-Ahead Logging mode to support concurrent reading queries.
-*   **Index Write Lock**: Applies a lockfile (`memory/kriya.lock`) during indexing updates.
-*   **Run Traces**: Every run stores a trace record (`run_traces.db`) logging the exact prompts, model versions, retrieved chunks, and token allocations, accessible via `kriya trace <run-id>`.
-*   **Evaluation Harness**: Pre-configured evaluation tests run 40+ reference coding tasks against the local repository to track recall and quality.
+*   **Run Traces**: Every run stores a trace record (`traces.db`) logging the goal, timestamp, duration, status, and files modified, accessible via the CLI command `kriya traces`.
+*   **Evaluation Harness**: Pre-configured evaluation tests run reference coding tasks against the local repository to track recall and quality.

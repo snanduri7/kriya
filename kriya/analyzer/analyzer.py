@@ -2,6 +2,8 @@ import os
 import re
 import json
 import logging
+import fnmatch
+import hashlib
 from typing import Dict, List, Any, Optional, Callable
 from pydantic import BaseModel, Field
 
@@ -82,6 +84,34 @@ class RepositoryModel(BaseModel):
     project_structure: Dict[str, Any] = Field(default_factory=dict, description="Basic folder structure hierarchy.")
     coding_style: Dict[str, Any] = Field(default_factory=dict, description="Detected coding style metrics.")
 
+
+def parse_gitignore(root_path: str) -> List[str]:
+    patterns = []
+    gitignore_path = os.path.join(root_path, ".gitignore")
+    if os.path.exists(gitignore_path):
+        try:
+            with open(gitignore_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        patterns.append(line)
+        except Exception:
+            pass
+    return patterns
+
+def is_ignored(filepath: str, root_path: str, gitignore_patterns: List[str]) -> bool:
+    rel_path = os.path.relpath(filepath, root_path)
+    parts = rel_path.split(os.sep)
+    system_ignores = {"target", "build", "node_modules", "dist", ".git", ".venv", "venv", "__pycache__", "obj", "bin"}
+    for p in parts:
+        if p in system_ignores or p.startswith("."):
+            return True
+    for pat in gitignore_patterns:
+        if pat.endswith("/"):
+            pat = pat[:-1]
+        if fnmatch.fnmatch(rel_path, pat) or any(fnmatch.fnmatch(part, pat) for part in parts):
+            return True
+    return False
 
 class RepositoryAnalyzer:
     """Analyzes workspace directory to extract language, frameworks, architecture and dependencies."""
@@ -245,6 +275,10 @@ class RepositoryAnalyzer:
                         frameworks.add("Spring Boot")
                     if "junit" in content:
                         testing.add("JUnit")
+                    # Extract maven dependencies
+                    deps = re.findall(r"<artifactId>([^<]+)</artifactId>", content)
+                    for d in deps:
+                        dependencies.add(d.strip())
             except Exception:
                 pass
 
@@ -253,6 +287,12 @@ class RepositoryAnalyzer:
             try:
                 with open(gradle_path, "r", errors="replace") as f:
                     content = f.read()
+                    if "junit" in content:
+                        testing.add("JUnit")
+                    # Extract gradle dependencies (e.g. implementation 'org.apache.ignite:ignite-core:2.18.0')
+                    deps = re.findall(r"(?:implementation|compileOnly|runtimeOnly|testImplementation)\s+['\"](?:[^:]+:)?([^:']+)['\"]", content)
+                    for d in deps:
+                        dependencies.add(d.strip())
                     if "spring-boot" in content:
                         frameworks.add("Spring Boot")
                     if "junit" in content:
@@ -346,22 +386,20 @@ class RepositoryAnalyzer:
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
         
-        # 2. Find target files
+        # 2. Find target files (respecting gitignore and system ignore filters)
         target_extensions = {".py", ".java", ".xml", ".rb"}
-        ignore_dirs = {
-            ".git", ".venv", "venv", "node_modules", "__pycache__", 
-            ".pytest_cache", "build", "dist", ".egg-info", "eggs", "bin", "obj"
-        }
+        gitignore_patterns = parse_gitignore(self.root_path)
         
         files_to_index = []
         for root, dirs, files in os.walk(self.root_path):
-            dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
+            dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), self.root_path, gitignore_patterns)]
             for file in files:
-                if file.startswith("."):
+                filepath = os.path.join(root, file)
+                if is_ignored(filepath, self.root_path, gitignore_patterns):
                     continue
                 _, ext = os.path.splitext(file)
                 if ext.lower() in target_extensions:
-                    files_to_index.append(os.path.join(root, file))
+                    files_to_index.append(filepath)
                     
         total_files = len(files_to_index)
         logger.info(f"Discovered {total_files} files for semantic indexing.")
@@ -373,12 +411,28 @@ class RepositoryAnalyzer:
             current_rel_paths.add(rel_path)
             
             try:
-                # Check modified time (mtime)
                 mtime = os.path.getmtime(filepath)
                 cached_mtime = store.file_metadata.get(rel_path, {}).get("mtime")
                 cached_graph_mtime = graph.get_cached_mtime(rel_path)
                 
+                # Fast path skip: mtime check
                 if cached_mtime == mtime and cached_graph_mtime == mtime:
+                    if progress_callback:
+                         progress_callback(f"{rel_path} [Up-to-date]", idx, total_files)
+                    continue
+
+                with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                
+                # Compute SHA-1 hash
+                file_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()
+                cached_hash = store.file_metadata.get(rel_path, {}).get("hash")
+                cached_graph_hash = graph.get_cached_hash(rel_path)
+                
+                # Resilient skip: hash check (handles branch checkouts cleanly)
+                if cached_hash == file_hash and cached_graph_hash == file_hash:
+                    # Update cached mtime to current checkout mtime
+                    store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
                     if progress_callback:
                          progress_callback(f"{rel_path} [Up-to-date]", idx, total_files)
                     continue
@@ -389,11 +443,8 @@ class RepositoryAnalyzer:
                 # Clear old chunks first to support re-indexing clean
                 store.remove_file(rel_path)
                 
-                with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
-                
                 # Index in dependency graph
-                graph.index_file(rel_path, content, mtime)
+                graph.index_file(rel_path, content, mtime, file_hash)
                 
                 # Chunk file syntactically with overlap (increased size to 120 lines to reduce call counts)
                 chunks = chunk_file_syntactically(content, max_lines=120, overlap=15)
@@ -408,10 +459,12 @@ class RepositoryAnalyzer:
                             filepath=rel_path,
                             text=chunk_text,
                             embedding=emb,
-                            chunk_index=chunk_idx
+                            chunk_index=chunk_idx,
+                            model_name=cfg.embedding.model,
+                            dimensions=len(emb)
                         )
-                # Store new mtime cache metadata
-                store.file_metadata[rel_path] = {"mtime": mtime}
+                # Store new cache metadata (including hash and mtime)
+                store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
             except Exception as e:
                 logger.error(f"Failed to index file {rel_path}: {e}")
                 

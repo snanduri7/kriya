@@ -36,24 +36,25 @@ def test_learn_command_multiple_sources(tmp_path):
         assert "Successfully indexed" in res.output
         
         # Verify file persistence and loaded chunks
-        index_path = os.path.join(cfg.paths.memory, "web_knowledge.json")
-        assert os.path.exists(index_path)
+        db_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
+        assert os.path.exists(db_path)
         
-        with open(index_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            
-        assert "documents" in data
-        docs = data["documents"]
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT text, provenance_url FROM learned_knowledge")
+        rows = cursor.fetchall()
+        conn.close()
         
         # We indexed 2 items (1 local file, 1 manual text entry)
-        assert len(docs) >= 2
+        assert len(rows) >= 2
         
         # Verify file source doc
-        file_doc = [d for d in docs if d["filepath"] == str(doc_file)]
+        file_doc = [r for r in rows if r[1] == str(doc_file)]
         assert len(file_doc) == 1
-        assert "CacheConfiguration" in file_doc[0]["text"]
+        assert "CacheConfiguration" in file_doc[0][0]
         
         # Verify text source doc
-        text_doc = [d for d in docs if d["filepath"] == "Manual Entry 1"]
+        text_doc = [r for r in rows if r[1] == "Manual Entry 1"]
         assert len(text_doc) == 1
-        assert "Java 11" in text_doc[0]["text"]
+        assert "Java 11" in text_doc[0][0]

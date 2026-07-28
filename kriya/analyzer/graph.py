@@ -24,9 +24,14 @@ class DependencyGraph:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS files (
                 filepath TEXT PRIMARY KEY,
-                mtime REAL
+                mtime REAL,
+                hash TEXT
             )
         """)
+        try:
+            cursor.execute("ALTER TABLE files ADD COLUMN hash TEXT")
+        except Exception:
+            pass
         
         # Table of symbols parsed (classes, methods, bean definitions)
         cursor.execute("""
@@ -68,6 +73,15 @@ class DependencyGraph:
         conn.close()
         return row[0] if row else None
 
+    def get_cached_hash(self, filepath: str) -> Optional[str]:
+        """Fetch cached content hash for incremental skip validation."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT hash FROM files WHERE filepath = ?", (filepath,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] else None
+
     def clear_file(self, filepath: str) -> None:
         """Delete old symbols and relationships associated with a file."""
         conn = sqlite3.connect(self.db_path)
@@ -83,8 +97,11 @@ class DependencyGraph:
         conn.commit()
         conn.close()
 
-    def index_file(self, rel_path: str, content: str, mtime: float) -> None:
+    def index_file(self, rel_path: str, content: str, mtime: float, file_hash: Optional[str] = None) -> None:
         """Parse source code of a file and populate SQLite database indices."""
+        if file_hash is None:
+            import hashlib
+            file_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()
         self.clear_file(rel_path)
         
         symbols = []
@@ -110,7 +127,7 @@ class DependencyGraph:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("INSERT OR REPLACE INTO files (filepath, mtime) VALUES (?, ?)", (rel_path, mtime))
+        cursor.execute("INSERT OR REPLACE INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", (rel_path, mtime, file_hash))
         
         for sym in symbols:
             cursor.execute("""
@@ -169,6 +186,60 @@ class DependencyGraph:
         rows = cursor.fetchall()
         conn.close()
         return [r[0] for r in rows]
+
+    def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2) -> List[Dict[str, Any]]:
+        """Perform bounded BFS traversal on the symbol relationship graph."""
+        if not seed_symbols:
+            return []
+            
+        visited = set()
+        queue = []
+        for symbol in seed_symbols:
+            queue.append((symbol, 0))
+            visited.add(symbol)
+            
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        results = []
+        
+        while queue:
+            current, hop = queue.pop(0)
+            if hop >= max_hops:
+                continue
+                
+            cursor.execute("""
+                SELECT r.source, r.target, r.type, s.filepath, s.type as symbol_type
+                FROM relations r
+                LEFT JOIN symbols s ON (r.source = s.name OR r.target = s.name)
+                WHERE r.source = ? OR r.target = ?
+            """, (current, current))
+            
+            rows = cursor.fetchall()
+            for r in rows:
+                source = r["source"]
+                target = r["target"]
+                rel_type = r["type"]
+                filepath = r["filepath"]
+                sym_type = r["symbol_type"]
+                
+                neighbor = target if source == current else source
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, hop + 1))
+                    
+                if filepath:
+                    results.append({
+                        "name": neighbor,
+                        "filepath": filepath,
+                        "relation_type": rel_type,
+                        "symbol_type": sym_type,
+                        "hop": hop + 1
+                    })
+                    
+        conn.close()
+        return results
 
     # =====================================================================
     # Language AST Parsers
@@ -237,17 +308,33 @@ class DependencyGraph:
         relations = []
         lines = content.splitlines()
         
-        # 1. Package name
+        # Package name
         pkg_match = re.search(r"package\s+([\w\.]+);", content)
         package_prefix = pkg_match.group(1) + "." if pkg_match else ""
         
-        # Regex mappings for Java classes and functions
-        class_regex = re.compile(r"(?:public|protected|private|static|\s)*class\s+(\w+)")
+        # Regex mappings for Java classes, methods and fields
+        class_regex = re.compile(
+            r"(?:public|protected|private|static|\s)*class\s+(\w+)"
+            r"(?:\s+extends\s+(\w+))?"
+            r"(?:\s+implements\s+([\w\s,]+))?"
+        )
         method_regex = re.compile(r"(?:public|protected|private|static|\s)+[\w<>]+\s+(\w+)\s*\([^\)]*\)\s*\{?")
         import_regex = re.compile(r"import\s+([\w\.\*]+);")
+        field_regex = re.compile(r"(?:public|protected|private|static|final|\s)*([\w<>\?]+)\s+(\w+)\s*;")
+        
+        pending_annotations = []
         
         for idx, line in enumerate(lines, 1):
             line_strip = line.strip()
+            
+            # Skip comments
+            if line_strip.startswith("//") or line_strip.startswith("/*") or line_strip.startswith("*"):
+                continue
+                
+            # Capture annotations
+            anno_matches = re.findall(r"@(\w+)", line_strip)
+            if anno_matches:
+                pending_annotations.extend(anno_matches)
             
             # Capture imports
             imp_match = import_regex.match(line_strip)
@@ -267,15 +354,58 @@ class DependencyGraph:
                     "name": class_name,
                     "type": "class",
                     "start_line": idx,
-                    "end_line": idx + 5 # baseline placeholder
+                    "end_line": idx + 5
                 })
+                
+                # Add class annotation relations
+                for anno in pending_annotations:
+                    relations.append({
+                        "source": class_name,
+                        "target": anno,
+                        "type": "annotated_with"
+                    })
+                pending_annotations = []
+                
+                # Handle extends
+                base_class = class_match.group(2)
+                if base_class:
+                    relations.append({
+                        "source": class_name,
+                        "target": base_class,
+                        "type": "inherits"
+                    })
+                    
+                # Handle implements
+                impl_interfaces = class_match.group(3)
+                if impl_interfaces:
+                    for interface in impl_interfaces.split(","):
+                        interface = interface.strip()
+                        if interface:
+                            relations.append({
+                                "source": class_name,
+                                "target": interface,
+                                "type": "implements"
+                            })
                 continue
+                
+            # Field DI injection matching
+            field_match = field_regex.match(line_strip)
+            if field_match:
+                field_type = field_match.group(1)
+                if field_type not in {"String", "int", "long", "double", "float", "boolean", "char", "byte", "short"}:
+                    if any(a in pending_annotations for a in {"Autowired", "Resource", "Inject", "Qualifier"}):
+                        relations.append({
+                            "source": filepath,
+                            "target": field_type,
+                            "type": "injects"
+                        })
+                pending_annotations = []
                 
             # Method definitions
             method_match = method_regex.match(line_strip)
             if method_match:
                 method_name = method_match.group(1)
-                # Ignore java keywords e.g. if, for, while
+                # Ignore java keywords
                 if method_name not in {"if", "for", "while", "switch", "catch"}:
                     symbols.append({
                         "name": method_name,
@@ -284,7 +414,7 @@ class DependencyGraph:
                         "end_line": idx + 2
                     })
                     
-            # Capture method invocations (regex lookup for method calls e.g. service.saveUser())
+            # Capture method invocations
             calls = re.findall(r"\.(\w+)\(", line_strip)
             for call in calls:
                 if call not in {"println", "print", "equals", "toString", "split", "replace"}:
@@ -300,24 +430,74 @@ class DependencyGraph:
         symbols = []
         relations = []
         
-        # Spring XML Bean definitions e.g. <bean id="userController" class="com.kriya.UserController" />
-        bean_regex = re.compile(r'<bean\s+id="([^"]+)"\s+class="([^"]+)"')
-        for idx, line in enumerate(content.splitlines(), 1):
-            match = bean_regex.search(line)
-            if match:
-                bean_id = match.group(1)
-                bean_class = match.group(2)
+        import xml.etree.ElementTree as ET
+        try:
+            # Strip XML namespace tags to make XPath lookup robust and uniform
+            cleaned_content = re.sub(r'\sxmlns="[^"]+"', '', content)
+            cleaned_content = re.sub(r'\sxmlns:[^=]+="[^"]+"', '', cleaned_content)
+            cleaned_content = re.sub(r'<beans[^>]*>', '<beans>', cleaned_content)
+            
+            root = ET.fromstring(cleaned_content)
+            for bean in root.findall(".//bean"):
+                bean_id = bean.get("id") or bean.get("name")
+                bean_class = bean.get("class")
+                if not bean_id:
+                    continue
+                    
                 symbols.append({
                     "name": bean_id,
                     "type": "spring_bean",
-                    "start_line": idx,
-                    "end_line": idx
+                    "start_line": 1,
+                    "end_line": 1
                 })
-                relations.append({
-                    "source": bean_id,
-                    "target": bean_class,
-                    "type": "references"
-                })
+                
+                if bean_class:
+                    relations.append({
+                        "source": bean_id,
+                        "target": bean_class,
+                        "type": "declares_bean"
+                    })
+                    
+                # Property references
+                for prop in bean.findall(".//property"):
+                    prop_ref = prop.get("ref")
+                    if prop_ref:
+                        relations.append({
+                            "source": bean_id,
+                            "target": prop_ref,
+                            "type": "references_bean"
+                        })
+                        
+                # Constructor arguments
+                for carg in bean.findall(".//constructor-arg"):
+                    carg_ref = carg.get("ref")
+                    if carg_ref:
+                        relations.append({
+                            "source": bean_id,
+                            "target": carg_ref,
+                            "type": "references_bean"
+                        })
+        except Exception as e:
+            logger.warning(f"ElementTree XML parse failed for {filepath}: {e}, falling back to regex")
+            bean_regex = re.compile(r'<bean\s+(?:id|name)="([^"]+)"(?:\s+class="([^"]+)")?')
+            for idx, line in enumerate(content.splitlines(), 1):
+                match = bean_regex.search(line)
+                if match:
+                    bean_id = match.group(1)
+                    bean_class = match.group(2) or ""
+                    symbols.append({
+                        "name": bean_id,
+                        "type": "spring_bean",
+                        "start_line": idx,
+                        "end_line": idx
+                    })
+                    if bean_class:
+                        relations.append({
+                            "source": bean_id,
+                            "target": bean_class,
+                            "type": "declares_bean"
+                        })
+                        
         return symbols, relations
 
     def _parse_ruby(self, filepath: str, content: str) -> tuple:

@@ -37,3 +37,15 @@ async def test_llm_client_forwards_extra_body():
                 "top_p": 0.8
             }
         }
+
+@pytest.mark.asyncio
+async def test_local_egress_policy():
+    from kriya.core.llm import EgressViolationError
+    cfg = AppConfig()
+    cfg.autonomy.egress_policy = "local_only"
+    cfg.llm.base_url = "https://api.deepseek.com/v1"
+    
+    llm = LLMClient(cfg)
+    
+    with pytest.raises(EgressViolationError):
+        await llm.complete("system", "user")

@@ -627,15 +627,19 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         click.echo(f"Generating embeddings for {len(chunks)} chunks of {source_name}...")
         embeddings = await embed_client.get_embeddings(chunks)
         
-        # Clear existing document chunks to prevent trailing chunk memory/index leaks
-        vector_store.remove_file(source_name)
+        # Clear existing learned chunks matching source_name
+        vector_store.remove_learned_knowledge(source_name)
         
-        for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
-            vector_store.add_document(
-                filepath=source_name,
+        import datetime
+        fetch_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for chunk, emb in zip(chunks, embeddings):
+            vector_store.add_learned_knowledge(
                 text=chunk,
                 embedding=emb,
-                chunk_index=idx
+                model_name=cfg.embedding.model,
+                dimensions=len(emb),
+                provenance_url=source_name,
+                fetch_date=fetch_date
             )
         click.secho(f"Successfully indexed: {source_name}", fg="green")
         
@@ -685,6 +689,144 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
     except Exception as e:
         click.secho(f"Learning process failed: {e}", fg="red")
         sys.exit(1)
+
+@main.command(name="fix")
+@click.option('--error', '-e', help="Compilation or test error log string. If omitted, reads from stdin.")
+@click.option('--workspace', '-w', default=".", type=click.Path(exists=True, file_okay=False), help="Workspace directory path.")
+@click.pass_context
+def fix(ctx: click.Context, error: Optional[str], workspace: str) -> None:
+    """Diagnose and automatically apply patches for compiler or test errors."""
+    if not error:
+        if not sys.stdin.isatty():
+            error = sys.stdin.read()
+        else:
+            click.secho("Error: Must provide --error (-e) or pipe error log to stdin.", fg="red")
+            sys.exit(1)
+            
+    cfg: AppConfig = ctx.obj['config']
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+    
+    click.echo(f"Initiating diagnostic repair workflow on: {os.path.abspath(workspace)}")
+    
+    async def run_fix():
+        def step_cb(step_name, content):
+            click.secho(f"\n[{step_name.upper()}]", bold=True, fg="cyan")
+            click.echo(content[:300] + "..." if len(content) > 300 else content)
+            
+        def approval_cb(diffs, reason):
+            click.secho(f"\n[HUMAN REVIEW GATE REQUIRED]: {reason}", bold=True, fg="yellow")
+            for diff in diffs:
+                click.secho(f"File: {diff['filepath']}", bold=True)
+                click.echo(diff['content'])
+            return click.confirm("Apply these changes to your active workspace?", default=True)
+
+        res = await we.run_generation_workflow(
+            goal="Fix compilation/test failure",
+            workspace_path=workspace,
+            step_callback=step_cb,
+            approval_callback=approval_cb,
+            error_context=error
+        )
+        if res["quality_gates_passed"]:
+            click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
+        else:
+            click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
+            
+    try:
+        asyncio.run(run_fix())
+    except Exception as e:
+        click.secho(f"Error executing fix workflow: {e}", fg="red")
+        sys.exit(1)
+
+@main.command(name="traces")
+@click.pass_context
+def traces(ctx: click.Context) -> None:
+    """Show persistent run trace logs and metrics of past runs."""
+    cfg: AppConfig = ctx.obj['config']
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    if not os.path.exists(db_path):
+        click.echo("No run traces recorded yet.")
+        return
+        
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified FROM runs ORDER BY timestamp DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        click.echo("No run traces recorded yet.")
+        return
+        
+    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
+    click.echo("-" * 100)
+    for r_id, ts, goal, dur, att, status, files in rows:
+        dur_str = f"{dur:.2f}s"
+        status_color = "green" if status.lower() == "success" else "red"
+        status_styled = click.style(f"{status:<10}", fg=status_color)
+        click.echo(f"{ts:<20} | {status_styled} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
+
+@click.group(name="skills")
+def skills() -> None:
+    """Manage Kriya engineering skills and conventions."""
+    pass
+
+@skills.command(name="list")
+@click.pass_context
+def skills_list(ctx: click.Context) -> None:
+    """List all discovered skills and staged/active conventions."""
+    cfg: AppConfig = ctx.obj['config']
+    from kriya.skills import SkillEngine
+    se = SkillEngine(cfg.paths.skills)
+    se.discover_and_load()
+    
+    click.secho("=== Discovered Skills ===", bold=True)
+    for skill in se.list_skills():
+        click.echo(f"  - {skill.name} (Tags: {', '.join(skill.tags)})")
+        staged_file = os.path.join(cfg.paths.skills, skill.name, "staged_rules.txt")
+        if os.path.exists(staged_file):
+            with open(staged_file, "r", encoding="utf-8") as sf:
+                lines = [l.strip() for l in sf if l.strip()]
+            if lines:
+                click.secho(f"    [STAGED RULES PENDING REVIEW ({len(lines)})]:", fg="yellow")
+                for l in lines:
+                    click.echo(f"      * {l}")
+
+@skills.command(name="approve")
+@click.argument('skill_name')
+@click.pass_context
+def skills_approve(ctx: click.Context, skill_name: str) -> None:
+    """Approve all staged rules for a specific skill, promoting them to rules.txt."""
+    cfg: AppConfig = ctx.obj['config']
+    skill_folder = os.path.join(cfg.paths.skills, skill_name)
+    staged_file = os.path.join(skill_folder, "staged_rules.txt")
+    rules_file = os.path.join(skill_folder, "rules.txt")
+    
+    if not os.path.exists(staged_file):
+        click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
+        return
+        
+    try:
+        with open(staged_file, "r", encoding="utf-8") as sf:
+            staged_lines = [l.strip() for l in sf if l.strip()]
+            
+        if not staged_lines:
+            click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
+            return
+            
+        with open(rules_file, "a", encoding="utf-8") as rf:
+            for line in staged_lines:
+                rf.write(f"\n{line}")
+                
+        os.remove(staged_file)
+        click.secho(f"Successfully approved and promoted {len(staged_lines)} rule(s) to rules.txt for skill '{skill_name}'!", fg="green")
+    except Exception as e:
+        click.secho(f"Failed to approve staged rules: {e}", fg="red")
+
+main.add_command(skills)
 
 if __name__ == '__main__':
     main()

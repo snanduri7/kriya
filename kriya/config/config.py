@@ -36,11 +36,12 @@ class EmbeddingConfig(BaseModel):
 
 class AutonomyConfig(BaseModel):
     mode: str = Field(default="human-in-the-loop")
+    egress_policy: str = Field(default="local_only")
     sensitive_paths: List[str] = Field(default_factory=lambda: [
         r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile", 
         r".*credentials.*", r".*password.*"
     ])
-    risk_threshold_lines: int = Field(default=500)
+    risk_threshold_lines: int = Field(default=100)
 
 class FallbackModelConfig(BaseModel):
     model: str
@@ -89,4 +90,15 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         except Exception as e:
             raise ValueError(f"Failed to load configuration at {config_path}: {e}") from e
             
-    return AppConfig(**config_dict)
+    cfg = AppConfig(**config_dict)
+    
+    # Enforce baseline sensitive paths inheritance
+    baseline_sensitive = [
+        r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile", 
+        r".*credentials.*", r".*password.*"
+    ]
+    for pattern in baseline_sensitive:
+        if pattern not in cfg.autonomy.sensitive_paths:
+            cfg.autonomy.sensitive_paths.append(pattern)
+            
+    return cfg

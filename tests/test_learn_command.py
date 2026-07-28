@@ -32,15 +32,25 @@ def test_learn_command_fetches_and_persists(tmp_path):
         assert "Local knowledge base updated" in res.output
         
         # Verify file persistence
-        index_path = os.path.join(cfg.paths.memory, "web_knowledge.json")
-        assert os.path.exists(index_path)
+        db_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
+        assert os.path.exists(db_path)
         
-        with open(index_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            
-        assert "documents" in data
-        docs = data["documents"]
-        assert len(docs) > 0
-        assert docs[0]["filepath"] == "http://example.com/ignite-docs"
-        assert "Ignite 2.18.0" in docs[0]["text"]
-        assert docs[0]["embedding"] == [0.1] * 384
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT text, provenance_url FROM learned_knowledge")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        assert len(rows) > 0
+        assert rows[0][1] == "http://example.com/ignite-docs"
+        assert "Ignite 2.18.0" in rows[0][0]
+        
+        # Verify embedding list length
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT embedding FROM learned_knowledge")
+        emb_blob = cursor.fetchone()[0]
+        conn.close()
+        from kriya.memory.vector import deserialize_embedding
+        assert len(deserialize_embedding(emb_blob)) == 384

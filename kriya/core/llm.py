@@ -1,9 +1,40 @@
+import socket
+import ipaddress
 import logging
+from urllib.parse import urlparse
 from typing import Optional, Callable
 from openai import AsyncOpenAI
 from kriya.config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+class EgressViolationError(ValueError):
+    """Raised when an LLM completion request violates local_only egress policy."""
+    pass
+
+def is_local_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return True
+            
+        if hostname.lower() in {"localhost", "127.0.0.1", "[::1]"}:
+            return True
+        if hostname.lower().endswith(".local"):
+            return True
+            
+        addr_info = socket.getaddrinfo(hostname, None)
+        for family, _, _, _, sockaddr in addr_info:
+            ip = sockaddr[0]
+            ip_obj = ipaddress.ip_address(ip)
+            if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local:
+                continue
+            else:
+                return False
+        return True
+    except Exception:
+        return False
 
 class LLMClient:
     """Wrapper around OpenAI-compatible API client for local LLM generation."""
@@ -29,6 +60,14 @@ class LLMClient:
         api_key_override: Optional[str] = None
     ) -> str:
         """Call the local LLM server and return the text completion (supporting streaming and JSON mode)."""
+        # Validate egress policy
+        if self.config.autonomy.egress_policy == "local_only":
+            url_to_check = base_url_override or self.config.llm.base_url
+            if not is_local_url(url_to_check):
+                raise EgressViolationError(
+                    f"Egress violation: Request to external API '{url_to_check}' blocked under 'local_only' policy."
+                )
+
         model = model_override or self.model
         client = self.client
         

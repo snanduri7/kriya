@@ -39,5 +39,5 @@ async def test_indexing_repository_files(tmp_path):
         assert "Service.java" in callback_files
         
         # Verify vector store index file was written to disk
-        vector_index_file = os.path.join(cfg.paths.memory, "vector_index.json")
+        vector_index_file = os.path.join(cfg.paths.memory, "vector_index.db")
         assert os.path.exists(vector_index_file)

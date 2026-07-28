@@ -105,7 +105,7 @@ async def test_workflow_fallback_chain(tmp_path):
     repo_slug = os.path.basename(tmp_path).lower().strip(".")
     if not repo_slug:
          repo_slug = "root"
-    rules_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "rules.txt")
+    rules_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_rules.txt")
     assert os.path.exists(rules_file)
     with open(rules_file, "r", encoding="utf-8") as f:
         rules_content = f.read()
