@@ -15,6 +15,8 @@ dependencies = [
     "openai>=1.0.0",
     "jinja2>=3.0.0",
     "mcp>=0.1.0",
+    "httpx>=0.24.0",
+    "numpy>=1.24.0",
 ]
 
 [project.optional-dependencies]
@@ -29,3 +31,7 @@ kriya-mcp = "kriya.mcp.server:main"
 
 [tool.setuptools.packages.find]
 include = ["kriya*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+

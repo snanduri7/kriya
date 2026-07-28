@@ -30,6 +30,20 @@ class PolymorphicValidator:
         # Default fallback to Python
         return "python"
 
+    def _run_cmd_with_timeout(self, cmd: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
+        try:
+            res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+            return {"returncode": res.returncode, "stdout": res.stdout, "stderr": res.stderr, "timeout": False}
+        except subprocess.TimeoutExpired as te:
+            stdout = te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else (te.stdout or "")
+            stderr = te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else (te.stderr or "")
+            return {
+                "returncode": -1, 
+                "stdout": stdout, 
+                "stderr": stderr + f"\n[TIMEOUT] Command timed out after {timeout} seconds.", 
+                "timeout": True
+            }
+
     def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
         """Runs language-specific compilation check on changed files."""
         if not files:
@@ -55,10 +69,10 @@ class PolymorphicValidator:
             # 1. Run Maven compile if pom.xml exists
             if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                 try:
-                    res = subprocess.run(["mvn", "compile"], cwd=self.workspace_path, capture_output=True, text=True)
-                    if res.returncode == 0:
+                    res = self._run_cmd_with_timeout(["mvn", "compile"], cwd=self.workspace_path)
+                    if res["returncode"] == 0:
                         return {"success": True, "output": "Maven compilation succeeded."}
-                    return {"success": False, "output": f"Maven compilation failed:\n{res.stdout}\n{res.stderr}"}
+                    return {"success": False, "output": f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"}
                 except Exception as e:
                     logger.warning(f"Failed to invoke mvn compile: {e}")
                     
@@ -66,10 +80,10 @@ class PolymorphicValidator:
             if os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                 try:
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
-                    res = subprocess.run([gradle_cmd, "compileJava"], cwd=self.workspace_path, capture_output=True, text=True)
-                    if res.returncode == 0:
+                    res = self._run_cmd_with_timeout([gradle_cmd, "compileJava"], cwd=self.workspace_path)
+                    if res["returncode"] == 0:
                         return {"success": True, "output": "Gradle compilation succeeded."}
-                    return {"success": False, "output": f"Gradle compilation failed:\n{res.stdout}\n{res.stderr}"}
+                    return {"success": False, "output": f"Gradle compilation failed:\n{res['stdout']}\n{res['stderr']}"}
                 except Exception as e:
                     logger.warning(f"Failed to invoke gradle compileJava: {e}")
             
@@ -83,9 +97,9 @@ class PolymorphicValidator:
             os.makedirs(os.path.join(self.workspace_path, "build"), exist_ok=True)
             
             try:
-                res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
-                if res.returncode != 0:
-                    return {"success": False, "output": f"Java compilation failed:\n{res.stderr}"}
+                res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                if res["returncode"] != 0:
+                    return {"success": False, "output": f"Java compilation failed:\n{res['stderr']}"}
                 return {"success": True, "output": "Java classes compiled successfully."}
             except Exception as e:
                 return {"success": False, "output": f"Javac compilation tool invocation failed: {e}"}
@@ -97,9 +111,9 @@ class PolymorphicValidator:
                     full = os.path.join(self.workspace_path, f)
                     if os.path.exists(full):
                         try:
-                            res = subprocess.run(["ruby", "-c", full], cwd=self.workspace_path, capture_output=True, text=True)
-                            if res.returncode != 0:
-                                errors.append(f"Ruby syntax error in {f}:\n{res.stderr}")
+                            res = self._run_cmd_with_timeout(["ruby", "-c", full], cwd=self.workspace_path)
+                            if res["returncode"] != 0:
+                                errors.append(f"Ruby syntax error in {f}:\n{res['stderr']}")
                         except Exception as e:
                             return {"success": False, "output": f"Ruby runtime execution failed: {e}"}
             if errors:
@@ -120,23 +134,23 @@ class PolymorphicValidator:
                 ]
                 if target_test:
                     cmd.append(target_test)
-                res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
-                return {"success": res.returncode in (0, 5), "output": res.stdout + "\n" + res.stderr}
+                res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                return {"success": res["returncode"] in (0, 5), "output": res["stdout"] + "\n" + res["stderr"]}
  
             elif self.stack == "java":
                 if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                     cmd = ["mvn", "test"]
                     if target_test:
                         cmd.append(f"-Dtest={target_test}")
-                    res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
-                    return {"success": res.returncode == 0, "output": res.stdout + "\n" + res.stderr}
+                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                    return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
                     cmd = [gradle_cmd, "test"]
                     if target_test:
                         cmd.extend(["--tests", target_test])
-                    res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
-                    return {"success": res.returncode == 0, "output": res.stdout + "\n" + res.stderr}
+                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                    return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
  
             elif self.stack == "ruby":
@@ -144,13 +158,13 @@ class PolymorphicValidator:
                 if target_test:
                     cmd.append(target_test)
                 try:
-                    res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
+                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 except Exception:
                     cmd = ["rspec"]
                     if target_test:
                         cmd.append(target_test)
-                    res = subprocess.run(cmd, cwd=self.workspace_path, capture_output=True, text=True)
-                return {"success": res.returncode == 0, "output": res.stdout + "\n" + res.stderr}
+                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
  
         except Exception as e:
             return {"success": False, "output": f"Failed to execute local test suite: {e}"}

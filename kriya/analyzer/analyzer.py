@@ -6,6 +6,7 @@ import fnmatch
 import hashlib
 from typing import Dict, List, Any, Optional, Callable
 from pydantic import BaseModel, Field
+import ast
 
 logger = logging.getLogger(__name__)
 
@@ -40,90 +41,78 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
     
     if ext == ".py":
         package = rel_path.replace("/", ".").replace(".py", "")
-        lines = content.splitlines()
-        
-        module_decl = []
-        i = 0
-        while i < len(lines):
-            line_strip = lines[i].strip()
-            if line_strip.startswith("class ") or line_strip.startswith("def "):
-                break
-            module_decl.append(lines[i])
-            i += 1
-        if module_decl:
-            chunks.append({
-                "text": f"File: {rel_path}\nModule: {package}\n=== Module Declarations ===\n" + "\n".join(module_decl),
-                "start": 1,
-                "end": i
-            })
+        try:
+            tree = ast.parse(content, filename=rel_path)
+        except Exception:
+            tree = None
+
+        if tree is not None:
+            lines = content.splitlines()
             
-        current_class = ""
-        current_class_javadoc = ""
-        
-        while i < len(lines):
-            line = lines[i]
-            line_strip = line.strip()
-            
-            class_match = re.match(r"^class\s+(\w+)", line_strip)
-            if class_match:
-                current_class = class_match.group(1)
-                doc_lines = []
-                if i + 1 < len(lines) and (lines[i+1].strip().startswith('"""') or lines[i+1].strip().startswith("'''")):
-                    j = i + 1
-                    doc_lines.append(lines[j])
-                    if not (lines[j].strip().endswith('"""') and len(lines[j].strip()) > 3):
-                        j += 1
-                        while j < len(lines):
-                            doc_lines.append(lines[j])
-                            if '"""' in lines[j] or "'''" in lines[j]:
-                                break
-                            j += 1
-                    i = j
-                current_class_javadoc = "\n".join(doc_lines).strip()
-                header = f"File: {rel_path}\nModule: {package}\nClass: {current_class}\nDocstring: {current_class_javadoc}\n=== Class Declaration ===\n"
+            # 1. Module Declarations
+            module_decls = []
+            for node in tree.body:
+                if not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    start_line = getattr(node, "lineno", 1)
+                    end_line = getattr(node, "end_lineno", start_line)
+                    module_decls.extend(lines[start_line - 1:end_line])
+            if module_decls:
                 chunks.append({
-                    "text": header + line + ("\n" + current_class_javadoc if current_class_javadoc else ""),
-                    "start": i + 1,
-                    "end": i + 1
+                    "text": f"File: {rel_path}\nModule: {package}\n=== Module Declarations ===\n" + "\n".join(module_decls),
+                    "start": 1,
+                    "end": len(module_decls)
                 })
-                i += 1
-                continue
-                
-            method_match = re.match(r"^def\s+(\w+)", line_strip)
-            if not method_match and current_class:
-                method_match = re.match(r"^\s+def\s+(\w+)", line)
-                
-            if method_match:
-                method_name = method_match.group(1)
-                method_indent = len(line) - len(line.lstrip())
-                method_lines = [line]
-                start_idx = i
-                
-                i += 1
-                while i < len(lines):
-                    if not lines[i].strip():
-                        method_lines.append(lines[i])
-                        i += 1
-                        continue
-                    indent = len(lines[i]) - len(lines[i].lstrip())
-                    if indent <= method_indent:
-                        break
-                    method_lines.append(lines[i])
-                    i += 1
-                
-                header = f"File: {rel_path}\nModule: {package}\n"
-                if current_class:
-                    header += f"Class: {current_class}\nClass Docstring: {current_class_javadoc}\n"
-                header += f"Method: {method_name}\n=== Method Body ===\n"
-                
-                chunks.append({
-                    "text": header + "\n".join(method_lines),
-                    "start": start_idx + 1,
-                    "end": i
-                })
-                continue
-                
-            i += 1
+
+            # Map children to parents
+            parent_map = {}
+            for parent in ast.walk(tree):
+                for child in ast.iter_child_nodes(parent):
+                    parent_map[child] = parent
+
+            # 2. Walk tree to find classes and functions
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    class_name = node.name
+                    docstring = ast.get_docstring(node) or ""
+                    start_line = node.lineno
+                    end_line = start_line
+                    if node.body:
+                        end_line = getattr(node.body[0], "lineno", start_line) - 1
+                        if end_line < start_line:
+                            end_line = start_line
+                    class_sig = lines[start_line - 1:end_line]
+                    header = f"File: {rel_path}\nModule: {package}\nClass: {class_name}\nDocstring: {docstring}\n=== Class Declaration ===\n"
+                    chunks.append({
+                        "text": header + "\n".join(class_sig) + (f"\n{docstring}" if docstring else ""),
+                        "start": start_line,
+                        "end": end_line
+                    })
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    parent = parent_map.get(node)
+                    while parent is not None and not isinstance(parent, (ast.ClassDef, ast.Module)):
+                        parent = parent_map.get(parent)
+                    
+                    parent_class_name = ""
+                    parent_class_doc = ""
+                    if isinstance(parent, ast.ClassDef):
+                        parent_class_name = parent.name
+                        parent_class_doc = ast.get_docstring(parent) or ""
+                    
+                    method_name = node.name
+                    docstring = ast.get_docstring(node) or ""
+                    start_line = node.lineno
+                    end_line = getattr(node, "end_lineno", start_line)
+                    method_lines = lines[start_line - 1:end_line]
+                    
+                    header = f"File: {rel_path}\nModule: {package}\n"
+                    if parent_class_name:
+                        header += f"Class: {parent_class_name}\nClass Docstring: {parent_class_doc}\n"
+                    header += f"Method: {method_name}\nDocstring: {docstring}\n=== Method Body ===\n"
+                    chunks.append({
+                        "text": header + "\n".join(method_lines),
+                        "start": start_line,
+                        "end": end_line
+                    })
             
     elif ext == ".java":
         pkg_match = re.search(r"package\s+([\w\.]+);", content)
@@ -551,6 +540,8 @@ class RepositoryAnalyzer:
     async def index_repository(
         self, 
         cfg: Any, 
+        changed: bool = False,
+        force: bool = False,
         progress_callback: Optional[Callable[[str, int, int], None]] = None
     ) -> None:
         """Walks the repository, chunks code files, generates semantic embeddings, and stores them in LocalVectorStore."""
@@ -564,22 +555,82 @@ class RepositoryAnalyzer:
         from kriya.analyzer.graph import DependencyGraph
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
+
+        # Probe model dimensions dynamically and verify
+        test_emb = await client.get_embedding("test")
+        detected_dim = len(test_emb)
         
-        # 2. Find target files (respecting gitignore and system ignore filters)
+        try:
+            store.verify_model(cfg.embedding.model, detected_dim)
+        except ValueError as e:
+            if force:
+                logger.info("Forcing re-index due to model/dimension mismatch. Wiping existing vector index...")
+                cursor = store.conn.cursor()
+                cursor.execute("DELETE FROM vector_chunks")
+                if store.use_fts:
+                    cursor.execute("DELETE FROM fts_chunks")
+                else:
+                    cursor.execute("DELETE FROM fts_chunks_fallback")
+                cursor.execute("DELETE FROM file_metadata")
+                store.conn.commit()
+            else:
+                store.close()
+                graph.close()
+                raise e
+        
+        # 2. Find target files (respecting nested gitignores and system ignore filters)
         target_extensions = {".py", ".java", ".xml", ".rb"}
-        gitignore_patterns = parse_gitignore(self.root_path)
         
         files_to_index = []
+        gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
+
         for root, dirs, files in os.walk(self.root_path):
-            dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), self.root_path, gitignore_patterns)]
+            parent = os.path.dirname(root)
+            current_patterns = list(gitignore_cache.get(parent, gitignore_cache[self.root_path]))
+            
+            local_gitignore = os.path.join(root, ".gitignore")
+            if os.path.exists(local_gitignore) and root != self.root_path:
+                try:
+                    with open(local_gitignore, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#"):
+                                rel_dir = os.path.relpath(root, self.root_path)
+                                if rel_dir != ".":
+                                    current_patterns.append(os.path.join(rel_dir, line))
+                                else:
+                                    current_patterns.append(line)
+                except Exception:
+                    pass
+            gitignore_cache[root] = current_patterns
+
+            dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), self.root_path, current_patterns)]
             for file in files:
                 filepath = os.path.join(root, file)
-                if is_ignored(filepath, self.root_path, gitignore_patterns):
+                if is_ignored(filepath, self.root_path, current_patterns):
                     continue
                 _, ext = os.path.splitext(file)
                 if ext.lower() in target_extensions:
                     files_to_index.append(filepath)
                     
+        if changed:
+            import subprocess
+            try:
+                res = subprocess.run(["git", "diff", "--name-only"], cwd=self.root_path, capture_output=True, text=True)
+                git_files = set()
+                if res.returncode == 0:
+                    for line in res.stdout.splitlines():
+                        if line.strip():
+                            git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
+                res_untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=self.root_path, capture_output=True, text=True)
+                if res_untracked.returncode == 0:
+                    for line in res_untracked.stdout.splitlines():
+                        if line.strip():
+                            git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
+                files_to_index = [f for f in files_to_index if os.path.abspath(f) in git_files]
+            except Exception as e:
+                logger.warning(f"Failed to query git for changes: {e}")
+
         total_files = len(files_to_index)
         logger.info(f"Discovered {total_files} files for semantic indexing.")
         
@@ -595,7 +646,7 @@ class RepositoryAnalyzer:
                 cached_graph_mtime = graph.get_cached_mtime(rel_path)
                 
                 # Fast path skip: mtime check
-                if cached_mtime == mtime and cached_graph_mtime == mtime:
+                if not force and cached_mtime == mtime and cached_graph_mtime == mtime:
                     if progress_callback:
                          progress_callback(f"{rel_path} [Up-to-date]", idx, total_files)
                     continue
@@ -608,9 +659,8 @@ class RepositoryAnalyzer:
                 cached_hash = store.file_metadata.get(rel_path, {}).get("hash")
                 cached_graph_hash = graph.get_cached_hash(rel_path)
                 
-                # Resilient skip: hash check (handles branch checkouts cleanly)
-                if cached_hash == file_hash and cached_graph_hash == file_hash:
-                    # Update cached mtime to current checkout mtime
+                # Resilient skip: hash check
+                if not force and cached_hash == file_hash and cached_graph_hash == file_hash:
                     store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
                     if progress_callback:
                          progress_callback(f"{rel_path} [Up-to-date]", idx, total_files)
@@ -619,31 +669,33 @@ class RepositoryAnalyzer:
                 if progress_callback:
                     progress_callback(rel_path, idx, total_files)
 
-                # Clear old chunks first to support re-indexing clean
-                store.remove_file(rel_path)
-                
-                # Index in dependency graph
-                graph.index_file(rel_path, content, mtime, file_hash)
-                
-                # Chunk file with metadata headers
-                chunks = chunk_file_with_metadata_headers(content, rel_path)
-                
-                chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
-                if chunk_texts:
-                    # Generate all embeddings concurrently
-                    embs = await client.get_embeddings(chunk_texts)
+                # Wrap changes in explicit transaction
+                with store.conn, graph.conn:
+                    # Clear old chunks first to support re-indexing clean
+                    store.remove_file(rel_path)
                     
-                    for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs)):
-                        store.add_document(
-                            filepath=rel_path,
-                            text=chunk_text,
-                            embedding=emb,
-                            chunk_index=chunk_idx,
-                            model_name=cfg.embedding.model,
-                            dimensions=len(emb)
-                        )
-                # Store new cache metadata (including hash and mtime)
-                store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
+                    # Index in dependency graph
+                    graph.index_file(rel_path, content, mtime, file_hash)
+                    
+                    # Chunk file with metadata headers
+                    chunks = chunk_file_with_metadata_headers(content, rel_path)
+                    
+                    chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
+                    if chunk_texts:
+                        # Generate all embeddings concurrently
+                        embs = await client.get_embeddings(chunk_texts)
+                        
+                        for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs)):
+                            store.add_document(
+                                filepath=rel_path,
+                                text=chunk_text,
+                                embedding=emb,
+                                chunk_index=chunk_idx,
+                                model_name=cfg.embedding.model,
+                                dimensions=len(emb)
+                            )
+                    # Store new cache metadata (including hash and mtime)
+                    store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
             except Exception as e:
                 logger.error(f"Failed to index file {rel_path}: {e}")
                 
@@ -652,12 +704,15 @@ class RepositoryAnalyzer:
         for cached_file in cached_files:
             if cached_file not in current_rel_paths:
                 logger.info(f"Removing deleted file from index cache: {cached_file}")
-                store.remove_file(cached_file)
-                graph.clear_file(cached_file)
+                with store.conn, graph.conn:
+                    store.remove_file(cached_file)
+                    graph.clear_file(cached_file)
                 
         # 4. Save persistent cache index
         store.save()
         logger.info("Semantic repository indexing completed.")
+        store.close()
+        graph.close()
         
         # 5. Auto-Generate Codebase Conventions Skill
         repo_slug = os.path.basename(self.root_path).lower().strip(".")

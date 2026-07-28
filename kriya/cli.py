@@ -108,6 +108,27 @@ def doctor(ctx: click.Context) -> None:
         except Exception as e:
             click.secho(f"  - [ERROR] Connectivity test encountered an error: {e}", fg="red")
 
+    # 2.5. Check local Embedding connection
+    click.echo("\nChecking Embedding provider connectivity:")
+    embed_url = cfg.embedding.base_url
+    embed_model = cfg.embedding.model
+    click.echo(f"  - Base URL: {embed_url}")
+    click.echo(f"  - Model: {embed_model}")
+    click.echo("  - Testing connection...")
+    
+    try:
+        from kriya.memory.vector import OllamaEmbeddingClient
+        client = OllamaEmbeddingClient(base_url=embed_url, model=embed_model)
+        import asyncio
+        emb = asyncio.run(client.get_embedding("test connectivity"))
+        if emb and any(v != 0.0 for v in emb):
+            click.secho(f"  - [SUCCESS] Connected and successfully generated embedding of dimension {len(emb)}", fg="green")
+        else:
+            click.secho("  - [WARNING] Generated empty or zero embedding vector.", fg="yellow")
+    except Exception as e:
+        click.secho(f"  - [ERROR] Could not connect or failed to generate test embedding: {e}", fg="red")
+        click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
+
 @main.command()
 @click.pass_context
 def plugins(ctx: click.Context) -> None:
@@ -244,8 +265,10 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
 
 @main.command()
 @click.argument('path', type=click.Path(exists=True))
+@click.option('--changed', '-d', is_flag=True, default=False, help="Only index files changed in git.")
+@click.option('--force', '-f', is_flag=True, default=False, help="Force complete re-indexing.")
 @click.pass_context
-def analyze(ctx: click.Context, path: str) -> None:
+def analyze(ctx: click.Context, path: str, changed: bool, force: bool) -> None:
     """Analyze and index a repository directory."""
     cfg: AppConfig = ctx.obj['config']
     analyzer = RepositoryAnalyzer(path)
@@ -256,13 +279,28 @@ def analyze(ctx: click.Context, path: str) -> None:
         if os.path.isdir(path):
             click.secho("\nBuilding semantic repository index...", bold=True, fg="cyan")
             
+            progress_bar = None
+            
             def progress_callback(filepath: str, idx: int, total: int):
-                click.echo(f"[{idx}/{total}] Indexing: {filepath}")
+                nonlocal progress_bar
+                if progress_bar is None:
+                    progress_bar = click.progressbar(length=total, label="Indexing repository files")
+                
+                # Check if it is a skip or compile
+                if "[Up-to-date]" in filepath:
+                    label_text = f"Skipping: {filepath[:30]}"
+                else:
+                    label_text = f"Indexing: {filepath[:30]}"
+                
+                progress_bar.label = label_text.ljust(45)
+                progress_bar.update(1)
                 
             async def run_indexing():
-                await analyzer.index_repository(cfg, progress_callback=progress_callback)
+                await analyzer.index_repository(cfg, changed=changed, force=force, progress_callback=progress_callback)
                 
             asyncio.run(run_indexing())
+            if progress_bar:
+                progress_bar.render_finish()
             click.secho("Success: Semantic index compiled and cached to disk.", fg="green")
     except Exception as e:
         click.secho(f"Analysis failed: {e}", fg="red")
@@ -276,7 +314,7 @@ def skills_group() -> None:
 @skills_group.command(name="list")
 @click.pass_context
 def skills_list(ctx: click.Context) -> None:
-    """List all registered skills."""
+    """List all registered skills and staged/active conventions."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
     se = SkillEngine(cfg.paths.skills)
     se.discover_and_load()
@@ -289,6 +327,19 @@ def skills_list(ctx: click.Context) -> None:
     click.secho(f"=== Discovered Skills ({len(skills)}) ===", bold=True)
     for s in skills:
         click.echo(f"  - {s.name}: {s.description} [Category: {s.category}]")
+        staged_file = os.path.join(cfg.paths.skills, s.name.lower(), "staged_rules.txt")
+        if not os.path.exists(staged_file):
+            staged_file = os.path.join(cfg.paths.skills, s.name, "staged_rules.txt")
+        if os.path.exists(staged_file):
+            try:
+                with open(staged_file, "r", encoding="utf-8") as sf:
+                    lines = [l.strip() for l in sf if l.strip()]
+                if lines:
+                    click.secho(f"    [STAGED RULES PENDING REVIEW ({len(lines)})]:", fg="yellow")
+                    for l in lines:
+                        click.echo(f"      * {l}")
+            except Exception:
+                pass
 
 @skills_group.command(name="show")
 @click.argument('skill_name')
@@ -341,6 +392,39 @@ def skills_create(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Failed to create skill: {e}", fg="red")
         sys.exit(1)
 
+@skills_group.command(name="approve")
+@click.argument('skill_name')
+@click.pass_context
+def skills_approve(ctx: click.Context, skill_name: str) -> None:
+    """Approve all staged rules for a specific skill, promoting them to rules.txt."""
+    cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
+    skill_folder = os.path.join(cfg.paths.skills, skill_name.lower())
+    if not os.path.exists(skill_folder):
+        skill_folder = os.path.join(cfg.paths.skills, skill_name)
+    staged_file = os.path.join(skill_folder, "staged_rules.txt")
+    rules_file = os.path.join(skill_folder, "rules.txt")
+    
+    if not os.path.exists(staged_file):
+        click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
+        return
+        
+    try:
+        with open(staged_file, "r", encoding="utf-8") as sf:
+            staged_lines = [l.strip() for l in sf if l.strip()]
+            
+        if not staged_lines:
+            click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
+            return
+            
+        with open(rules_file, "a", encoding="utf-8") as rf:
+            for line in staged_lines:
+                rf.write(f"\n{line}")
+                
+        os.remove(staged_file)
+        click.secho(f"Successfully approved and promoted {len(staged_lines)} rule(s) to rules.txt for skill '{skill_name}'!", fg="green")
+    except Exception as e:
+        click.secho(f"Failed to approve staged rules: {e}", fg="red")
+
 @main.command()
 @click.argument('goal')
 @click.option('--yes', '-y', is_flag=True, default=False, help="Auto-approve all proposed code changes.")
@@ -382,7 +466,7 @@ def generate(ctx: click.Context, goal: str, yes: bool) -> None:
     async def run_workflow():
         nonlocal goal
         rag_context = ""
-        index_path = os.path.join(cfg.paths.memory, "web_knowledge.json")
+        index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
         if os.path.exists(index_path):
             try:
                 from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
@@ -396,6 +480,7 @@ def generate(ctx: click.Context, goal: str, yes: bool) -> None:
                 good_matches = [m for m in matches if m["score"] > 0.4]
                 if good_matches:
                     rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
+                vector_store.close()
             except Exception as e:
                 logger.warning(f"Failed to query RAG database in workflow: {e}")
                 
@@ -558,7 +643,7 @@ def ask(ctx: click.Context, question: str) -> None:
         
     async def run_query():
         rag_context = ""
-        index_path = os.path.join(cfg.paths.memory, "web_knowledge.json")
+        index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
         if os.path.exists(index_path):
             try:
                 from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
@@ -572,6 +657,7 @@ def ask(ctx: click.Context, question: str) -> None:
                 good_matches = [m for m in matches if m["score"] > 0.4]
                 if good_matches:
                     rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
+                vector_store.close()
             except Exception as e:
                 pass
                 
@@ -612,7 +698,7 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
     )
     
     os.makedirs(cfg.paths.memory, exist_ok=True)
-    index_path = os.path.join(cfg.paths.memory, "web_knowledge.json")
+    index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
     vector_store = LocalVectorStore(index_path)
     
     async def index_text_content(source_name: str, content: str):
@@ -680,8 +766,9 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
             except Exception as e:
                 click.secho(f"Failed to index text entry: {e}", fg="red")
 
-        # Persist index changes
+        # Persist index changes and close connection
         vector_store.save()
+        vector_store.close()
         
     try:
         asyncio.run(process_sources())
@@ -784,65 +871,6 @@ def traces(ctx: click.Context) -> None:
         status_color = "green" if status.lower() == "success" else "red"
         status_styled = click.style(f"{status:<10}", fg=status_color)
         click.echo(f"{ts:<20} | {status_styled} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
-
-@click.group(name="skills")
-def skills() -> None:
-    """Manage Kriya engineering skills and conventions."""
-    pass
-
-@skills.command(name="list")
-@click.pass_context
-def skills_list(ctx: click.Context) -> None:
-    """List all discovered skills and staged/active conventions."""
-    cfg: AppConfig = ctx.obj['config']
-    from kriya.skills import SkillEngine
-    se = SkillEngine(cfg.paths.skills)
-    se.discover_and_load()
-    
-    click.secho("=== Discovered Skills ===", bold=True)
-    for skill in se.list_skills():
-        click.echo(f"  - {skill.name} (Tags: {', '.join(skill.tags)})")
-        staged_file = os.path.join(cfg.paths.skills, skill.name, "staged_rules.txt")
-        if os.path.exists(staged_file):
-            with open(staged_file, "r", encoding="utf-8") as sf:
-                lines = [l.strip() for l in sf if l.strip()]
-            if lines:
-                click.secho(f"    [STAGED RULES PENDING REVIEW ({len(lines)})]:", fg="yellow")
-                for l in lines:
-                    click.echo(f"      * {l}")
-
-@skills.command(name="approve")
-@click.argument('skill_name')
-@click.pass_context
-def skills_approve(ctx: click.Context, skill_name: str) -> None:
-    """Approve all staged rules for a specific skill, promoting them to rules.txt."""
-    cfg: AppConfig = ctx.obj['config']
-    skill_folder = os.path.join(cfg.paths.skills, skill_name)
-    staged_file = os.path.join(skill_folder, "staged_rules.txt")
-    rules_file = os.path.join(skill_folder, "rules.txt")
-    
-    if not os.path.exists(staged_file):
-        click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
-        return
-        
-    try:
-        with open(staged_file, "r", encoding="utf-8") as sf:
-            staged_lines = [l.strip() for l in sf if l.strip()]
-            
-        if not staged_lines:
-            click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
-            return
-            
-        with open(rules_file, "a", encoding="utf-8") as rf:
-            for line in staged_lines:
-                rf.write(f"\n{line}")
-                
-        os.remove(staged_file)
-        click.secho(f"Successfully approved and promoted {len(staged_lines)} rule(s) to rules.txt for skill '{skill_name}'!", fg="green")
-    except Exception as e:
-        click.secho(f"Failed to approve staged rules: {e}", fg="red")
-
-main.add_command(skills)
 
 if __name__ == '__main__':
     main()

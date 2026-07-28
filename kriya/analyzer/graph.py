@@ -1,20 +1,11 @@
 import os
 import re
 import sqlite3
-_orig_connect = sqlite3.connect
-def wal_connect(*args, **kwargs):
-    kwargs["timeout"] = 30.0
-    conn = _orig_connect(*args, **kwargs)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-    except Exception:
-        pass
-    return conn
-sqlite3.connect = wal_connect
-
 import logging
 import ast
 from typing import Dict, List, Any, Optional
+
+from kriya.core.db import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +19,8 @@ class DependencyGraph:
 
     def _init_db(self) -> None:
         """Create database schema if not exists."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        self.conn = get_connection(self.db_path)
+        cursor = self.conn.cursor()
         
         # Table of files and their indexing states
         cursor.execute("""
@@ -72,41 +63,34 @@ class DependencyGraph:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target)")
         
-        conn.commit()
-        conn.close()
+        self.conn.commit()
 
     def get_cached_mtime(self, filepath: str) -> Optional[float]:
         """Fetch cached mtime for incremental skip validation."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute("SELECT mtime FROM files WHERE filepath = ?", (filepath,))
         row = cursor.fetchone()
-        conn.close()
         return row[0] if row else None
 
     def get_cached_hash(self, filepath: str) -> Optional[str]:
         """Fetch cached content hash for incremental skip validation."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute("SELECT hash FROM files WHERE filepath = ?", (filepath,))
         row = cursor.fetchone()
-        conn.close()
         return row[0] if row and row[0] else None
 
     def clear_file(self, filepath: str) -> None:
         """Delete old symbols and relationships associated with a file."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM files WHERE filepath = ?", (filepath,))
-        cursor.execute("DELETE FROM symbols WHERE filepath = ?", (filepath,))
-        # Delete any relation whose source or target references a local symbol in this file
+        cursor = self.conn.cursor()
+        # Delete relations first (while symbols still exist in the database!)
         cursor.execute("""
             DELETE FROM relations 
             WHERE source IN (SELECT name FROM symbols WHERE filepath = ?)
                OR target IN (SELECT name FROM symbols WHERE filepath = ?)
         """, (filepath, filepath))
-        conn.commit()
-        conn.close()
+        cursor.execute("DELETE FROM symbols WHERE filepath = ?", (filepath,))
+        cursor.execute("DELETE FROM files WHERE filepath = ?", (filepath,))
+        self.conn.commit()
 
     def index_file(self, rel_path: str, content: str, mtime: float, file_hash: Optional[str] = None) -> None:
         """Parse source code of a file and populate SQLite database indices."""
@@ -135,8 +119,7 @@ class DependencyGraph:
             return
             
         # Write to SQLite
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("INSERT OR REPLACE INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", (rel_path, mtime, file_hash))
         
@@ -152,14 +135,12 @@ class DependencyGraph:
                 VALUES (?, ?, ?)
             """, (rel["source"], rel["target"], rel["type"]))
             
-        conn.commit()
-        conn.close()
+        self.conn.commit()
 
     def get_callers(self, target: str) -> List[Dict[str, Any]]:
         """Retrieve calling symbols referencing the target symbol."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        self.conn.row_factory = sqlite3.Row
+        cursor = self.conn.cursor()
         cursor.execute("""
             SELECT r.source, s.filepath, s.type 
             FROM relations r
@@ -167,14 +148,12 @@ class DependencyGraph:
             WHERE r.target = ? AND r.type = 'calls'
         """, (target,))
         rows = cursor.fetchall()
-        conn.close()
         return [dict(r) for r in rows]
 
     def get_callees(self, source: str) -> List[Dict[str, Any]]:
         """Retrieve target symbols referenced or called by the source symbol."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        self.conn.row_factory = sqlite3.Row
+        cursor = self.conn.cursor()
         cursor.execute("""
             SELECT r.target, s.filepath, s.type 
             FROM relations r
@@ -182,20 +161,17 @@ class DependencyGraph:
             WHERE r.source = ? AND r.type = 'calls'
         """, (source,))
         rows = cursor.fetchall()
-        conn.close()
         return [dict(r) for r in rows]
 
     def get_imports(self, filepath: str) -> List[str]:
         """Fetch all dependency import files or packages for a specific file path."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute("""
             SELECT DISTINCT target 
             FROM relations 
             WHERE source = ? AND type = 'imports'
         """, (filepath,))
         rows = cursor.fetchall()
-        conn.close()
         return [r[0] for r in rows]
 
     def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2) -> List[Dict[str, Any]]:
@@ -209,9 +185,8 @@ class DependencyGraph:
             queue.append((symbol, 0))
             visited.add(symbol)
             
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        self.conn.row_factory = sqlite3.Row
+        cursor = self.conn.cursor()
         
         results = []
         
@@ -249,12 +224,12 @@ class DependencyGraph:
                         "hop": hop + 1
                     })
                     
-        conn.close()
         return results
 
-    # =====================================================================
-    # Language AST Parsers
-    # =====================================================================
+    def close(self) -> None:
+        if hasattr(self, "conn") and self.conn:
+            self.conn.close()
+
 
     def _parse_python(self, filepath: str, content: str) -> tuple:
         symbols = []

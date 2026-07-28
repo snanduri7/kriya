@@ -3,28 +3,18 @@ import json
 import sqlite3
 import datetime
 
-_orig_connect = sqlite3.connect
-def wal_connect(*args, **kwargs):
-    kwargs["timeout"] = 30.0
-    conn = _orig_connect(*args, **kwargs)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-    except Exception:
-        pass
-    return conn
-sqlite3.connect = wal_connect
+from kriya.core.db import get_connection
 
 class TraceLogger:
     def __init__(self, db_path: str) -> None:
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self.conn = get_connection(self.db_path)
         self.init_db()
 
     def init_db(self) -> None:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("DROP TABLE IF EXISTS runs")
-        # Create table with all details
+        cursor = self.conn.cursor()
+        # Create table with all details without dropping it first (preserves history!)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY,
@@ -41,8 +31,7 @@ class TraceLogger:
                 model_hops TEXT
             )
         """)
-        conn.commit()
-        conn.close()
+        self.conn.commit()
 
     def log_run(
         self, 
@@ -58,8 +47,7 @@ class TraceLogger:
         gate_outcomes: list = None,
         model_hops: list = None
     ) -> None:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         files_str = ",".join(files_modified)
         
@@ -78,5 +66,8 @@ class TraceLogger:
             run_id, timestamp, goal, duration_sec, attempts, status, files_str,
             chunks_json, skills_str, prompt_rendered, gates_json, hops_json
         ))
-        conn.commit()
-        conn.close()
+        self.conn.commit()
+
+    def close(self) -> None:
+        if hasattr(self, "conn") and self.conn:
+            self.conn.close()

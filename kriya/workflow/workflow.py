@@ -162,6 +162,10 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
         
     return "".join(result)
 
+def estimate_tokens(text: str) -> int:
+    """Estimates the number of tokens in a string using word heuristics (~1.3 tokens per word)."""
+    return int(len(text.split()) * 1.3)
+
 def build_code_context(matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int) -> str:
     matched_contents = {}
     for f in matched_files:
@@ -186,12 +190,21 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
     matched_tier = "full"
     related_tier = "full"
     
+    # Introduce cache for skeletonized content to optimize performance
+    skel_cache = {}
+
+    def get_skeletonized(content: str, filepath: str, tier: str) -> str:
+        key = (filepath, tier)
+        if key not in skel_cache:
+            skel_cache[key] = skeletonize_code(content, filepath, tier)
+        return skel_cache[key]
+
     def total_len():
         l = 0
         for filepath, content in matched_contents.items():
-            l += len(skeletonize_code(content, filepath, matched_tier))
+            l += estimate_tokens(get_skeletonized(content, filepath, matched_tier))
         for filepath, content in related_contents.items():
-            l += len(skeletonize_code(content, filepath, related_tier))
+            l += estimate_tokens(get_skeletonized(content, filepath, related_tier))
         return l
 
     while total_len() > budget_limit:
@@ -208,13 +221,13 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
             
     graph_rag_context = "\n\n=== Codebase Semantic Reference Context ===\n"
     for filepath, content in matched_contents.items():
-        skel = skeletonize_code(content, filepath, matched_tier)
+        skel = get_skeletonized(content, filepath, matched_tier)
         graph_rag_context += f"\nFile: {filepath} (Tier: {matched_tier})\n{skel}\n"
         
     if related_contents:
         graph_rag_context += "\n\n=== Bounded Neighborhood Dependency Context ===\n"
         for filepath, content in related_contents.items():
-            skel = skeletonize_code(content, filepath, related_tier)
+            skel = get_skeletonized(content, filepath, related_tier)
             graph_rag_context += f"\nFile: {filepath} (Tier: {related_tier})\n{skel}\n"
             
     return graph_rag_context
@@ -407,7 +420,7 @@ class WorkflowEngine:
                     matched_files = matched_files_list
                     related_files = list(related_files_set)
                     
-                    primary_limit = self.kernel.config.llm.context_window * 3
+                    primary_limit = int(self.kernel.config.llm.context_window * 0.75)
                     graph_rag_context = build_code_context(matched_files, related_files, workspace_path, primary_limit)
         except Exception as ex:
             logger.warning(f"Failed to query Graph RAG: {ex}")
@@ -512,7 +525,7 @@ class WorkflowEngine:
                     task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
 
                 # Re-run context budget allocator dynamically for escalated model context window size
-                current_limit = self.kernel.config.llm.context_window * 3
+                current_limit = int(self.kernel.config.llm.context_window * 0.75)
                 model_override = None
                 base_url_override = None
                 api_key_override = None
@@ -523,8 +536,8 @@ class WorkflowEngine:
                     model_override = fallback.model
                     base_url_override = fallback.base_url
                     api_key_override = fallback.api_key
-                    current_limit = fallback.context_window * 3
-                    logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} chars)")
+                    current_limit = int(fallback.context_window * 0.75)
+                    logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} tokens)")
                 
                 current_graph_context = build_code_context(matched_files, related_files, workspace_path, current_limit)
                 active_code_context = skills_prompt
