@@ -69,7 +69,7 @@ class PolymorphicValidator:
             # 1. Run Maven compile if pom.xml exists
             if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                 try:
-                    res = self._run_cmd_with_timeout(["mvn", "compile"], cwd=self.workspace_path)
+                    res = self._run_cmd_with_timeout(["mvn", "clean", "compile"], cwd=self.workspace_path)
                     if res["returncode"] == 0:
                         return {"success": True, "output": "Maven compilation succeeded."}
                     return {"success": False, "output": f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"}

@@ -59,6 +59,12 @@ class DeveloperAgent(BaseAgent):
         return (
             "You are the Kriya Developer Agent.\n"
             "Your task is to implement the requested code changes.\n"
+            "CRITICAL RULES FOR COMPILER CORRECTNESS:\n"
+            "1. You must include all necessary import statements for all classes, annotations, and functions used in the files you generate or edit. For example, in Java, import all required Apache Ignite, Spring, and JMS types (e.g., org.apache.ignite.Ignite, org.apache.ignite.IgniteCache, org.apache.ignite.Ignition, javax.jms.*, etc.). Do not assume they are imported implicitly.\n"
+            "2. Ensure the code compiles cleanly and matches standard structural definitions.\n"
+            "3. If a previous compilation error is provided, fix the exact error and do not repeat the mistake.\n"
+            "4. You must implement ALL files defined in the Architect Design Guidelines. Do not omit any files, leave placeholders, or defer their creation to a future step.\n"
+            "\n"
             "Return a clean JSON block list containing the code modifications. Do NOT wrap your JSON in any extra markdown text (no ```json code blocks), just return the raw JSON array. "
             "Format your output EXACTLY as a JSON array of file objects, like this:\n"
             "[\n"
@@ -108,17 +114,60 @@ class DeveloperAgent(BaseAgent):
             cleaned = "\n".join(lines).strip()
             
         try:
-            return json.loads(cleaned)
+            res = json.loads(cleaned)
+            if isinstance(res, dict):
+                # Check if this dict wraps a list of files (e.g. {"files": [...]})
+                for key, val in res.items():
+                    if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
+                        # Standardize "path" to "filepath"
+                        for item in val:
+                            if "path" in item and "filepath" not in item:
+                                item["filepath"] = item["path"]
+                        return val
+                return [res]
+            if isinstance(res, list):
+                # Ensure all elements in the list are dicts, skip strings
+                return [item for item in res if isinstance(item, dict)]
+            return res
         except json.JSONDecodeError as e:
             logger.error(f"Developer Agent returned invalid JSON: {response_str}")
-            # Attempt to find JSON array brackets as fallback
-            start = cleaned.find("[")
-            end = cleaned.rfind("]")
-            if start != -1 and end != -1:
+            start_d = cleaned.find("{")
+            end_d = cleaned.rfind("}")
+            start_a = cleaned.find("[")
+            end_a = cleaned.rfind("]")
+            
+            if start_a != -1 and end_a != -1 and (start_d == -1 or start_a < start_d):
                 try:
-                    return json.loads(cleaned[start:end+1])
+                    res = json.loads(cleaned[start_a:end_a+1])
+                    if isinstance(res, dict):
+                        for key, val in res.items():
+                            if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
+                                for item in val:
+                                    if "path" in item and "filepath" not in item:
+                                        item["filepath"] = item["path"]
+                                return val
+                        return [res]
+                    if isinstance(res, list):
+                        return [item for item in res if isinstance(item, dict)]
+                    return res
                 except Exception:
                     pass
+            
+            if start_d != -1 and end_d != -1:
+                try:
+                    res = json.loads(cleaned[start_d:end_d+1])
+                    if isinstance(res, dict):
+                        for key, val in res.items():
+                            if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
+                                for item in val:
+                                    if "path" in item and "filepath" not in item:
+                                        item["filepath"] = item["path"]
+                                return val
+                        return [res]
+                    return [res]
+                except Exception:
+                    pass
+                    
             raise ValueError(f"Failed to parse Developer Agent response as JSON: {e}. Raw response: {response_str}") from e
 
 

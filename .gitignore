@@ -127,3 +127,12 @@ cython_debug/
 memory/
 .system_generated/
 *.log
+
+# SQLite databases and temp files
+*.db
+*.db-wal
+*.db-shm
+logs/
+
+# Scratch generation folders
+scratch_generate/

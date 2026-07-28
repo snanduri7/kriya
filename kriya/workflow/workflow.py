@@ -17,9 +17,23 @@ from kriya.agents.agent import PlannerAgent, ArchitectAgent, DeveloperAgent, Rev
 logger = logging.getLogger(__name__)
 
 def create_git_worktree(repo_path: str) -> str:
+    # 1. Quick pre-check: Is this a git repository?
+    try:
+        res = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo_path, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise ValueError("Not a git repository")
+    except Exception as e:
+        raise ValueError(f"Directory is not a git repository: {e}")
+
     worktree_path = os.path.join(repo_path, ".kriya", "worktree")
     os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
     
+    # 2. Prune any stale/orphaned worktree records in git administrative data
+    try:
+        subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
+    except Exception:
+        pass
+
     worktree_registered = False
     try:
         res = subprocess.run(["git", "worktree", "list"], cwd=repo_path, capture_output=True, text=True)
@@ -33,9 +47,17 @@ def create_git_worktree(repo_path: str) -> str:
             shutil.rmtree(worktree_path, ignore_errors=True)
         subprocess.run(["git", "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
     else:
-        # Reset but preserve target/ and other build directories
-        subprocess.run(["git", "checkout", "-f", "HEAD"], cwd=worktree_path, check=True, capture_output=True)
-        subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, check=True, capture_output=True)
+        # Recreate the directory physically if it was deleted but still registered
+        if not os.path.exists(worktree_path):
+            try:
+                subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
+            except Exception:
+                pass
+            subprocess.run(["git", "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
+        else:
+            # Reset but preserve target/ and other build directories
+            subprocess.run(["git", "checkout", "-f", "HEAD"], cwd=worktree_path, check=True, capture_output=True)
+            subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, check=True, capture_output=True)
         
     return worktree_path
 
@@ -375,6 +397,10 @@ class WorkflowEngine:
                         convention_prompt += "Rules:\n" + "\n".join(f"- {r}" for r in skill.rules) + "\n"
                     if skill.instructions:
                         convention_prompt += f"Instructions:\n{skill.instructions}\n"
+                    if skill.examples:
+                        convention_prompt += "Examples:\n"
+                        for basename, content in skill.examples.items():
+                            convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
                     logger.info(f"Loaded engineering skill '{skill.name}' for generation context.")
         
         # 1.5. Graph RAG Context Retrieval
@@ -505,10 +531,12 @@ class WorkflowEngine:
         # 4. Developer & Quality Gates (Auto-debugging loop)
         logger.info("Developer Agent implementing source files...")
         chain = self.kernel.config.llm_chain
-        max_retries = 1 + len(chain) if chain else 3
+        max_retries = max(4, 1 + len(chain)) if chain else 4
         retry_count = 0
         error_context = error_context or ""
         files_written = []
+        all_files_written = set()
+        all_original_contents = {}
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -562,17 +590,17 @@ class WorkflowEngine:
                 )
                 
                 # Read original file contents before overwriting (crucial for fallback mode diffs)
-                original_contents = {}
                 for file_obj in files:
                     filepath = file_obj.get("filepath", "")
                     if not filepath:
                         continue
-                    actual_file = os.path.join(workspace_path, filepath)
-                    if os.path.exists(actual_file):
-                        with open(actual_file, "r", encoding="utf-8", errors="replace") as fh:
-                            original_contents[filepath] = fh.read()
-                    else:
-                        original_contents[filepath] = ""
+                    if filepath not in all_original_contents:
+                        actual_file = os.path.join(workspace_path, filepath)
+                        if os.path.exists(actual_file):
+                            with open(actual_file, "r", encoding="utf-8", errors="replace") as fh:
+                                all_original_contents[filepath] = fh.read()
+                        else:
+                            all_original_contents[filepath] = ""
 
                 # Write files to worktree sandbox
                 files_written = []
@@ -607,6 +635,7 @@ class WorkflowEngine:
                             f.write(content)
                             
                     files_written.append(filepath)
+                    all_files_written.add(filepath)
                     logger.info(f"Wrote generated/edited file to sandbox: {filepath}")
 
                 # Quality Gates: Polymorphic compile & test checks inside sandbox
@@ -614,7 +643,7 @@ class WorkflowEngine:
                 from kriya.tools.validate import PolymorphicValidator
                 validator = PolymorphicValidator(worktree_path)
                 
-                compile_res = validator.run_compile_check(files_written)
+                compile_res = validator.run_compile_check(list(all_files_written))
                 gate_outcomes.append({
                     "attempt": retry_count + 1,
                     "type": "compile",
@@ -624,7 +653,7 @@ class WorkflowEngine:
                 if not compile_res["success"]:
                     raise ValueError(f"COMPILATION FAILURE:\n{compile_res['output']}")
                     
-                target_test = extract_target_test(error_context, files_written)
+                target_test = extract_target_test(error_context, list(all_files_written))
                 if target_test:
                     logger.info(f"Quality Gates: Running targeted tests: {target_test}")
                     test_res = validator.run_tests(target_test=target_test)
@@ -637,7 +666,7 @@ class WorkflowEngine:
                     if not test_res["success"]:
                         raise ValueError(f"TARGETED TEST FAILURE:\n{test_res['output']}")
                 else:
-                    test_written = any("test" in f.lower() or "spec" in f.lower() for f in files_written)
+                    test_written = any("test" in f.lower() or "spec" in f.lower() for f in all_files_written)
                     if test_written:
                         logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                         test_res = validator.run_tests()
@@ -655,9 +684,9 @@ class WorkflowEngine:
                 
                 # 4.5. Pre-Apply Human Approval Gate
                 diffs_to_show = []
-                for filepath in files_written:
+                for filepath in sorted(all_files_written):
                     worktree_file = os.path.join(worktree_path, filepath)
-                    actual_content = original_contents.get(filepath, "")
+                    actual_content = all_original_contents.get(filepath, "")
                     with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
                         new_content = fh.read()
                         
@@ -675,7 +704,7 @@ class WorkflowEngine:
                 # Check sensitive paths matches
                 sensitive_match = False
                 sensitive_reason = ""
-                for filepath in files_written:
+                for filepath in all_files_written:
                     for pattern in autonomy_cfg.sensitive_paths:
                         try:
                             if re.match(pattern, filepath, re.IGNORECASE):
@@ -709,7 +738,7 @@ class WorkflowEngine:
                         if worktree_path != workspace_path:
                             remove_git_worktree(workspace_path, worktree_path)
                         else:
-                            for filepath, orig_content in original_contents.items():
+                            for filepath, orig_content in all_original_contents.items():
                                 actual_file = os.path.join(workspace_path, filepath)
                                 if orig_content:
                                     with open(actual_file, "w", encoding="utf-8") as fh:
@@ -726,7 +755,7 @@ class WorkflowEngine:
                         
                 # If approved, write files to the actual workspace
                 if worktree_path != workspace_path:
-                    for filepath in files_written:
+                    for filepath in all_files_written:
                         worktree_file = os.path.join(worktree_path, filepath)
                         actual_file = os.path.join(workspace_path, filepath)
                         os.makedirs(os.path.dirname(actual_file), exist_ok=True)
@@ -745,7 +774,7 @@ class WorkflowEngine:
                             f"A compilation/test error occurred:\n{error_context}\n\n"
                             f"The files were successfully fixed with this final content:\n"
                         )
-                        for filepath in files_written:
+                        for filepath in all_files_written:
                             full_path = os.path.join(workspace_path, filepath)
                             try:
                                 with open(full_path, "r", encoding="utf-8") as fh:
@@ -823,7 +852,7 @@ class WorkflowEngine:
         # 5. Reviewer
         logger.info("Reviewer Agent evaluating results...")
         review_prompt = f"Goal: {goal}\n\nFiles generated:\n"
-        for filepath in files_written:
+        for filepath in sorted(all_files_written):
             full_path = os.path.join(workspace_path, filepath)
             try:
                 with open(full_path, "r", encoding="utf-8") as f:
@@ -851,7 +880,7 @@ class WorkflowEngine:
                 duration_sec=duration,
                 attempts=retry_count,
                 status="success" if quality_passed else "failure",
-                files_modified=files_written,
+                files_modified=list(all_files_written),
                 retrieved_chunks=retrieved_chunks,
                 active_skills=active_skills,
                 prompt_rendered=plan_prompt,
@@ -865,7 +894,7 @@ class WorkflowEngine:
         return {
             "plan": plan,
             "design": design,
-            "files": files_written,
+            "files": list(all_files_written),
             "quality_gates_passed": quality_passed,
             "review": review
         }

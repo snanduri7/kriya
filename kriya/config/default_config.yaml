@@ -28,6 +28,15 @@ logging:
 
 mcp: {}
 
+llm_chain:
+  - model: "deepseek-r1:32b"
+    base_url: "http://localhost:11434/v1"
+    reasoning: true
+    context_window: 32768
+    temperature: 0.2
+
+
+
 embedding:
   model: "nomic-embed-text:latest"
   base_url: "http://localhost:11434/v1"

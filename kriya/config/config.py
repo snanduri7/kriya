@@ -79,6 +79,14 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         except Exception:
             pass
             
+    # If no config_path is explicitly provided, look for 'kriya.yaml' or 'kriya.yml' in current directory
+    if not config_path:
+        for filename in ["kriya.yaml", "kriya.yml"]:
+            path = os.path.join(os.getcwd(), filename)
+            if os.path.exists(path):
+                config_path = path
+                break
+
     # Load user config if specified and exists
     if config_path and os.path.exists(config_path):
         try:

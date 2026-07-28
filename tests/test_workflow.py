@@ -110,3 +110,52 @@ async def test_workflow_fallback_chain(tmp_path):
     with open(rules_file, "r", encoding="utf-8") as f:
         rules_content = f.read()
     assert "Avoid missing colon in function definition." in rules_content
+
+
+@pytest.mark.asyncio
+async def test_workflow_cumulative_sandbox_sync(tmp_path):
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    
+    # We want attempt 1 to generate file1.py, which compiles fine, but we'll mock compile check or test to fail once.
+    # Attempt 2 will generate file2.py.
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write files",
+        # Attempt 1: Generates file1.py
+        '[{"filepath": "file1.py", "content": "def func1():\\n    return 1"}]',
+        # Attempt 2: Generates only file2.py
+        '[{"filepath": "file2.py", "content": "def func2():\\n    return 2"}]',
+        "Avoid test failure.",
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    
+    # Mock validator compile and test checks to trigger a retry
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests") as mock_test:
+         
+         # Attempt 1 compile succeeds, but test fails
+         # Attempt 2 compile succeeds, test succeeds
+         mock_compile.return_value = {"success": True, "output": ""}
+         mock_test.side_effect = [
+             {"success": False, "output": "Test failed"}, # Attempt 1
+             {"success": True, "output": ""} # Attempt 2
+         ]
+         
+         res = await we.run_generation_workflow(
+             goal="Create library with multiple files",
+             workspace_path=str(tmp_path)
+         )
+         
+         assert res["quality_gates_passed"] is True
+         # Both files should be in the returned file list
+         assert "file1.py" in res["files"]
+         assert "file2.py" in res["files"]
+         
+         # Both files should actually exist in the workspace
+         assert os.path.exists(os.path.join(tmp_path, "file1.py"))
+         assert os.path.exists(os.path.join(tmp_path, "file2.py"))
+
