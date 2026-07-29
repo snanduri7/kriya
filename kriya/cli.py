@@ -618,15 +618,20 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             elif knowledge_policy == 'strict':
                 click.secho("\n[KRIYA BLOCKED] Knowledge gap detected in strict mode:", bold=True, fg="red")
                 for g in unacked_gaps:
-                    click.secho(f"  - {g['library']} version {g['version']}: {g['reason']}", fg="red")
+                    version_desc = "no specific version mentioned" if g['version'] == "unspecified" else f"version {g['version']}"
+                    click.secho(f"  - {g['library']} ({version_desc}): {g['reason']}", fg="red")
                 await kernel.stop()
                 sys.exit(1)
             else:  # 'warn'
                 click.secho("\n⚠️  KNOWLEDGE GUARD RISK DETECTED", bold=True, fg="yellow")
                 for g in unacked_gaps:
-                    date_str = g["release_date"][:10] if g["release_date"] else "Unknown"
-                    click.secho(f"  Library  : {g['library']} (version {g['version']})", fg="yellow")
-                    click.secho(f"  Released : {date_str}  |  Risk Level: {g['risk_level']}", fg="yellow")
+                    if g['version'] == "unspecified":
+                        click.secho(f"  Library  : {g['library']} (no specific version mentioned)", fg="yellow")
+                        click.secho(f"  Risk Level: {g['risk_level']}", fg="yellow")
+                    else:
+                        date_str = g["release_date"][:10] if g["release_date"] else "Unknown"
+                        click.secho(f"  Library  : {g['library']} (version {g['version']})", fg="yellow")
+                        click.secho(f"  Released : {date_str}  |  Risk Level: {g['risk_level']}", fg="yellow")
                     click.secho(f"  Reason   : {g['reason']}", fg="yellow")
                     click.echo("")
 
@@ -671,10 +676,16 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         
         click.secho("\n=== Generation Workflow Completed ===", bold=True)
         if res.get("files"):
-            click.echo(f"Files written: {', '.join(res['files'])}")
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
             click.secho(f"Quality Gates: {status_text}", bold=True, fg=status_color)
+            if res.get('quality_gates_passed'):
+                click.echo(f"Files written to workspace: {', '.join(res['files'])}")
+            else:
+                click.secho(
+                    f"Files attempted but NOT applied to workspace (quality gates failed): {', '.join(res['files'])}",
+                    fg="red"
+                )
             if res.get("review"):
                 click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
                 click.echo(res.get("review"))

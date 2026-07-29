@@ -15,6 +15,7 @@ COMMON_ALIASES = {
     "ignite-spring": ("org.apache.ignite", "ignite-spring"),
     "artemis": ("org.apache.activemq", "artemis-server"),
     "artemis-server": ("org.apache.activemq", "artemis-server"),
+    "qpid": ("org.apache.qpid", "qpid-broker-core"),
     "qpid-jms": ("org.apache.qpid", "qpid-jms-client"),
     "qpid-jms-client": ("org.apache.qpid", "qpid-jms-client"),
     "spring-boot": ("org.springframework.boot", "spring-boot-starter"),
@@ -348,6 +349,7 @@ def extract_library_versions(goal: str) -> List[Tuple[str, str]]:
 
     # Canonicalize and deduplicate
     seen = set()
+    seen_canonical = set()
     deduped = []
     for lib, ver in results:
         name_lower = lib.lower().strip()
@@ -371,6 +373,25 @@ def extract_library_versions(goal: str) -> List[Tuple[str, str]]:
         if key not in seen:
             seen.add(key)
             deduped.append(key)
+        seen_canonical.add(canonical)
+
+    # Bare (unversioned) mentions of known technologies - e.g. "Redhat qpid MRG broker"
+    # names Qpid without a version number, so the passes above never see it. Only checks
+    # against COMMON_ALIASES (a small, deliberately curated table) to keep this precise -
+    # this is what lets the structural skill-coverage check below fire even when no
+    # version is mentioned at all. Skipped for libraries already matched with a real
+    # version, so a goal mixing "Ignite 2.18.0 ... ignite cache" doesn't produce a
+    # spurious second "unspecified" entry alongside the real one.
+    for alias_key, (g, a) in COMMON_ALIASES.items():
+        canonical = f"{g}:{a}"
+        if canonical in seen_canonical:
+            continue
+        if re.search(rf"\b{re.escape(alias_key)}\b", goal, re.IGNORECASE):
+            key = (canonical, "unspecified")
+            if key not in seen:
+                seen.add(key)
+                deduped.append(key)
+            seen_canonical.add(canonical)
 
     return deduped
 
@@ -401,9 +422,13 @@ class GapReport:
             "──────────────────────────────────────────────────────"
         ]
         for g in self.gaps:
-            lines.append(f"Library  : {g['library']} (version {g['version']})")
-            date_str = g["release_date"][:10] if g["release_date"] else "Unknown"
-            lines.append(f"Released : {date_str}  |  Risk Level: {g['risk_level']}")
+            if g["version"] == "unspecified":
+                lines.append(f"Library  : {g['library']} (no specific version mentioned)")
+                lines.append(f"Risk Level: {g['risk_level']}")
+            else:
+                lines.append(f"Library  : {g['library']} (version {g['version']})")
+                date_str = g["release_date"][:10] if g["release_date"] else "Unknown"
+                lines.append(f"Released : {date_str}  |  Risk Level: {g['risk_level']}")
             lines.append(f"Reason   : {g['reason']}")
             lines.append("")
         lines.append("──────────────────────────────────────────────────────")
@@ -460,6 +485,15 @@ class KnowledgeGuard:
                         skill_found = True
                         break
 
+            if ver == "unspecified":
+                # No version was mentioned for this library, so there's nothing to check
+                # for temporal (post-cutoff) risk - only report a gap if there's also no
+                # skill coverage for it at all.
+                if not skill_found:
+                    reason = f"'{lib}' is mentioned in the goal but has no verified skill file - Kriya has no curated guidance for it."
+                    report.add_gap(lib, "unspecified", None, "MEDIUM", reason)
+                continue
+
             # 2. Temporal Cutoff Check
             rel_date = adapter.get_release_date(lib, ver, offline=self.offline, cache=self.cache)
             if rel_date:
@@ -479,20 +513,23 @@ class KnowledgeGuard:
 
         return report
 
-    def generate_skill_template(self, library: str, version: str) -> str:
+    def generate_skill_template(self, library: str, version: Optional[str]) -> str:
         """Scaffolds a new skill directory template under skills/."""
+        has_version = version not in (None, "unspecified")
         clean_lib = library.lower().replace(":", "-").replace("/", "-")
-        skill_name = f"{clean_lib}-{version}"
+        skill_name = f"{clean_lib}-{version}" if has_version else clean_lib
         target_dir = os.path.join(self.skills_dir, skill_name)
         os.makedirs(target_dir, exist_ok=True)
 
         # 1. skill.yaml
+        version_line = f'version: "{version}"\n' if has_version else ""
+        supported_versions = f">={version}" if has_version else "*"
+        description = f"Custom engineering skill for {library} version {version}" if has_version else f"Custom engineering skill for {library}"
         yaml_content = f"""name: {clean_lib}
-description: Custom engineering skill for {library} version {version}
-version: "{version}"
-# supported_versions defines the semver range of library versions this skill supports.
-# Example: ">=2.15.0 <3.0.0"
-supported_versions: ">={version}"
+description: {description}
+{version_line}# supported_versions defines the semver range of library versions this skill supports.
+# Example: ">=2.15.0 <3.0.0" (use "*" if not version-specific)
+supported_versions: "{supported_versions}"
 tags:
   - {clean_lib}
   - java
@@ -511,10 +548,12 @@ tags:
             f.write(rules_content)
 
         # 3. instructions.md
-        instructions_content = f"""# {library} Version {version} Guidelines
+        title = f"# {library} Version {version} Guidelines" if has_version else f"# {library} Guidelines"
+        version_note = f"introduced in version {version}" if has_version else "relevant to this library"
+        instructions_content = f"""{title}
 
 ## API Differences and Setup Steps
-Provide step-by-step setup guides here. Explain any API changes or parameters introduced in version {version}.
+Provide step-by-step setup guides here. Explain any API changes or parameters {version_note}.
 
 ## Key Code Snippets
 Include Markdown code blocks to guide code generation.
@@ -530,6 +569,6 @@ Include Markdown code blocks to guide code generation.
         os.makedirs(examples_dir, exist_ok=True)
         example_file = os.path.join(examples_dir, "Example.java")
         with open(example_file, "w", encoding="utf-8") as f:
-            f.write(f"// Example boilerplate for {library} {version}\n")
+            f.write(f"// Example boilerplate for {library}{' ' + version if has_version else ''}\n")
 
         return target_dir

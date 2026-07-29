@@ -1,0 +1,23 @@
+{
+  "name": "EmbeddedBroker",
+  "modelVersion": "9.2",
+  "authenticationproviders": [
+    { "name": "anonymous", "type": "Anonymous" }
+  ],
+  "ports": [
+    {
+      "name": "AMQP",
+      "port": "5672",
+      "authenticationProvider": "anonymous",
+      "protocols": ["AMQP_1_0"]
+    }
+  ],
+  "virtualhostnodes": [
+    {
+      "name": "default",
+      "type": "Memory",
+      "defaultVirtualHostNode": true,
+      "virtualHostInitialConfiguration": "{\"type\": \"Memory\"}"
+    }
+  ]
+}

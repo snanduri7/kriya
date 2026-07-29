@@ -587,11 +587,15 @@ class WorkflowEngine:
             if new_gaps:
                 logger.info(f"Stage 2A: Detected {len(new_gaps)} new library gaps in architect design.")
                 desc = "\n".join([
-                    f"- {g['library']} (version {g['version']}) [Risk: {g['risk_level']}]: {g['reason']}"
+                    (
+                        f"- {g['library']} (no specific version mentioned) [Risk: {g['risk_level']}]: {g['reason']}"
+                        if g['version'] == "unspecified"
+                        else f"- {g['library']} (version {g['version']}) [Risk: {g['risk_level']}]: {g['reason']}"
+                    )
                     for g in new_gaps
                 ])
                 reason_str = (
-                    f"Knowledge Guard detected new post-cutoff dependencies in the proposed architecture:\n{desc}\n"
+                    f"Knowledge Guard detected new dependency/technology gaps in the proposed architecture:\n{desc}\n"
                     f"Do you want to proceed with these dependencies?"
                 )
                 if approval_callback:
@@ -610,6 +614,11 @@ class WorkflowEngine:
         files_written = []
         all_files_written = set()
         all_original_contents = {}
+        # Captures the last attempt's file contents before worktree cleanup, so the
+        # Reviewer stage has something to review even when quality gates never passed
+        # (files in that case are never copied to workspace_path - only ever lived in
+        # the worktree, which gets git-clean'd on failure).
+        final_attempt_contents: Dict[str, str] = {}
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -941,12 +950,30 @@ class WorkflowEngine:
                 if retry_count >= max_retries:
                     logger.error("Quality Gates exceeded maximum debug retries. Continuing to review with errors.")
                     if worktree_path != workspace_path:
+                        for filepath in all_files_written:
+                            worktree_file = os.path.join(worktree_path, filepath)
+                            try:
+                                with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
+                                    final_attempt_contents[filepath] = fh.read()
+                            except Exception as e:
+                                logger.debug(f"Failed to capture final content of '{worktree_file}' before worktree cleanup: {e}")
                         remove_git_worktree(workspace_path, worktree_path)
-                    
+
         # 5. Reviewer
         logger.info("Reviewer Agent evaluating results...")
-        review_prompt = f"Goal: {goal}\n\nFiles generated:\n"
+        if final_attempt_contents:
+            review_prompt = (
+                f"Goal: {goal}\n\n"
+                "NOTE: Quality gates did not pass within the retry budget - these files were "
+                "NOT applied to the workspace and only reflect the last (failing) attempt.\n"
+                f"Last quality gate error:\n{error_context}\n\nFiles from the failing attempt:\n"
+            )
+        else:
+            review_prompt = f"Goal: {goal}\n\nFiles generated:\n"
         for filepath in sorted(all_files_written):
+            if filepath in final_attempt_contents:
+                review_prompt += f"\n=== File: {filepath} ===\n{final_attempt_contents[filepath]}\n"
+                continue
             full_path = os.path.join(workspace_path, filepath)
             try:
                 with open(full_path, "r", encoding="utf-8") as f:

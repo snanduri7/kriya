@@ -316,6 +316,53 @@ def test_workflow_auto_accrual(tmp_path):
         assert os.path.exists(expected_skill_path / "skill.yaml")
 
 
+def test_knowledge_guard_bare_mention_gap_without_skill(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    kg = KnowledgeGuard(str(skills_dir), "2023-12-01", offline=True)
+    report = kg.check_goal("Build a broker using Redhat qpid MRG in server mode")
+
+    assert report.has_gaps
+    gap = next(g for g in report.gaps if g["library"] == "org.apache.qpid:qpid-broker-core")
+    assert gap["version"] == "unspecified"
+    assert gap["release_date"] is None
+    assert gap["risk_level"] == "MEDIUM"
+
+def test_knowledge_guard_bare_mention_no_gap_with_skill(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "qpid").mkdir()
+    (skills_dir / "qpid" / "skill.yaml").write_text("name: qpid\ntags: [qpid]")
+
+    kg = KnowledgeGuard(str(skills_dir), "2023-12-01", offline=True)
+    report = kg.check_goal("Build a broker using Redhat qpid MRG in server mode")
+
+    assert not report.has_gaps
+
+def test_extract_library_versions_bare_mention_skipped_when_version_present():
+    goal = "Apache Ignite 2.18.0 running embedded, with Redhat qpid MRG as the broker and Apache Ignite 2.18.0 for cache"
+    libs = extract_library_versions(goal)
+    libs_dict = dict(libs)
+
+    assert libs_dict["org.apache.ignite:ignite-core"] == "2.18.0"
+    assert libs_dict["org.apache.qpid:qpid-broker-core"] == "unspecified"
+    # Ignite must not also appear as a spurious second "unspecified" entry
+    assert len([lib for lib in libs if lib[0] == "org.apache.ignite:ignite-core"]) == 1
+
+def test_generate_skill_template_without_version(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    kg = KnowledgeGuard(str(skills_dir), "2023-12-01")
+    t_dir = kg.generate_skill_template("org.apache.qpid:qpid-broker-core", "unspecified")
+
+    assert os.path.basename(t_dir) == "org.apache.qpid-qpid-broker-core"
+    with open(os.path.join(t_dir, "skill.yaml"), "r") as f:
+        content = f.read()
+        assert 'supported_versions: "*"' in content
+        assert "unspecified" not in content
+
 def test_extract_library_versions_deduplication():
     goal = "Apache Ignite 2.18 and org.apache.ignite:ignite-core:2.18.0 and apache-ignite 2.18"
     libs = extract_library_versions(goal)
