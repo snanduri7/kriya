@@ -70,6 +70,17 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+For a reproducible install pinned to known-working dependency versions (recommended for CI or production), install from the generated lock file first:
+```bash
+pip install -r requirements.txt
+pip install -e . --no-deps
+```
+`requirements.txt` is generated with `pip-compile` (from `pip-tools`, a `dev` extra) — regenerate it after changing `dependencies` in `pyproject.toml`:
+```bash
+pip install -e ".[dev]"
+pip-compile --extra dev --output-file=requirements.txt pyproject.toml
+```
+
 ---
 
 ## 5. Usage Guide

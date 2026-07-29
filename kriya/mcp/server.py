@@ -5,11 +5,11 @@ import fnmatch
 import logging
 from typing import Dict, List, Any, Optional
 
-# Let's import FastMCP from the mcp SDK
-from mcp.server.fastmcp import FastMCP
+# Let's import MCPServer from the mcp SDK (formerly FastMCP, renamed in mcp>=2.0.0)
+from mcp.server.mcpserver import MCPServer
 
-# Instantiate FastMCP server
-mcp = FastMCP("kriya")
+# Instantiate MCP server
+mcp = MCPServer("kriya")
 
 # =====================================================================
 # 1. AST Parser Tool
@@ -159,7 +159,7 @@ def search_code(pattern: str, path: str = ".", file_glob: str = "*") -> str:
 # =====================================================================
 
 def main() -> None:
-    """CLI script entrypoint to run the FastMCP tool server."""
+    """CLI script entrypoint to run the MCP tool server."""
     mcp.run()
 
 if __name__ == "__main__":
