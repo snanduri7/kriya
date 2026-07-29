@@ -46,6 +46,7 @@ class AutonomyConfig(BaseModel):
         r".*credentials.*", r".*password.*"
     ])
     risk_threshold_lines: int = Field(default=100)
+    sandbox_execution: bool = Field(default=False)
 
 class FallbackModelConfig(BaseModel):
     model: str

@@ -134,3 +134,25 @@ def test_java_dependency_regression(tmp_path):
         res_ok = validator.run_compile_check(["pom.xml"])
         assert res_ok["success"] is True
 
+def test_sandbox_docker_invocation(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "App.java").write_text("class App {}")
+    
+    # Initialize with sandbox_execution=True
+    validator = PolymorphicValidator(str(tmp_path), sandbox_execution=True)
+    assert validator.sandbox_execution is True
+    
+    with patch("subprocess.run") as mock_run:
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+        
+        res = validator.run_compile_check(["App.java"])
+        assert mock_run.called
+        args, kwargs = mock_run.call_args
+        cmd_run = args[0]
+        assert cmd_run[0] == "docker"
+        assert cmd_run[1] == "run"
+        assert "maven:3.9-eclipse-temurin-17" in cmd_run
+        assert res["success"] is True
+

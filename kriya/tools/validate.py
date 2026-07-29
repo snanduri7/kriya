@@ -11,9 +11,10 @@ logger = logging.getLogger(__name__)
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
-    def __init__(self, workspace_path: str, original_workspace_path: Optional[str] = None) -> None:
+    def __init__(self, workspace_path: str, original_workspace_path: Optional[str] = None, sandbox_execution: bool = False) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
+        self.sandbox_execution = sandbox_execution
         self.stack = self._detect_stack()
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
@@ -67,6 +68,27 @@ class PolymorphicValidator:
                 "timeout": True
             }
 
+    def _run_in_docker(self, cmd: List[str], timeout: int = 300) -> Dict[str, Any]:
+        """Runs the specified command inside an isolated Docker container."""
+        docker_cmd = [
+            "docker", "run", "--rm",
+            "-v", f"{self.workspace_path}:/workspace",
+            "-w", "/workspace"
+        ]
+        
+        if self.stack == "java":
+            docker_cmd.append("maven:3.9-eclipse-temurin-17")
+        elif self.stack == "ruby":
+            docker_cmd.append("ruby:3.2")
+        else:
+            docker_cmd.append("python:3.11")
+            
+        inner_cmd = " ".join(cmd)
+        docker_cmd.extend(["sh", "-c", inner_cmd])
+        
+        logger.info(f"Executing sandboxed command: {' '.join(docker_cmd)}")
+        return self._run_cmd_with_timeout(docker_cmd, cwd=self.workspace_path, timeout=timeout)
+
     def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
         """Runs language-specific compilation check on changed files."""
         if not files:
@@ -106,7 +128,8 @@ class PolymorphicValidator:
             # 2. Run Maven compile if pom.xml exists
             if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                 try:
-                    res = self._run_cmd_with_timeout(["mvn", "clean", "compile"], cwd=self.workspace_path)
+                    cmd = ["mvn", "clean", "compile"]
+                    res = self._run_in_docker(cmd) if self.sandbox_execution else self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                     if res["returncode"] == 0:
                         return {"success": True, "output": "Maven compilation succeeded."}
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
@@ -123,7 +146,8 @@ class PolymorphicValidator:
             if os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                 try:
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
-                    res = self._run_cmd_with_timeout([gradle_cmd, "compileJava"], cwd=self.workspace_path)
+                    cmd = [gradle_cmd, "compileJava"]
+                    res = self._run_in_docker(cmd) if self.sandbox_execution else self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                     if res["returncode"] == 0:
                         return {"success": True, "output": "Gradle compilation succeeded."}
                     return {"success": False, "output": f"Gradle compilation failed:\n{res['stdout']}\n{res['stderr']}"}
@@ -131,16 +155,22 @@ class PolymorphicValidator:
                     logger.warning(f"Failed to invoke gradle compileJava: {e}")
             
             # 3. Fallback to raw javac syntax check (for simple single-class projects)
-            java_files = [os.path.join(self.workspace_path, f) for f in files if f.endswith(".java")]
+            if self.sandbox_execution:
+                java_files = [os.path.join("/workspace", f) for f in files if f.endswith(".java")]
+                build_dir = "/workspace/build"
+            else:
+                java_files = [os.path.join(self.workspace_path, f) for f in files if f.endswith(".java")]
+                build_dir = os.path.join(self.workspace_path, "build")
+                
             if not java_files:
                 return {"success": True, "output": "No Java files to compile."}
                 
-            cmd = ["javac", "-proc:none", "-d", os.path.join(self.workspace_path, "build")]
+            cmd = ["javac", "-proc:none", "-d", build_dir]
             cmd.extend(java_files)
             os.makedirs(os.path.join(self.workspace_path, "build"), exist_ok=True)
             
             try:
-                res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                res = self._run_in_docker(cmd) if self.sandbox_execution else self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 if res["returncode"] != 0:
                     error_output = f"Java compilation failed:\n{res['stderr']}"
                     try:
@@ -160,7 +190,7 @@ class PolymorphicValidator:
                     full = os.path.join(self.workspace_path, f)
                     if os.path.exists(full):
                         try:
-                            res = self._run_cmd_with_timeout(["ruby", "-c", full], cwd=self.workspace_path)
+                            res = self._run_in_docker(["ruby", "-c", f]) if self.sandbox_execution else self._run_cmd_with_timeout(["ruby", "-c", full], cwd=self.workspace_path)
                             if res["returncode"] != 0:
                                 errors.append(f"Ruby syntax error in {f}:\n{res['stderr']}")
                         except Exception as e:
@@ -175,15 +205,16 @@ class PolymorphicValidator:
         """Runs tech-stack specific test execution suite."""
         try:
             if self.stack == "python":
+                python_bin = "python" if self.sandbox_execution else sys.executable
                 cmd = [
-                    sys.executable,
+                    python_bin,
                     "-c",
                     "import sys, os; sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; import pytest; sys.exit(pytest.main(sys.argv[1:]))",
                     "--"
                 ]
                 if target_test:
                     cmd.append(target_test)
-                res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                res = self._run_in_docker(cmd) if self.sandbox_execution else self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] in (0, 5), "output": res["stdout"] + "\n" + res["stderr"]}
  
             elif self.stack == "java":
@@ -191,14 +222,14 @@ class PolymorphicValidator:
                     cmd = ["mvn", "test"]
                     if target_test:
                         cmd.append(f"-Dtest={target_test}")
-                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                    res = self._run_in_docker(cmd) if self.sandbox_execution else self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                     return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
                     cmd = [gradle_cmd, "test"]
                     if target_test:
                         cmd.extend(["--tests", target_test])
-                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                    res = self._run_in_docker(cmd) if self.sandbox_execution else self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                     return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
  
@@ -207,12 +238,12 @@ class PolymorphicValidator:
                 if target_test:
                     cmd.append(target_test)
                 try:
-                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                    res = self._run_in_docker(cmd) if self.sandbox_execution else self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 except Exception:
                     cmd = ["rspec"]
                     if target_test:
                         cmd.append(target_test)
-                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                    res = self._run_in_docker(cmd) if self.sandbox_execution else self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
  
         except Exception as e:

@@ -52,8 +52,9 @@ class KnowledgeCache:
                     )
                 """)
                 conn.commit()
-        except Exception as e:
-            logger.warning(f"Failed to initialize KnowledgeCache DB: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"Failed to initialize KnowledgeCache DB: {e}")
+            raise RuntimeError(f"Database initialization error on {self.db_path}: {e}") from e
 
     def get_release_date(self, ecosystem: str, package: str, version: str) -> Optional[datetime]:
         try:
@@ -66,8 +67,8 @@ class KnowledgeCache:
                 row = cursor.fetchone()
                 if row and row[0]:
                     return parse_iso_datetime(row[0])
-        except Exception as e:
-            logger.debug(f"Failed to read from KnowledgeCache: {e}")
+        except sqlite3.Error as e:
+            logger.warning(f"Failed to read from KnowledgeCache: {e}")
         return None
 
     def set_release_date(self, ecosystem: str, package: str, version: str, release_date: datetime) -> None:
@@ -79,8 +80,8 @@ class KnowledgeCache:
                     (ecosystem.lower(), package.lower(), version.lower(), date_str)
                 )
                 conn.commit()
-        except Exception as e:
-            logger.debug(f"Failed to write to KnowledgeCache: {e}")
+        except sqlite3.Error as e:
+            logger.warning(f"Failed to write to KnowledgeCache: {e}")
 
 class RegistryAdapter(abc.ABC):
     """Abstract base class for ecosystem registries."""
@@ -117,8 +118,8 @@ class MavenCentralAdapter(RegistryAdapter):
                             if cache:
                                 cache.set_release_date("java", package, version, dt)
                             return dt
-        except Exception as e:
-            logger.debug(f"MavenCentral query failed for {package}:{version} - {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.warning(f"MavenCentral query failed for {package}:{version} - {e}")
         return None
 
 class PyPIAdapter(RegistryAdapter):
@@ -141,8 +142,8 @@ class PyPIAdapter(RegistryAdapter):
                         if dt and cache:
                             cache.set_release_date("python", package, version, dt)
                         return dt
-        except Exception as e:
-            logger.debug(f"PyPI query failed for {package}=={version} - {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.warning(f"PyPI query failed for {package}=={version} - {e}")
         return None
 
 class NpmAdapter(RegistryAdapter):
@@ -165,8 +166,8 @@ class NpmAdapter(RegistryAdapter):
                         if dt and cache:
                             cache.set_release_date("javascript", package, version, dt)
                         return dt
-        except Exception as e:
-            logger.debug(f"npm query failed for {package}@{version} - {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.warning(f"npm query failed for {package}@{version} - {e}")
         return None
 
 class RubyGemsAdapter(RegistryAdapter):
@@ -192,8 +193,8 @@ class RubyGemsAdapter(RegistryAdapter):
                                 if dt and cache:
                                     cache.set_release_date("ruby", package, version, dt)
                                 return dt
-        except Exception as e:
-            logger.debug(f"RubyGems query failed for {package}:{version} - {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.warning(f"RubyGems query failed for {package}:{version} - {e}")
         return None
 
 class GoModulesAdapter(RegistryAdapter):
@@ -217,8 +218,8 @@ class GoModulesAdapter(RegistryAdapter):
                         if dt and cache:
                             cache.set_release_date("go", package, version, dt)
                         return dt
-        except Exception as e:
-            logger.debug(f"Go proxy query failed for {package}@{version} - {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.warning(f"Go proxy query failed for {package}@{version} - {e}")
         return None
 
 class CargoAdapter(RegistryAdapter):
@@ -242,8 +243,8 @@ class CargoAdapter(RegistryAdapter):
                         if dt and cache:
                             cache.set_release_date("rust", package, version, dt)
                         return dt
-        except Exception as e:
-            logger.debug(f"crates.io query failed for {package}:{version} - {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.warning(f"crates.io query failed for {package}:{version} - {e}")
         return None
 
 class NuGetAdapter(RegistryAdapter):
@@ -268,8 +269,8 @@ class NuGetAdapter(RegistryAdapter):
                         if dt and cache:
                             cache.set_release_date("dotnet", package, version, dt)
                         return dt
-        except Exception as e:
-            logger.debug(f"NuGet query failed for {package}:{version} - {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.warning(f"NuGet query failed for {package}:{version} - {e}")
         return None
 
 class NullAdapter(RegistryAdapter):

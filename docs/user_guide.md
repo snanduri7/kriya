@@ -24,51 +24,28 @@ This guide describes how to install, configure, optimize, and use Kriya for code
 
 ## 2. Configuration (`kriya.yaml`)
 
-Create a `kriya.yaml` configuration file in your workspace to manage model settings, paths, and egress policies.
+Create a `kriya.yaml` configuration file in your workspace to manage model settings, paths, and policies.
 
 ```yaml
-# LLM Endpoint Profiles
 llm:
-  default_profile: "primary-moe"
-  profiles:
-    primary-moe:
-      provider: "openai_compatible"
-      base_url: "http://localhost:11434/v1"
-      model: "qwen3-30b-a3b-instruct"      # Primary fast MoE model
-      temperature: 0.3                     # Slightly higher temperature for MoE expert routing
-      max_tokens: 4096
-      context_window: 32768                # Native model input context window limit
-    
-    fallback-14b:
-      provider: "openai_compatible"
-      base_url: "http://localhost:11434/v1"
-      model: "deepseek-r1:14b"
-      temperature: 0.2
-      max_tokens: 4096
-      context_window: 16384
-      
-    fallback-32b:
-      provider: "openai_compatible"
-      base_url: "http://localhost:11434/v1"
-      model: "deepseek-r1:32b"
-      temperature: 0.2
-      max_tokens: 4096
-      context_window: 32768
+  provider: "openai"
+  base_url: "http://localhost:11434/v1"
+  model: "qwen3-30b-a3b-instruct"      # Primary fast MoE model
+  temperature: 0.3                     # Optimized for MoE routing
+  max_tokens: 4096
+  knowledge_cutoff: "2023-12-01"       # Estimated model cutoff date
+  knowledge_cutoff_confidence: "estimated"
 
-    remote-deepseek:
-      provider: "openai_compatible"
-      base_url: "https://api.deepseek.com"
-      model: "deepseek-reasoner"
-      temperature: 0.2
-      max_tokens: 4096
-      context_window: 64000
-      api_key_env: "DEEPSEEK_API_KEY"       # Read key from local environment variable
+knowledge:
+  check_enabled: true                  # Toggle KnowledgeGuard verification
+  offline_mode: false                  # Force using the cache and skip live HTTP queries
 
 # Ordered Fallback Chain (Escalation Series)
 llm_chain:
-  - "fallback-14b"
-  - "fallback-32b"
-  # - "remote-deepseek"                    # Remote fallbacks block under local_only policy
+  - model: "deepseek-r1:14b"           # Fallback Tier 1: Small Reasoner
+    base_url: "http://localhost:11434/v1"
+  - model: "deepseek-r1:32b"           # Fallback Tier 2: Medium Reasoner
+    base_url: "http://localhost:11434/v1"
 
 # Data safety & egress boundaries
 autonomy:
@@ -85,7 +62,7 @@ paths:
   logs: "./logs"                           # Logs folder
 
 embedding:
-  model: "nomic-embed-text:latest"         # Embedding model for vector indexing (768 dimensions)
+  model: "nomic-embed-text:latest"         # Embedding model for vector indexing
   base_url: "http://localhost:11434/v1"
 ```
 
@@ -94,19 +71,22 @@ embedding:
 ## 3. Core Commands
 
 ### 3.1 Indexing the Codebase (`analyze`)
-Index your workspace so Kriya can build the AST dependency graph (parsing DI and XML beans) and hybrid search database:
+Index your workspace so Kriya can build the AST dependency graph and hybrid search database:
 ```bash
-# Build the AST dependency graph (specifying workspace root)
-kriya -c kriya.yaml analyze . --graph
+# Analyze and index the current repository
+kriya -c kriya.yaml analyze .
 
-# Build/update the semantic vector index
-kriya -c kriya.yaml analyze . --vectors
+# Only index files changed in git
+kriya -c kriya.yaml analyze . --changed
+
+# Force complete re-indexing
+kriya -c kriya.yaml analyze . --force
 ```
 
 ### 3.2 Dynamic Learning (`learn`)
-Ingest stack overflow answers, official docs, or error workarounds into Kriya's semantic index. All ingested content is treated as untrusted reference material to prevent prompt injection.
+Ingest stack overflow answers, official docs, or error workarounds into Kriya's semantic index:
 ```bash
-# Ingest from a URL (constrained by domain allowlist)
+# Ingest from a URL
 kriya -c kriya.yaml learn -u "https://ignite.apache.org/docs/latest/setup"
 
 # Ingest from raw text
@@ -120,9 +100,16 @@ kriya -c kriya.yaml ask "How is the Ignite server bean configured in Spring XML?
 ```
 
 ### 3.4 Generate Code (`generate`)
-Launch the autonomous developer workflow:
+Launch the autonomous developer workflow. To prevent shell escaping issues, pass prompts via a markdown/text file or redirect stdin:
 ```bash
-kriya -c kriya.yaml generate "Create a Spring-XML Java 17 app running Ignite 2.18.0"
+# Run with inline description (for simple prompts)
+kriya -c kriya.yaml generate "Create Apache Ignite 2.18 app"
+
+# Run by reading the prompt from a text/markdown file (Recommended for complex prompts)
+kriya -c kriya.yaml generate -f prompt.md
+
+# Run via standard input (stdin) redirection
+cat prompt.md | kriya -c kriya.yaml generate
 ```
 
 ### 3.5 Fix Bugs (`fix`)
@@ -139,16 +126,23 @@ mvn clean compile | kriya -c kriya.yaml fix
 
 ## 4. Engineering Skills
 
-### 4.1 Listing and Viewing Staged Rules
-Verify all discovered skills and check for pending staged rules extracted during auto-debugging escalations:
+### 4.1 Listing and Creating Skills
+Verify discovered skills, create custom skills, or promote staged rules:
 ```bash
+# List all skills loaded
 kriya -c kriya.yaml skills list
+
+# Create a new custom skill skeleton
+kriya -c kriya.yaml skills create [skill_name]
+
+# Promote accrued rules to active skills
+kriya -c kriya.yaml skills approve [skill_name]
 ```
 
-### 4.2 Promoting Accrued Rules
-When Kriya stages a lesson rule from a bug fix, approve it to promote it to active skill guidelines:
+### 4.2 Optimizing Prompts
+Generate optimized, detailed developer prompts for Kriya using high-level requirements:
 ```bash
-kriya -c kriya.yaml skills approve [skill_name]
+kriya -c kriya.yaml prompt generate "Spring XML App with Ignite 2.18" > prompt.md
 ```
 
 ### 4.3 Viewing Past Runs (`traces`)
@@ -161,63 +155,6 @@ kriya -c kriya.yaml traces
 
 ## 5. Local Model Performance Optimization (Apple Silicon)
 
-Optimize your local inference engine (Ollama, LM Studio, etc.) to get maximum speed out of Mixtures-of-Experts (MoE) and large reasoning models:
-*   **Lock Memory (`mlock`)**: Set `OLLAMA_MLOCK=1` in your environment. This pins the model weights in your Unified Memory, avoiding swap delays when switching expert branches.
-*   **Pin Thread Count**: Run `kriya doctor` to detect your system's performance cores. Pin the CPU threads to **match your system's physical performance cores** (e.g., 8 threads for M1 Max).
-*   **Configure Context Size (`num_ctx`)**: Ollama defaults to `num_ctx: 2048` or `4096`. You must explicitly configure `num_ctx` to match your model's native context window (e.g. `32768`) in Ollama API calls or your Modelfile, otherwise context chunks will be silently truncated.
-
----
-
-## 6. Creating Custom Engineering Skills
-
-To guide Kriya's generation and debugging offline and prevent local models from hallucinating dependencies or APIs, you can create custom engineering skills.
-
-### 6.1 Skill Directory Structure
-Create a subfolder in your `paths.skills` directory (e.g., `skills/activemq-artemis/`):
-
-```
-skills/activemq-artemis/
-├── skill.yaml            # YAML Metadata (name, tags, description)
-├── rules.txt             # Lint/architectural rules, one per line
-├── instructions.md       # Detailed guide for code structure
-└── examples/             # Reference files that Developer Agent can match
-    └── BrokerServer.java
-```
-
-### 6.2 Example Configs
-- **`skill.yaml`**:
-  ```yaml
-  name: activemq-artemis
-  description: Embedded ActiveMQ Artemis AMQP Broker setup instructions.
-  tags: [artemis, activemq, broker, amqp]
-  ```
-- **`rules.txt`**:
-  ```txt
-  Use org.apache.activemq:artemis-server and artemis-amqp-protocol dependencies (version 2.31.2).
-  Do not use artemis-core-server; use artemis-server instead.
-  ```
-
----
-
-## 7. How to Run the Apache Ignite + Qpid AMQP Messaging Application
-
-To execute the generated Spring XML-based Apache Ignite and embedded ActiveMQ Artemis AMQP application:
-
-### Step 1: Start the Embedded Broker Server
-In your first terminal session:
-```bash
-# Build the project classes and download dependencies
-mvn clean compile
-
-# Build a text file with the project classpath dependencies
-mvn dependency:build-classpath -Dmdep.outputFile=cp.txt
-
-# Run the Standalone Embedded AMQP Broker
-java -cp target/classes:$(cat cp.txt) com.example.BrokerServer
-```
-
-### Step 2: Start the Client Application
-In a separate terminal session, run the client application which connects to the broker, sends a test message, retrieves it, and caches it in Ignite:
-```bash
-mvn compile exec:exec
-```
+*   **Lock Memory (`mlock`)**: Set `OLLAMA_MLOCK=1` in your environment to pin the model weights in your Unified Memory.
+*   **Pin Thread Count**: Run `kriya doctor` to detect physical performance cores. Pin the CPU threads to match this count.
+*   **Configure Context Size (`num_ctx`)**: Ensure the context size parameters in your inference server match your configured LLM settings.
