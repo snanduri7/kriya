@@ -326,6 +326,25 @@ def extract_target_test(error_context: str, files_written: List[str]) -> Optiona
                 return valid[0]
     return None
 
+EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")
+
+def extract_expected_files(design: str) -> set:
+    """Extracts basenames of files the Architect's design calls for (directory trees,
+    bullet lists, or prose mentions all match), so the Developer Agent's actual output
+    can be checked for completeness - not just whether what it did write compiles."""
+    if not design:
+        return set()
+    pattern = r'\b[\w\-]+\.(?:' + "|".join(EXPECTED_FILE_EXTENSIONS) + r')\b'
+    return {m.group(0) for m in re.finditer(pattern, design)}
+
+def find_missing_expected_files(expected_files: set, written_files: set) -> List[str]:
+    """Compares expected basenames (from the design) against actually-written filepaths
+    (matched by basename, since the design typically doesn't list full paths)."""
+    if not expected_files:
+        return []
+    written_basenames = {os.path.basename(f) for f in written_files}
+    return sorted(expected_files - written_basenames)
+
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
 
@@ -719,6 +738,20 @@ class WorkflowEngine:
                     files_written.append(filepath)
                     all_files_written.add(filepath)
                     logger.info(f"Wrote generated/edited file to sandbox: {filepath}")
+
+                # Completeness Check: catch the Developer Agent silently under-delivering
+                # (e.g. only writing pom.xml when the Architect's design called for 7 files).
+                # A trivially-passing compile on a near-empty sandbox would otherwise report
+                # PASSED and get applied to the workspace despite the goal not being met.
+                expected_files = extract_expected_files(design)
+                missing_files = find_missing_expected_files(expected_files, all_files_written)
+                if missing_files:
+                    raise ValueError(
+                        "INCOMPLETE GENERATION: The design called for the following files, but "
+                        f"they were never written: {', '.join(missing_files)}. "
+                        f"You must generate ALL files listed in the Architect Design Guidelines, "
+                        f"not just a subset."
+                    )
 
                 # Quality Gates: Polymorphic compile & test checks inside sandbox
                 logger.info("Quality Gates: Running polymorphic compiler and test checks...")

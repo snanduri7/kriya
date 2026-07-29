@@ -4,7 +4,33 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.workflow.workflow import WorkflowEngine
+from kriya.workflow.workflow import WorkflowEngine, extract_expected_files, find_missing_expected_files
+
+def test_extract_expected_files_from_design_tree():
+    design = """
+    src/main/java/com/example/
+              |-- App.java
+              |-- BrokerServer.java
+          |-- ignite-config.xml
+
+    Maven Dependencies (pom.xml)
+    """
+    expected = extract_expected_files(design)
+    assert expected == {"App.java", "BrokerServer.java", "ignite-config.xml", "pom.xml"}
+
+def test_extract_expected_files_empty_for_no_design():
+    assert extract_expected_files("") == set()
+    assert extract_expected_files("Just a plain description, no filenames here.") == set()
+
+def test_find_missing_expected_files_matches_by_basename():
+    expected = {"App.java", "BrokerServer.java", "pom.xml"}
+    written = {"pom.xml", "src/main/java/com/example/App.java"}
+    assert find_missing_expected_files(expected, written) == ["BrokerServer.java"]
+
+def test_find_missing_expected_files_none_missing():
+    expected = {"pom.xml"}
+    written = {"pom.xml"}
+    assert find_missing_expected_files(expected, written) == []
 
 @pytest.mark.asyncio
 async def test_workflow_successful_run(tmp_path):
@@ -59,6 +85,37 @@ async def test_workflow_syntax_error_auto_debugging_loop(tmp_path):
     with open(os.path.join(tmp_path, "math.py"), "r") as f:
         content = f.read()
     assert "def add(a,b):" in content
+
+
+@pytest.mark.asyncio
+async def test_workflow_incomplete_generation_triggers_retry(tmp_path):
+    """A Developer Agent that only writes a subset of the design's planned files
+    (e.g. only pom.xml instead of pom.xml + 6 source files) must not be accepted as
+    a passing run just because what little it wrote happens to compile."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py and helper.py",
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}, '
+        '{"filepath": "helper.py", "content": "def helper():\\n    pass"}]',
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    res = await we.run_generation_workflow(
+        goal="Create math library with a helper module",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert "math.py" in res["files"]
+    assert "helper.py" in res["files"]
+    assert os.path.exists(os.path.join(tmp_path, "helper.py"))
 
 
 @pytest.mark.asyncio
