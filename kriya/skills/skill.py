@@ -79,77 +79,98 @@ class Skill(BaseModel):
 class SkillEngine:
     """Discovers, validates, and manages engineering skills."""
 
-    def __init__(self, skills_dir: str) -> None:
-        self.skills_dir = os.path.abspath(skills_dir)
+    def __init__(self, skills_dir: str, load_global: bool = True) -> None:
+        self.skills_dirs = []
+        
+        # 1. Determine Kriya Installation Directory
+        KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        global_skills = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, "skills"))
+        
+        # 2. Add global skills first (lowest precedence) if load_global is True
+        if load_global and os.path.exists(global_skills):
+            self.skills_dirs.append(global_skills)
+            
+        # 3. Add local/supplied skills directory
+        supplied_dir = os.path.abspath(skills_dir)
+        if supplied_dir not in self.skills_dirs:
+            self.skills_dirs.append(supplied_dir)
+            
+        # 4. Add CWD-based skills directory if present and different (only if load_global is True)
+        local_cwd_skills = os.path.abspath(os.path.join(os.getcwd(), "skills"))
+        if load_global and os.path.exists(local_cwd_skills) and local_cwd_skills not in self.skills_dirs:
+            self.skills_dirs.append(local_cwd_skills)
+            
+        self.skills_dir = supplied_dir
         self._skills: Dict[str, Skill] = {}
 
     def discover_and_load(self) -> None:
-        """Walks the skills directory to discover and parse skills."""
-        if not os.path.exists(self.skills_dir):
-            logger.warning(f"Skills directory '{self.skills_dir}' does not exist.")
-            return
-
-        for folder in os.listdir(self.skills_dir):
-            folder_path = os.path.join(self.skills_dir, folder)
-            if not os.path.isdir(folder_path) or folder.startswith(".") or folder.startswith("_"):
+        """Walks the skills directories to discover and parse skills (later paths override earlier ones)."""
+        self._skills = {}
+        for directory in self.skills_dirs:
+            if not os.path.exists(directory):
                 continue
+            
+            for folder in os.listdir(directory):
+                folder_path = os.path.join(directory, folder)
+                if not os.path.isdir(folder_path) or folder.startswith(".") or folder.startswith("_"):
+                    continue
 
-            yaml_path = os.path.join(folder_path, "skill.yaml")
-            if not os.path.exists(yaml_path):
-                logger.debug(f"Directory '{folder}' is missing 'skill.yaml'. Skipping.")
-                continue
+                yaml_path = os.path.join(folder_path, "skill.yaml")
+                if not os.path.exists(yaml_path):
+                    logger.debug(f"Directory '{folder}' is missing 'skill.yaml'. Skipping.")
+                    continue
 
-            try:
-                # Load metadata
-                with open(yaml_path, "r", encoding="utf-8") as f:
-                    meta = yaml.safe_load(f) or {}
+                try:
+                    # Load metadata
+                    with open(yaml_path, "r", encoding="utf-8") as f:
+                        meta = yaml.safe_load(f) or {}
 
-                name = meta.get("name", folder).lower()
-                
-                # Load instructions
-                instructions = ""
-                instructions_path = os.path.join(folder_path, "instructions.md")
-                if os.path.exists(instructions_path):
-                    with open(instructions_path, "r", encoding="utf-8") as f:
-                        instructions = f.read()
+                    name = meta.get("name", folder).lower()
+                    
+                    # Load instructions
+                    instructions = ""
+                    instructions_path = os.path.join(folder_path, "instructions.md")
+                    if os.path.exists(instructions_path):
+                        with open(instructions_path, "r", encoding="utf-8") as f:
+                            instructions = f.read()
 
-                # Load rules
-                rules = []
-                rules_path = os.path.join(folder_path, "rules.txt")
-                if os.path.exists(rules_path):
-                    with open(rules_path, "r", encoding="utf-8") as f:
-                        rules = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+                    # Load rules
+                    rules = []
+                    rules_path = os.path.join(folder_path, "rules.txt")
+                    if os.path.exists(rules_path):
+                        with open(rules_path, "r", encoding="utf-8") as f:
+                            rules = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
 
-                # Load examples
-                examples = {}
-                examples_dir = os.path.join(folder_path, "examples")
-                if os.path.exists(examples_dir) and os.path.isdir(examples_dir):
-                    for file in os.listdir(examples_dir):
-                        file_path = os.path.join(examples_dir, file)
-                        if os.path.isfile(file_path) and not file.startswith("."):
-                            try:
-                                with open(file_path, "r", encoding="utf-8") as f:
-                                    examples[file] = f.read()
-                            except Exception as ex:
-                                logger.warning(f"Could not read example file '{file}' in skill '{name}': {ex}")
+                    # Load examples
+                    examples = {}
+                    examples_dir = os.path.join(folder_path, "examples")
+                    if os.path.exists(examples_dir) and os.path.isdir(examples_dir):
+                        for file in os.listdir(examples_dir):
+                            file_path = os.path.join(examples_dir, file)
+                            if os.path.isfile(file_path) and not file.startswith("."):
+                                try:
+                                    with open(file_path, "r", encoding="utf-8") as f:
+                                        examples[file] = f.read()
+                                except Exception as ex:
+                                    logger.warning(f"Could not read example file '{file}' in skill '{name}': {ex}")
 
-                # Build Skill object
-                skill = Skill(
-                    name=meta.get("name", folder),
-                    description=meta.get("description", "No description provided."),
-                    category=meta.get("category", "General"),
-                    tags=meta.get("tags", []),
-                    instructions=instructions,
-                    rules=rules,
-                    examples=examples,
-                    supported_versions=meta.get("supported_versions", "*")
-                )
+                    # Build Skill object
+                    skill = Skill(
+                        name=meta.get("name", folder),
+                        description=meta.get("description", "No description provided."),
+                        category=meta.get("category", "General"),
+                        tags=meta.get("tags", []),
+                        instructions=instructions,
+                        rules=rules,
+                        examples=examples,
+                        supported_versions=meta.get("supported_versions", "*")
+                    )
 
-                self._skills[folder.lower()] = skill
-                logger.info(f"Loaded skill '{skill.name}' from {folder_path}")
+                    self._skills[folder.lower()] = skill
+                    logger.info(f"Loaded skill '{skill.name}' from {folder_path}")
 
-            except Exception as e:
-                logger.error(f"Failed to load skill from '{folder}': {e}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"Failed to load skill from '{folder}': {e}", exc_info=True)
 
     def list_skills(self) -> List[Skill]:
         """Returns all discovered skills."""

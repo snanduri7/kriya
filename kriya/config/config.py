@@ -78,6 +78,9 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""
     config_dict = {}
     
+    # Determine Kriya Installation Directory
+    KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    
     # Try to load default configuration from package path
     default_path = os.path.join(os.path.dirname(__file__), "default_config.yaml")
     if os.path.exists(default_path):
@@ -85,17 +88,41 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             with open(default_path, "r") as f:
                 default_data = yaml.safe_load(f)
                 if default_data:
+                    # Resolve relative paths in default config to Kriya Installation root
+                    if "paths" in default_data:
+                        for k, v in default_data["paths"].items():
+                            if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
+                                default_data["paths"][k] = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, v))
+                    if "plugins" in default_data and "directory" in default_data["plugins"]:
+                        v = default_data["plugins"]["directory"]
+                        if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
+                            default_data["plugins"]["directory"] = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, v))
                     config_dict.update(default_data)
         except Exception:
             pass
             
     # If no config_path is explicitly provided, look for 'kriya.yaml' or 'kriya.yml' in current directory
+    # If not found, look for it in the Kriya Installation Directory
+    config_dir = os.getcwd()
     if not config_path:
         for filename in ["kriya.yaml", "kriya.yml"]:
             path = os.path.join(os.getcwd(), filename)
             if os.path.exists(path):
                 config_path = path
+                config_dir = os.getcwd()
                 break
+        
+        if not config_path:
+            # Fall back to Kriya installation directory
+            for filename in ["kriya.yaml", "kriya.yml"]:
+                path = os.path.join(KRIYA_INSTALL_DIR, filename)
+                if os.path.exists(path):
+                    config_path = path
+                    config_dir = KRIYA_INSTALL_DIR
+                    break
+    else:
+        config_path = os.path.abspath(config_path)
+        config_dir = os.path.dirname(config_path)
 
     # Load user config if specified and exists
     if config_path and os.path.exists(config_path):
@@ -103,6 +130,16 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             with open(config_path, "r") as f:
                 user_data = yaml.safe_load(f)
                 if user_data:
+                    # Resolve relative paths in user config to config_dir
+                    if "paths" in user_data:
+                        for k, v in user_data["paths"].items():
+                            if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
+                                user_data["paths"][k] = os.path.abspath(os.path.join(config_dir, v))
+                    if "plugins" in user_data and "directory" in user_data["plugins"]:
+                        v = user_data["plugins"]["directory"]
+                        if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
+                            user_data["plugins"]["directory"] = os.path.abspath(os.path.join(config_dir, v))
+                    
                     # Simple deep merge of level-1 dicts
                     for key, val in user_data.items():
                         if isinstance(val, dict) and key in config_dict and isinstance(config_dict[key], dict):

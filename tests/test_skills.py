@@ -6,7 +6,7 @@ def test_skills_lifecycle(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
     
-    se = SkillEngine(str(skills_dir))
+    se = SkillEngine(str(skills_dir), load_global=False)
     
     # 1. Create skill skeleton
     path = se.create_skill_skeleton("FastAPI App")
@@ -22,7 +22,7 @@ def test_skills_lifecycle(tmp_path):
         f.write("# FastAPI example")
         
     # 2. Discover and Load
-    se_load = SkillEngine(str(skills_dir))
+    se_load = SkillEngine(str(skills_dir), load_global=False)
     se_load.discover_and_load()
     
     skills = se_load.list_skills()

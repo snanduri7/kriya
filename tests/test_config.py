@@ -55,7 +55,7 @@ def test_load_custom_config(tmp_path):
             assert cfg.llm.temperature == expected_temp
             return
     assert isinstance(cfg.llm.temperature, float)
-    assert cfg.paths.skills == "./skills"
+    assert cfg.paths.skills.endswith("skills")
 
 def test_load_invalid_config(tmp_path):
     invalid_yaml = {
