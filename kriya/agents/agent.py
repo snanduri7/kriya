@@ -77,115 +77,161 @@ class DeveloperAgent(BaseAgent):
             "]"
         )
 
+    @staticmethod
+    def _strip_markdown_fences(text: str) -> str:
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        return cleaned
+
+    @staticmethod
+    def _normalize_file_entries(parsed: Any) -> Optional[List[Dict[str, Any]]]:
+        """Normalizes whatever shape the file-list completion parsed into - a list of
+        path strings, a list of dicts with filepath/path (+ optional content/edits), or
+        a dict wrapping either - into a uniform list of {"filepath", "content", "edits"}
+        dicts. content/edits are None when that file still needs its content generated.
+        Returns None if nothing usable was found."""
+        candidates = None
+        if isinstance(parsed, list):
+            candidates = parsed
+        elif isinstance(parsed, dict):
+            for val in parsed.values():
+                if isinstance(val, list) and val:
+                    candidates = val
+                    break
+
+        if not candidates:
+            return None
+
+        if all(isinstance(x, str) for x in candidates):
+            return [{"filepath": p, "content": None, "edits": None} for p in candidates]
+
+        if all(isinstance(x, dict) for x in candidates):
+            entries = []
+            for item in candidates:
+                filepath = item.get("filepath") or item.get("path")
+                if not filepath:
+                    continue
+                entries.append({
+                    "filepath": filepath,
+                    "content": item.get("content") or None,
+                    "edits": item.get("edits") or None,
+                })
+            return entries or None
+
+        return None
+
+    async def _fill_missing_content(
+        self,
+        file_entries: List[Dict[str, Any]],
+        task_description: str,
+        design_context: str,
+        existing_code_context: str,
+        stream_callback: Optional[Callable[[str], None]],
+        model_override: Optional[str],
+        base_url_override: Optional[str],
+        api_key_override: Optional[str],
+    ) -> List[Dict[str, str]]:
+        """Passes through any entry that already has real content/edits unchanged (no
+        extra call), and individually generates content for any entry that doesn't -
+        so a model that only fills in some files in its file-list response doesn't
+        silently end up with empty or missing files."""
+        all_paths = [e["filepath"] for e in file_entries]
+        files_out = []
+        for entry in file_entries:
+            filepath = entry["filepath"]
+            if entry.get("content") or entry.get("edits"):
+                files_out.append({"filepath": filepath, "content": entry.get("content"), "edits": entry.get("edits") or []})
+                continue
+
+            if stream_callback:
+                stream_callback(f"\n[Implementing file: {filepath}]")
+
+            file_sys_prompt = (
+                "You are the Kriya Developer Agent.\n"
+                "Your task is to write the complete, production-grade source code for the requested file path. "
+                "Return ONLY the raw file content. Do not include markdown code block wrappers (like ```) or conversational explanation."
+            )
+
+            sibling_paths = [p for p in all_paths if p != filepath]
+            sibling_section = f"=== Other Files In This Batch ===\n{', '.join(sibling_paths)}\n\n" if sibling_paths else ""
+
+            file_prompt = (
+                f"=== Task ===\n{task_description}\n\n"
+                f"=== Architecture Design ===\n{design_context}\n\n"
+                f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
+                f"{sibling_section}"
+                f"Please generate the complete, correct, and production-grade file content for: '{filepath}'"
+            )
+
+            content = await self.llm.complete(
+                file_sys_prompt,
+                file_prompt,
+                stream_callback=stream_callback,
+                json_mode=False,
+                model_override=model_override,
+                base_url_override=base_url_override,
+                api_key_override=api_key_override
+            )
+
+            files_out.append({"filepath": filepath, "content": self._strip_markdown_fences(content)})
+        return files_out
+
     async def run_generation(
-        self, 
-        task_description: str, 
-        design_context: str, 
+        self,
+        task_description: str,
+        design_context: str,
         existing_code_context: str,
         stream_callback: Optional[Callable[[str], None]] = None,
         model_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
         api_key_override: Optional[str] = None
     ) -> List[Dict[str, str]]:
-        """Generates code files based on planner task and architect design. Falls back to iterative generation for reliability."""
-        
+        """Generates code files based on planner task and architect design. Prefers
+        per-file generation for reliability (filling in only what's missing), falling
+        back to single-stage generation only if a usable file list can't be determined
+        at all."""
+
         # Step 1: Query the model for the list of files to generate (or full implementation if mocked in tests)
         system_list_prompt = (
             "You are the Kriya File List Planner.\n"
             "Your task is to identify and return a list of file paths that need to be created or modified based on the design.\n"
             "Return ONLY a JSON list of strings (e.g. [\"pom.xml\", \"src/main/java/App.java\"]). Do not include markdown wraps."
         )
-        
+
         list_prompt = (
             f"=== Task ===\n{task_description}\n\n"
             f"=== Design ===\n{design_context}\n\n"
             "Please return the JSON list of files to create/modify."
         )
-        
+
         try:
             response_str = await self.llm.complete(
-                system_list_prompt, 
-                list_prompt, 
+                system_list_prompt,
+                list_prompt,
                 json_mode=True,
                 model_override=model_override,
                 base_url_override=base_url_override,
                 api_key_override=api_key_override
             )
-            
-            cleaned = response_str.strip()
-            # Clean markdown codeblock wrappers if present
-            if cleaned.startswith("```"):
-                lines = cleaned.splitlines()
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                cleaned = "\n".join(lines).strip()
-                
-            parsed = json.loads(cleaned)
-            
-            # Backwards compatibility check: If parsed is a list of dicts (from tests or a single-generation mock), return it directly!
-            if isinstance(parsed, list) and len(parsed) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in parsed):
-                for item in parsed:
-                    if "path" in item and "filepath" not in item:
-                        item["filepath"] = item["path"]
-                return parsed
-                
-            if isinstance(parsed, dict):
-                # Check if it wraps files list
-                for key, val in parsed.items():
-                    if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
-                        for item in val:
-                            if "path" in item and "filepath" not in item:
-                                item["filepath"] = item["path"]
-                        return val
-                
-            # If parsed is a list of strings, it's a list of paths! Perform iterative generation.
-            if isinstance(parsed, list) and all(isinstance(x, str) for x in parsed):
-                files_out = []
-                for filepath in parsed:
-                    if stream_callback:
-                        stream_callback(f"\n[Implementing file: {filepath}]")
-                        
-                    file_sys_prompt = (
-                        "You are the Kriya Developer Agent.\n"
-                        "Your task is to write the complete, production-grade source code for the requested file path. "
-                        "Return ONLY the raw file content. Do not include markdown code block wrappers (like ```) or conversational explanation."
-                    )
-                    
-                    file_prompt = (
-                        f"=== Task ===\n{task_description}\n\n"
-                        f"=== Architecture Design ===\n{design_context}\n\n"
-                        f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
-                        f"Please generate the complete, correct, and production-grade file content for: '{filepath}'"
-                    )
-                    
-                    content = await self.llm.complete(
-                        file_sys_prompt,
-                        file_prompt,
-                        stream_callback=stream_callback,
-                        json_mode=False,
-                        model_override=model_override,
-                        base_url_override=base_url_override,
-                        api_key_override=api_key_override
-                    )
-                    
-                    # Clean markdown code block wraps if model accidentally generated them
-                    c_clean = content.strip()
-                    if c_clean.startswith("```"):
-                        lines = c_clean.splitlines()
-                        if lines[0].startswith("```"):
-                            lines = lines[1:]
-                        if lines and lines[-1].startswith("```"):
-                            lines = lines[:-1]
-                        c_clean = "\n".join(lines).strip()
-                        
-                    files_out.append({"filepath": filepath, "content": c_clean})
-                return files_out
-                
+
+            parsed = json.loads(self._strip_markdown_fences(response_str))
+            file_entries = self._normalize_file_entries(parsed)
+
+            if file_entries:
+                return await self._fill_missing_content(
+                    file_entries, task_description, design_context, existing_code_context,
+                    stream_callback, model_override, base_url_override, api_key_override
+                )
+
         except Exception as e:
-            logger.warning(f"Iterative generation setup failed: {e}. Falling back to single-stage generation.")
-            
+            logger.warning(f"Failed to resolve file list from Developer Agent: {e}. Falling back to single-stage generation.")
+
         # Fallback to single-stage generation (original implementation)
         prompt = (
             f"=== User Request & Task ===\n{task_description}\n\n"
