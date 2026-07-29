@@ -6,14 +6,23 @@ from typing import Dict, Any, List, Optional
 
 import xml.etree.ElementTree as ET
 
+from kriya.config.config import AutonomyConfig
+from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+
 logger = logging.getLogger(__name__)
 
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
-    def __init__(self, workspace_path: str, original_workspace_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        workspace_path: str,
+        original_workspace_path: Optional[str] = None,
+        autonomy_cfg: Optional[AutonomyConfig] = None,
+    ) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
+        self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
@@ -54,8 +63,18 @@ class PolymorphicValidator:
         return "python"
 
     def _run_cmd_with_timeout(self, cmd: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
+        env = None
+        preexec_fn = None
+        if self.autonomy_cfg.sandbox_execution:
+            env = build_restricted_env(self.autonomy_cfg.sandbox_env_allowlist)
+            preexec_fn = posix_resource_limits_preexec_fn(
+                self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
+            )
         try:
-            res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+            res = subprocess.run(
+                cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                env=env, preexec_fn=preexec_fn,
+            )
             return {"returncode": res.returncode, "stdout": res.stdout, "stderr": res.stderr, "timeout": False}
         except subprocess.TimeoutExpired as te:
             stdout = te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else (te.stdout or "")

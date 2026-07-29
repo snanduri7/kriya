@@ -290,21 +290,22 @@ def tools_list(ctx: click.Context) -> None:
 @tools_group.command(name="execute")
 @click.argument('tool_name')
 @click.argument('arguments_json', required=False)
+@click.option('--yes', '-y', is_flag=True, help="Auto-approve execution of tools that require confirmation (e.g. shell).")
 @click.pass_context
-def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[str]) -> None:
+def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[str], yes: bool) -> None:
     """Execute a tool with JSON arguments."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    
+
     kernel = Kernel(config=cfg)
     pm = PluginManager(kernel=kernel, plugin_dir=cfg.plugins.directory)
-    
+
     try:
         pm.discover_and_load(enabled_plugins=cfg.plugins.enabled)
-        
+
         async def run_exec():
             await kernel.start()
             await pm.initialize_all()
-            
+
             try:
                 tool = kernel.registry.get("tool", tool_name)
             except Exception:
@@ -312,9 +313,23 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                 await pm.shutdown_all()
                 await kernel.stop()
                 sys.exit(1)
-                
+
             args = json.loads(arguments_json) if arguments_json else {}
-            
+
+            if tool.requires_confirmation and not yes:
+                click.secho(f"\n[CONFIRMATION REQUIRED] Tool '{tool_name}' requires approval before execution.", fg="yellow")
+                click.echo(f"Arguments: {json.dumps(args, indent=2)}")
+                if not sys.stdin.isatty():
+                    click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve.", fg="red")
+                    await pm.shutdown_all()
+                    await kernel.stop()
+                    sys.exit(1)
+                if not click.confirm("Proceed with execution?"):
+                    click.secho("Execution cancelled.", fg="yellow")
+                    await pm.shutdown_all()
+                    await kernel.stop()
+                    sys.exit(1)
+
             try:
                 result = await tool.execute(**args)
                 if isinstance(result, (dict, list)):

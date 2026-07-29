@@ -2,6 +2,7 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 from kriya.tools.validate import PolymorphicValidator
+from kriya.config import AppConfig
 
 def test_polymorphic_stack_detection(tmp_path):
     # 1. Test Python Detection
@@ -133,4 +134,41 @@ def test_java_dependency_regression(tmp_path):
         mock_run.return_value = mock_res
         res_ok = validator.run_compile_check(["pom.xml"])
         assert res_ok["success"] is True
+
+def test_sandbox_execution_restricts_subprocess_env_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRIYA_TEST_SECRET", "super-secret-value")
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "UserService.java").write_text("class UserService {}")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.run") as mock_run:
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+        validator.run_compile_check(["UserService.java"])
+
+        assert mock_run.called
+        _, kwargs = mock_run.call_args
+        assert "KRIYA_TEST_SECRET" not in kwargs["env"]
+        assert kwargs["preexec_fn"] is not None
+
+def test_sandbox_execution_disabled_uses_full_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRIYA_TEST_SECRET", "super-secret-value")
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "UserService.java").write_text("class UserService {}")
+
+    cfg = AppConfig()
+    cfg.autonomy.sandbox_execution = False
+    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=cfg.autonomy)
+
+    with patch("subprocess.run") as mock_run:
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+        validator.run_compile_check(["UserService.java"])
+
+        _, kwargs = mock_run.call_args
+        assert kwargs["env"] is None
+        assert kwargs["preexec_fn"] is None
 

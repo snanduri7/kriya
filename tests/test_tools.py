@@ -51,11 +51,38 @@ async def test_filesystem_tool_errors(tmp_path):
 @pytest.mark.asyncio
 async def test_shell_tool():
     tool = ShellTool()
-    
+
     # Run a simple echo command
     res = await tool.execute(command="echo 'Hello CLI'")
     assert res["exit_code"] == 0
     assert "Hello CLI" in res["stdout"]
+
+def test_shell_tool_requires_confirmation():
+    assert ShellTool().requires_confirmation is True
+
+def test_other_tools_do_not_require_confirmation():
+    assert FilesystemTool().requires_confirmation is False
+    assert GitTool().requires_confirmation is False
+
+@pytest.mark.asyncio
+async def test_shell_tool_env_is_restricted_by_default(monkeypatch):
+    monkeypatch.setenv("KRIYA_TEST_SECRET", "super-secret-value")
+    tool = ShellTool()
+
+    res = await tool.execute(command="echo $KRIYA_TEST_SECRET")
+    assert res["stdout"].strip() == ""
+
+@pytest.mark.asyncio
+async def test_shell_tool_env_full_when_sandbox_disabled(monkeypatch):
+    from kriya.config import AppConfig
+    monkeypatch.setenv("KRIYA_TEST_SECRET", "super-secret-value")
+
+    cfg = AppConfig()
+    cfg.autonomy.sandbox_execution = False
+    tool = ShellTool(autonomy_cfg=cfg.autonomy)
+
+    res = await tool.execute(command="echo $KRIYA_TEST_SECRET")
+    assert res["stdout"].strip() == "super-secret-value"
 
 @pytest.mark.asyncio
 async def test_git_tool(tmp_path):

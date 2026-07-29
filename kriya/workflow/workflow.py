@@ -714,7 +714,10 @@ class WorkflowEngine:
                 # Quality Gates: Polymorphic compile & test checks inside sandbox
                 logger.info("Quality Gates: Running polymorphic compiler and test checks...")
                 from kriya.tools.validate import PolymorphicValidator
-                validator = PolymorphicValidator(worktree_path, original_workspace_path=workspace_path)
+                validator = PolymorphicValidator(
+                    worktree_path, original_workspace_path=workspace_path,
+                    autonomy_cfg=self.kernel.config.autonomy,
+                )
                 
                 compile_res = validator.run_compile_check(list(all_files_written))
                 gate_outcomes.append({

@@ -48,3 +48,23 @@ def test_version_command_runs_end_to_end(runner):
     result = runner.invoke(main, ["version"])
     assert result.exit_code == 0, result.output
     assert "Kriya version" in result.output
+
+
+def test_tools_execute_shell_requires_confirmation_without_yes(runner):
+    # CliRunner's stdin is non-interactive, so this should hit the non-TTY safety
+    # exit rather than hang waiting for a confirmation prompt.
+    result = runner.invoke(main, ["tools", "execute", "shell", '{"command": "echo hi"}'])
+    assert result.exit_code != 0
+    assert "CONFIRMATION REQUIRED" in result.output
+    assert "Non-TTY" in result.output
+
+
+def test_tools_execute_shell_runs_with_yes_flag(runner):
+    result = runner.invoke(main, ["tools", "execute", "-y", "shell", '{"command": "echo hi"}'])
+    assert result.exit_code == 0, result.output
+    assert "hi" in result.output
+
+
+def test_tools_execute_non_confirmation_tool_runs_without_yes(runner, tmp_path):
+    result = runner.invoke(main, ["tools", "execute", "filesystem", f'{{"operation": "list", "path": "{tmp_path}"}}'])
+    assert result.exit_code == 0, result.output

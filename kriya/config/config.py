@@ -42,10 +42,17 @@ class AutonomyConfig(BaseModel):
     mode: str = Field(default="human-in-the-loop")
     egress_policy: str = Field(default="local_only")
     sensitive_paths: List[str] = Field(default_factory=lambda: [
-        r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile", 
+        r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile",
         r".*credentials.*", r".*password.*"
     ])
     risk_threshold_lines: int = Field(default=100)
+    sandbox_execution: bool = Field(default=True)
+    sandbox_env_allowlist: List[str] = Field(default_factory=lambda: [
+        "HOME", "LANG", "LC_ALL", "USER", "SHELL", "TMPDIR", "TEMP", "TMP",
+        "JAVA_HOME", "M2_HOME", "GRADLE_HOME", "VIRTUAL_ENV", "PYTHONPATH"
+    ])
+    sandbox_cpu_seconds: int = Field(default=240)
+    sandbox_memory_mb: int = Field(default=4096)
 
 class FallbackModelConfig(BaseModel):
     model: str

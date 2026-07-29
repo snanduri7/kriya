@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 from kriya.plugins.plugin import BasePlugin
 from kriya.tools.tool import BaseTool, ToolExecutionError
+from kriya.config.config import AutonomyConfig
+from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 
 # =====================================================================
 # 1. Tool Arguments Schemas
@@ -104,6 +106,9 @@ class FilesystemTool(BaseTool):
 
 
 class ShellTool(BaseTool):
+    def __init__(self, autonomy_cfg: Optional[AutonomyConfig] = None) -> None:
+        self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
+
     @property
     def name(self) -> str:
         return "shell"
@@ -116,15 +121,28 @@ class ShellTool(BaseTool):
     def arguments_schema(self) -> Type[BaseModel]:
         return ShellArgs
 
+    @property
+    def requires_confirmation(self) -> bool:
+        return True
+
     async def _run(self, args: ShellArgs) -> Any:
+        env = None
+        preexec_fn = None
+        if self.autonomy_cfg.sandbox_execution:
+            env = build_restricted_env(self.autonomy_cfg.sandbox_env_allowlist)
+            preexec_fn = posix_resource_limits_preexec_fn(
+                self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
+            )
         try:
             process = await asyncio.create_subprocess_shell(
                 args.command,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                preexec_fn=preexec_fn,
             )
             stdout, stderr = await process.communicate()
-            
+
             return {
                 "exit_code": process.returncode,
                 "stdout": stdout.decode("utf-8", errors="replace"),
@@ -351,8 +369,9 @@ class CoreToolsPlugin(BasePlugin):
 
     async def initialize(self) -> None:
         from .validation_tool import ValidationTool
+        autonomy_cfg = getattr(self.kernel.config, "autonomy", None) if self.kernel.config else None
         self.kernel.registry.register("tool", "filesystem", FilesystemTool())
-        self.kernel.registry.register("tool", "shell", ShellTool())
+        self.kernel.registry.register("tool", "shell", ShellTool(autonomy_cfg=autonomy_cfg))
         self.kernel.registry.register("tool", "git", GitTool())
         self.kernel.registry.register("tool", "search", SearchTool())
         self.kernel.registry.register("tool", "ast", ASTTool())

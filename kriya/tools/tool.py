@@ -32,6 +32,11 @@ class BaseTool(ABC):
         """Pydantic model class representing arguments structure and validation."""
         pass
 
+    @property
+    def requires_confirmation(self) -> bool:
+        """Whether callers (e.g. the CLI) should prompt for confirmation before executing this tool."""
+        return False
+
     async def execute(self, **kwargs: Any) -> Any:
         """Validates inputs against arguments_schema and calls _run."""
         try:
