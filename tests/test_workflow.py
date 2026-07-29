@@ -32,6 +32,24 @@ def test_find_missing_expected_files_none_missing():
     written = {"pom.xml"}
     assert find_missing_expected_files(expected, written) == []
 
+def test_find_missing_expected_files_excludes_unrequested_test_file():
+    expected = {"App.java", "MessageServiceTest.java", "pom.xml"}
+    written = {"App.java", "pom.xml"}
+    goal = "Build a messaging app that sends and reads messages."
+    assert find_missing_expected_files(expected, written, goal=goal) == []
+
+def test_find_missing_expected_files_keeps_test_file_when_requested():
+    expected = {"App.java", "MessageServiceTest.java", "pom.xml"}
+    written = {"App.java", "pom.xml"}
+    goal = "Build a messaging app with unit test coverage for the message service."
+    assert find_missing_expected_files(expected, written, goal=goal) == ["MessageServiceTest.java"]
+
+def test_find_missing_expected_files_excludes_readme_unless_requested():
+    expected = {"App.java", "README.md"}
+    written = {"App.java"}
+    assert find_missing_expected_files(expected, written, goal="Build an app") == []
+    assert find_missing_expected_files(expected, written, goal="Build an app with documentation") == ["README.md"]
+
 @pytest.mark.asyncio
 async def test_workflow_successful_run(tmp_path):
     cfg = AppConfig()

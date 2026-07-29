@@ -337,13 +337,38 @@ def extract_expected_files(design: str) -> set:
     pattern = r'\b[\w\-]+\.(?:' + "|".join(EXPECTED_FILE_EXTENSIONS) + r')\b'
     return {m.group(0) for m in re.finditer(pattern, design)}
 
-def find_missing_expected_files(expected_files: set, written_files: set) -> List[str]:
+TEST_OR_DOC_REQUEST_PHRASES = (
+    "unit test", "test case", "test coverage", "test suite", "junit",
+    "with tests", "including tests", "documentation", "readme"
+)
+
+def _is_test_or_doc_file(filename: str) -> bool:
+    lower = filename.lower()
+    return "test" in lower or "spec" in lower or lower.endswith(".md") or lower == "readme"
+
+def _goal_requests_tests_or_docs(goal: str) -> bool:
+    lower = (goal or "").lower()
+    return any(phrase in lower for phrase in TEST_OR_DOC_REQUEST_PHRASES)
+
+def find_missing_expected_files(expected_files: set, written_files: set, goal: str = "") -> List[str]:
     """Compares expected basenames (from the design) against actually-written filepaths
-    (matched by basename, since the design typically doesn't list full paths)."""
+    (matched by basename, since the design typically doesn't list full paths).
+
+    Test/doc files (e.g. FooTest.java, README.md) that the Architect volunteered on its
+    own initiative are excluded unless the goal explicitly asked for tests or docs -
+    mirroring ReviewerAgent's existing pragmatism principle ("if the user goal does not
+    explicitly request unit tests, test files, or documentation, do not reject the
+    submission solely for their absence"). Otherwise a self-volunteered test file can
+    burn through the entire retry budget on something the user never asked for, while
+    the actual application code the user did ask for is otherwise complete.
+    """
     if not expected_files:
         return []
     written_basenames = {os.path.basename(f) for f in written_files}
-    return sorted(expected_files - written_basenames)
+    missing = expected_files - written_basenames
+    if not _goal_requests_tests_or_docs(goal):
+        missing = {f for f in missing if not _is_test_or_doc_file(f)}
+    return sorted(missing)
 
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
@@ -744,7 +769,7 @@ class WorkflowEngine:
                 # A trivially-passing compile on a near-empty sandbox would otherwise report
                 # PASSED and get applied to the workspace despite the goal not being met.
                 expected_files = extract_expected_files(design)
-                missing_files = find_missing_expected_files(expected_files, all_files_written)
+                missing_files = find_missing_expected_files(expected_files, all_files_written, goal=goal)
                 if missing_files:
                     raise ValueError(
                         "INCOMPLETE GENERATION: The design called for the following files, but "
