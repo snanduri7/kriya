@@ -325,7 +325,7 @@ def extract_library_versions(goal: str) -> List[Tuple[str, str]]:
       - Quarkus 3.12.0
       - package@version (npm style)
       - package==version (pypi style)
-    Returns list of (library_name, version_string).
+    Returns list of canonical (library_name, version_string) tuples.
     """
     results = []
     if not goal:
@@ -346,7 +346,33 @@ def extract_library_versions(goal: str) -> List[Tuple[str, str]]:
     for lib, ver in name_space_version:
         results.append((lib.lower().replace(" ", "-"), ver))
 
-    return results
+    # Canonicalize and deduplicate
+    seen = set()
+    deduped = []
+    for lib, ver in results:
+        name_lower = lib.lower().strip()
+        if name_lower in COMMON_ALIASES:
+            g, a = COMMON_ALIASES[name_lower]
+            canonical = f"{g}:{a}"
+        elif name_lower == "apache-ignite":
+            canonical = "org.apache.ignite:ignite-core"
+        elif name_lower == "activemq-artemis":
+            canonical = "org.apache.activemq:artemis-server"
+        else:
+            canonical = name_lower
+
+        # Normalize version (e.g. "2.18" -> "2.18.0")
+        v_clean = ver.strip().strip(".")
+        parts = v_clean.split(".")
+        if len(parts) == 2 and all(p.isdigit() for p in parts):
+            v_clean = f"{v_clean}.0"
+
+        key = (canonical, v_clean)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(key)
+
+    return deduped
 
 class GapReport:
     """Consolidated representation of knowledge gap check results."""
@@ -418,8 +444,19 @@ class KnowledgeGuard:
             # 1. Structural Gap Check (Missing Skills)
             skill_found = False
             if os.path.exists(self.skills_dir):
+                aliases = [lib]
+                if ":" in lib:
+                    aliases.extend(lib.split(":"))
+                for k, v in COMMON_ALIASES.items():
+                    if f"{v[0]}:{v[1]}" == lib:
+                        aliases.append(k)
+                if "ignite" in lib.lower():
+                    aliases.extend(["apache-ignite", "ignite"])
+                if "artemis" in lib.lower():
+                    aliases.extend(["activemq-artemis", "artemis"])
+
                 for folder in os.listdir(self.skills_dir):
-                    if lib.lower() in folder.lower():
+                    if any(a.lower().replace(":", "-").replace("/", "-") in folder.lower() for a in aliases):
                         skill_found = True
                         break
 
@@ -453,6 +490,9 @@ class KnowledgeGuard:
         yaml_content = f"""name: {clean_lib}
 description: Custom engineering skill for {library} version {version}
 version: "{version}"
+# supported_versions defines the semver range of library versions this skill supports.
+# Example: ">=2.15.0 <3.0.0"
+supported_versions: ">={version}"
 tags:
   - {clean_lib}
   - java
@@ -462,8 +502,10 @@ tags:
 
         # 2. rules.txt
         rules_content = """# Coding rules and gotchas for this library version.
+# Each line is read as a rule to direct model coding behavior.
 # Example:
-# - Never use class XYZ which was deprecated in version 2.18
+# - Always disable cache persistence in Ignite Configuration when running unit tests.
+# - Do not use deprecated client factory classes.
 """
         with open(os.path.join(target_dir, "rules.txt"), "w", encoding="utf-8") as f:
             f.write(rules_content)
@@ -472,7 +514,10 @@ tags:
         instructions_content = f"""# {library} Version {version} Guidelines
 
 ## API Differences and Setup Steps
-Add details here about how to configure this library.
+Provide step-by-step setup guides here. Explain any API changes or parameters introduced in version {version}.
+
+## Key Code Snippets
+Include Markdown code blocks to guide code generation.
 
 ## Official Resources
 - Release Notes: https://search.maven.org/artifact/{library}

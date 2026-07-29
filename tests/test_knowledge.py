@@ -18,8 +18,8 @@ def test_extract_library_versions():
     assert "org.apache.ignite:ignite-core" in libs_dict
     assert libs_dict["org.apache.ignite:ignite-core"] == "2.18.0"
     
-    assert "spring-boot" in libs_dict
-    assert libs_dict["spring-boot"] == "3.2.0"
+    assert "org.springframework.boot:spring-boot-starter" in libs_dict
+    assert libs_dict["org.springframework.boot:spring-boot-starter"] == "3.2.0"
     
     assert "express" in libs_dict
     assert libs_dict["express"] == "4.18.2"
@@ -316,3 +316,9 @@ def test_workflow_auto_accrual(tmp_path):
         assert os.path.exists(expected_skill_path / "skill.yaml")
 
 
+def test_extract_library_versions_deduplication():
+    goal = "Apache Ignite 2.18 and org.apache.ignite:ignite-core:2.18.0 and apache-ignite 2.18"
+    libs = extract_library_versions(goal)
+    # Both "Apache Ignite 2.18" (which canonicalizes to org.apache.ignite:ignite-core:2.18.0) and "org.apache.ignite:ignite-core:2.18.0" should be normalized and deduplicated into a single entry!
+    assert len(libs) == 1
+    assert libs[0] == ("org.apache.ignite:ignite-core", "2.18.0")

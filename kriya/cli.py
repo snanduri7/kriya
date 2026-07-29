@@ -178,6 +178,45 @@ def prompt_render(template_name: str, var: tuple) -> None:
         click.secho(f"Error: {e}", fg="red")
         sys.exit(1)
 
+@prompt_group.command(name="generate")
+@click.argument('description')
+@click.pass_context
+def prompt_generate(ctx: click.Context, description: str) -> None:
+    """Generate an optimized code-generation prompt based on a high-level description."""
+    cfg: AppConfig = ctx.obj['config']
+    
+    from kriya.core.llm import LLMClient
+    import asyncio
+    llm = LLMClient(cfg)
+    
+    system_prompt = (
+        "You are an expert software developer and prompt engineer.\n"
+        "Your task is to take a high-level description of an application or feature, and "
+        "generate a highly optimized, precise, and structured prompt that can be used by an AI coding assistant "
+        "(like Kriya) to generate the application correctly.\n"
+        "The generated prompt should specify:\n"
+        "- The exact technology stack and recommended versions.\n"
+        "- The system architecture and files structure.\n"
+        "- Edge cases, compiler configuration, and required quality gates / unit tests.\n"
+        "- Directives to avoid common hallucinations.\n"
+        "Output ONLY the optimized prompt itself, formatted cleanly in Markdown. Do not include introductory or concluding conversational filler."
+    )
+    
+    async def run_gen():
+        click.secho("Generating optimized prompt...", fg="cyan")
+        return await llm.complete(
+            system_prompt=system_prompt,
+            user_prompt=f"Create a developer prompt for: {description}"
+        )
+        
+    try:
+        res = asyncio.run(run_gen())
+        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green")
+        click.echo(res)
+    except Exception as e:
+        click.secho(f"Failed to generate prompt: {e}", fg="red")
+        sys.exit(1)
+
 @main.group(name="tools")
 def tools_group() -> None:
     """Manage and execute platform tools."""
@@ -426,13 +465,28 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Failed to approve staged rules: {e}", fg="red")
 
 @main.command()
-@click.argument('goal')
+@click.argument('goal', required=False)
+@click.option('--file', '-f', type=click.Path(exists=True), help="Path to a text/markdown file containing the goal/prompt.")
 @click.option('--yes', '-y', is_flag=True, default=False, help="Auto-approve all proposed code changes.")
 @click.option('--knowledge-policy', type=click.Choice(['strict', 'warn', 'permissive']), default='warn', help="KnowledgeGuard policy for handling detected gaps.")
 @click.option('--ack-knowledge-gap', multiple=True, help="Acknowledge specific coordinates (e.g. org.apache.ignite:ignite-core) to bypass check.")
 @click.pass_context
-def generate(ctx: click.Context, goal: str, yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
+    if file:
+        try:
+            with open(file, "r", encoding="utf-8") as fh:
+                goal = fh.read()
+        except Exception as e:
+            click.secho(f"Failed to read goal file: {e}", fg="red")
+            sys.exit(1)
+    elif not goal:
+        if not sys.stdin.isatty():
+            goal = sys.stdin.read()
+        else:
+            click.secho("Error: Missing argument 'GOAL' or '--file' option.", fg="red")
+            sys.exit(1)
+
     cfg: AppConfig = ctx.obj['config']
     
     llm = LLMClient(cfg)
@@ -557,6 +611,11 @@ def generate(ctx: click.Context, goal: str, yes: bool, knowledge_policy: str, ac
                         for g in unacked_gaps:
                             t_dir = guard.generate_skill_template(g["library"], g["version"])
                             click.secho(f"Created skill template at: {t_dir}", fg="green")
+                        click.secho("\n💡 INFO: Please populate the scaffolded files with specific API rules or version matching logic.", fg="cyan")
+                        click.secho("  - Update skill.yaml to set tags and version range support (e.g. 'supported_versions: >=2.18.0').", fg="cyan")
+                        click.secho("  - Add coding rules to rules.txt to direct model behavior.", fg="cyan")
+                        click.secho("  - Add detailed code blocks to instructions.md and files in examples/.", fg="cyan")
+                        click.secho("Refer to Part 2 Section 2-D of the User Guide for detailed instructions.", fg="cyan")
                     await kernel.stop()
                     sys.exit(0)
 
@@ -568,6 +627,9 @@ def generate(ctx: click.Context, goal: str, yes: bool, knowledge_policy: str, ac
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
             click.secho(f"Quality Gates: {status_text}", bold=True, fg=status_color)
+            if res.get("review"):
+                click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+                click.echo(res.get("review"))
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
         

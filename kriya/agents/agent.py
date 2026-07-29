@@ -49,7 +49,9 @@ class ArchitectAgent(BaseAgent):
             "You are the Kriya Architect Agent.\n"
             "Your task is to define the technical design, packages, interfaces, and architecture structure.\n"
             "Ensure the design aligns with the existing codebase structure provided in the context.\n"
-            "Outline your interface design clearly in Markdown."
+            "Outline your interface design clearly in Markdown. DO NOT write or output the full implementation code of the source files. "
+            "Only specify file paths, directory layouts, class/interface/method signatures, and bean configuration outlines. "
+            "The implementation details and actual code inside files must be left entirely to the Developer Agent."
         )
 
 
@@ -85,7 +87,106 @@ class DeveloperAgent(BaseAgent):
         base_url_override: Optional[str] = None,
         api_key_override: Optional[str] = None
     ) -> List[Dict[str, str]]:
-        """Generates code files based on planner task and architect design."""
+        """Generates code files based on planner task and architect design. Falls back to iterative generation for reliability."""
+        
+        # Step 1: Query the model for the list of files to generate (or full implementation if mocked in tests)
+        system_list_prompt = (
+            "You are the Kriya File List Planner.\n"
+            "Your task is to identify and return a list of file paths that need to be created or modified based on the design.\n"
+            "Return ONLY a JSON list of strings (e.g. [\"pom.xml\", \"src/main/java/App.java\"]). Do not include markdown wraps."
+        )
+        
+        list_prompt = (
+            f"=== Task ===\n{task_description}\n\n"
+            f"=== Design ===\n{design_context}\n\n"
+            "Please return the JSON list of files to create/modify."
+        )
+        
+        try:
+            response_str = await self.llm.complete(
+                system_list_prompt, 
+                list_prompt, 
+                json_mode=True,
+                model_override=model_override,
+                base_url_override=base_url_override,
+                api_key_override=api_key_override
+            )
+            
+            cleaned = response_str.strip()
+            # Clean markdown codeblock wrappers if present
+            if cleaned.startswith("```"):
+                lines = cleaned.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                cleaned = "\n".join(lines).strip()
+                
+            parsed = json.loads(cleaned)
+            
+            # Backwards compatibility check: If parsed is a list of dicts (from tests or a single-generation mock), return it directly!
+            if isinstance(parsed, list) and len(parsed) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in parsed):
+                for item in parsed:
+                    if "path" in item and "filepath" not in item:
+                        item["filepath"] = item["path"]
+                return parsed
+                
+            if isinstance(parsed, dict):
+                # Check if it wraps files list
+                for key, val in parsed.items():
+                    if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
+                        for item in val:
+                            if "path" in item and "filepath" not in item:
+                                item["filepath"] = item["path"]
+                        return val
+                
+            # If parsed is a list of strings, it's a list of paths! Perform iterative generation.
+            if isinstance(parsed, list) and all(isinstance(x, str) for x in parsed):
+                files_out = []
+                for filepath in parsed:
+                    if stream_callback:
+                        stream_callback(f"\n[Implementing file: {filepath}]")
+                        
+                    file_sys_prompt = (
+                        "You are the Kriya Developer Agent.\n"
+                        "Your task is to write the complete, production-grade source code for the requested file path. "
+                        "Return ONLY the raw file content. Do not include markdown code block wrappers (like ```) or conversational explanation."
+                    )
+                    
+                    file_prompt = (
+                        f"=== Task ===\n{task_description}\n\n"
+                        f"=== Architecture Design ===\n{design_context}\n\n"
+                        f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
+                        f"Please generate the complete, correct, and production-grade file content for: '{filepath}'"
+                    )
+                    
+                    content = await self.llm.complete(
+                        file_sys_prompt,
+                        file_prompt,
+                        stream_callback=stream_callback,
+                        json_mode=False,
+                        model_override=model_override,
+                        base_url_override=base_url_override,
+                        api_key_override=api_key_override
+                    )
+                    
+                    # Clean markdown code block wraps if model accidentally generated them
+                    c_clean = content.strip()
+                    if c_clean.startswith("```"):
+                        lines = c_clean.splitlines()
+                        if lines[0].startswith("```"):
+                            lines = lines[1:]
+                        if lines and lines[-1].startswith("```"):
+                            lines = lines[:-1]
+                        c_clean = "\n".join(lines).strip()
+                        
+                    files_out.append({"filepath": filepath, "content": c_clean})
+                return files_out
+                
+        except Exception as e:
+            logger.warning(f"Iterative generation setup failed: {e}. Falling back to single-stage generation.")
+            
+        # Fallback to single-stage generation (original implementation)
         prompt = (
             f"=== User Request & Task ===\n{task_description}\n\n"
             f"=== Architect Design Guidelines ===\n{design_context}\n\n"
@@ -103,7 +204,6 @@ class DeveloperAgent(BaseAgent):
             api_key_override=api_key_override
         )
         
-        # Clean any accidental markdown codeblock wrappers (e.g. ```json ... ```)
         cleaned = response_str.strip()
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
@@ -116,17 +216,14 @@ class DeveloperAgent(BaseAgent):
         try:
             res = json.loads(cleaned)
             if isinstance(res, dict):
-                # Check if this dict wraps a list of files (e.g. {"files": [...]})
                 for key, val in res.items():
                     if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
-                        # Standardize "path" to "filepath"
                         for item in val:
                             if "path" in item and "filepath" not in item:
                                 item["filepath"] = item["path"]
                         return val
                 return [res]
             if isinstance(res, list):
-                # Ensure all elements in the list are dicts, skip strings
                 return [item for item in res if isinstance(item, dict)]
             return res
         except json.JSONDecodeError as e:
@@ -180,5 +277,6 @@ class ReviewerAgent(BaseAgent):
             "State whether the code is approved or rejected, and list details of any issues.\n"
             "Please adhere to these guidelines:\n"
             "1. Be pragmatic: If the user goal does not explicitly request unit tests, test files, or documentation (like a README), do not reject the submission solely for their absence. Instead, list them as optional recommendations.\n"
-            "2. Avoid hallucinations: When checking long configuration files (like pom.xml or build files), double-check your analysis. Do not claim parameters, arguments, or dependencies are missing unless you are absolutely certain they are absent from the generated content."
+            "2. Avoid hallucinations: When checking long configuration files (like pom.xml or build files), double-check your analysis. Do not claim parameters, arguments, or dependencies are missing unless you are absolutely certain they are absent from the generated content.\n"
+            "3. Run Instructions: At the end of your review report, always include a section '## How to Run the Application' detailing exactly how to compile, start, and verify the generated application (e.g. specifying 'mvn clean compile', 'python main.py', etc.)."
         )
