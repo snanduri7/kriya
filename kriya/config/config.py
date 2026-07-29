@@ -13,6 +13,8 @@ class LLMConfig(BaseModel):
     extra_body: Dict[str, Any] = Field(default_factory=dict)
     reasoning: bool = Field(default=False)
     context_window: int = Field(default=32768)
+    knowledge_cutoff: str = Field(default="2023-12-01")
+    knowledge_cutoff_confidence: str = Field(default="estimated")
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
@@ -53,6 +55,13 @@ class FallbackModelConfig(BaseModel):
     max_tokens: int = Field(default=4096)
     reasoning: bool = Field(default=False)
     context_window: int = Field(default=32768)
+    knowledge_cutoff: str = Field(default="2023-12-01")
+    knowledge_cutoff_confidence: str = Field(default="estimated")
+
+class KnowledgeConfig(BaseModel):
+    training_cutoff: str = Field(default="2023-12-01")  # ISO date
+    check_enabled: bool = Field(default=True)
+    offline_mode: bool = Field(default=False)
 
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -63,6 +72,7 @@ class AppConfig(BaseModel):
     mcp: Dict[str, MCPServerConfig] = Field(default_factory=dict)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""

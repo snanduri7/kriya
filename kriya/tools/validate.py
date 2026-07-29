@@ -4,14 +4,37 @@ import logging
 import sys
 from typing import Dict, Any, List, Optional
 
+import xml.etree.ElementTree as ET
+
 logger = logging.getLogger(__name__)
 
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
-    def __init__(self, workspace_path: str) -> None:
+    def __init__(self, workspace_path: str, original_workspace_path: Optional[str] = None) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
+        self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.stack = self._detect_stack()
+
+    def _get_pom_dependencies(self, pom_path: str) -> List[str]:
+        if not os.path.exists(pom_path):
+            return []
+        try:
+            tree = ET.parse(pom_path)
+            root = tree.getroot()
+            ns = ""
+            if root.tag.startswith("{"):
+                ns = root.tag.split("}")[0] + "}"
+            deps = []
+            for dep in root.findall(f".//{ns}dependency"):
+                groupId_elem = dep.find(f"{ns}groupId")
+                artifactId_elem = dep.find(f"{ns}artifactId")
+                if groupId_elem is not None and artifactId_elem is not None:
+                    deps.append(f"{groupId_elem.text.strip()}:{artifactId_elem.text.strip()}")
+            return deps
+        except Exception as e:
+            logger.warning(f"Failed to parse POM dependencies at {pom_path}: {e}")
+            return []
 
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby."""
@@ -66,13 +89,33 @@ class PolymorphicValidator:
             return {"success": True, "output": "Python files compiled successfully."}
 
         elif self.stack == "java":
-            # 1. Run Maven compile if pom.xml exists
+            # 1. Check for dependency regression if original pom.xml exists
+            if self.original_workspace_path:
+                orig_pom = os.path.join(self.original_workspace_path, "pom.xml")
+                new_pom = os.path.join(self.workspace_path, "pom.xml")
+                if os.path.exists(orig_pom) and os.path.exists(new_pom):
+                    orig_deps = self._get_pom_dependencies(orig_pom)
+                    new_deps = self._get_pom_dependencies(new_pom)
+                    missing_deps = [d for d in orig_deps if d not in new_deps]
+                    if missing_deps:
+                        return {
+                            "success": False,
+                            "output": f"Dependency regression: The following dependencies were removed from pom.xml: {', '.join(missing_deps)}. You must preserve all existing dependencies."
+                        }
+
+            # 2. Run Maven compile if pom.xml exists
             if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                 try:
                     res = self._run_cmd_with_timeout(["mvn", "clean", "compile"], cwd=self.workspace_path)
                     if res["returncode"] == 0:
                         return {"success": True, "output": "Maven compilation succeeded."}
-                    return {"success": False, "output": f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"}
+                    error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
+                    try:
+                        from kriya.tools.resolver import enrich_java_compiler_errors
+                        error_output = enrich_java_compiler_errors(error_output)
+                    except Exception as ree:
+                        logger.warning(f"Resolver failed to run: {ree}")
+                    return {"success": False, "output": error_output}
                 except Exception as e:
                     logger.warning(f"Failed to invoke mvn compile: {e}")
                     
@@ -99,7 +142,13 @@ class PolymorphicValidator:
             try:
                 res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 if res["returncode"] != 0:
-                    return {"success": False, "output": f"Java compilation failed:\n{res['stderr']}"}
+                    error_output = f"Java compilation failed:\n{res['stderr']}"
+                    try:
+                        from kriya.tools.resolver import enrich_java_compiler_errors
+                        error_output = enrich_java_compiler_errors(error_output)
+                    except Exception as ree:
+                        logger.warning(f"Resolver failed to run: {ree}")
+                    return {"success": False, "output": error_output}
                 return {"success": True, "output": "Java classes compiled successfully."}
             except Exception as e:
                 return {"success": False, "output": f"Javac compilation tool invocation failed: {e}"}

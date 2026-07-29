@@ -1,0 +1,6 @@
+Use org.apache.activemq:artemis-server and org.apache.activemq:artemis-amqp-protocol Maven dependencies for an embedded ActiveMQ Artemis AMQP broker (version 2.31.2).
+Do not use artemis-core-server; use artemis-server instead.
+ActiveMQ Server configuration requires setting persistenceEnabled, journalDirectory, bindingsDirectory, pagingDirectory, and largeMessagesDirectory.
+AMQP protocol support requires adding AMQPProtocolManagerFactory to ProtocolManagerFactories list in ConfigurationImpl.
+AMQP acceptor port defaults to 5672 (using tcp://localhost:5672?protocols=AMQP).
+Use javax.jms:javax.jms-api:2.0.1 for JMS API dependencies.

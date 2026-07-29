@@ -344,10 +344,36 @@ class WorkflowEngine:
         step_callback: Optional[Callable[[str, str], None]] = None,
         approval_callback: Optional[Callable[[List[Dict[str, str]], str], Any]] = None,
         stream_callback: Optional[Callable[[str, str], None]] = None,
-        error_context: Optional[str] = None
+        error_context: Optional[str] = None,
+        knowledge_risk_confirmed: bool = False
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming)."""
         
+        # 0. KnowledgeGuard Stage 0 Check
+        from kriya.tools.knowledge import KnowledgeGuard
+        knowledge_config = self.kernel.config.knowledge
+        cutoff = self.kernel.config.llm.knowledge_cutoff
+        if knowledge_config.training_cutoff != "2023-12-01":
+            cutoff = knowledge_config.training_cutoff
+
+        guard = KnowledgeGuard(
+            skills_dir=self.kernel.config.paths.skills,
+            cutoff_date_str=cutoff,
+            offline=knowledge_config.offline_mode,
+            memory_dir=self.kernel.config.paths.memory
+        )
+
+        gap_report = guard.check_goal(goal, workspace_path)
+        if gap_report.has_gaps and not knowledge_risk_confirmed:
+            if step_callback:
+                step_callback("knowledge_gap", gap_report.format_report())
+            return {
+                "status": "knowledge_gap",
+                "gap_report": gap_report.to_dict(),
+                "goal": goal,
+                "workspace_path": workspace_path
+            }
+
         # Initialize trace lists
         active_skills = []
         retrieved_chunks = []
@@ -371,6 +397,16 @@ class WorkflowEngine:
         se.discover_and_load()
         
         convention_prompt = ""
+        if gap_report.has_gaps:
+            convention_prompt += "\n\n=== KNOWLEDGE GUARD SAFETY CONSTRAINTS ===\n"
+            for g in gap_report.gaps:
+                date_str = g["release_date"][:10] if g["release_date"] else "Unknown"
+                convention_prompt += (
+                    f"- WARNING: You are writing code using library '{g['library']}' version '{g['version']}'.\n"
+                    f"  This version was released on {date_str}, which is after your estimated knowledge cutoff date.\n"
+                    f"  DO NOT invent API methods or configuration parameters. Restrict yourself strictly to known-good patterns.\n"
+                )
+            convention_prompt += "==========================================\n"
         for skill in se.list_skills():
             # Check matches with repository facts (dependencies and frameworks)
             fact_match = False
@@ -389,6 +425,19 @@ class WorkflowEngine:
                 skill.name.lower() == f"auto-{repo_slug}" or
                 fact_match
             )
+            
+            # Check version-range compatibility
+            if is_relevant and skill.supported_versions != "*":
+                from kriya.skills.skill import is_version_supported
+                from kriya.tools.knowledge import extract_library_versions
+                libs = extract_library_versions(goal)
+                for lib, ver in libs:
+                    if lib.lower() in skill.name.lower() or any(t.lower() in lib.lower() for t in skill.tags):
+                        if not is_version_supported(ver, skill.supported_versions):
+                            is_relevant = False
+                            logger.info(f"Skipping skill '{skill.name}' because version '{ver}' does not satisfy constraint '{skill.supported_versions}'")
+                            break
+
             if is_relevant:
                 active_skills.append(skill.name)
                 if skill.rules or skill.instructions:
@@ -528,6 +577,30 @@ class WorkflowEngine:
         if step_callback:
             step_callback("Design", design)
 
+        # Stage 2A: Post-architecture dependency scan
+        if knowledge_config.check_enabled:
+            from kriya.tools.knowledge import extract_library_versions
+            post_report = guard.check_goal(design, workspace_path)
+            initial_libs = {g["library"] for g in gap_report.gaps}
+            new_gaps = [g for g in post_report.gaps if g["library"] not in initial_libs]
+
+            if new_gaps:
+                logger.info(f"Stage 2A: Detected {len(new_gaps)} new library gaps in architect design.")
+                desc = "\n".join([
+                    f"- {g['library']} (version {g['version']}) [Risk: {g['risk_level']}]: {g['reason']}"
+                    for g in new_gaps
+                ])
+                reason_str = (
+                    f"Knowledge Guard detected new post-cutoff dependencies in the proposed architecture:\n{desc}\n"
+                    f"Do you want to proceed with these dependencies?"
+                )
+                if approval_callback:
+                    approved = approval_callback([], reason_str)
+                    if not approved:
+                        raise ValueError("Workflow aborted: User rejected post-cutoff dependency risk in Stage 2A.")
+                else:
+                    logger.warning("Stage 2A validation warning: new gaps detected but no approval callback available. Proceeding under default policy.")
+
         # 4. Developer & Quality Gates (Auto-debugging loop)
         logger.info("Developer Agent implementing source files...")
         chain = self.kernel.config.llm_chain
@@ -641,7 +714,7 @@ class WorkflowEngine:
                 # Quality Gates: Polymorphic compile & test checks inside sandbox
                 logger.info("Quality Gates: Running polymorphic compiler and test checks...")
                 from kriya.tools.validate import PolymorphicValidator
-                validator = PolymorphicValidator(worktree_path)
+                validator = PolymorphicValidator(worktree_path, original_workspace_path=workspace_path)
                 
                 compile_res = validator.run_compile_check(list(all_files_written))
                 gate_outcomes.append({
@@ -765,7 +838,25 @@ class WorkflowEngine:
                 # Clean up worktree sandbox
                 if worktree_path != workspace_path:
                     remove_git_worktree(workspace_path, worktree_path)
-                
+
+                # Phase 3: Auto-generate skill templates for solved dependencies
+                if retry_count > 0:
+                    for outcome in gate_outcomes:
+                        output_str = outcome.get("output", "")
+                        if output_str and "=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===" in output_str:
+                            deps = re.findall(
+                                r"<groupId>([^<]+)</groupId>\s*<artifactId>([^<]+)</artifactId>\s*<version>([^<]+)</version>",
+                                output_str
+                            )
+                            for g, a, v in deps:
+                                try:
+                                    coord = f"{g.strip()}:{a.strip()}"
+                                    ver = v.strip()
+                                    logger.info(f"Auto-accrual: Automatically scaffolding verified skill for resolved dependency {coord}:{ver}")
+                                    guard.generate_skill_template(coord, ver)
+                                except Exception as ex:
+                                    logger.warning(f"Failed to auto-accrue skill for dependency: {ex}")
+
                 # Autonomous Skill Accrual / Lesson extraction
                 if retry_count > 0 and chain:
                     try:

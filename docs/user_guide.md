@@ -165,3 +165,59 @@ Optimize your local inference engine (Ollama, LM Studio, etc.) to get maximum sp
 *   **Lock Memory (`mlock`)**: Set `OLLAMA_MLOCK=1` in your environment. This pins the model weights in your Unified Memory, avoiding swap delays when switching expert branches.
 *   **Pin Thread Count**: Run `kriya doctor` to detect your system's performance cores. Pin the CPU threads to **match your system's physical performance cores** (e.g., 8 threads for M1 Max).
 *   **Configure Context Size (`num_ctx`)**: Ollama defaults to `num_ctx: 2048` or `4096`. You must explicitly configure `num_ctx` to match your model's native context window (e.g. `32768`) in Ollama API calls or your Modelfile, otherwise context chunks will be silently truncated.
+
+---
+
+## 6. Creating Custom Engineering Skills
+
+To guide Kriya's generation and debugging offline and prevent local models from hallucinating dependencies or APIs, you can create custom engineering skills.
+
+### 6.1 Skill Directory Structure
+Create a subfolder in your `paths.skills` directory (e.g., `skills/activemq-artemis/`):
+
+```
+skills/activemq-artemis/
+├── skill.yaml            # YAML Metadata (name, tags, description)
+├── rules.txt             # Lint/architectural rules, one per line
+├── instructions.md       # Detailed guide for code structure
+└── examples/             # Reference files that Developer Agent can match
+    └── BrokerServer.java
+```
+
+### 6.2 Example Configs
+- **`skill.yaml`**:
+  ```yaml
+  name: activemq-artemis
+  description: Embedded ActiveMQ Artemis AMQP Broker setup instructions.
+  tags: [artemis, activemq, broker, amqp]
+  ```
+- **`rules.txt`**:
+  ```txt
+  Use org.apache.activemq:artemis-server and artemis-amqp-protocol dependencies (version 2.31.2).
+  Do not use artemis-core-server; use artemis-server instead.
+  ```
+
+---
+
+## 7. How to Run the Apache Ignite + Qpid AMQP Messaging Application
+
+To execute the generated Spring XML-based Apache Ignite and embedded ActiveMQ Artemis AMQP application:
+
+### Step 1: Start the Embedded Broker Server
+In your first terminal session:
+```bash
+# Build the project classes and download dependencies
+mvn clean compile
+
+# Build a text file with the project classpath dependencies
+mvn dependency:build-classpath -Dmdep.outputFile=cp.txt
+
+# Run the Standalone Embedded AMQP Broker
+java -cp target/classes:$(cat cp.txt) com.example.BrokerServer
+```
+
+### Step 2: Start the Client Application
+In a separate terminal session, run the client application which connects to the broker, sends a test message, retrieves it, and caches it in Ignite:
+```bash
+mvn compile exec:exec
+```

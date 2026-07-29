@@ -6,6 +6,62 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+import re
+from typing import Tuple
+
+def parse_version_parts(v_str: str) -> Tuple[int, int, int]:
+    """Helper to parse a version string into (major, minor, patch) integer tuple."""
+    parts = []
+    cleaned = re.sub(r'^[^\d]+', '', v_str)
+    cleaned = re.sub(r'[^\d]+$', '', cleaned)
+    for part in cleaned.split('.'):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+def is_version_supported(ver_str: str, range_str: str) -> bool:
+    """
+    Checks if ver_str satisfies the range_str.
+    Supports operators: >=, <=, >, <, ==, !=, *
+    Example ranges: ">=2.15.0 <3.0.0", "==2.18.0"
+    """
+    if not range_str or range_str.strip() == "*":
+        return True
+    
+    version = parse_version_parts(ver_str)
+    conditions = range_str.strip().split()
+    for cond in conditions:
+        match = re.match(r"^([>=<!\s]*)([0-9\.]+)", cond.strip())
+        if not match:
+            continue
+        op, cond_ver_str = match.groups()
+        op = op.strip() if op else "=="
+        cond_ver = parse_version_parts(cond_ver_str)
+        
+        if op == "==":
+            if version != cond_ver:
+                return False
+        elif op == "!=":
+            if version == cond_ver:
+                return False
+        elif op == ">=":
+            if version < cond_ver:
+                return False
+        elif op == "<=":
+            if version > cond_ver:
+                return False
+        elif op == ">":
+            if version <= cond_ver:
+                return False
+        elif op == "<":
+            if version >= cond_ver:
+                return False
+    return True
+
 class Skill(BaseModel):
     name: str = Field(description="Name of the skill.")
     description: str = Field(description="Short summary of the skill's purpose.")
@@ -17,6 +73,7 @@ class Skill(BaseModel):
         default_factory=dict, 
         description="Dictionary mapping example file basenames to their contents."
     )
+    supported_versions: str = Field(default="*", description="Supported version range (e.g. >=2.15.0 <3.0.0).")
 
 
 class SkillEngine:
@@ -84,7 +141,8 @@ class SkillEngine:
                     tags=meta.get("tags", []),
                     instructions=instructions,
                     rules=rules,
-                    examples=examples
+                    examples=examples,
+                    supported_versions=meta.get("supported_versions", "*")
                 )
 
                 self._skills[folder.lower()] = skill

@@ -40,3 +40,28 @@ def test_skills_lifecycle(tmp_path):
     tagged = se_load.find_skills_by_tag("fastapi-app")
     assert len(tagged) == 1
     assert tagged[0].name == "FastAPI App"
+
+def test_is_version_supported():
+    from kriya.skills.skill import is_version_supported
+    
+    # 1. Base cases
+    assert is_version_supported("2.18.0", "*") is True
+    assert is_version_supported("2.18.0", "") is True
+    
+    # 2. Operators
+    assert is_version_supported("2.18.0", "==2.18.0") is True
+    assert is_version_supported("2.18.0", "!=2.15.0") is True
+    assert is_version_supported("2.18.0", ">=2.15.0") is True
+    assert is_version_supported("2.18.0", "<=2.20.0") is True
+    assert is_version_supported("2.18.0", ">2.17") is True
+    assert is_version_supported("2.18.0", "<3.0") is True
+    
+    # 3. Mismatches
+    assert is_version_supported("2.18.0", "==2.15.0") is False
+    assert is_version_supported("2.18.0", "<2.15.0") is False
+    assert is_version_supported("2.18.0", ">3.0.0") is False
+    
+    # 4. Range combinations
+    assert is_version_supported("2.18.0", ">=2.15.0 <3.0.0") is True
+    assert is_version_supported("3.1.0", ">=2.15.0 <3.0.0") is False
+

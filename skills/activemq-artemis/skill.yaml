@@ -1,0 +1,8 @@
+name: activemq-artemis
+description: Embedded ActiveMQ Artemis AMQP Broker configuration and setup rules.
+tags:
+  - artemis
+  - activemq
+  - broker
+  - jms
+  - amqp

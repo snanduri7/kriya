@@ -1,0 +1,318 @@
+import os
+import pytest
+from datetime import datetime, timezone
+from unittest.mock import patch, MagicMock
+from kriya.tools.knowledge import (
+    extract_library_versions,
+    parse_iso_datetime,
+    RegistryAdapterFactory,
+    KnowledgeGuard,
+    GapReport
+)
+
+def test_extract_library_versions():
+    goal = "Build a Spring Boot 3.2.0 app with org.apache.ignite:ignite-core:2.18.0 and express@4.18.2 plus requests==2.31.0"
+    libs = extract_library_versions(goal)
+    libs_dict = dict(libs)
+    
+    assert "org.apache.ignite:ignite-core" in libs_dict
+    assert libs_dict["org.apache.ignite:ignite-core"] == "2.18.0"
+    
+    assert "spring-boot" in libs_dict
+    assert libs_dict["spring-boot"] == "3.2.0"
+    
+    assert "express" in libs_dict
+    assert libs_dict["express"] == "4.18.2"
+    
+    assert "requests" in libs_dict
+    assert libs_dict["requests"] == "2.31.0"
+
+def test_parse_iso_datetime():
+    assert parse_iso_datetime("2024-03-15T00:00:00Z") == datetime(2024, 3, 15, 0, 0, tzinfo=timezone.utc)
+    assert parse_iso_datetime("2024-03-15T00:00:00+00:00") == datetime(2024, 3, 15, 0, 0, tzinfo=timezone.utc)
+    assert parse_iso_datetime("") is None
+    assert parse_iso_datetime("invalid-date") is None
+
+def test_detect_stack(tmp_path):
+    assert RegistryAdapterFactory.detect_stack(str(tmp_path)) == "unknown"
+    
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    assert RegistryAdapterFactory.detect_stack(str(tmp_path)) == "java"
+    (tmp_path / "pom.xml").unlink()
+    
+    (tmp_path / "package.json").write_text("{}")
+    assert RegistryAdapterFactory.detect_stack(str(tmp_path)) == "javascript"
+    (tmp_path / "package.json").unlink()
+
+    (tmp_path / "requirements.txt").write_text("")
+    assert RegistryAdapterFactory.detect_stack(str(tmp_path)) == "python"
+
+def test_maven_central_adapter_success():
+    adapter = RegistryAdapterFactory.from_stack("java")
+    
+    # Mock successful SOLR response
+    with patch("httpx.Client") as MockClient:
+        mock_client = MockClient.return_value.__enter__.return_value
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "response": {
+                "docs": [{"timestamp": 1710460800000}]  # 2024-03-15
+            }
+        }
+        mock_client.get.return_value = mock_resp
+        
+        rel_date = adapter.get_release_date("org.apache.ignite:ignite-core", "2.18.0")
+        assert rel_date is not None
+        assert rel_date.year == 2024
+        assert rel_date.month == 3
+        assert rel_date.day == 15
+
+def test_pypi_adapter_success():
+    adapter = RegistryAdapterFactory.from_stack("python")
+    
+    with patch("httpx.Client") as MockClient:
+        mock_client = MockClient.return_value.__enter__.return_value
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "urls": [{"upload_time": "2024-03-15T12:00:00Z"}]
+        }
+        mock_client.get.return_value = mock_resp
+        
+        rel_date = adapter.get_release_date("requests", "2.31.0")
+        assert rel_date == datetime(2024, 3, 15, 12, 0, tzinfo=timezone.utc)
+
+def test_npm_adapter_success():
+    adapter = RegistryAdapterFactory.from_stack("javascript")
+    
+    with patch("httpx.Client") as MockClient:
+        mock_client = MockClient.return_value.__enter__.return_value
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "time": {"4.18.2": "2024-03-15T12:00:00Z"}
+        }
+        mock_client.get.return_value = mock_resp
+        
+        rel_date = adapter.get_release_date("express", "4.18.2")
+        assert rel_date == datetime(2024, 3, 15, 12, 0, tzinfo=timezone.utc)
+
+def test_knowledge_guard_gaps(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    
+    # 1. Structural Gap Check: skills folder is empty
+    kg = KnowledgeGuard(str(skills_dir), "2023-12-01")
+    
+    with patch("httpx.Client") as MockClient:
+        mock_client = MockClient.return_value.__enter__.return_value
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "response": {
+                "docs": [{"timestamp": 1710460800000}]  # 2024-03-15 (after cutoff)
+            }
+        }
+        mock_client.get.return_value = mock_resp
+        
+        report = kg.check_goal("Build spring-boot 3.2.0")
+        assert report.has_gaps
+        # Should be HIGH risk because release is post-cutoff AND skill file is missing
+        assert report.gaps[0]["risk_level"] == "HIGH"
+
+def test_knowledge_guard_no_gaps(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    
+    # Pre-populate skill to remove structural gap
+    (skills_dir / "spring-boot-3.2.0").mkdir()
+    (skills_dir / "spring-boot-3.2.0" / "skill.yaml").write_text("name: spring-boot")
+    
+    kg = KnowledgeGuard(str(skills_dir), "2025-01-01")  # Cutoff is after release
+    
+    with patch("httpx.Client") as MockClient:
+        mock_client = MockClient.return_value.__enter__.return_value
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "response": {
+                "docs": [{"timestamp": 1710460800000}]  # 2024-03-15 (before cutoff)
+            }
+        }
+        mock_client.get.return_value = mock_resp
+        
+        report = kg.check_goal("Build spring-boot 3.2.0")
+        assert not report.has_gaps
+
+def test_generate_skill_template(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    
+    kg = KnowledgeGuard(str(skills_dir), "2023-12-01")
+    t_dir = kg.generate_skill_template("org.apache.ignite:ignite-core", "2.18.0")
+    
+    assert os.path.exists(t_dir)
+    assert os.path.exists(os.path.join(t_dir, "skill.yaml"))
+    assert os.path.exists(os.path.join(t_dir, "rules.txt"))
+    assert os.path.exists(os.path.join(t_dir, "instructions.md"))
+    assert os.path.exists(os.path.join(t_dir, "examples", "Example.java"))
+    
+    # Verify contents
+    with open(os.path.join(t_dir, "skill.yaml"), "r") as f:
+        content = f.read()
+        assert "org.apache.ignite-ignite-core" in content
+        assert "2.18.0" in content
+
+def test_knowledge_cache(tmp_path):
+    from kriya.tools.knowledge import KnowledgeCache
+    cache = KnowledgeCache(str(tmp_path))
+    
+    # 1. Cache hit should return None initially
+    assert cache.get_release_date("java", "org.apache.ignite:ignite-core", "2.18.0") is None
+    
+    # 2. Write to cache
+    dt = datetime(2024, 3, 15, 12, 0, tzinfo=timezone.utc)
+    cache.set_release_date("java", "org.apache.ignite:ignite-core", "2.18.0", dt)
+    
+    # 3. Cache read should return the datetime
+    cached_dt = cache.get_release_date("java", "org.apache.ignite:ignite-core", "2.18.0")
+    assert cached_dt == dt
+
+def test_knowledge_guard_with_cache(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    
+    kg = KnowledgeGuard(str(skills_dir), "2023-12-01", memory_dir=str(memory_dir))
+    
+    # Pre-populate cache to avoid HTTP request
+    dt = datetime(2024, 3, 15, 12, 0, tzinfo=timezone.utc)
+    kg.cache.set_release_date("java", "org.apache.ignite:ignite-core", "2.18.0", dt)
+    
+    # Call check_goal - should hit cache
+    with patch("httpx.Client") as MockClient:
+        # MockClient should NOT be called because of cache hit
+        report = kg.check_goal("Build org.apache.ignite:ignite-core:2.18.0")
+        assert report.has_gaps
+        assert len(report.gaps) == 1
+        assert report.gaps[0]["library"] == "org.apache.ignite:ignite-core"
+        assert report.gaps[0]["risk_level"] == "HIGH"
+        MockClient.assert_not_called()
+
+def test_workflow_stage_2a_gap(tmp_path):
+    from kriya.workflow.workflow import WorkflowEngine
+    from kriya.core.kernel import Kernel
+    from kriya.core.llm import LLMClient
+    from kriya.config.config import AppConfig
+    
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.memory = str(tmp_path / "memory")
+    os.makedirs(cfg.paths.skills)
+    os.makedirs(cfg.paths.memory)
+    
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+    
+    # Mock planner and architect to return a design that includes a gap
+    from unittest.mock import AsyncMock
+    we.planner.run = AsyncMock(return_value="Valid Plan")
+    we.architect.run = AsyncMock(return_value="Design proposes org.apache.ignite:ignite-core:2.18.0")
+    
+    # We prime the cache with a post-cutoff release date
+    from kriya.tools.knowledge import KnowledgeCache
+    cache = KnowledgeCache(cfg.paths.memory)
+    cache.set_release_date("java", "org.apache.ignite:ignite-core", "2.18.0", datetime(2024, 3, 15, 0, 0, tzinfo=timezone.utc))
+    
+    # mock approval callback to reject
+    mock_approval = MagicMock(return_value=False)
+    
+    with patch("kriya.workflow.workflow.RepositoryAnalyzer") as MockAnalyzer:
+        mock_analyzer = MockAnalyzer.return_value
+        mock_analyzer.analyze.return_value.dependencies = []
+        mock_analyzer.analyze.return_value.frameworks = []
+        mock_analyzer.analyze.return_value.model_dump_json.return_value = "{}"
+        
+        with pytest.raises(ValueError, match="User rejected post-cutoff dependency risk in Stage 2A"):
+            import asyncio
+            asyncio.run(we.run_generation_workflow(
+                goal="Build a standard application",
+                workspace_path=str(tmp_path),
+                approval_callback=mock_approval,
+                knowledge_risk_confirmed=True  # Confirm stage 0, trigger stage 2A check
+            ))
+            
+        # Verify approval callback was indeed queried for the Stage 2A gap
+        assert mock_approval.called
+
+def test_workflow_auto_accrual(tmp_path):
+    from kriya.workflow.workflow import WorkflowEngine
+    from kriya.core.kernel import Kernel
+    from kriya.core.llm import LLMClient
+    from kriya.config.config import AppConfig
+    from unittest.mock import AsyncMock
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.memory = str(tmp_path / "memory")
+    os.makedirs(cfg.paths.skills)
+    os.makedirs(cfg.paths.memory)
+
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    # 1. We mock the workflow execution so that:
+    # - Attempt 1 fails compiling with a resolver suggestion
+    # - Attempt 2 compiles successfully
+    we.planner.run = AsyncMock(return_value="Drafting plan")
+    we.architect.run = AsyncMock(return_value="Designing structure")
+    we.developer.run_generation = AsyncMock(return_value=[{"filepath": "pom.xml", "content": "<project></project>"}])
+    we.reviewer.run = AsyncMock(return_value="Passed Review")
+    we.llm.complete = AsyncMock(return_value="Valid Lesson")
+
+    # We mock PolymorphicValidator to fail on attempt 1 with a dependency suggestion, and succeed on attempt 2
+    mock_run_compile = MagicMock()
+    mock_run_compile.side_effect = [
+        {
+            "success": False,
+            "output": "Maven compilation failed:\n=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===\n[KRIYA SUGGESTION] Missing item was matched to Maven dependency:\n<dependency>\n    <groupId>org.apache.activemq</groupId>\n    <artifactId>artemis-server</artifactId>\n    <version>2.31.2</version>\n</dependency>\n=============================================\n"
+        },
+        {"success": True, "output": "Maven compilation succeeded."}
+    ]
+
+    with patch("kriya.workflow.workflow.RepositoryAnalyzer") as MockAnalyzer, \
+         patch("kriya.tools.validate.PolymorphicValidator") as MockValidator:
+         
+        mock_analyzer = MockAnalyzer.return_value
+        mock_analyzer.analyze.return_value.dependencies = []
+        mock_analyzer.analyze.return_value.frameworks = []
+        mock_analyzer.analyze.return_value.model_dump_json.return_value = "{}"
+        
+        mock_validator = MockValidator.return_value
+        mock_validator.run_compile_check = mock_run_compile
+        mock_validator.run_tests.return_value = {"success": True, "output": "Tests passed"}
+        mock_validator.stack = "java"
+        
+        # Disable human approval to auto-apply
+        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.risk_threshold_lines = 1000
+        
+        import asyncio
+        res = asyncio.run(we.run_generation_workflow(
+            goal="Build a standard application",
+            workspace_path=str(tmp_path),
+            knowledge_risk_confirmed=True
+        ))
+        
+        assert res["quality_gates_passed"] is True
+        
+        # Verify that the custom skill directory was automatically accrued in the skills folder!
+        expected_skill_path = tmp_path / "skills" / "org.apache.activemq-artemis-server-2.31.2"
+        assert os.path.exists(expected_skill_path)
+        assert os.path.exists(expected_skill_path / "skill.yaml")
+
+

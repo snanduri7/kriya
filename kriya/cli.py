@@ -428,8 +428,10 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
 @main.command()
 @click.argument('goal')
 @click.option('--yes', '-y', is_flag=True, default=False, help="Auto-approve all proposed code changes.")
+@click.option('--knowledge-policy', type=click.Choice(['strict', 'warn', 'permissive']), default='warn', help="KnowledgeGuard policy for handling detected gaps.")
+@click.option('--ack-knowledge-gap', multiple=True, help="Acknowledge specific coordinates (e.g. org.apache.ignite:ignite-core) to bypass check.")
 @click.pass_context
-def generate(ctx: click.Context, goal: str, yes: bool) -> None:
+def generate(ctx: click.Context, goal: str, yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     cfg: AppConfig = ctx.obj['config']
     
@@ -494,6 +496,70 @@ def generate(ctx: click.Context, goal: str, yes: bool) -> None:
             approval_callback=on_approval,
             stream_callback=on_stream
         )
+
+        if isinstance(res, dict) and res.get("status") == "knowledge_gap":
+            gap_report_dict = res["gap_report"]
+            unacked_gaps = []
+            for g in gap_report_dict.get("gaps", []):
+                coord = g["library"]
+                if coord not in ack_knowledge_gap:
+                    unacked_gaps.append(g)
+
+            if not unacked_gaps or knowledge_policy == 'permissive':
+                res = await we.run_generation_workflow(
+                    goal=goal,
+                    workspace_path=os.getcwd(),
+                    approval_callback=on_approval,
+                    stream_callback=on_stream,
+                    knowledge_risk_confirmed=True
+                )
+            elif knowledge_policy == 'strict':
+                click.secho("\n[KRIYA BLOCKED] Knowledge gap detected in strict mode:", bold=True, fg="red")
+                for g in unacked_gaps:
+                    click.secho(f"  - {g['library']} version {g['version']}: {g['reason']}", fg="red")
+                await kernel.stop()
+                sys.exit(1)
+            else:  # 'warn'
+                click.secho("\n⚠️  KNOWLEDGE GUARD RISK DETECTED", bold=True, fg="yellow")
+                for g in unacked_gaps:
+                    date_str = g["release_date"][:10] if g["release_date"] else "Unknown"
+                    click.secho(f"  Library  : {g['library']} (version {g['version']})", fg="yellow")
+                    click.secho(f"  Released : {date_str}  |  Risk Level: {g['risk_level']}", fg="yellow")
+                    click.secho(f"  Reason   : {g['reason']}", fg="yellow")
+                    click.echo("")
+
+                if yes:
+                    click.secho("[Auto-Confirming knowledge risk]", fg="green")
+                    confirm = True
+                else:
+                    confirm = click.confirm("Do you want to proceed anyway despite the knowledge risk?")
+
+                if confirm:
+                    res = await we.run_generation_workflow(
+                        goal=goal,
+                        workspace_path=os.getcwd(),
+                        approval_callback=on_approval,
+                        stream_callback=on_stream,
+                        knowledge_risk_confirmed=True
+                    )
+                else:
+                    if click.confirm("Would you like Kriya to scaffold skill templates for these libraries?"):
+                        from kriya.tools.knowledge import KnowledgeGuard
+                        knowledge_config = cfg.knowledge
+                        cutoff = cfg.llm.knowledge_cutoff
+                        if knowledge_config.training_cutoff != "2023-12-01":
+                            cutoff = knowledge_config.training_cutoff
+                        guard = KnowledgeGuard(
+                            skills_dir=cfg.paths.skills,
+                            cutoff_date_str=cutoff,
+                            offline=knowledge_config.offline_mode
+                        )
+                        for g in unacked_gaps:
+                            t_dir = guard.generate_skill_template(g["library"], g["version"])
+                            click.secho(f"Created skill template at: {t_dir}", fg="green")
+                    await kernel.stop()
+                    sys.exit(0)
+
         await kernel.stop()
         
         click.secho("\n=== Generation Workflow Completed ===", bold=True)

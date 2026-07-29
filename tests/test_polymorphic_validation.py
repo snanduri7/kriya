@@ -62,3 +62,75 @@ def test_java_ruby_compile_invocation(tmp_path):
         
         res_rb = validator_rb.run_compile_check(["test.rb"])
         assert res_rb["success"] is True
+
+def test_java_dependency_regression(tmp_path):
+    orig_dir = tmp_path / "orig"
+    new_dir = tmp_path / "new"
+    orig_dir.mkdir()
+    new_dir.mkdir()
+
+    orig_pom_content = """<?xml version="1.0" encoding="UTF-8"?>
+<project>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.qpid</groupId>
+            <artifactId>qpid-jms-client</artifactId>
+            <version>1.9.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-core</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+    </dependencies>
+</project>"""
+    (orig_dir / "pom.xml").write_text(orig_pom_content)
+
+    # 1. Test case: dependency missing in new pom.xml
+    new_pom_missing = """<?xml version="1.0" encoding="UTF-8"?>
+<project>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-core</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+    </dependencies>
+</project>"""
+    (new_dir / "pom.xml").write_text(new_pom_missing)
+
+    validator = PolymorphicValidator(str(new_dir), original_workspace_path=str(orig_dir))
+    res = validator.run_compile_check(["pom.xml"])
+    assert res["success"] is False
+    assert "Dependency regression: The following dependencies were removed from pom.xml: org.apache.qpid:qpid-jms-client" in res["output"]
+
+    # 2. Test case: all dependencies preserved
+    new_pom_preserved = """<?xml version="1.0" encoding="UTF-8"?>
+<project>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.qpid</groupId>
+            <artifactId>qpid-jms-client</artifactId>
+            <version>1.9.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-core</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.activemq</groupId>
+            <artifactId>artemis-server</artifactId>
+            <version>2.31.2</version>
+        </dependency>
+    </dependencies>
+</project>"""
+    (new_dir / "pom.xml").write_text(new_pom_preserved)
+
+    with patch("subprocess.run") as mock_run:
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+        res_ok = validator.run_compile_check(["pom.xml"])
+        assert res_ok["success"] is True
+
