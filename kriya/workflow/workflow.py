@@ -31,17 +31,17 @@ def create_git_worktree(repo_path: str) -> str:
     # 2. Prune any stale/orphaned worktree records in git administrative data
     try:
         subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"git worktree prune failed (non-fatal): {e}")
 
     worktree_registered = False
     try:
         res = subprocess.run(["git", "worktree", "list"], cwd=repo_path, capture_output=True, text=True)
         if worktree_path in res.stdout:
             worktree_registered = True
-    except Exception:
-        pass
-        
+    except Exception as e:
+        logger.debug(f"git worktree list failed, assuming worktree is not registered: {e}")
+
     if not worktree_registered:
         if os.path.exists(worktree_path):
             shutil.rmtree(worktree_path, ignore_errors=True)
@@ -51,8 +51,8 @@ def create_git_worktree(repo_path: str) -> str:
         if not os.path.exists(worktree_path):
             try:
                 subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"git worktree prune failed (non-fatal): {e}")
             subprocess.run(["git", "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
         else:
             # Reset but preserve target/ and other build directories
@@ -66,8 +66,8 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
         try:
             subprocess.run(["git", "checkout", "-f", "HEAD"], cwd=worktree_path, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, capture_output=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to clean up worktree at '{worktree_path}' (non-fatal): {e}")
 
 def skeletonize_code(content: str, filepath: str, tier: str) -> str:
     if tier == "full" or not tier:
@@ -196,9 +196,9 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
             try:
                 with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
                     matched_contents[f] = fh.read()
-            except Exception:
-                pass
-                
+            except Exception as e:
+                logger.debug(f"Failed to read matched file '{full_p}' for RAG context: {e}")
+
     related_contents = {}
     for f in related_files:
         full_p = os.path.join(workspace_path, f)
@@ -206,8 +206,8 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
             try:
                 with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
                     related_contents[f] = fh.read()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to read related file '{full_p}' for RAG context: {e}")
 
     matched_tier = "full"
     related_tier = "full"
@@ -787,8 +787,8 @@ class WorkflowEngine:
                                 sensitive_match = True
                                 sensitive_reason = f"Sensitive path matched: {filepath} ({pattern})"
                                 break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Invalid sensitive_paths regex '{pattern}' - this pattern is not being enforced: {e}")
                     if sensitive_match:
                         break
 
@@ -873,8 +873,8 @@ class WorkflowEngine:
                             try:
                                 with open(full_path, "r", encoding="utf-8") as fh:
                                     extract_prompt += f"=== File: {filepath} ===\n{fh.read()}\n"
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Failed to read '{full_path}' for lesson extraction: {e}")
                         extract_prompt += "\nExtract a single, concise coding rule (maximum 1 sentence) explaining the fix so that future models can avoid the same error. Do not output anything else, just the sentence starting with a capital letter."
                         
                         lesson = await self.llm.complete(
@@ -952,8 +952,8 @@ class WorkflowEngine:
                 with open(full_path, "r", encoding="utf-8") as f:
                     content = f.read()
                 review_prompt += f"\n=== File: {filepath} ===\n{content}\n"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to read '{full_path}' for reviewer prompt: {e}")
                 
         reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
         review = await self.reviewer.run(review_prompt, stream_callback=reviewer_stream)

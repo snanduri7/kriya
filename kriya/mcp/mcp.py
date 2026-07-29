@@ -88,8 +88,8 @@ class MCPClient:
             try:
                 self._process.terminate()
                 await self._process.wait()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to cleanly terminate MCP server '{self.name}' process: {e}")
                 
         # Resolve all pending requests as failed
         for fut in self._pending_requests.values():
@@ -201,7 +201,8 @@ class MCPClient:
                 if not line:
                     break
                 logger.warning(f"[MCP Server: {self.name}] {line.decode('utf-8').strip()}")
-            except Exception:
+            except Exception as e:
+                logger.debug(f"MCP server '{self.name}' stderr reader loop exiting: {e}")
                 break
 
     async def list_tools(self) -> List[Dict[str, Any]]:
@@ -339,8 +340,8 @@ class MCPManager:
         for server_name, client in list(self.clients.items()):
             try:
                 await client.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to cleanly stop MCP client '{server_name}': {e}")
             
             # Unregister tools from registry
             tool_names = self.registered_tools.pop(server_name, [])

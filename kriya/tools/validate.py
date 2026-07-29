@@ -227,7 +227,8 @@ class PolymorphicValidator:
                     cmd.append(target_test)
                 try:
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"'bundle exec rspec' failed, falling back to plain 'rspec': {e}")
                     cmd = ["rspec"]
                     if target_test:
                         cmd.append(target_test)

@@ -1,7 +1,10 @@
 import os
+import logging
 from typing import List, Optional, Dict, Any
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 class LLMConfig(BaseModel):
     provider: str = Field(default="openai")
@@ -105,8 +108,8 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                         if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
                             default_data["plugins"]["directory"] = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, v))
                     config_dict.update(default_data)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to load packaged default configuration at '{default_path}', falling back to bare defaults: {e}")
             
     # If no config_path is explicitly provided, look for 'kriya.yaml' or 'kriya.yml' in current directory
     # If not found, look for it in the Kriya Installation Directory

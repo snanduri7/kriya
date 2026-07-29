@@ -34,7 +34,8 @@ def is_local_url(url: str) -> bool:
             else:
                 return False
         return True
-    except Exception:
+    except Exception as e:
+        logger.debug(f"is_local_url check failed for '{url}', treating as non-local (fail closed): {e}")
         return False
 
 class LLMClient:
@@ -113,7 +114,8 @@ class LLMClient:
                         extra_body=extra_body,
                         response_format=response_format
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Streaming request with stream_options failed, retrying without it (server may not support it): {e}")
                     response = await client.chat.completions.create(
                         model=model,
                         messages=[

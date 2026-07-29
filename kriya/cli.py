@@ -19,6 +19,8 @@ from kriya.core import LLMClient
 from kriya.workflow import WorkflowEngine
 from kriya.agents import ReviewerAgent
 
+logger = logging.getLogger(__name__)
+
 def configure_logging(cfg: AppConfig) -> None:
     """Initializes root logging handlers (console + optional file) from AppConfig.logging."""
     if logging.getLogger().handlers:
@@ -308,7 +310,8 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
 
             try:
                 tool = kernel.registry.get("tool", tool_name)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to resolve tool '{tool_name}': {e}")
                 click.secho(f"Tool '{tool_name}' not found.", fg="red")
                 await pm.shutdown_all()
                 await kernel.stop()
@@ -422,8 +425,8 @@ def skills_list(ctx: click.Context) -> None:
                     click.secho(f"    [STAGED RULES PENDING REVIEW ({len(lines)})]:", fg="yellow")
                     for l in lines:
                         click.echo(f"      * {l}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to read staged rules file '{staged_file}': {e}")
 
 @skills_group.command(name="show")
 @click.argument('skill_name')
@@ -797,8 +800,8 @@ def ask(ctx: click.Context, question: str) -> None:
                         
                     if len(key_files_context) < 30000:
                         key_files_context += f"\n=== File: {rel_path} ===\n{file_content}\n"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to read key file '{full_path}' for ask context: {e}")
 
     llm = LLMClient(cfg)
     
@@ -832,8 +835,8 @@ def ask(ctx: click.Context, question: str) -> None:
                     rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
                 vector_store.close()
             except Exception as e:
-                pass
-                
+                logger.debug(f"Failed to query RAG database for ask command: {e}")
+
         user_prompt = (
             f"=== Repository Context ===\n{repo_context}\n\n"
             f"=== Key Files Context ===\n{key_files_context}\n\n"

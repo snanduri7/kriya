@@ -13,7 +13,7 @@ def wal_connect(*args, **kwargs):
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
     except Exception as e:
-        logger.debug(f"Failed to execute WAL/synchronous pragmas: {e}")
+        logger.warning(f"Failed to execute WAL/synchronous pragmas (concurrent access may see 'database is locked' errors): {e}")
     return conn
 
 # Globally patch sqlite3.connect

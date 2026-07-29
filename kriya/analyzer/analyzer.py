@@ -43,7 +43,8 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
         package = rel_path.replace("/", ".").replace(".py", "")
         try:
             tree = ast.parse(content, filename=rel_path)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to parse AST for '{rel_path}', falling back to generic chunking: {e}")
             tree = None
 
         if tree is not None:
@@ -190,9 +191,9 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
                     "start": 1,
                     "end": 1
                 })
-        except Exception:
-            pass
-            
+        except Exception as e:
+            logger.debug(f"Failed to parse Spring XML bean config for '{rel_path}', falling back to generic chunking: {e}")
+
     if not chunks:
         chunks = chunk_file_syntactically(content)
         for c in chunks:
@@ -263,8 +264,8 @@ def parse_gitignore(root_path: str) -> List[str]:
                     line = line.strip()
                     if line and not line.startswith("#"):
                         patterns.append(line)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to read '.gitignore' at '{gitignore_path}': {e}")
     return patterns
 
 def is_ignored(filepath: str, root_path: str, gitignore_patterns: List[str]) -> bool:
@@ -381,8 +382,8 @@ class RepositoryAnalyzer:
                     for pkg in ["fastapi", "django", "flask", "pyramid", "pytest", "black", "pydantic", "jinja2", "openai"]:
                         if pkg in content.lower():
                             dependencies.add(pkg)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to parse '{pyproject_path}': {e}")
 
         # 2. Parse requirements.txt
         if os.path.exists(req_path):
@@ -395,8 +396,8 @@ class RepositoryAnalyzer:
                         # Remove version specifiers
                         pkg = re.split(r"[=<>]", line)[0].strip()
                         dependencies.add(pkg)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to parse '{req_path}': {e}")
 
         # 3. Parse package.json
         if os.path.exists(package_json_path):
@@ -407,8 +408,8 @@ class RepositoryAnalyzer:
                     all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
                     for dep in all_deps.keys():
                         dependencies.add(dep)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to parse '{package_json_path}': {e}")
 
         # 4. Check specific framework markers
         for dep in list(dependencies):
@@ -447,8 +448,8 @@ class RepositoryAnalyzer:
                     deps = re.findall(r"<artifactId>([^<]+)</artifactId>", content)
                     for d in deps:
                         dependencies.add(d.strip())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to parse '{pom_path}': {e}")
 
         if os.path.exists(gradle_path):
             frameworks.add("Gradle (Java)")
@@ -465,8 +466,8 @@ class RepositoryAnalyzer:
                         frameworks.add("Spring Boot")
                     if "junit" in content:
                         testing.add("JUnit")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to parse '{gradle_path}': {e}")
 
         # 6. Check Go markers
         if os.path.exists(go_mod_path):
@@ -518,8 +519,8 @@ class RepositoryAnalyzer:
                         indent_spaces += 1
                     elif line.startswith("\t"):
                         indent_tabs += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to sample '{filepath}' for coding style: {e}")
 
         indentation = "Unknown"
         if total_analyzed > 0:
@@ -600,8 +601,8 @@ class RepositoryAnalyzer:
                                     current_patterns.append(os.path.join(rel_dir, line))
                                 else:
                                     current_patterns.append(line)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to read '.gitignore' at '{local_gitignore}': {e}")
             gitignore_cache[root] = current_patterns
 
             dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), self.root_path, current_patterns)]
@@ -738,8 +739,8 @@ class RepositoryAnalyzer:
                     with open(fp, "r", encoding="utf-8", errors="replace") as f:
                         head = f.read(1500)
                     samples.append(f"=== File: {rel} ===\n{head}\n")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to read sample file '{fp}' for auto-skill convention extraction: {e}")
             samples_str = "\n".join(samples)
             
             try:

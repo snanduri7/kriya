@@ -11,6 +11,8 @@ from mcp.server.mcpserver import MCPServer
 # Instantiate MCP server
 mcp = MCPServer("kriya")
 
+logger = logging.getLogger(__name__)
+
 # =====================================================================
 # 1. AST Parser Tool
 # =====================================================================
@@ -136,9 +138,8 @@ def search_code(pattern: str, path: str = ".", file_glob: str = "*") -> str:
                         if regex.search(line):
                             rel_path = os.path.relpath(file_path, abs_dir)
                             matches.append(f"{rel_path}:{line_num}: {line.strip()}")
-            except Exception:
-                # Skip unreadable binary files safely
-                pass
+            except Exception as e:
+                logger.debug(f"Skipped unreadable file '{file_path}' during search: {e}")
 
     if not matches:
         return f"No matches found for '{pattern}' (searched {total_searched} files)."

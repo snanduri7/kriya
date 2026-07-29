@@ -232,61 +232,61 @@ class DependencyGraph:
 
 
     def _parse_python(self, filepath: str, content: str) -> tuple:
+        # Deliberately does not catch parse errors here - let them propagate to
+        # index_file's except block, which already logs them properly. Swallowing
+        # here would make that existing error handler never fire for this case.
         symbols = []
         relations = []
-        try:
-            tree = ast.parse(content, filename=filepath)
-            for node in ast.walk(tree):
-                # 1. Capture Classes
-                if isinstance(node, ast.ClassDef):
-                    symbols.append({
-                        "name": node.name,
-                        "type": "class",
-                        "start_line": node.lineno,
-                        "end_line": getattr(node, "end_lineno", node.lineno)
+        tree = ast.parse(content, filename=filepath)
+        for node in ast.walk(tree):
+            # 1. Capture Classes
+            if isinstance(node, ast.ClassDef):
+                symbols.append({
+                    "name": node.name,
+                    "type": "class",
+                    "start_line": node.lineno,
+                    "end_line": getattr(node, "end_lineno", node.lineno)
+                })
+            # 2. Capture Functions
+            elif isinstance(node, ast.FunctionDef):
+                symbols.append({
+                    "name": node.name,
+                    "type": "function",
+                    "start_line": node.lineno,
+                    "end_line": getattr(node, "end_lineno", node.lineno)
+                })
+            # 3. Capture Imports
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    relations.append({
+                        "source": filepath,
+                        "target": alias.name,
+                        "type": "imports"
                     })
-                # 2. Capture Functions
-                elif isinstance(node, ast.FunctionDef):
-                    symbols.append({
-                        "name": node.name,
-                        "type": "function",
-                        "start_line": node.lineno,
-                        "end_line": getattr(node, "end_lineno", node.lineno)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    relations.append({
+                        "source": filepath,
+                        "target": node.module,
+                        "type": "imports"
                     })
-                # 3. Capture Imports
-                elif isinstance(node, ast.Import):
-                    for alias in node.names:
-                        relations.append({
-                            "source": filepath,
-                            "target": alias.name,
-                            "type": "imports"
-                        })
-                elif isinstance(node, ast.ImportFrom):
-                    if node.module:
-                        relations.append({
-                            "source": filepath,
-                            "target": node.module,
-                            "type": "imports"
-                        })
-                        
-                # 4. Capture method/function calls
-                elif isinstance(node, ast.Call):
-                    if isinstance(node.func, ast.Name):
-                        # Local call e.g. add(1, 2)
-                        relations.append({
-                            "source": filepath,
-                            "target": node.func.id,
-                            "type": "calls"
-                        })
-                    elif isinstance(node.func, ast.Attribute):
-                        # Attribute call e.g. self.evaluate()
-                        relations.append({
-                            "source": filepath,
-                            "target": node.func.attr,
-                            "type": "calls"
-                        })
-        except Exception:
-            pass
+
+            # 4. Capture method/function calls
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    # Local call e.g. add(1, 2)
+                    relations.append({
+                        "source": filepath,
+                        "target": node.func.id,
+                        "type": "calls"
+                    })
+                elif isinstance(node.func, ast.Attribute):
+                    # Attribute call e.g. self.evaluate()
+                    relations.append({
+                        "source": filepath,
+                        "target": node.func.attr,
+                        "type": "calls"
+                    })
         return symbols, relations
 
     def _parse_java(self, filepath: str, content: str) -> tuple:

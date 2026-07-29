@@ -118,7 +118,7 @@ class MavenCentralAdapter(RegistryAdapter):
                                 cache.set_release_date("java", package, version, dt)
                             return dt
         except Exception as e:
-            logger.debug(f"MavenCentral query failed for {package}:{version} - {e}")
+            logger.warning(f"MavenCentral query failed for {package}:{version} - {e}")
         return None
 
 class PyPIAdapter(RegistryAdapter):
@@ -142,7 +142,7 @@ class PyPIAdapter(RegistryAdapter):
                             cache.set_release_date("python", package, version, dt)
                         return dt
         except Exception as e:
-            logger.debug(f"PyPI query failed for {package}=={version} - {e}")
+            logger.warning(f"PyPI query failed for {package}=={version} - {e}")
         return None
 
 class NpmAdapter(RegistryAdapter):
@@ -166,7 +166,7 @@ class NpmAdapter(RegistryAdapter):
                             cache.set_release_date("javascript", package, version, dt)
                         return dt
         except Exception as e:
-            logger.debug(f"npm query failed for {package}@{version} - {e}")
+            logger.warning(f"npm query failed for {package}@{version} - {e}")
         return None
 
 class RubyGemsAdapter(RegistryAdapter):
@@ -193,7 +193,7 @@ class RubyGemsAdapter(RegistryAdapter):
                                     cache.set_release_date("ruby", package, version, dt)
                                 return dt
         except Exception as e:
-            logger.debug(f"RubyGems query failed for {package}:{version} - {e}")
+            logger.warning(f"RubyGems query failed for {package}:{version} - {e}")
         return None
 
 class GoModulesAdapter(RegistryAdapter):
@@ -218,7 +218,7 @@ class GoModulesAdapter(RegistryAdapter):
                             cache.set_release_date("go", package, version, dt)
                         return dt
         except Exception as e:
-            logger.debug(f"Go proxy query failed for {package}@{version} - {e}")
+            logger.warning(f"Go proxy query failed for {package}@{version} - {e}")
         return None
 
 class CargoAdapter(RegistryAdapter):
@@ -243,7 +243,7 @@ class CargoAdapter(RegistryAdapter):
                             cache.set_release_date("rust", package, version, dt)
                         return dt
         except Exception as e:
-            logger.debug(f"crates.io query failed for {package}:{version} - {e}")
+            logger.warning(f"crates.io query failed for {package}:{version} - {e}")
         return None
 
 class NuGetAdapter(RegistryAdapter):
@@ -269,7 +269,7 @@ class NuGetAdapter(RegistryAdapter):
                             cache.set_release_date("dotnet", package, version, dt)
                         return dt
         except Exception as e:
-            logger.debug(f"NuGet query failed for {package}:{version} - {e}")
+            logger.warning(f"NuGet query failed for {package}:{version} - {e}")
         return None
 
 class NullAdapter(RegistryAdapter):

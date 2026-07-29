@@ -3,6 +3,7 @@ import re
 import ast
 import fnmatch
 import asyncio
+import logging
 from typing import Type, Optional, Any, List, Dict
 from pydantic import BaseModel, Field
 
@@ -10,6 +11,8 @@ from kriya.plugins.plugin import BasePlugin
 from kriya.tools.tool import BaseTool, ToolExecutionError
 from kriya.config.config import AutonomyConfig
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+
+logger = logging.getLogger(__name__)
 
 # =====================================================================
 # 1. Tool Arguments Schemas
@@ -251,8 +254,8 @@ class SearchTool(BaseTool):
                             if regex.search(line):
                                 rel = os.path.relpath(file_path, base_dir)
                                 matches.append(f"{rel}:{line_num}: {line.strip()}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Skipped unreadable file '{file_path}' during search: {e}")
 
         if not matches:
             return "No matches found."
