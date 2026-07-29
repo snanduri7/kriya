@@ -65,4 +65,4 @@ Click-based command group (`kriya` entry point defined in `pyproject.toml`). Key
 
 ## Notes on the docs directory
 
-`docs/design.md` describes the target architecture and mostly matches the implementation above. `docs/user_guide.md` describes some CLI flags/config shapes (e.g. `analyze --graph/--vectors`, multi-profile `llm.profiles`) that are **not** what's currently implemented in `cli.py`/`config.py` — treat the actual code as ground truth over the user guide when the two disagree.
+`docs/design.md` and `docs/user_guide.md` were reconciled against the actual implementation (2026-07-29) — mismatches like `analyze --graph/--vectors`, multi-profile `llm.profiles`, tree-sitter/sqlite-vec/GBNF claims, etc. were corrected in place. They should now match the code; if you find a new mismatch (e.g. after a future feature change), treat the actual code as ground truth and update the docs rather than assuming the docs are still authoritative.

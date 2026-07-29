@@ -12,9 +12,9 @@ Kriya coordinates local analysis, hybrid vector-lexical indexing, and relational
 graph TD
     CLI[Kriya CLI Command] --> Kernel[Platform Kernel]
     Kernel --> Config[Configuration & Egress Manager]
-    Kernel --> SQLite[(SQLite DB: AST + sqlite-vec + FTS5 + WAL)]
+    Kernel --> SQLite[(SQLite DBs: AST Graph + Vector BLOBs + FTS5 + WAL)]
     Kernel --> Workflow[Workflow Engine]
-    Workflow --> ASTParser[Tree-Sitter Java \/ Python \/ Spring XML Parser]
+    Workflow --> ASTParser[ast-module Java \/ Python \/ Spring XML Parser]
     Workflow --> Budget[Context Budget Allocator]
     Workflow --> Escalation[Model Escalation Chain]
     Escalation --> LLMClient[LLM Client]
@@ -27,7 +27,7 @@ graph TD
 
 ### System Architecture Flow
 When running repository workflows:
-1.  **Repository Analysis**: Kriya parses codebases incrementally using tree-sitter. It stores structural relations in a SQLite database, generates hybrid vector indices, and indexes text for Lexical Search (FTS5).
+1.  **Repository Analysis**: Kriya parses codebases incrementally using Python's `ast` module (Python) and regex-based extraction (Java/Spring XML) - not tree-sitter. It stores structural relations in a SQLite database, generates hybrid vector indices, and indexes text for Lexical Search (FTS5).
 2.  **Context Retrieval (Hybrid Graph RAG)**: For a given prompt, Kriya performs hybrid semantic (cosine) and lexical (BM25) search, and traverses the AST graph (callers, callees, DI dependencies) to assemble the context within a tight token budget.
 3.  **Orchestration Pipelines**: Executes declarative workflows (Generate, Fix, Ask, Review) through specialized agents.
 4.  **Verification (Quality Gates)**: Runs isolated worktree compilation and unit tests to ensure syntax and build correctness.
@@ -37,11 +37,11 @@ When running repository workflows:
 
 ## 2. Detailed Design
 
-### 2.1 Storage Architecture (SQLite + `sqlite-vec` + FTS5)
-Rather than keeping document chunk vectors in memory-heavy JSON files (`vector_index.json`), Kriya uses a unified SQLite database:
-*   **Vector Engine (`sqlite-vec`)**: Anchors float vector embeddings (768 dimensions for Nomic, 1536 for OpenAI) directly in virtual tables. This supports disk-backed, memory-mapped incremental writes and deletes.
-*   **Metadata Integration**: Links vectors directly to the `symbols` and `relations` tables, permitting single-query joins like *"find symbols semantic to X AND located under package Y AND modified within the last 5 commits"*.
-*   **Model Invalidation & Degraded Search**: Each index record holds the generator model name and dimension. If `embedding.model` changes in the config, Kriya invalidates the vector index, marking it as dirty, alerts the user with a visible console warning, and gracefully degrades queries to lexical-only FTS matching.
+### 2.1 Storage Architecture (SQLite + FTS5)
+Rather than keeping document chunk vectors in memory-heavy JSON files, Kriya stores them in SQLite (`kriya/memory/vector.py`):
+*   **Vector Storage**: Embeddings are stored as serialized BLOBs in a plain `vector_chunks` table (not a `sqlite-vec` virtual table - no `sqlite-vec` extension is used). Cosine similarity is computed in Python at query time, not via a SQL vector index.
+*   **Separate Databases, Correlated in Python**: The vector index (`vector_index.db`) and the AST dependency graph (`dependency_graph.db`, with its own `symbols`/`relations` tables) are separate SQLite files, not joined via SQL. `kriya/workflow/workflow.py` queries each independently and merges/expands results (e.g. matched files → graph neighborhood) in application code.
+*   **Model Invalidation**: Each index record holds the generator model name and dimension. If `embedding.model` changes in the config, a mismatch raises a hard error (`LocalVectorStore.verify_model`) instructing the user to re-run `kriya analyze` - there is no automatic graceful degrade to lexical-only search.
 *   **Lexical Index (FTS5) & camelCase Splitting**: SQLite FTS5 indexes identifiers, class names, method signatures, and imports. During indexing, Kriya splits camelCase and snake_case tokens to populate a helper `split_text` column. Lexical queries automatically construct `OR` matches between the raw token and its sub-tokens to route query symbol matches.
 *   **Concurrency Conformance (WAL & timeout)**: Database connections enforce Write-Ahead Logging (`PRAGMA journal_mode=WAL;`) and a `30.0` second busy timeout. This allows multiple concurrent readers and handles indexing/run updates without throwing "database is locked" errors.
 
@@ -69,14 +69,13 @@ skills/
     └── instructions.md     # Detailed markdown code guidelines
 ```
 
-*   **Fact-Driven Matching**: Rather than relying on unreliable prompt keyword matching, Kriya activates skills based on repository facts. The parsing phase reads the project's build file (`pom.xml` or `build.gradle` for Java; `pyproject.toml` or `requirements.txt` for Python). If `ignite-core` version 2.18.0 is detected, the `ignite-java17` skill is automatically loaded for all generation and Q&A tasks in that repo.
-*   **Secondary Boosting & Overrides**: Manual tags match as a fallback boost, and users can force a skill using the CLI parameter `--skill ignite-java17` to guarantee reproducibility.
+*   **Fact-Driven Matching**: Rather than relying solely on prompt keyword matching, Kriya activates skills based on repository facts. The parsing phase reads the project's build file (`pom.xml` or `build.gradle` for Java; `pyproject.toml` or `requirements.txt` for Python). If a skill's tags match a detected dependency or framework (e.g. `ignite-core`), that skill is automatically loaded for generation and Q&A tasks in that repo.
+*   **Secondary Boosting**: Manual tag/name matches against the goal text are also considered. There is currently no CLI flag to force a specific skill by name - matching is fully automatic based on the goal text, tags, and repository facts.
 
 ### 2.4 Structured Output & Verification Contracts
 To guarantee that the Developer Agent always returns valid code modifications:
-*   **Grammar Constraints**: For local backends (Ollama, llama.cpp), Kriya passes GBNF grammar files or JSON schemas to restrict the token sampler to output the exact schema format.
-*   **Capability Probing (`kriya doctor`)**: At startup, Kriya probes the API endpoint. If the endpoint silently ignores OpenAI's `response_format` (common in older Ollama API versions), Kriya falls back to grammar constraints and regex fences.
-*   **Pydantic Schema Validation**: Every output from the Developer Agent is loaded and validated against a Pydantic schema before parsing. If validation fails, Kriya routes the error message back to the model for a single, bounded retry.
+*   **JSON Mode + Fallback Parsing**: Kriya requests JSON-formatted output from the model (`response_format={"type": "json_object"}` where supported) and falls back to extracting the first well-formed JSON array/object from the response if the model wraps output in markdown or extra text. There is no GBNF grammar constraint mechanism and no capability probing of the endpoint - this is response-side parsing tolerance, not sampler-level enforcement.
+*   **Iterative Fallback Generation**: If the model returns only a list of file paths instead of full file objects, the Developer Agent (`kriya/agents/agent.py`) falls back to generating each file's content in a separate completion call.
 *   **Strict Anchored Find/Replace Verification**: For codebase modifications, Developer Agent can emit anchored search/replace blocks. Before applying any write, Kriya normalizes whitespaces and enforces that the search anchor matches **exactly one** segment in the target file (0 or multiple matches trigger a hard failure, which is routed back to the model for correction). Additionally, Kriya verifies that the search block does not anchor on code elided from the model's skeletonized view, preventing blind modifications.
 *   **Whitespace Normalization**: Whitespace and line breaks are explicitly normalized (collapsing blanks and leading indent variations) during pattern matching.
 
@@ -89,8 +88,7 @@ To prevent context overflow, Kriya splits the LLM's context window:
     *   *Full Content*: Shows the whole file.
     *   *Skeleton*: Extracts classes, methods, and javadocs, eliding method bodies (e.g., replacement of method body with `// ... implementation elided ...`).
     *   *Signature*: Shows imports and class definitions only.
-*   **Escalated Budget Re-allocation**: When a Quality Gate failure triggers model escalation in the fallback chain, the Context Budget Allocator is re-run dynamically to scale up the skeletonized context according to the escalated model's larger native context window.
-*   **Capability Probing**: `kriya doctor` queries the local API to verify the effective input context size, and configures the allocator accordingly.
+*   **Escalated Budget Re-allocation**: When a Quality Gate failure triggers model escalation in the fallback chain, the Context Budget Allocator is re-run dynamically to scale up the skeletonized context according to the escalated model's configured `context_window` value (from `llm_chain` config, not auto-detected from the API).
 
 ### 2.6 The Agent Roster
 
@@ -112,10 +110,10 @@ To prevent context overflow, Kriya splits the LLM's context window:
 ## 3. Workflows & Pipelines
 
 ### 3.1 Incremental Repository Indexing
-Kriya builds its AST and vector indices incrementally using **Content-Hash Keying** (git blob SHA-1). 
+Kriya builds its AST and vector indices incrementally using **Content-Hash Keying** (a plain SHA-1 of file content, not a git blob hash - it doesn't use git's blob-header-prefixed hashing scheme, so hashes won't match `git hash-object` output).
 *   **Branch Switching**: Because checkout dates modify filesystem timestamps (`mtime`), keying by content hashes ensures unchanged files survive branch switches without needing re-indexing.
-*   **Resumability**: Indexing progress writes to the SQLite DB after every file batch. If interrupted, Kriya resumes from the last completed file hash.
-*   **Ignore Rules**: Respects `.gitignore` and ignores build folders (`target/`, `build/`, `node_modules/`, `dist/`) and generated source files (Protobuf, MapStruct, JAX-B) to avoid index pollution.
+*   **Effectively Resumable**: Because already-indexed files are skipped by content hash on a subsequent run, re-running `kriya analyze` after an interruption naturally skips already-completed work - there's no explicit checkpoint/resume mechanism, but the hash-comparison skip logic produces the same practical effect.
+*   **Ignore Rules**: Respects `.gitignore` plus a fixed directory-name ignore list (`target/`, `build/`, `node_modules/`, `dist/`, `.venv/`, `venv/`, `__pycache__/`, `obj/`, `bin/`). There is no content- or annotation-based filtering for generated code (e.g. Protobuf/MapStruct/JAXB markers) - only directory names are excluded.
 *   **Changed Path Scan**: Supports `kriya analyze --changed` which uses `git diff --name-only` to index changes instantly.
 
 ### 3.2 The Generate Pipeline (`kriya generate`)
@@ -133,21 +131,18 @@ Kriya builds its AST and vector indices incrementally using **Content-Hash Keyin
 3.  **Persistent Worktree Sandbox**: Reuses a persistent `.kriya/worktree` sandbox to avoid cold build compile latency (D3 latency win). The worktree is cleanly reset using git checkout and clean before and after every execution.
 4.  **Polymorphic fast-fail Quality Gates**: Run compilation checks first. If a compilation succeeds, run targeted tests (extracted from the compiler output or modified test files) first to fail fast. The full regression test suite is run only once at the end of the workflow.
 5.  **TTY-Isolated Human Approval Gate**: Prompts the user to approve applied changes before they are synced to the active repository. Click prompts are isolated to read from `/dev/tty` so piped error streams do not conflict with terminal inputs. Under non-TTY (piped) execution environments, the workflow halts with a warning unless `--yes` is specified.
-6.  **Verify & Classify**: Re-runs test gates and outputs classification:
-    *   `Verified`: Test fails before, compiles and passes after.
-    *   `Plausible Unverified`: Code compiles but no test verified it.
-    *   `Needs Human Intervention`: Error could not be resolved within bounds.
-7.  **Repair Loop Bounds**: Restricts loop execution to a maximum of 4 iterations, 15 minutes, or 5 modified files to prevent resource thrashing.
+6.  **Verify & Report**: Re-runs the full test gate and reports a binary outcome - `[SUCCESS]` if quality gates ultimately passed, `[FAILURE]` if the retry budget was exhausted. There is no three-tier Verified/Plausible/Needs-Human-Intervention classification.
+7.  **Repair Loop Bounds**: The retry count is `max(4, 1 + len(llm_chain))` - a floor of 4 attempts that grows with how many fallback models are configured, not a fixed cap. There is no wall-clock time limit or modified-file-count limit on the loop.
 
 ### 3.4 The Ask Pipeline (`kriya ask`)
-1.  **Hybrid RAG Query**: Fetches semantic chunks from `vector_index.json` and lexical matches from FTS5.
+1.  **Hybrid RAG Query**: Fetches semantic chunks from `vector_index.db` (SQLite) and lexical matches from FTS5.
 2.  **Graph Expansion**: Traverses callers, callees, and imports.
 3.  **Context Budgeting**: Fits files into the model window.
 4.  **LLM Call**: Returns the structured answer.
 
 ### 3.5 The Review Pipeline (`kriya review`)
-*   **Diff-Scoped**: Scopes reviews only to lines changed in `git diff`.
-*   **Linter Checks**: Runs native analyzers (Checkstyle, flake8, pytest) first, reserving the LLM for design and rule compliance.
+*   **File/Directory Scoped**: `kriya review <path>` reviews a single file directly, or for a directory, reviews git-modified files (falling back to scanning up to 10 recognized source files if nothing is modified) - it does not scope to changed *lines* within a diff.
+*   **LLM-Only**: There is no native linter/analyzer pre-pass (no Checkstyle/flake8 integration) - files are syntactically chunked and sent directly to the Reviewer Agent.
 
 ---
 
@@ -155,13 +150,13 @@ Kriya builds its AST and vector indices incrementally using **Content-Hash Keyin
 
 ### 4.1 Sensitive Paths & Egress Protections
 *   **Inherited Baseline Rules**: The configuration inheritance mechanism merges baseline security patterns (`.env`, `secrets`) with per-repo additions, preventing repositories from overriding baseline rules.
-*   **Approvals Gate**: Any change to sensitive files or diffs exceeding **100 lines** automatically pauses execution for manual developer review.
-*   **Audit Diffs Security**: The external egress audit log records only symbol names, file paths, and hashes, **never** the plaintext code diffs.
+*   **Approvals Gate**: Any change to sensitive files or diffs exceeding `autonomy.risk_threshold_lines` automatically pauses execution for manual developer review. The pydantic model default is 100 lines, but the packaged `default_config.yaml` overrides this to **500** - that's the effective default for a real install.
+*   **No Egress Audit Log**: There is currently no separate audit log of egress activity (symbol names, file paths, hashes, etc.) - `local_only` egress enforcement (`kriya/core/llm.py::is_local_url`) blocks non-local LLM API calls, but nothing is logged to a dedicated audit trail beyond the normal application log.
 
 ### 4.2 Multi-Language Core (Java & Python)
 Kriya fully supports Java and Python:
-*   **Parsers**: Utilizes `tree-sitter-java` and `tree-sitter-python`.
-*   **Quality Gates**: Automatically detects the build system (Maven for Java; pip/poetry for Python) and runs corresponding validation engines (`mvn clean compile test` or `poetry run pytest`).
+*   **Parsers**: Python's `ast` module for Python; regex-based extraction for Java and Spring XML (`kriya/analyzer/analyzer.py`, `kriya/analyzer/graph.py`) - not tree-sitter.
+*   **Quality Gates**: Automatically detects the build system (Maven for Java; falls back to Python by default otherwise - see `PolymorphicValidator._detect_stack`) and runs `mvn clean compile` then `mvn test` as separate calls for Java (deliberately split for fast-fail), or invokes `pytest` directly via `sys.executable` for Python (no poetry integration).
 
 ### 4.3 Staged Skill Accrual
 *   **Rule Staging**: Extracted rules are written to `staged_rules.txt` inside the skill directory.
@@ -169,4 +164,3 @@ Kriya fully supports Java and Python:
 
 ### 4.4 Concurrency & Observability
 *   **Persistent Run Audit Traces**: Every generation or fix workflow records detailed audit trace fields to `traces.db`. This includes the run goal, duration, status, modified files, active engineering skills, a JSON array of retrieved semantic chunks (with cosine scores and files), the rendered text prompt, model overrides used per debug hop, and specific compiler/test quality gate outcomes per attempt.
-*   **Evaluation Harness**: Pre-configured evaluation tests run reference coding tasks against the local repository to track recall and quality.
