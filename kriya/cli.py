@@ -4,7 +4,8 @@ import urllib.request
 import urllib.error
 import json
 import asyncio
-from typing import Optional
+import logging
+from typing import Optional, List, Dict
 import click
 
 from kriya import __version__
@@ -18,6 +19,32 @@ from kriya.core import LLMClient
 from kriya.workflow import WorkflowEngine
 from kriya.agents import ReviewerAgent
 
+def configure_logging(cfg: AppConfig) -> None:
+    """Initializes root logging handlers (console + optional file) from AppConfig.logging."""
+    if logging.getLogger().handlers:
+        return
+
+    level = getattr(logging, cfg.logging.level.upper(), logging.INFO)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    handlers: List[logging.Handler] = []
+
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setFormatter(formatter)
+    handlers.append(console_handler)
+
+    if cfg.logging.file:
+        try:
+            log_path = os.path.abspath(cfg.logging.file)
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            file_handler = logging.FileHandler(log_path)
+            file_handler.setFormatter(formatter)
+            handlers.append(file_handler)
+        except Exception as e:
+            click.secho(f"Warning: Failed to initialize log file '{cfg.logging.file}': {e}", fg="yellow", err=True)
+
+    logging.basicConfig(level=level, handlers=handlers)
+
 @click.group()
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')
 @click.pass_context
@@ -30,6 +57,7 @@ def main(ctx: click.Context, config: Optional[str]) -> None:
     except Exception as e:
         click.secho(f"Error loading configuration: {e}", fg="red", err=True)
         sys.exit(1)
+    configure_logging(ctx.obj['config'])
 
 @main.command()
 def version() -> None:
@@ -150,6 +178,7 @@ def plugins(ctx: click.Context) -> None:
             click.echo(f"  - {p.name} (v{p.version})")
     except Exception as e:
         click.secho(f"Error loading plugins: {e}", fg="red")
+        sys.exit(1)
 
 @main.group(name="prompt")
 def prompt_group() -> None:
@@ -256,6 +285,7 @@ def tools_list(ctx: click.Context) -> None:
         asyncio.run(run_list())
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
 
 @tools_group.command(name="execute")
 @click.argument('tool_name')
