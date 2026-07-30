@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from abc import ABC
 from typing import Any, Callable, Dict, List, Optional
 
@@ -86,7 +87,16 @@ class DeveloperAgent(BaseAgent):
                 lines = lines[1:]
             if lines and lines[-1].startswith("```"):
                 lines = lines[:-1]
-            cleaned = "\n".join(lines).strip()
+            return "\n".join(lines).strip()
+
+        # Reasoning models sometimes wrap the actual content in a fenced block but
+        # surround it with conversational preamble/postamble instead of returning
+        # only the fence. Prefer the largest fenced block over the raw text in that
+        # case (largest, since a short illustrative aside could also be fenced).
+        fences = re.findall(r"```[a-zA-Z0-9_+-]*\n(.*?)\n```", cleaned, re.DOTALL)
+        if fences:
+            return max(fences, key=len).strip()
+
         return cleaned
 
     @staticmethod

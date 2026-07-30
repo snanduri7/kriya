@@ -109,6 +109,39 @@ async def test_fill_missing_content_only_calls_for_missing_entries():
     assert "Other Files In This Batch" in file_prompt
     assert "pom.xml" in file_prompt
 
+def test_strip_markdown_fences_plain_leading_fence():
+    text = "```python\ndef add(a, b):\n    return a + b\n```"
+    assert DeveloperAgent._strip_markdown_fences(text) == "def add(a, b):\n    return a + b"
+
+def test_strip_markdown_fences_no_fence_passthrough():
+    text = "def add(a, b):\n    return a + b"
+    assert DeveloperAgent._strip_markdown_fences(text) == text
+
+def test_strip_markdown_fences_prose_wrapped_fence():
+    # Reproduces the deepseek-r1 fallback-model failure: the model returns the
+    # correct fenced code but surrounds it with conversational pre/postamble
+    # instead of ONLY the fence, despite being told not to.
+    text = (
+        "Now, to fix the import issue between `tests/` and `src/`, we need to "
+        "create an empty `__init__.py` file in both directories.\n\n"
+        "Here is the complete content for:\n\n"
+        "```python\n"
+        "# This is a blank file that makes the directory a Python package\n"
+        "```\n\n"
+        "This simple file will ensure proper module importing when running pytest tests."
+    )
+    assert DeveloperAgent._strip_markdown_fences(text) == (
+        "# This is a blank file that makes the directory a Python package"
+    )
+
+def test_strip_markdown_fences_picks_largest_of_multiple_fences():
+    text = (
+        "For example:\n```python\nx = 1\n```\n\n"
+        "But the real content is:\n"
+        "```python\ndef add(a, b):\n    return a + b\n```"
+    )
+    assert DeveloperAgent._strip_markdown_fences(text) == "def add(a, b):\n    return a + b"
+
 @pytest.mark.asyncio
 async def test_developer_agent_nested_json_parsing():
     cfg = AppConfig()
