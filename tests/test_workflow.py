@@ -9,7 +9,12 @@ import pytest
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.workflow.workflow import WorkflowEngine, extract_expected_files, find_missing_expected_files
+from kriya.workflow.workflow import (
+    WorkflowEngine,
+    extract_expected_files,
+    find_missing_expected_files,
+    normalize_written_filepath,
+)
 
 
 def test_extract_expected_files_from_design_tree():
@@ -55,6 +60,20 @@ def test_find_missing_expected_files_excludes_readme_unless_requested():
     written = {"App.java"}
     assert find_missing_expected_files(expected, written, goal="Build an app") == []
     assert find_missing_expected_files(expected, written, goal="Build an app with documentation") == ["README.md"]
+
+def test_normalize_written_filepath_passes_through_relative_path():
+    assert normalize_written_filepath("src/app.py", "/workspace") == "src/app.py"
+
+def test_normalize_written_filepath_makes_absolute_path_relative():
+    assert normalize_written_filepath("/workspace/app.py", "/workspace") == "app.py"
+
+def test_normalize_written_filepath_rejects_path_escaping_workspace():
+    # An absolute path outside the workspace root must not resolve to a "../.." path
+    # that would write outside the sandbox - reject it outright.
+    assert normalize_written_filepath("/elsewhere/secret.py", "/workspace") is None
+
+def test_normalize_written_filepath_rejects_empty():
+    assert normalize_written_filepath("", "/workspace") is None
 
 @pytest.mark.asyncio
 async def test_workflow_successful_run(tmp_path):
@@ -563,4 +582,50 @@ async def test_workflow_skill_gap_not_reasked_once_acknowledged(tmp_path):
 
     assert res["quality_gates_passed"] is True
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_workflow_normalizes_absolute_filepath_from_developer_agent(tmp_path):
+    """Reproduces a real observed failure: the Developer Agent sometimes returns an
+    absolute path instead of a relative one. os.path.join(worktree_path, filepath)
+    silently discards worktree_path when filepath is absolute, so the file would land
+    directly in the real workspace (bypassing the sandbox) and later crash with
+    shutil.SameFileError when the apply step tries to copy worktree -> workspace with
+    source == destination. Needs a real git repo so a real worktree gets created
+    (worktree_path != workspace_path) - the bug doesn't manifest in the fallback path
+    where they're already the same directory.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("placeholder\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True)
+
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    absolute_filepath = str(tmp_path / "app.py")
+    file_list_response = json.dumps([{"filepath": absolute_filepath, "content": "print(1)\n"}])
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        file_list_response,
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create a small script",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["files"] == ["app.py"]
+    assert (tmp_path / "app.py").exists()
+    with open(tmp_path / "app.py") as f:
+        assert f.read() == "print(1)\n"
 

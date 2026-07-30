@@ -331,6 +331,34 @@ def extract_target_test(error_context: str, files_written: List[str]) -> Optiona
                 return valid[0]
     return None
 
+def normalize_written_filepath(filepath: str, workspace_path: str) -> Optional[str]:
+    """Normalizes a filepath the Developer Agent returned to one relative to
+    workspace_path. The Agent occasionally returns an absolute path instead of a
+    relative one (observed in a real run); os.path.join(base, filepath) silently
+    discards `base` whenever `filepath` is absolute, so an unnormalized absolute path
+    bypasses the worktree sandbox entirely and writes straight into the real
+    workspace - which then collides with itself as both "source" and "destination"
+    when the apply step tries to copy worktree -> workspace, and can trip substring-
+    based heuristics (like extract_target_test's "test" in f.lower()) that assume a
+    short relative path, not an absolute one that might contain that substring
+    incidentally (e.g. a workspace directory whose own name contains "test").
+
+    Returns None (caller should skip the file and log a warning) if the result would
+    resolve outside workspace_path - i.e. treat it as invalid Agent output rather than
+    ever writing outside the sandbox, not just a cosmetic path issue.
+    """
+    if not filepath:
+        return None
+    if os.path.isabs(filepath):
+        try:
+            filepath = os.path.relpath(filepath, workspace_path)
+        except ValueError:
+            return None  # e.g. different drive on Windows
+    filepath = os.path.normpath(filepath)
+    if filepath == os.pardir or filepath.startswith(os.pardir + os.sep) or os.path.isabs(filepath):
+        return None
+    return filepath
+
 EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")
 
 def extract_expected_files(design: str) -> set:
@@ -894,7 +922,24 @@ class WorkflowEngine:
                     base_url_override=base_url_override,
                     api_key_override=api_key_override
                 )
-                
+
+                # Normalize filepaths before anything downstream uses them - the
+                # Developer Agent occasionally returns an absolute path instead of a
+                # relative one, which os.path.join(base, filepath) would silently
+                # resolve to just `filepath` (discarding `base`) in every loop below.
+                normalized_files = []
+                for file_obj in files:
+                    raw_filepath = file_obj.get("filepath", "")
+                    normalized = normalize_written_filepath(raw_filepath, workspace_path)
+                    if normalized is None:
+                        logger.warning(f"Developer Agent returned an unusable filepath '{raw_filepath}' (absolute path outside the workspace, or empty) - skipping this file.")
+                        continue
+                    if normalized != raw_filepath:
+                        logger.info(f"Normalized Developer Agent filepath '{raw_filepath}' -> '{normalized}'.")
+                    file_obj["filepath"] = normalized
+                    normalized_files.append(file_obj)
+                files = normalized_files
+
                 # Read original file contents before overwriting (crucial for fallback mode diffs)
                 for file_obj in files:
                     filepath = file_obj.get("filepath", "")
