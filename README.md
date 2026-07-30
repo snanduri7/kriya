@@ -26,6 +26,7 @@ Kriya runs entirely on **local infrastructure** — local LLMs, local tools, loc
 - **Runtime Verification Gate** (`autonomy.run_verification_enabled`, default on): after compile/test gates pass, Kriya can actually *run* the generated app and have an LLM judge grade the captured output against your goal — compiling and passing unit tests doesn't prove the thing works. A passing run marks every skill that contributed to the change as `verified` (see below).
 - **Skill Verification & Gap Detection**: skills carry a `verified`/`unverified` status, not just content. If a goal touches a skill Kriya doesn't have verified information for (or names a technology with no matching skill at all), `generate` pauses and asks you for a URL/file/text reference before proceeding, extracts rules from it, and folds them into the current run. A skill only becomes `verified` via an objective signal — a passing Runtime Verification run, or an explicit human `kriya skills promote` — never by self-reported model confidence.
 - **Skill Conflict Detection**: two skills can each be individually correct and still conflict once both are active for the same run (e.g. two broker skills pinning different values for the same shared port). When skills matched for a goal genuinely contradict each other, `generate` pauses and asks which one should govern — your answer is remembered per exact rule pair, so the same conflict is never asked about twice.
+- **Live Lookup** (`autonomy.web_lookup_enabled`, **off by default** — the one opt-in exception to "zero cloud dependency"): auto-resolves a skill gap by searching a configured backend (e.g. a self-hosted SearXNG instance, `search.base_url`) instead of always waiting on a human to paste a URL. Search queries are built *exclusively* from bare technology-name strings already extracted by code (never goal text, design text, or your actual code) — a hard, code-enforced boundary, not a prompt instruction a model could ignore. Found references are always shown for a single batch confirmation before use. Tries several ranked results per term, not just the first — real testing showed a single top hit for a well-known library is often a landing page with nothing extractable, so one attempt isn't enough to call it "resolved."
 - **Autonomy Guardrails**:
   - Automatically flags modifications touching sensitive paths (e.g. `.env`, credentials, workflows).
   - Triggers interactive TTY-isolated `[y/n]` confirmation in the CLI if risk thresholds (line limits or sensitive paths) are hit, bypassing piped stream collisions.
@@ -175,6 +176,11 @@ autonomy:
     - ".*workflows.*"
   run_verification_enabled: true          # Actually run the generated app and grade output before applying
   run_verification_timeout_seconds: 90
+  web_lookup_enabled: false                # Opt-in per project; also requires search.base_url below
+
+search:
+  base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance
+  top_k: 3                                 # Candidate results tried per term before giving up on it
 
 paths:
   plugins: "./plugins"

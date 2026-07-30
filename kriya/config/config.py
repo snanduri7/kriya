@@ -59,6 +59,21 @@ class AutonomyConfig(BaseModel):
     sandbox_memory_mb: int = Field(default=4096)
     run_verification_enabled: bool = Field(default=True)
     run_verification_timeout_seconds: int = Field(default=90)
+    web_lookup_enabled: bool = Field(default=False)
+
+class SearchConfig(BaseModel):
+    # Empty by default - live lookup stays fully inert unless a project explicitly
+    # points this at a search backend (e.g. a self-hosted SearXNG instance) AND sets
+    # autonomy.web_lookup_enabled: true. Two separate switches on purpose - flipping
+    # one alone does nothing, so a config merge/copy-paste can't silently enable
+    # outbound search.
+    base_url: str = Field(default="")
+    # How many candidate results to fetch and try per term before giving up on it.
+    # A single top-ranked result for a well-known library is often a marketing/landing
+    # page with nothing concrete to extract (confirmed via real testing against a real
+    # search backend) - trying several in order meaningfully improves the odds of
+    # actually finding something usable, which is the whole point of the feature.
+    top_k: int = Field(default=3)
 
 class FallbackModelConfig(BaseModel):
     model: str
@@ -86,6 +101,7 @@ class AppConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
+    search: SearchConfig = Field(default_factory=SearchConfig)
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""

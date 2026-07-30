@@ -761,6 +761,18 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         click.secho("This decision will be remembered for future runs of these two skills.", dim=True)
         return {"a": "prefer_a", "b": "prefer_b", "both": "both_ok"}[choice]
 
+    def on_web_lookup(found: List[Dict[str, str]]) -> bool:
+        if yes:
+            click.secho(f"\n[Auto-Skipping Live Lookup Review] found {len(found)} reference(s), discarding under -y", dim=True)
+            return False
+
+        click.secho(f"\n[Live Lookup] Found {len(found)} reference(s) to strengthen skill coverage for this run:", bold=True, fg="yellow")
+        for item in found:
+            click.echo(f"  [{item['term']}] {item['url']}")
+            if item.get("snippet"):
+                click.echo(f"    {item['snippet'][:160]}")
+        return click.confirm("\nUse these references for this run? (declining discards all of them, none partially)")
+
     async def run_workflow():
         nonlocal goal
         rag_context = ""
@@ -792,7 +804,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             approval_callback=on_approval,
             stream_callback=on_stream,
             skill_gap_callback=on_skill_gap,
-            skill_conflict_callback=on_skill_conflict
+            skill_conflict_callback=on_skill_conflict,
+            web_lookup_callback=on_web_lookup
         )
 
         if isinstance(res, dict) and res.get("status") == "knowledge_gap":
@@ -811,6 +824,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     stream_callback=on_stream,
                     skill_gap_callback=on_skill_gap,
                     skill_conflict_callback=on_skill_conflict,
+                    web_lookup_callback=on_web_lookup,
                     knowledge_risk_confirmed=True
                 )
             elif knowledge_policy == 'strict':
@@ -847,6 +861,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         stream_callback=on_stream,
                         skill_gap_callback=on_skill_gap,
                         skill_conflict_callback=on_skill_conflict,
+                        web_lookup_callback=on_web_lookup,
                         knowledge_risk_confirmed=True
                     )
                 else:

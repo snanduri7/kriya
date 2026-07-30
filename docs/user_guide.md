@@ -60,6 +60,7 @@ autonomy:
   sandbox_execution: true                  # Restrict env vars + resource-limit quality-gate/shell subprocess execution
   run_verification_enabled: true           # After compile/test gates pass, actually run the app and LLM-grade its output
   run_verification_timeout_seconds: 90     # Kill the run if it hangs past this many seconds
+  web_lookup_enabled: false                # Opt-in per project - see "search:" below and Section 4.6
 
 paths:
   skills: "./skills"                       # Path to engineering skills
@@ -69,6 +70,12 @@ paths:
 embedding:
   model: "nomic-embed-text:latest"         # Embedding model for vector indexing (768 dimensions)
   base_url: "http://localhost:11434/v1"
+
+# Only used if autonomy.web_lookup_enabled is also true - both switches must be set,
+# so a config merge/copy-paste can't silently enable outbound search on its own.
+search:
+  base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance
+  top_k: 3                                 # Candidate results tried per term before giving up on it
 ```
 
 ---
@@ -110,10 +117,11 @@ Launch the autonomous developer workflow:
 kriya -c kriya.yaml generate "Create a Spring-XML Java 17 app running Ignite 2.18.0"
 ```
 
-Three things can pause a `generate` run beyond the usual human-approval gate:
+Four things can pause a `generate` run beyond the usual human-approval gate:
 *   **Runtime Verification Gate**: once compile checks and targeted tests pass, Kriya judges whether the goal implies something runnable, and if so actually runs it and has an LLM grade the captured output against the goal - compiling and unit tests don't prove a Spring app actually starts or a message actually round-trips through a broker. If Kriya *inferred* (rather than you explicitly stating) a run command, it asks for confirmation once per run (skip with `-y`). Disable entirely with `autonomy.run_verification_enabled: false`.
-*   **Skill gap detection**: if the goal touches a skill Kriya doesn't have verified information for, or names a technology with no matching skill at all, Kriya pauses and asks you for a URL, a file path, or pasted text before proceeding - see [Section 6](#6-creating-custom-engineering-skills) and [Section 4](#4-engineering-skills) below. `-y` skips the prompt (the run proceeds on unverified skill content, same as before this feature existed).
+*   **Skill gap detection**: if the goal touches a skill Kriya doesn't have verified information for, or names a technology with no matching skill at all, Kriya pauses and asks you for a URL, a file path, or pasted text before proceeding - see [Section 6](#6-creating-custom-engineering-skills) and [Section 4](#4-engineering-skills) below. `-y` skips the prompt (the run proceeds on unverified skill content, same as before this feature existed). If `autonomy.web_lookup_enabled` is on, Kriya tries to resolve the gap itself first - see 4.6 below - and only falls back to asking you if that doesn't turn up anything.
 *   **Skill conflict detection**: if two or more skills matched for this goal turn out to have rules that genuinely contradict each other (e.g. two broker skills each pinning a different port for what must be a single shared setting), Kriya pauses and asks which one should govern this run - see [Section 4.4](#44-resolving-skill-conflicts) below. Your answer is remembered, so the same pair of skills is never asked about again. `-y` skips the prompt for that run without excluding either rule and without remembering anything.
+*   **Live lookup batch confirmation**: if `autonomy.web_lookup_enabled` is on and Kriya auto-resolved one or more skill gaps via search, it shows you everything it found in one batch and asks for a single confirm/decline before using any of it - see [Section 4.6](#46-live-lookup) below.
 
 ### 3.5 Fix Bugs (`fix`)
 Locate and repair bugs in your project using reproduced test outputs or stack traces:
@@ -185,6 +193,35 @@ Inspect traces of all past generation and repair runs:
 ```bash
 kriya -c kriya.yaml traces
 ```
+
+### 4.6 Live Lookup
+By default, when Kriya lacks verified information for a skill, it stops and asks *you* for a URL, file, or pasted text (Section 4.2 above / Section 3.4). Live lookup lets Kriya try to resolve that gap itself first, by searching a backend you configure - this is the one opt-in exception to Kriya's "zero cloud dependency" default, so it's off unless you explicitly turn it on **for that project**:
+```yaml
+autonomy:
+  web_lookup_enabled: true   # both switches required - flipping only one does nothing
+
+search:
+  base_url: "http://localhost:8080"  # a search endpoint, e.g. a self-hosted SearXNG instance
+  top_k: 3                           # candidate results tried per term before giving up
+```
+A self-hosted SearXNG instance keeps the *aggregator* local, but by default it still federates queries out to real public search engines (Google, Bing, DuckDuckGo, etc.) - configure it with only offline/local sources if you need outbound network activity bounded further than what's described below.
+
+**What can never leave your machine, even when this is on**: search queries are built *exclusively* from bare technology-name strings a bounded, deterministic code path already extracted from the goal or the Architect's proposed design (the same extraction used for missing-skill detection) - never your actual goal text, design text, or code. This is a hard, code-enforced boundary, not something a model decides at runtime, specifically so a project's proprietary content can never end up in an outbound search request.
+
+**Where it triggers**: (1) an unverified or missing skill detected from your goal text (same trigger as the regular skill-gap check), and (2) new technologies the Architect's design names that the goal never mentioned - a vague goal ("build a message broker app") might not name anything specific, but the design usually will once it makes real decisions. Both fall back to asking you directly (Section 4.2 above / Section 3.4) if live lookup doesn't turn up anything usable - Kriya never silently generates code against a technology it has zero grounding for just because a search didn't help.
+
+**What you see**: everything found across all gaps in a run is shown once, together, for a single accept/decline:
+```
+[Live Lookup] Found 2 reference(s) to strengthen skill coverage for this run:
+  [qpid-jms] https://qpid.apache.org/releases/qpid-jms-2.10.0/docs/index.html
+    Client configuration reference for the Apache Qpid JMS client...
+  [gizmolib] https://example.com/gizmolib/docs
+
+Use these references for this run? (declining discards all of them, none partially)
+```
+Declining, or `-y`, discards everything found for that run without excluding either path - it's exactly as if live lookup had found nothing, and the regular skill-gap ask-a-human flow takes over for anything still unresolved.
+
+**Real-world caveat, confirmed via testing against a real search backend**: the single top search result for a well-known library is often a landing/marketing page with nothing concrete to extract, not deep technical documentation. Kriya tries up to `search.top_k` ranked results per term and only gives up on that term - falling back to asking you - if none of them yield anything usable. Accepting the batch confirmation above means "try these," not "these are good enough" - if none of them turn out to be, you'll still be asked for a better source, same as if live lookup had never run.
 
 ---
 

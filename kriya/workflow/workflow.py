@@ -5,7 +5,7 @@ import os
 import re
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.agent import (
     ArchitectAgent,
@@ -455,6 +455,75 @@ def _stage_skill_conflicts(skill: Any, conflicts: List[Dict[str, str]]) -> None:
                 sf.write(f"\n[CONFLICT] {candidate} -- conflicts with existing rule: '{existing}' ({reason})")
     git_commit_if_tracked(staged_file, f"Kriya: flag {len(conflicts)} conflicting candidate rule(s) for skill '{skill.name}'")
 
+async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k: int) -> List[Dict[str, Any]]:
+    """Auto-resolves a list of already-extracted, bare technology-name terms via a
+    configured search backend, fetching up to `top_k` candidate pages per term
+    (best-first, ranked by the search backend). `terms` MUST already be the product of
+    a bounded, code-level extraction (e.g. extract_library_versions matched against
+    goal/design text) - this function only ever issues the term string itself as the
+    query, never any surrounding goal/design/code text, so a project's proprietary
+    content can never end up in an outbound search request. Best-effort: a term that
+    fails to search entirely is silently skipped, not an error.
+
+    Returns one entry per term with a `candidates` list (each already-fetched page's
+    url/snippet/text) so callers can try each in turn until one actually yields
+    something extractable - a single unhelpful top result (a marketing/landing page,
+    confirmed to happen in real testing) shouldn't sink the whole lookup. `url`/
+    `snippet` at the top level mirror the best candidate, for a simple human-facing
+    confirmation summary that doesn't need to enumerate every candidate."""
+    from kriya.tools.search import search_web
+    from kriya.tools.web import fetch_url_text
+
+    resolved = []
+    for term in terms:
+        try:
+            results = await search_web(f"{term} documentation", search_base_url, top_k=top_k)
+        except Exception as ex:
+            logger.debug(f"Live lookup search failed for '{term}': {ex}")
+            continue
+        if not results:
+            continue
+
+        candidates = []
+        for r in results:
+            try:
+                text = await fetch_url_text(r["url"])
+            except Exception as ex:
+                logger.debug(f"Live lookup fetch failed for '{term}' ({r['url']}): {ex}")
+                continue
+            candidates.append({"url": r["url"], "snippet": r.get("snippet", ""), "text": text})
+
+        if candidates:
+            resolved.append({
+                "term": term,
+                "url": candidates[0]["url"],
+                "snippet": candidates[0]["snippet"],
+                "candidates": candidates,
+            })
+    return resolved
+
+
+async def _extract_first_usable(
+    skill_gap_agent: Any, target: Any, gap_description: str, candidates: List[Dict[str, str]]
+) -> Dict[str, Any]:
+    """Tries extraction against each candidate's fetched text in order (best search
+    result first) and returns the first one that actually yields something (rules,
+    examples, or even a flagged conflict - any of those is real signal). A URL being
+    reachable is not the same as it containing anything usable - if none of the
+    candidates for this term have anything extractable, returns the last (empty)
+    result so downstream logging still fires, but nothing gets written to the skill."""
+    result: Dict[str, Any] = {"rules": [], "examples": {}, "conflicts": []}
+    for candidate in candidates:
+        result = await skill_gap_agent.extract_skill_update(
+            reference_text=candidate["text"],
+            gap_description=gap_description,
+            existing_rules=target.rules,
+        )
+        if result["rules"] or result["examples"] or result["conflicts"]:
+            return result
+    return result
+
+
 def _skill_verification_context(skill: Any, goal: str) -> str:
     """Best-effort description of what was actually verified (e.g. "qpid 9.2.1"),
     recorded as advisory provenance on the skill (visible via 'kriya skills list'/
@@ -494,7 +563,8 @@ class WorkflowEngine:
         error_context: Optional[str] = None,
         knowledge_risk_confirmed: bool = False,
         skill_gap_callback: Optional[Callable[[str, List[str]], Any]] = None,
-        skill_conflict_callback: Optional[Callable[[str, str, str, str, str], Any]] = None
+        skill_conflict_callback: Optional[Callable[[str, str, str, str, str], Any]] = None,
+        web_lookup_callback: Optional[Callable[[List[Dict[str, str]]], Any]] = None
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming)."""
         
@@ -643,15 +713,69 @@ class WorkflowEngine:
                 ". Provide a URL, file path, or paste reference content to strengthen it, "
                 "or decline to proceed with best-effort generation."
             )
-            gap_skill_names = [s.name for s in unverified_relevant] + missing_skill_candidates
+            # Try to auto-resolve via live lookup first, before ever asking a human to
+            # paste a URL. Query terms here are ALWAYS just the bare skill/library name
+            # strings already computed above by code (unverified_relevant skill names,
+            # missing_skill_candidates library names) - never free LLM text, never
+            # goal/design content - the hard boundary that keeps proprietary project
+            # content out of any outbound search query. Off unless a project explicitly
+            # opts in via autonomy.web_lookup_enabled AND configures search.base_url.
+            # Extraction runs immediately here (not deferred to a shared loop below) so
+            # a term only counts as "resolved" - and only gets excluded from the
+            # human-ask path further down - if live lookup actually found something
+            # USABLE, not merely because a search/fetch call technically succeeded. A
+            # term live lookup tried and came up empty on falls through to the normal
+            # human-ask path exactly as if lookup had never run at all.
+            auto_resolutions: List[Tuple[Any, Dict[str, Any]]] = []
+            if self.kernel.config.autonomy.web_lookup_enabled and self.kernel.config.search.base_url:
+                lookup_terms = [s.name for s in unverified_relevant] + missing_skill_candidates
+                found = await _resolve_via_web_lookup(
+                    lookup_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
+                )
+                proceed = bool(found)
+                if found and web_lookup_callback:
+                    try:
+                        proceed = web_lookup_callback(found)
+                        if asyncio.iscoroutine(proceed):
+                            proceed = await proceed
+                    except Exception as ex:
+                        logger.warning(f"web_lookup_callback failed, discarding auto-found references: {ex}")
+                        proceed = False
+                if proceed:
+                    for item in found:
+                        term = item["term"]
+                        target = next((s for s in unverified_relevant if s.name == term), None)
+                        if not target:
+                            try:
+                                se.create_skill_skeleton(term)
+                                se.discover_and_load()
+                                target = se.get_skill(term)
+                            except Exception as ex:
+                                logger.warning(f"Failed to bootstrap new skill '{term}' from live lookup: {ex}")
+                                continue
+                        extraction = await _extract_first_usable(self.skill_gap_agent, target, gap_reason, item["candidates"])
+                        if extraction["rules"] or extraction["examples"] or extraction["conflicts"]:
+                            auto_resolutions.append((target, extraction))
+                            logger.info(f"Live lookup found usable information for '{term}'.")
+                        else:
+                            logger.info(
+                                f"Live lookup tried {len(item['candidates'])} reference(s) for '{term}' but none "
+                                "contained anything usable - falling back to asking for a better source."
+                            )
 
-            try:
-                supplied = skill_gap_callback(gap_reason, gap_skill_names)
-                if asyncio.iscoroutine(supplied):
-                    supplied = await supplied
-            except Exception as ex:
-                logger.warning(f"skill_gap_callback failed, proceeding without it: {ex}")
-                supplied = None
+            resolved_names = {t.name for t, _ in auto_resolutions}
+            remaining_unverified = [s for s in unverified_relevant if s.name not in resolved_names]
+            remaining_missing = [m for m in missing_skill_candidates if m not in resolved_names]
+
+            supplied = None
+            if remaining_unverified or remaining_missing:
+                try:
+                    supplied = skill_gap_callback(gap_reason, [s.name for s in remaining_unverified] + remaining_missing)
+                    if asyncio.iscoroutine(supplied):
+                        supplied = await supplied
+                except Exception as ex:
+                    logger.warning(f"skill_gap_callback failed, proceeding without it: {ex}")
+                    supplied = None
 
             reference_text: Optional[str] = None
             if supplied:
@@ -676,45 +800,44 @@ class WorkflowEngine:
                 else:
                     reference_text = supplied
 
+            manual_resolutions: List[Tuple[Any, Dict[str, Any]]] = []
             if reference_text:
-                target_skills = list(unverified_relevant)
-                if not target_skills and missing_skill_candidates:
-                    new_name = missing_skill_candidates[0]
+                target_skills = list(remaining_unverified)
+                if not target_skills and remaining_missing:
+                    new_name = remaining_missing[0]
                     try:
                         se.create_skill_skeleton(new_name)
                         se.discover_and_load()
                         target_skills = [se.get_skill(new_name)]
                     except Exception as ex:
                         logger.warning(f"Failed to bootstrap new skill '{new_name}': {ex}")
-
-                for target in target_skills:
-                    extraction = await self.skill_gap_agent.extract_skill_update(
-                        reference_text=reference_text,
-                        gap_description=gap_reason,
-                        existing_rules=target.rules,
-                    )
-                    if extraction["conflicts"]:
-                        _stage_skill_conflicts(target, extraction["conflicts"])
-                        logger.info(f"Flagged {len(extraction['conflicts'])} conflicting candidate rule(s) for skill '{target.name}' for human review.")
-                    if extraction["rules"] or extraction["examples"]:
-                        _write_skill_extraction(target, extraction)
-                        # Fold the newly ingested content into THIS run's context
-                        # immediately, not just future runs.
-                        if extraction["rules"]:
-                            convention_prompt += (
-                                f"\n\n=== Engineering Skill Conventions: {target.name} (just added) ===\n"
-                                "Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
-                            )
-                        for basename, content in extraction["examples"].items():
-                            convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
-                        if target.name not in active_skills:
-                            active_skills.append(target.name)
-                        logger.info(f"Strengthened skill '{target.name}' with {len(extraction['rules'])} new rule(s) and {len(extraction['examples'])} example(s) from supplied reference.")
-                    else:
-                        logger.info(f"Supplied reference material didn't contain anything usable for skill '{target.name}'.")
+                for t in target_skills:
+                    extraction = await _extract_first_usable(self.skill_gap_agent, t, gap_reason, [{"text": reference_text}])
+                    manual_resolutions.append((t, extraction))
             else:
-                for s in unverified_relevant:
+                for s in remaining_unverified:
                     se.mark_gap_acknowledged(s.name)
+
+            for target, extraction in auto_resolutions + manual_resolutions:
+                if extraction["conflicts"]:
+                    _stage_skill_conflicts(target, extraction["conflicts"])
+                    logger.info(f"Flagged {len(extraction['conflicts'])} conflicting candidate rule(s) for skill '{target.name}' for human review.")
+                if extraction["rules"] or extraction["examples"]:
+                    _write_skill_extraction(target, extraction)
+                    # Fold the newly ingested content into THIS run's context
+                    # immediately, not just future runs.
+                    if extraction["rules"]:
+                        convention_prompt += (
+                            f"\n\n=== Engineering Skill Conventions: {target.name} (just added) ===\n"
+                            "Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
+                        )
+                    for basename, content in extraction["examples"].items():
+                        convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
+                    if target.name not in active_skills:
+                        active_skills.append(target.name)
+                    logger.info(f"Strengthened skill '{target.name}' with {len(extraction['rules'])} new rule(s) and {len(extraction['examples'])} example(s) from supplied reference.")
+                else:
+                    logger.info(f"Supplied reference material didn't contain anything usable for skill '{target.name}'.")
 
         # 1.3. Skill-to-Skill Conflict Detection & Resolution. Two independently
         # correct skills can still conflict when both are active in the same run (e.g.
@@ -925,6 +1048,127 @@ class WorkflowEngine:
                         raise ValueError("Workflow aborted: User rejected post-cutoff dependency risk in Stage 2A.")
                 else:
                     logger.warning("Stage 2A validation warning: new gaps detected but no approval callback available. Proceeding under default policy.")
+
+        # Stage 2B: Design-derived live lookup. The goal text alone can be vague
+        # ("build a message broker app"), but the Architect's design usually names
+        # concrete technologies/versions once it makes real decisions - this extends
+        # detection past what the pre-Planner skill-gap check (goal text only) could
+        # see. Live lookup is tried first (same hard query-safety boundary as Stage 1.2:
+        # bare extracted term strings only, never design/goal/code text); if it doesn't
+        # find anything usable, this now falls back to asking a human too (same
+        # skill_gap_callback as Stage 1.2) rather than silently generating code against
+        # a technology Kriya has zero grounding for - deliberately chosen over staying
+        # silent, since proceeding ungrounded is more likely to produce something wrong
+        # than a single extra confirmation prompt is to annoy. Still silently skips if
+        # lookup is disabled entirely, so a project that hasn't opted in sees no
+        # behavior change at all.
+        if self.kernel.config.autonomy.web_lookup_enabled and self.kernel.config.search.base_url:
+            new_design_terms: List[str] = []
+            try:
+                from kriya.tools.knowledge import extract_library_versions
+                known_terms = {s.name.lower() for s in se.list_skills()}
+                known_terms.update(t.lower() for s in se.list_skills() for t in s.tags)
+                known_terms.update(a.lower() for a in active_skills)
+                already_considered = {m.lower() for m in missing_skill_candidates}
+                already_considered.update(s.name.lower() for s in unverified_relevant)
+
+                for lib, _ver in extract_library_versions(design):
+                    lib_lower = lib.lower()
+                    if lib_lower in already_considered:
+                        continue
+                    if any(lib_lower in term or term in lib_lower for term in known_terms):
+                        continue
+                    if lib not in new_design_terms:
+                        new_design_terms.append(lib)
+            except Exception as ex:
+                logger.debug(f"Failed to scan architect design for design-derived lookup candidates: {ex}")
+
+            if new_design_terms:
+                found = await _resolve_via_web_lookup(
+                    new_design_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
+                )
+                proceed = bool(found)
+                if found and web_lookup_callback:
+                    try:
+                        proceed = web_lookup_callback(found)
+                        if asyncio.iscoroutine(proceed):
+                            proceed = await proceed
+                    except Exception as ex:
+                        logger.warning(f"web_lookup_callback failed, discarding design-derived references: {ex}")
+                        proceed = False
+                if proceed:
+                    for item in found:
+                        term = item["term"]
+                        try:
+                            se.create_skill_skeleton(term)
+                            se.discover_and_load()
+                            target = se.get_skill(term)
+                        except Exception as ex:
+                            logger.warning(f"Failed to bootstrap new skill '{term}' from design-derived live lookup: {ex}")
+                            continue
+                        design_gap_reason = f"The proposed architecture design mentions '{term}', which has no existing Kriya skill."
+                        extraction = await _extract_first_usable(
+                            self.skill_gap_agent, target, design_gap_reason, item["candidates"],
+                        )
+                        if not (extraction["rules"] or extraction["examples"] or extraction["conflicts"]) and skill_gap_callback:
+                            logger.info(
+                                f"Live lookup tried {len(item['candidates'])} reference(s) for design-derived "
+                                f"technology '{term}' but none contained anything usable - falling back to asking for a better source."
+                            )
+                            try:
+                                supplied = skill_gap_callback(
+                                    design_gap_reason + " Provide a URL, file path, or paste reference content to "
+                                    "strengthen it, or decline to proceed with best-effort generation.",
+                                    [term],
+                                )
+                                if asyncio.iscoroutine(supplied):
+                                    supplied = await supplied
+                            except Exception as ex:
+                                logger.warning(f"skill_gap_callback failed for design-derived term '{term}': {ex}")
+                                supplied = None
+
+                            reference_text: Optional[str] = None
+                            if supplied:
+                                if supplied.startswith("http://") or supplied.startswith("https://"):
+                                    if self.kernel.config.autonomy.egress_policy == "local_only":
+                                        logger.warning(
+                                            f"Refusing to fetch external URL '{supplied}' for skill-gap resolution "
+                                            "under local_only egress policy. Supply a file path or pasted text instead."
+                                        )
+                                    else:
+                                        try:
+                                            from kriya.tools.web import fetch_url_text
+                                            reference_text = await fetch_url_text(supplied)
+                                        except Exception as ex:
+                                            logger.warning(f"Failed to fetch skill-gap reference URL '{supplied}': {ex}")
+                                elif os.path.isfile(supplied):
+                                    try:
+                                        with open(supplied, "r", encoding="utf-8", errors="replace") as fh:
+                                            reference_text = fh.read()
+                                    except Exception as ex:
+                                        logger.warning(f"Failed to read skill-gap reference file '{supplied}': {ex}")
+                                else:
+                                    reference_text = supplied
+
+                            if reference_text:
+                                extraction = await _extract_first_usable(
+                                    self.skill_gap_agent, target, design_gap_reason, [{"text": reference_text}],
+                                )
+
+                        if extraction["conflicts"]:
+                            _stage_skill_conflicts(target, extraction["conflicts"])
+                        if extraction["rules"] or extraction["examples"]:
+                            _write_skill_extraction(target, extraction)
+                            if extraction["rules"]:
+                                skills_prompt += (
+                                    f"\n\n=== Engineering Skill Conventions: {target.name} (just added) ===\n"
+                                    "Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
+                                )
+                            for basename, content in extraction["examples"].items():
+                                skills_prompt += f"=== Example File: {basename} ===\n{content}\n"
+                            if target.name not in active_skills:
+                                active_skills.append(target.name)
+                            logger.info(f"Live lookup bootstrapped new skill '{target.name}' from architect design with {len(extraction['rules'])} rule(s).")
 
         # 4. Developer & Quality Gates (Auto-debugging loop)
         logger.info("Developer Agent implementing source files...")
