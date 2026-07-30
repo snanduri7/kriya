@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from typing import Any, Callable, Dict, List, Optional
 
-from kriya.agents.agent import ArchitectAgent, DeveloperAgent, PlannerAgent, ReviewerAgent
+from kriya.agents.agent import ArchitectAgent, DeveloperAgent, PlannerAgent, ReviewerAgent, RunVerifierAgent
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -378,6 +378,7 @@ class WorkflowEngine:
         self.architect = ArchitectAgent("architect", llm_client)
         self.developer = DeveloperAgent("developer", llm_client)
         self.reviewer = ReviewerAgent("reviewer", llm_client)
+        self.run_verifier = RunVerifierAgent("run_verifier", llm_client)
 
     async def run_generation_workflow(
         self, 
@@ -661,6 +662,11 @@ class WorkflowEngine:
         # (files in that case are never copied to workspace_path - only ever lived in
         # the worktree, which gets git-clean'd on failure).
         final_attempt_contents: Dict[str, str] = {}
+        # Tracks the human-in-the-loop confirmation for judgment-triggered (not
+        # goal-text-explicit) runtime verification, so it's asked at most once per
+        # generation run rather than on every retry attempt.
+        run_verification_confirmed = False
+        run_verification_declined = False
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -819,7 +825,73 @@ class WorkflowEngine:
                         })
                         if not test_res["success"]:
                             raise ValueError(f"TEST FAILURE:\n{test_res['output']}")
-                
+
+                # Quality Gates: Runtime Verification. Compiling and passing whatever tests
+                # exist only proves the code is valid - it says nothing about whether it does
+                # what the goal actually asked for, which matters most for goals with no test
+                # suite at all. Judgment decides per-attempt whether this goal describes
+                # self-terminating runtime behavior worth actually running and checking.
+                autonomy_cfg_rv = self.kernel.config.autonomy
+                if autonomy_cfg_rv.run_verification_enabled and not run_verification_declined:
+                    judgment = await self.run_verifier.judge(
+                        goal=goal,
+                        design=design,
+                        files_written=list(all_files_written),
+                        model_override=model_override,
+                        base_url_override=base_url_override,
+                        api_key_override=api_key_override,
+                    )
+                    if judgment["should_run"]:
+                        proceed_with_run = True
+                        if judgment["command_source"] == "inferred" and not run_verification_confirmed:
+                            if autonomy_cfg_rv.mode == "human-in-the-loop":
+                                confirm_reason = (
+                                    "Kriya judged that this goal describes runtime behavior compile/test "
+                                    "checks can't verify, and wants to actually run the generated app:\n"
+                                    f"  Command: {' '.join(judgment['run_command'])}\n"
+                                    f"  Looking for: {judgment['success_criteria']}\n"
+                                    "Allow Kriya to execute this command inside the sandboxed worktree?"
+                                )
+                                if approval_callback:
+                                    approved = approval_callback([], confirm_reason)
+                                    if asyncio.iscoroutine(approved):
+                                        approved = await approved
+                                    proceed_with_run = bool(approved)
+                                else:
+                                    logger.warning("Runtime verification warrants human approval but no approval_callback is available. Proceeding under default policy.")
+                            if not proceed_with_run:
+                                run_verification_declined = True
+                        if proceed_with_run:
+                            run_verification_confirmed = True
+                            logger.info(f"Quality Gates: Running runtime verification: {' '.join(judgment['run_command'])}")
+                            run_res = validator.run_app(
+                                judgment["run_command"],
+                                timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                            )
+                            if run_res["timed_out"]:
+                                grade = {"passed": False, "reasoning": f"Run timed out after {autonomy_cfg_rv.run_verification_timeout_seconds}s."}
+                            elif run_res["returncode"] != 0:
+                                grade = {"passed": False, "reasoning": f"Process exited with code {run_res['returncode']}."}
+                            else:
+                                grade = await self.run_verifier.grade(
+                                    goal=goal,
+                                    success_criteria=judgment["success_criteria"],
+                                    output=run_res["output"],
+                                    returncode=run_res["returncode"],
+                                    model_override=model_override,
+                                    base_url_override=base_url_override,
+                                    api_key_override=api_key_override,
+                                )
+                            gate_outcomes.append({
+                                "attempt": retry_count + 1,
+                                "type": "run_verification",
+                                "success": grade["passed"],
+                                "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
+                            })
+                            if not grade["passed"]:
+                                raise ValueError(f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}\n\nCaptured output:\n{run_res['output']}")
+                            logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
+
                 # If we made it here, Quality Gates passed successfully!
                 logger.info("Quality Gates check PASSED.")
                 
@@ -928,9 +1000,13 @@ class WorkflowEngine:
                 # Autonomous Skill Accrual / Lesson extraction
                 if retry_count > 0 and chain:
                     try:
-                        logger.info("Escalation model successfully resolved the compilation/test issue! Extracting lessons learned...")
+                        error_kind = (
+                            "runtime verification" if "RUNTIME VERIFICATION" in error_context
+                            else "compilation/test"
+                        )
+                        logger.info(f"Escalation model successfully resolved the {error_kind} issue! Extracting lessons learned...")
                         extract_prompt = (
-                            f"A compilation/test error occurred:\n{error_context}\n\n"
+                            f"A {error_kind} error occurred:\n{error_context}\n\n"
                             f"The files were successfully fixed with this final content:\n"
                         )
                         for filepath in all_files_written:
@@ -941,9 +1017,9 @@ class WorkflowEngine:
                             except Exception as e:
                                 logger.debug(f"Failed to read '{full_path}' for lesson extraction: {e}")
                         extract_prompt += "\nExtract a single, concise coding rule (maximum 1 sentence) explaining the fix so that future models can avoid the same error. Do not output anything else, just the sentence starting with a capital letter."
-                        
+
                         lesson = await self.llm.complete(
-                            system_prompt="You are a senior compiler architect. Extract the core rule/lesson from this compile/test error resolution.",
+                            system_prompt="You are a senior software engineer. Extract the core rule/lesson from this error resolution so future generations of similar code avoid repeating it.",
                             user_prompt=extract_prompt,
                             model_override=model_override,
                             base_url_override=base_url_override,
@@ -994,7 +1070,12 @@ class WorkflowEngine:
                 logger.warning(f"Quality Gates FAILED (Attempt {retry_count}/{max_retries}): {e}")
                 error_context = str(e)
                 
-                fail_type = "compile" if "COMPILATION" in error_context else ("test" if "TEST" in error_context else "general_error")
+                fail_type = (
+                    "compile" if "COMPILATION" in error_context
+                    else "run_verification" if "RUNTIME VERIFICATION" in error_context
+                    else "test" if "TEST" in error_context
+                    else "general_error"
+                )
                 if not any(o.get("attempt") == retry_count and o.get("type") == fail_type for o in gate_outcomes):
                     gate_outcomes.append({
                         "attempt": retry_count,

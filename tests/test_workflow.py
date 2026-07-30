@@ -1,4 +1,6 @@
+import json
 import os
+import sys
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -56,6 +58,7 @@ def test_find_missing_expected_files_excludes_readme_unless_requested():
 @pytest.mark.asyncio
 async def test_workflow_successful_run(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     
@@ -81,6 +84,7 @@ async def test_workflow_successful_run(tmp_path):
 @pytest.mark.asyncio
 async def test_workflow_syntax_error_auto_debugging_loop(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     
@@ -114,6 +118,7 @@ async def test_workflow_incomplete_generation_triggers_retry(tmp_path):
     (e.g. only pom.xml instead of pom.xml + 6 source files) must not be accepted as
     a passing run just because what little it wrote happens to compile."""
     cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -147,6 +152,7 @@ async def test_workflow_fallback_chain(tmp_path):
         FallbackModelConfig(model="fallback-1"),
         FallbackModelConfig(model="fallback-2")
     ]
+    cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     
@@ -193,6 +199,7 @@ async def test_workflow_fallback_chain(tmp_path):
 @pytest.mark.asyncio
 async def test_workflow_cumulative_sandbox_sync(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     
@@ -236,4 +243,90 @@ async def test_workflow_cumulative_sandbox_sync(tmp_path):
          # Both files should actually exist in the workspace
          assert os.path.exists(os.path.join(tmp_path, "file1.py"))
          assert os.path.exists(os.path.join(tmp_path, "file2.py"))
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_goal_explicit_passes_without_confirmation(tmp_path):
+    """A goal-text-explicit run command is pre-authorized by the user and must proceed
+    without needing the human-in-the-loop confirmation gate, even though that's the
+    default autonomy mode."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('[SUCCESS] it worked')\n"}])
+    judge_response = json.dumps({
+        "should_run": True,
+        "run_command": [sys.executable, "app.py"],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]"
+    })
+    grade_response = json.dumps({"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."})
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        file_list_response,       # Developer
+        judge_response,           # RunVerifier.judge
+        grade_response,           # RunVerifier.grade
+        "Review: Approved"        # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    res = await we.run_generation_workflow(
+        goal="Run with python app.py; it should print [SUCCESS]",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert "app.py" in res["files"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_declined_still_passes_on_compile_alone(tmp_path):
+    """Declining the judgment-triggered confirmation must only skip the run-verification
+    step itself, not fail the whole generation - compile passing is still a valid pass.
+    The same approval_callback also gates the (separate) pre-apply diff approval, which
+    must still be asked and approved independently."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "human-in-the-loop"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('hello')\n"}])
+    judge_response = json.dumps({
+        "should_run": True,
+        "run_command": [sys.executable, "app.py"],
+        "command_source": "inferred",
+        "success_criteria": "Output contains hello"
+    })
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        file_list_response,       # Developer
+        judge_response,           # RunVerifier.judge (grade must NOT be called after this)
+        "Review: Approved"        # Reviewer
+    ])
+
+    def approval_cb(files, reason):
+        # Run-verification's own confirmation is called with an empty diff list;
+        # the pre-apply diff-approval gate is called with the real diffs. Decline
+        # only the former to isolate what's being tested.
+        return bool(files)
+
+    we = WorkflowEngine(kernel, llm)
+
+    res = await we.run_generation_workflow(
+        goal="Create a small script",
+        workspace_path=str(tmp_path),
+        approval_callback=approval_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert "app.py" in res["files"]
+    # llm.complete's side_effect list has exactly 5 entries - if grade() had been
+    # called despite the decline, AsyncMock would have raised StopAsyncIteration.
+    assert llm.complete.await_count == 5
 

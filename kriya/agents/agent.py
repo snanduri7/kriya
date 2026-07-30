@@ -329,6 +329,133 @@ class DeveloperAgent(BaseAgent):
             raise ValueError(f"Failed to parse Developer Agent response as JSON: {e}. Raw response: {response_str}") from e
 
 
+class RunVerifierAgent(BaseAgent):
+    """Drives the Runtime Verification Gate: decides whether a goal describes behavior
+    that compiling/testing alone can't verify, and (if so) grades captured output from
+    actually running the generated app against that goal. Compile and test checks only
+    prove the code is valid - they say nothing about whether it does what was asked."""
+
+    @property
+    def system_prompt(self) -> str:
+        return (
+            "You are the Kriya Run Verification Judge.\n"
+            "You decide whether a goal describes observable RUNTIME BEHAVIOR (e.g. \"send a "
+            "message and print the result\", \"start a server and respond to a request\") that "
+            "compiling and passing the existing test suite would NOT actually verify.\n"
+            "Only self-terminating/batch entrypoints can be verified this way - a script or app "
+            "that runs, does its work, and exits on its own. Do not propose running a long-lived "
+            "server/daemon that never exits by itself.\n"
+            "Return ONLY a JSON object, no markdown fences, no extra commentary, with exactly "
+            "these fields:\n"
+            "{\n"
+            '  "should_run": true or false,\n'
+            '  "run_command": ["executable", "arg1", "arg2"] or null,\n'
+            '  "command_source": "goal_explicit" or "inferred",\n'
+            '  "success_criteria": "one or two sentences describing what observable output would prove success"\n'
+            "}\n"
+            "If the goal explicitly states how to run the app (e.g. names a specific command "
+            "like \"mvn exec:exec\" or \"run with python app.py\"), extract that exact command "
+            "and set command_source to \"goal_explicit\". Otherwise, if you can reasonably infer "
+            "a run command from the generated files (e.g. a pom.xml with an exec-maven-plugin "
+            "block implies [\"mvn\", \"exec:exec\"]; a Python file with a __main__ guard implies "
+            "[\"python\", \"that_file.py\"]), set command_source to \"inferred\". If there is no "
+            "runnable, self-terminating entrypoint at all (a library, a config file, a long-running "
+            "service, or the goal doesn't describe observable behavior), set should_run to false, "
+            "run_command to null, and success_criteria to an empty string."
+        )
+
+    async def judge(
+        self,
+        goal: str,
+        design: str,
+        files_written: List[str],
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        prompt = (
+            f"=== Architecture Design ===\n{design}\n\n"
+            f"=== Files Generated (already compiled and passed any existing tests) ===\n"
+            f"{chr(10).join(files_written)}\n\n"
+            f"=== Goal ===\n{goal}\n\n"
+            "Decide whether this goal warrants runtime verification, per the rules above."
+        )
+        response_str = await self.llm.complete(
+            self.system_prompt,
+            prompt,
+            json_mode=True,
+            model_override=model_override,
+            base_url_override=base_url_override,
+            api_key_override=api_key_override,
+        )
+        try:
+            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+        except Exception as e:
+            logger.warning(f"Run Verifier judge() returned unparseable JSON, skipping run verification: {e}")
+            return {"should_run": False, "run_command": None, "command_source": "inferred", "success_criteria": ""}
+
+        if not isinstance(parsed, dict):
+            return {"should_run": False, "run_command": None, "command_source": "inferred", "success_criteria": ""}
+
+        run_command = parsed.get("run_command")
+        if not isinstance(run_command, list) or not all(isinstance(x, str) for x in run_command):
+            run_command = None
+
+        return {
+            "should_run": bool(parsed.get("should_run")) and run_command is not None,
+            "run_command": run_command,
+            "command_source": parsed.get("command_source") if parsed.get("command_source") in ("goal_explicit", "inferred") else "inferred",
+            "success_criteria": parsed.get("success_criteria") or "",
+        }
+
+    async def grade(
+        self,
+        goal: str,
+        success_criteria: str,
+        output: str,
+        returncode: Optional[int],
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        grader_system_prompt = (
+            "You are the Kriya Run Verification Grader.\n"
+            "You will be given the original goal, a description of what a successful run's "
+            "output should show, and the ACTUAL captured stdout/stderr and exit code from "
+            "actually running the generated application.\n"
+            "Decide whether the captured output demonstrates the goal was genuinely achieved - "
+            "not merely that the process didn't crash. Be strict: exit code 0 alone is not "
+            "sufficient evidence if the described behavior isn't actually visible in the output.\n"
+            "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
+            '{"passed": true or false, "reasoning": "one or two sentences citing specific evidence from the output"}'
+        )
+        prompt = (
+            f"=== Goal ===\n{goal}\n\n"
+            f"=== Expected Success Criteria ===\n{success_criteria}\n\n"
+            f"=== Actual Exit Code ===\n{returncode}\n\n"
+            f"=== Actual Captured Output ===\n{output}\n\n"
+            "Did this run actually succeed per the criteria above?"
+        )
+        response_str = await self.llm.complete(
+            grader_system_prompt,
+            prompt,
+            json_mode=True,
+            model_override=model_override,
+            base_url_override=base_url_override,
+            api_key_override=api_key_override,
+        )
+        try:
+            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+        except Exception as e:
+            logger.warning(f"Run Verifier grade() returned unparseable JSON, treating as failure: {e}")
+            return {"passed": False, "reasoning": f"Grader response could not be parsed: {e}"}
+
+        if not isinstance(parsed, dict):
+            return {"passed": False, "reasoning": "Grader response was not a JSON object."}
+
+        return {"passed": bool(parsed.get("passed")), "reasoning": parsed.get("reasoning") or ""}
+
+
 class ReviewerAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:

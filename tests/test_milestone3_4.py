@@ -46,7 +46,8 @@ async def test_staged_skill_accrual(tmp_path):
     cfg.paths.skills = str(tmp_path / "skills")
     cfg.paths.logs = str(tmp_path / "logs")
     cfg.llm_chain = [FallbackModelConfig(model="model-fallback", base_url="http://localhost", api_key="test")]
-    
+    cfg.autonomy.run_verification_enabled = False
+
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     

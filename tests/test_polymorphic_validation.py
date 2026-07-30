@@ -1,3 +1,4 @@
+import sys
 from unittest.mock import MagicMock, patch
 
 from kriya.config import AppConfig
@@ -35,6 +36,41 @@ def test_python_compile_check(tmp_path):
     res2 = validator.run_compile_check(["invalid.py"])
     assert res2["success"] is False
     assert "Syntax error" in res2["output"]
+
+def test_run_app_success(tmp_path):
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "app.py").write_text("print('[SUCCESS] it worked')\n")
+
+    res = validator.run_app([sys.executable, "app.py"], timeout=10)
+
+    assert res["success"] is True
+    assert res["timed_out"] is False
+    assert res["returncode"] == 0
+    assert "[SUCCESS] it worked" in res["output"]
+
+def test_run_app_nonzero_exit(tmp_path):
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "app.py").write_text("import sys\nsys.exit(1)\n")
+
+    res = validator.run_app([sys.executable, "app.py"], timeout=10)
+
+    assert res["success"] is False
+    assert res["timed_out"] is False
+    assert res["returncode"] == 1
+
+def test_run_app_timeout(tmp_path):
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "app.py").write_text("import time\ntime.sleep(10)\n")
+
+    res = validator.run_app([sys.executable, "app.py"], timeout=1)
+
+    assert res["success"] is False
+    assert res["timed_out"] is True
+
+def test_run_app_no_command():
+    validator = PolymorphicValidator(".")
+    res = validator.run_app([])
+    assert res["success"] is False
 
 def test_python_run_tests_resolves_src_layout_imports(tmp_path):
     # Reproduces a real generation failure: a src/ layout project where the

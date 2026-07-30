@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kriya.agents.agent import DeveloperAgent, PlannerAgent
+from kriya.agents.agent import DeveloperAgent, PlannerAgent, RunVerifierAgent
 from kriya.config import AppConfig
 from kriya.core.llm import LLMClient
 
@@ -159,10 +159,106 @@ async def test_developer_agent_nested_json_parsing():
     }
     """
     llm.complete = AsyncMock(return_value=json_response)
-    
+
     dev = DeveloperAgent("developer", llm)
     files = await dev.run_generation("Goal: Add math lib", "Design specs", "Existing code")
-    
+
     assert len(files) == 1
     assert files[0]["filepath"] == "math_lib.py"
     assert files[0]["content"] == "def add(a, b): return a + b"
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_goal_explicit_command():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "run_command": ["python", "app.py"],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains 'Hello, world!'"
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Run with python app.py and print Hello, world!", design="", files_written=["app.py"])
+
+    assert judgment["should_run"] is True
+    assert judgment["run_command"] == ["python", "app.py"]
+    assert judgment["command_source"] == "goal_explicit"
+    assert "Hello, world!" in judgment["success_criteria"]
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_no_runnable_entrypoint():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": False,
+        "run_command": None,
+        "command_source": "inferred",
+        "success_criteria": ""
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Add a utility library", design="", files_written=["utils.py"])
+
+    assert judgment["should_run"] is False
+    assert judgment["run_command"] is None
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_missing_run_command_forces_should_run_false():
+    # A model that says should_run=true but omits a usable run_command must not be
+    # trusted - there's nothing to actually execute.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "run_command": None,
+        "command_source": "inferred",
+        "success_criteria": "Something"
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["should_run"] is False
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_unparseable_response_defaults_to_no_run():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="I cannot comply with this request.")
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["should_run"] is False
+    assert judgment["run_command"] is None
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_passed():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": True,
+        "reasoning": "The output contains the expected [SUCCESS] line."
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(
+        goal="Print [SUCCESS]", success_criteria="Output contains [SUCCESS]",
+        output="[SUCCESS] done", returncode=0
+    )
+
+    assert grade["passed"] is True
+    assert "SUCCESS" in grade["reasoning"]
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_unparseable_response_defaults_to_failure():
+    # A grader response that can't be parsed must fail closed, not silently pass.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="not json at all")
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
+
+    assert grade["passed"] is False

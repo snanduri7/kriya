@@ -52,6 +52,7 @@ async def test_autonomy_risk_threshold_escalation(tmp_path):
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.risk_threshold_lines = 10 # low threshold
+    cfg.autonomy.run_verification_enabled = False
     
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)

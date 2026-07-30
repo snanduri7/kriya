@@ -256,5 +256,25 @@ class PolymorphicValidator:
  
         except Exception as e:
             return {"success": False, "output": f"Failed to execute local test suite: {e}"}
- 
+
         return {"success": True, "output": "Stack test execution skipped."}
+
+    def run_app(self, command: List[str], timeout: int = 90) -> Dict[str, Any]:
+        """Executes an already-resolved run command for a self-terminating/batch entrypoint
+        (not a long-running server) inside the sandboxed workspace, and returns the raw
+        execution result. Does not itself judge whether the output is CORRECT - only
+        whether the process completed within the timeout and its exit code. Callers
+        (the Runtime Verification Gate) are responsible for grading the captured output
+        against the goal."""
+        if not command:
+            return {"success": False, "timed_out": False, "returncode": None, "output": "No run command provided."}
+        try:
+            res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
+        except Exception as e:
+            return {"success": False, "timed_out": False, "returncode": None, "output": f"Failed to execute run command: {e}"}
+        return {
+            "success": res["returncode"] == 0 and not res["timeout"],
+            "timed_out": res["timeout"],
+            "returncode": res["returncode"],
+            "output": res["stdout"] + "\n" + res["stderr"],
+        }

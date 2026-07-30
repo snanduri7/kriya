@@ -57,6 +57,8 @@ class AutonomyConfig(BaseModel):
     ])
     sandbox_cpu_seconds: int = Field(default=240)
     sandbox_memory_mb: int = Field(default=4096)
+    run_verification_enabled: bool = Field(default=True)
+    run_verification_timeout_seconds: int = Field(default=90)
 
 class FallbackModelConfig(BaseModel):
     model: str
