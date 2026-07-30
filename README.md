@@ -23,6 +23,8 @@ Kriya runs entirely on **local infrastructure** — local LLMs, local tools, loc
 - **Method-Level Syntactic Chunker**: Chunk boundaries align to code structures (class headers, function headers, method signatures), prepending enclosure package, class javadocs, and path headers.
 - **Hybrid RAG & camelCase Splitting**: Joins cosine vector similarity with FTS5 lexical searches, splitting camelCase/snake_case tokens during indexing to route symbol name matches.
 - **Fast-Fail Quality Gates**: Compiles and runs targeted tests first inside a persistent git worktree sandbox (.kriya/worktree) to preserve compilation caches and reduce latencies.
+- **Runtime Verification Gate** (`autonomy.run_verification_enabled`, default on): after compile/test gates pass, Kriya can actually *run* the generated app and have an LLM judge grade the captured output against your goal — compiling and passing unit tests doesn't prove the thing works. A passing run marks every skill that contributed to the change as `verified` (see below).
+- **Skill Verification & Gap Detection**: skills carry a `verified`/`unverified` status, not just content. If a goal touches a skill Kriya doesn't have verified information for (or names a technology with no matching skill at all), `generate` pauses and asks you for a URL/file/text reference before proceeding, extracts rules from it, and folds them into the current run. A skill only becomes `verified` via an objective signal — a passing Runtime Verification run, or an explicit human `kriya skills promote` — never by self-reported model confidence.
 - **Autonomy Guardrails**:
   - Automatically flags modifications touching sensitive paths (e.g. `.env`, credentials, workflows).
   - Triggers interactive TTY-isolated `[y/n]` confirmation in the CLI if risk thresholds (line limits or sensitive paths) are hit, bypassing piped stream collisions.
@@ -124,6 +126,15 @@ Generate or refactor code autonomously based on a goal:
 .venv/bin/kriya generate "Create a calculator module in python with test cases"
 ```
 
+### Manage Engineering Skills
+List, inspect, and maintain the verification status of skills:
+```bash
+.venv/bin/kriya skills list                              # shows [VERIFIED]/[UNVERIFIED] per skill
+.venv/bin/kriya skills show <skill_name>                 # verification provenance + rules/instructions
+.venv/bin/kriya skills promote <source> <target> --all    # push an approved lesson into the shared skill library
+.venv/bin/kriya skills unverify <skill_name>              # reset a skill you know has gone stale
+```
+
 ### Start the Kriya MCP Server
 Run the local MCP tool server:
 ```bash
@@ -161,6 +172,8 @@ autonomy:
     - ".*\\.env$"
     - ".*secrets.*"
     - ".*workflows.*"
+  run_verification_enabled: true          # Actually run the generated app and grade output before applying
+  run_verification_timeout_seconds: 90
 
 paths:
   plugins: "./plugins"

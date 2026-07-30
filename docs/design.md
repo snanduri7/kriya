@@ -22,6 +22,7 @@ graph TD
     Sandbox --> Gates[Fast-Fail Quality Gates]
     Gates --> Targeted[Targeted Test Selection]
     Gates --> FullSuite[Full Suite Regression]
+    Gates --> RunVerify[Runtime Verification Gate]
     Workflow --> Approval[TTY-Isolated Human Gate]
 ```
 
@@ -31,7 +32,8 @@ When running repository workflows:
 2.  **Context Retrieval (Hybrid Graph RAG)**: For a given prompt, Kriya performs hybrid semantic (cosine) and lexical (BM25) search, and traverses the AST graph (callers, callees, DI dependencies) to assemble the context within a tight token budget.
 3.  **Orchestration Pipelines**: Executes declarative workflows (Generate, Fix, Ask, Review) through specialized agents.
 4.  **Verification (Quality Gates)**: Runs isolated worktree compilation and unit tests to ensure syntax and build correctness.
-5.  **Review (Static + LLM)**: Evaluates the diff against base branches, matching structured rules, and outputs formatted findings.
+5.  **Runtime Verification (optional gate)**: After targeted tests pass, judges whether the goal implies something runnable, actually executes it in the sandbox, and has an LLM grade the captured output against the goal - compiling and passing unit tests doesn't prove a running system behaves correctly. See §2.7.
+6.  **Review (Static + LLM)**: Evaluates the diff against base branches, matching structured rules, and outputs formatted findings.
 
 ---
 
@@ -72,6 +74,22 @@ skills/
 *   **Fact-Driven Matching**: Rather than relying solely on prompt keyword matching, Kriya activates skills based on repository facts. The parsing phase reads the project's build file (`pom.xml` or `build.gradle` for Java; `pyproject.toml` or `requirements.txt` for Python). If a skill's tags match a detected dependency or framework (e.g. `ignite-core`), that skill is automatically loaded for generation and Q&A tasks in that repo.
 *   **Secondary Boosting**: Manual tag/name matches against the goal text are also considered. There is currently no CLI flag to force a specific skill by name - matching is fully automatic based on the goal text, tags, and repository facts.
 
+#### 2.3.1 Skill Content Trust & Verification
+A skill's content (its rules/instructions) and its trustworthiness are tracked separately - `Skill` carries `verified: bool`, `verification_gap_acknowledged: bool`, `verified_at: Optional[str]`, and `verified_context: Optional[str]` (persisted in `skill.yaml`, written via `SkillEngine._set_skill_yaml_fields`). Verification is deliberately anchored to an *objective signal*, not LLM self-reported confidence - a model that writes a wrong config value doesn't reliably flag itself as unsure. There are exactly two ways a skill becomes `verified`:
+1.  A `generate` run that used the skill passes the Runtime Verification Gate (§2.7) - every `active_skill` in that run is marked verified, with `verified_context` computed by `_skill_verification_context()` (`kriya/workflow/workflow.py`) cross-referencing the goal text's library/version mentions (`extract_library_versions`) against the skill's name/tags, falling back to `"version unspecified"`.
+2.  A human runs `kriya skills promote SOURCE TARGET (--rule | --all)`, which always writes into Kriya's shared/global skill library (`_get_global_skills_dir()`, not the active project-local `paths.skills`) and requires interactive confirmation with no `-y` bypass - it permanently changes shared knowledge every future project inherits.
+
+There is no manual "mark verified" command, and a *failing* Runtime Verification run never auto-demotes a skill (attributing failure to one specific active skill among several is unreliable) - demotion is always the deliberate `kriya skills unverify <name>` command, which simply resets the flags without touching rule content.
+
+#### 2.3.2 Skill Gap Detection & Reference-Material Extraction
+Before Planner/Architect run, the workflow checks the matched skill set for two kinds of gap and, if found, invokes a `skill_gap_callback` (wired to an interactive CLI prompt by default, skippable with `-y`) exactly once per skill per run:
+*   **Unverified-but-relevant**: a matched skill is `verified == False` and hasn't already had its gap acknowledged this run.
+*   **Missing entirely**: the goal names a library/version (via `extract_library_versions`) with no skill whose tags match it at all - offers to bootstrap a brand-new skill.
+
+The callback's answer (a URL, a local file path, or pasted text) is fetched/read - URL fetches honor `autonomy.egress_policy` (refused under `local_only`) - and handed to `SkillGapAgent.extract_skill_update()` (`kriya/agents/agent.py`), which extracts candidate rules/examples and cross-checks them against the skill's *existing* rules, routing anything that contradicts an existing rule into a separate `conflicts` list instead of silently appending it (code-level mutual exclusivity is enforced after parsing - a real test against a non-reasoning local model showed prompt instructions alone weren't reliable here). Non-conflicting extractions are written straight into the skill's live files (not staged) - the user actively supplying material in response to Kriya's own question is treated as sufficient intent - and folded into the *current* run's context immediately. Conflicts are staged separately for human review, never silently overwriting the existing rule. Every skill-file write in this whole subsystem (`mark_verified`, extraction writes, conflict staging, `create_skill_skeleton`, `skills promote`) goes through `git_commit_if_tracked()` (`kriya/skills/skill.py`), a best-effort per-file commit that gives skill content an ordinary `git log`/`git revert`-based undo and audit trail.
+
+**Known gaps, not yet built**: skill-to-skill conflict/overlap detection (e.g. two skills both claiming the same broker port) has no definition of "overlapping" yet; there's no automatic staleness trigger (expiry, version-drift) - only the manual `unverify` escape hatch; a bad extraction is live in a skill's `rules.txt`, unverified, before it's ever proven right or wrong - current mitigation is that nothing *marked* verified until a real pass proves it, which limits but doesn't eliminate the exposure window.
+
 ### 2.4 Structured Output & Verification Contracts
 To guarantee that the Developer Agent always returns valid code modifications:
 *   **JSON Mode + Fallback Parsing**: Kriya requests JSON-formatted output from the model (`response_format={"type": "json_object"}` where supported) and falls back to extracting the first well-formed JSON array/object from the response if the model wraps output in markdown or extra text. There is no GBNF grammar constraint mechanism and no capability probing of the endpoint - this is response-side parsing tolerance, not sampler-level enforcement.
@@ -104,6 +122,22 @@ To prevent context overflow, Kriya splits the LLM's context window:
 *   **Reviewer Agent**:
     *   *Input*: User Goal + Active Diffs + Code Files.
     *   *Output*: Structured Markdown code review findings.
+*   **RunVerifierAgent** (§2.7):
+    *   *Input (judge)*: Goal + repository facts. *Output*: whether a run is implied, an inferred run command, and success criteria.
+    *   *Input (grade)*: Goal + success criteria + captured stdout/stderr/exit code. *Output*: pass/fail verdict with cited evidence.
+*   **SkillGapAgent** (§2.3.2):
+    *   *Input*: A skill's existing rules + supplied reference material (URL/file/text).
+    *   *Output*: extracted candidate rules/examples, plus a separate `conflicts` list for anything contradicting an existing rule.
+
+### 2.7 Runtime Verification Gate
+Compiling and passing unit tests doesn't prove a running system behaves correctly - the gate that motivated this was catching messaging-config mistakes (wrong broker settings, wrong delivery semantics) that only manifest at runtime, invisible to compile-only checking. Placed as a new tier right after targeted-test success, deliberately *before* the pre-apply human-approval gate and before worktree cleanup, so the generated files are guaranteed to still be present to run:
+*   **Judge**: `RunVerifierAgent.judge()` decides `should_run`, infers a `run_command` if the goal doesn't state one explicitly, and defines success criteria against the goal text.
+*   **Confirm**: if the run command was *inferred* (not goal-explicit), a one-time-per-run confirmation is routed through the existing `autonomy.mode` human-in-the-loop gate (`-y` auto-approves, matching every other Kriya confirmation).
+*   **Run**: `PolymorphicValidator.run_app()` (`kriya/tools/validate.py`) executes the command through the same sandboxed-subprocess machinery as compile/test (env allowlist + resource limits, §4.1), bounded by `autonomy.run_verification_timeout_seconds` (default `90`).
+*   **Grade**: `RunVerifierAgent.grade()` LLM-judges the captured stdout/stderr/exit code against the goal and success criteria, citing specific evidence rather than a bare verdict.
+*   **On pass**: every skill in `active_skills` for the run is marked `verified` (§2.3.1).
+
+Controlled by `autonomy.run_verification_enabled` (default `true`). Deliberately *not* merged into the existing full-regression-check tier, which runs later in a spot that turned out to already be timing-fragile relative to worktree cleanup (a separate, since-fixed bug - the full-regression check now always constructs a fresh `PolymorphicValidator` pointed at `workspace_path` rather than reusing a worktree-pointed instance that may already have been `git clean -fd`'d).
 
 ---
 
@@ -122,8 +156,11 @@ Kriya builds its AST and vector indices incrementally using **Content-Hash Keyin
 3.  **Implement**: Developer Agent generates anchored find/replace edits.
 4.  **Worktree Isolation**: Checks out a temporary git worktree (`git worktree add`) to apply the diff.
 5.  **Quality Gates**: Compiles and executes tests in the sandbox.
-6.  **Human Approval**: Proposes the structured diff and root-cause hypothesis to the user.
-7.  **Apply / Rollback**: The user approves, rejects, or amends the changes.
+6.  **Runtime Verification** (optional, on by default - §2.7): Actually runs the app and LLM-grades captured output against the goal; a pass marks contributing skills `verified`.
+7.  **Human Approval**: Proposes the structured diff and root-cause hypothesis to the user.
+8.  **Apply / Rollback**: The user approves, rejects, or amends the changes.
+
+Before step 1, the workflow also checks matched skills for gaps (§2.3.2) - an unverified-but-relevant skill, or a goal-named technology with no matching skill at all - and can pause for a human-supplied reference before Planner ever runs.
 
 ### 3.3 The Fix Pipeline (`kriya fix`)
 1.  **Reproduce & Localize**: Runs the build/execution log, inspects stack frames, and extracts relevant files via graph retrieval.
@@ -152,6 +189,7 @@ Kriya builds its AST and vector indices incrementally using **Content-Hash Keyin
 *   **Inherited Baseline Rules**: The configuration inheritance mechanism merges baseline security patterns (`.env`, `secrets`) with per-repo additions, preventing repositories from overriding baseline rules.
 *   **Approvals Gate**: Any change to sensitive files or diffs exceeding `autonomy.risk_threshold_lines` automatically pauses execution for manual developer review. The pydantic model default is 100 lines, but the packaged `default_config.yaml` overrides this to **500** - that's the effective default for a real install.
 *   **No Egress Audit Log**: There is currently no separate audit log of egress activity (symbol names, file paths, hashes, etc.) - `local_only` egress enforcement (`kriya/core/llm.py::is_local_url`) blocks non-local LLM API calls, but nothing is logged to a dedicated audit trail beyond the normal application log.
+*   **Process-Level Execution Hardening** (`autonomy.sandbox_execution`, default on, `kriya/tools/sandbox.py`): compile/test/run commands executed by the quality-gate and Runtime Verification loops, and the `shell` tool, run with a restricted environment (an explicit allowlist of variables so API keys/tokens/credentials in your shell env aren't inherited) plus CPU/memory resource limits. The `shell` tool additionally requires interactive confirmation. This reduces blast radius (secret-leak-via-env-var, runaway/destructive execution) but is **not** full sandboxing - executed code still has real filesystem and network access as the OS user (e.g. can read `~/.ssh` or `~/.aws/credentials` directly, or reach the network). Full containerized isolation is not implemented.
 
 ### 4.2 Multi-Language Core (Java & Python)
 Kriya fully supports Java and Python:
@@ -159,8 +197,9 @@ Kriya fully supports Java and Python:
 *   **Quality Gates**: Automatically detects the build system (Maven for Java; falls back to Python by default otherwise - see `PolymorphicValidator._detect_stack`) and runs `mvn clean compile` then `mvn test` as separate calls for Java (deliberately split for fast-fail), or invokes `pytest` directly via `sys.executable` for Python (no poetry integration).
 
 ### 4.3 Staged Skill Accrual
-*   **Rule Staging**: Extracted rules are written to `staged_rules.txt` inside the skill directory.
-*   **Promotion**: Rules require manual confirmation (`kriya skills approve <skill>`) before appending to `rules.txt`.
+*   **Rule Staging**: Extracted rules (from auto-debugging escalations) are written to `staged_rules.txt` inside the skill directory.
+*   **Repo-Local Approval**: Rules require manual confirmation (`kriya skills approve <skill>`) before appending to that repo's own `rules.txt` - this affects only the current repository's private `auto-<repo-slug>` skill.
+*   **Cross-Project Promotion**: `kriya skills promote SOURCE TARGET (--rule | --all)` (§2.3.1) separately pushes an already-approved rule up into Kriya's shared/global skill library, so future projects using the same technology benefit without rediscovering the same lesson - always interactive, no `-y` bypass.
 
 ### 4.4 Concurrency & Observability
 *   **Persistent Run Audit Traces**: Every generation or fix workflow records detailed audit trace fields to `traces.db`. This includes the run goal, duration, status, modified files, active engineering skills, a JSON array of retrieved semantic chunks (with cosine scores and files), the rendered text prompt, model overrides used per debug hop, and specific compiler/test quality gate outcomes per attempt.

@@ -58,6 +58,8 @@ autonomy:
     - ".*secrets.*"
   risk_threshold_lines: 500                # Pause for review if change size exceeds this many lines
   sandbox_execution: true                  # Restrict env vars + resource-limit quality-gate/shell subprocess execution
+  run_verification_enabled: true           # After compile/test gates pass, actually run the app and LLM-grade its output
+  run_verification_timeout_seconds: 90     # Kill the run if it hangs past this many seconds
 
 paths:
   skills: "./skills"                       # Path to engineering skills
@@ -108,6 +110,10 @@ Launch the autonomous developer workflow:
 kriya -c kriya.yaml generate "Create a Spring-XML Java 17 app running Ignite 2.18.0"
 ```
 
+Two things can pause a `generate` run beyond the usual human-approval gate:
+*   **Runtime Verification Gate**: once compile checks and targeted tests pass, Kriya judges whether the goal implies something runnable, and if so actually runs it and has an LLM grade the captured output against the goal - compiling and unit tests don't prove a Spring app actually starts or a message actually round-trips through a broker. If Kriya *inferred* (rather than you explicitly stating) a run command, it asks for confirmation once per run (skip with `-y`). Disable entirely with `autonomy.run_verification_enabled: false`.
+*   **Skill gap detection**: if the goal touches a skill Kriya doesn't have verified information for, or names a technology with no matching skill at all, Kriya pauses and asks you for a URL, a file path, or pasted text before proceeding - see [Section 6](#6-creating-custom-engineering-skills) and [Section 4](#4-engineering-skills) below. `-y` skips the prompt (the run proceeds on unverified skill content, same as before this feature existed).
+
 ### 3.5 Fix Bugs (`fix`)
 Locate and repair bugs in your project using reproduced test outputs or stack traces:
 ```bash
@@ -122,19 +128,45 @@ mvn clean compile | kriya -c kriya.yaml fix
 
 ## 4. Engineering Skills
 
-### 4.1 Listing and Viewing Staged Rules
-Verify all discovered skills and check for pending staged rules extracted during auto-debugging escalations:
+### 4.1 Listing and Viewing Skills
+List all discovered skills, their verification status, and any pending staged rules from auto-debugging escalations:
 ```bash
 kriya -c kriya.yaml skills list
 ```
+Each skill shows `[VERIFIED - <context>, on <date>]` or `[UNVERIFIED]`. Inspect one skill in full (rules, instructions, examples, verification provenance):
+```bash
+kriya -c kriya.yaml skills show <skill_name>
+```
 
-### 4.2 Promoting Accrued Rules
-When Kriya stages a lesson rule from a bug fix, approve it to promote it to active skill guidelines:
+### 4.2 Skill Verification Lifecycle
+A skill's `verified` flag is not self-reported by the model - it only flips to `true` via one of two objective signals:
+1.  A `generate` run that used the skill passes the **Runtime Verification Gate** (the app actually ran and an LLM-graded check confirmed its output matched the goal).
+2.  You explicitly run `kriya skills promote` (below) into the shared skill library.
+
+There is no manual "just mark this verified" command - if you want a skill treated as trustworthy, either run something real against it or promote a rule you've personally validated.
+
+If you learn a verified skill has gone stale (a pinned version got yanked, a config shape changed in a new major version, an approach became deprecated), reset it:
+```bash
+kriya -c kriya.yaml skills unverify <skill_name>
+```
+This does not delete any rules - it only resets the verification flag so future `generate` runs are asked to strengthen/re-confirm the skill again (see 3.4 above). Kriya never auto-demotes a skill on a *failed* Runtime Verification run - attributing a failure to one specific skill among several active ones is unreliable, so demotion is always a deliberate human call.
+
+### 4.3 Promoting Accrued Rules
+When Kriya stages a lesson rule from a bug fix (during an auto-debugging escalation), approve it to promote it into that repo's own private `auto-<repo-slug>` skill:
 ```bash
 kriya -c kriya.yaml skills approve [skill_name]
 ```
+This only affects the current repository - the same lesson would have to be independently rediscovered in every other project using the same technology. To share a validated, repo-local lesson with every future project, promote it into Kriya's shared skill library instead:
+```bash
+# Promote one specific already-approved rule
+kriya -c kriya.yaml skills promote auto-myrepo qpid --rule "Use SLF4J for logging."
 
-### 4.3 Viewing Past Runs (`traces`)
+# Promote every approved rule not already present in the target
+kriya -c kriya.yaml skills promote auto-myrepo qpid --all
+```
+`promote` always targets Kriya's shared/global skill library (not whatever project-local `paths.skills` is active) and requires interactive `[y/n]` confirmation with **no `-y` bypass**, even under `generate -y` - it permanently changes shared knowledge every future project inherits, so it's the one Kriya gate that's always manual. It also marks the target skill `verified` (context: `promoted from '<source>'`).
+
+### 4.4 Viewing Past Runs (`traces`)
 Inspect traces of all past generation and repair runs:
 ```bash
 kriya -c kriya.yaml traces
@@ -179,6 +211,8 @@ skills/activemq-artemis/
   Use org.apache.activemq:artemis-server and artemis-amqp-protocol dependencies (version 2.31.2).
   Do not use artemis-core-server; use artemis-server instead.
   ```
+
+A freshly hand-authored skill starts `[UNVERIFIED]` - Kriya writes `verified`/`verified_at`/`verified_context` into `skill.yaml` itself once the verification lifecycle described in 4.2 fires; you don't set those fields by hand. `generate` will pause on an unverified skill and ask you to reinforce it with a reference URL/file/text unless you pass `-y`.
 
 ---
 
