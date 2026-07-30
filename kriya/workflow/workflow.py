@@ -7,7 +7,14 @@ import shutil
 import subprocess
 from typing import Any, Callable, Dict, List, Optional
 
-from kriya.agents.agent import ArchitectAgent, DeveloperAgent, PlannerAgent, ReviewerAgent, RunVerifierAgent
+from kriya.agents.agent import (
+    ArchitectAgent,
+    DeveloperAgent,
+    PlannerAgent,
+    ReviewerAgent,
+    RunVerifierAgent,
+    SkillGapAgent,
+)
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -368,6 +375,58 @@ def find_missing_expected_files(expected_files: set, written_files: set, goal: s
         missing = {f for f in missing if not _is_test_or_doc_file(f)}
     return sorted(missing)
 
+def _write_skill_extraction(skill: Any, extraction: Dict[str, Any]) -> None:
+    """Writes newly extracted rules/examples straight into a skill's own files - per
+    the design decision that user-supplied-in-response-to-a-direct-question content is
+    a strong enough intent signal to skip the staged/approve flow used for unattended
+    lesson extraction. `skill` is the already-loaded Skill object (has source_path set
+    by SkillEngine.discover_and_load), avoiding a redundant re-scan of the skills dir."""
+    from kriya.skills.skill import git_commit_if_tracked
+    if not skill.source_path:
+        return
+
+    new_rules = extraction.get("rules") or []
+    if new_rules:
+        existing = set(skill.rules)
+        to_add = [r for r in new_rules if r not in existing]
+        if to_add:
+            rules_file = os.path.join(skill.source_path, "rules.txt")
+            with open(rules_file, "a", encoding="utf-8") as rf:
+                for r in to_add:
+                    rf.write(f"\n{r}")
+            git_commit_if_tracked(rules_file, f"Kriya: add {len(to_add)} rule(s) to skill '{skill.name}' from supplied reference material")
+
+    new_examples = extraction.get("examples") or {}
+    if new_examples:
+        examples_dir = os.path.join(skill.source_path, "examples")
+        os.makedirs(examples_dir, exist_ok=True)
+        for basename, content in new_examples.items():
+            safe_basename = os.path.basename(basename)
+            if not safe_basename:
+                continue
+            example_path = os.path.join(examples_dir, safe_basename)
+            with open(example_path, "w", encoding="utf-8") as ef:
+                ef.write(content)
+            git_commit_if_tracked(example_path, f"Kriya: add example '{safe_basename}' to skill '{skill.name}' from supplied reference material")
+
+def _stage_skill_conflicts(skill: Any, conflicts: List[Dict[str, str]]) -> None:
+    """Surfaces candidate rules that contradict a skill's existing rules into the same
+    staged_rules.txt file (and 'kriya skills list' display) already used for
+    auto-extracted lessons, so a human notices and resolves them - rather than either
+    silently discarding the new information or silently overwriting the existing rule."""
+    if not skill.source_path or not conflicts:
+        return
+    from kriya.skills.skill import git_commit_if_tracked
+    staged_file = os.path.join(skill.source_path, "staged_rules.txt")
+    with open(staged_file, "a", encoding="utf-8") as sf:
+        for c in conflicts:
+            candidate = c.get("candidate_rule", "")
+            existing = c.get("conflicts_with", "")
+            reason = c.get("reason", "")
+            if candidate:
+                sf.write(f"\n[CONFLICT] {candidate} -- conflicts with existing rule: '{existing}' ({reason})")
+    git_commit_if_tracked(staged_file, f"Kriya: flag {len(conflicts)} conflicting candidate rule(s) for skill '{skill.name}'")
+
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
 
@@ -379,6 +438,7 @@ class WorkflowEngine:
         self.developer = DeveloperAgent("developer", llm_client)
         self.reviewer = ReviewerAgent("reviewer", llm_client)
         self.run_verifier = RunVerifierAgent("run_verifier", llm_client)
+        self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client)
 
     async def run_generation_workflow(
         self, 
@@ -388,7 +448,8 @@ class WorkflowEngine:
         approval_callback: Optional[Callable[[List[Dict[str, str]], str], Any]] = None,
         stream_callback: Optional[Callable[[str, str], None]] = None,
         error_context: Optional[str] = None,
-        knowledge_risk_confirmed: bool = False
+        knowledge_risk_confirmed: bool = False,
+        skill_gap_callback: Optional[Callable[[str, List[str]], Any]] = None
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming)."""
         
@@ -494,7 +555,122 @@ class WorkflowEngine:
                         for basename, content in skill.examples.items():
                             convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
                     logger.info(f"Loaded engineering skill '{skill.name}' for generation context.")
-        
+
+        # 1.2. Skill Gap Detection & Interactive Resolution. Compile/test/run-verification
+        # passing can't tell you a skill's CONTENT was wrong to begin with - only whether
+        # it was ever proven right (a passing Runtime Verification Gate run, or a human
+        # explicitly promoting a rule into it via `kriya skills promote`). Ask at most
+        # once per skill per gap - `verification_gap_acknowledged` remembers a decline so
+        # future runs don't keep re-asking about a skill the user already said is fine.
+        unverified_relevant = [
+            s for s in se.list_skills()
+            if s.name in active_skills and not s.verified and not s.verification_gap_acknowledged
+        ]
+
+        # Also detect goal-mentioned technologies with NO matching skill at all - the
+        # check above only fires for a skill that already exists and got matched;
+        # something genuinely new to Kriya is otherwise invisible to it.
+        missing_skill_candidates: List[str] = []
+        try:
+            from kriya.tools.knowledge import extract_library_versions
+            known_terms = set()
+            for s in se.list_skills():
+                known_terms.add(s.name.lower())
+                known_terms.update(t.lower() for t in s.tags)
+            for lib, _ver in extract_library_versions(goal):
+                lib_lower = lib.lower()
+                if not any(lib_lower in term or term in lib_lower for term in known_terms):
+                    missing_skill_candidates.append(lib)
+        except Exception as ex:
+            logger.debug(f"Failed to scan for missing-skill candidates: {ex}")
+
+        if (unverified_relevant or missing_skill_candidates) and skill_gap_callback:
+            reason_parts = []
+            if unverified_relevant:
+                reason_parts.append(
+                    f"unverified skill(s) relevant to this goal: {', '.join(s.name for s in unverified_relevant)} "
+                    "(never had a passing Runtime Verification Gate run, and no rule in them has been human-promoted)"
+                )
+            if missing_skill_candidates:
+                reason_parts.append(f"no skill exists yet for: {', '.join(missing_skill_candidates)}")
+            gap_reason = (
+                "Kriya doesn't have verified information for: " + "; ".join(reason_parts) +
+                ". Provide a URL, file path, or paste reference content to strengthen it, "
+                "or decline to proceed with best-effort generation."
+            )
+            gap_skill_names = [s.name for s in unverified_relevant] + missing_skill_candidates
+
+            try:
+                supplied = skill_gap_callback(gap_reason, gap_skill_names)
+                if asyncio.iscoroutine(supplied):
+                    supplied = await supplied
+            except Exception as ex:
+                logger.warning(f"skill_gap_callback failed, proceeding without it: {ex}")
+                supplied = None
+
+            reference_text: Optional[str] = None
+            if supplied:
+                if supplied.startswith("http://") or supplied.startswith("https://"):
+                    if self.kernel.config.autonomy.egress_policy == "local_only":
+                        logger.warning(
+                            f"Refusing to fetch external URL '{supplied}' for skill-gap resolution under "
+                            "local_only egress policy. Supply a file path or pasted text instead."
+                        )
+                    else:
+                        try:
+                            from kriya.tools.web import fetch_url_text
+                            reference_text = await fetch_url_text(supplied)
+                        except Exception as ex:
+                            logger.warning(f"Failed to fetch skill-gap reference URL '{supplied}': {ex}")
+                elif os.path.isfile(supplied):
+                    try:
+                        with open(supplied, "r", encoding="utf-8", errors="replace") as fh:
+                            reference_text = fh.read()
+                    except Exception as ex:
+                        logger.warning(f"Failed to read skill-gap reference file '{supplied}': {ex}")
+                else:
+                    reference_text = supplied
+
+            if reference_text:
+                target_skills = list(unverified_relevant)
+                if not target_skills and missing_skill_candidates:
+                    new_name = missing_skill_candidates[0]
+                    try:
+                        se.create_skill_skeleton(new_name)
+                        se.discover_and_load()
+                        target_skills = [se.get_skill(new_name)]
+                    except Exception as ex:
+                        logger.warning(f"Failed to bootstrap new skill '{new_name}': {ex}")
+
+                for target in target_skills:
+                    extraction = await self.skill_gap_agent.extract_skill_update(
+                        reference_text=reference_text,
+                        gap_description=gap_reason,
+                        existing_rules=target.rules,
+                    )
+                    if extraction["conflicts"]:
+                        _stage_skill_conflicts(target, extraction["conflicts"])
+                        logger.info(f"Flagged {len(extraction['conflicts'])} conflicting candidate rule(s) for skill '{target.name}' for human review.")
+                    if extraction["rules"] or extraction["examples"]:
+                        _write_skill_extraction(target, extraction)
+                        # Fold the newly ingested content into THIS run's context
+                        # immediately, not just future runs.
+                        if extraction["rules"]:
+                            convention_prompt += (
+                                f"\n\n=== Engineering Skill Conventions: {target.name} (just added) ===\n"
+                                "Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
+                            )
+                        for basename, content in extraction["examples"].items():
+                            convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
+                        if target.name not in active_skills:
+                            active_skills.append(target.name)
+                        logger.info(f"Strengthened skill '{target.name}' with {len(extraction['rules'])} new rule(s) and {len(extraction['examples'])} example(s) from supplied reference.")
+                    else:
+                        logger.info(f"Supplied reference material didn't contain anything usable for skill '{target.name}'.")
+            else:
+                for s in unverified_relevant:
+                    se.mark_gap_acknowledged(s.name)
+
         # 1.5. Graph RAG Context Retrieval
         matched_files = []
         related_files = []
@@ -891,6 +1067,15 @@ class WorkflowEngine:
                             if not grade["passed"]:
                                 raise ValueError(f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}\n\nCaptured output:\n{run_res['output']}")
                             logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
+                            # A passing real-world run is exactly the proof the
+                            # skill-verification gap check is looking for - mark every
+                            # skill that contributed to this generation as verified so
+                            # future runs stop asking about it.
+                            for active_skill_name in active_skills:
+                                try:
+                                    se.mark_verified(active_skill_name)
+                                except Exception as ex:
+                                    logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
 
                 # If we made it here, Quality Gates passed successfully!
                 logger.info("Quality Gates check PASSED.")

@@ -378,3 +378,189 @@ async def test_workflow_full_regression_check_tests_the_applied_change_not_stale
     with open(tmp_path / "calc.py") as f:
         assert "a + b" in f.read()
 
+
+@pytest.mark.asyncio
+async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp_path):
+    """A passing Runtime Verification Gate run is exactly the proof the skill-gap
+    check needs - any skill that contributed to a run whose generated app actually
+    ran and did what the goal asked should come out of that run marked verified,
+    so future runs stop asking about it."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Widgets must be printed in uppercase.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('[SUCCESS] WIDGET')\n"}])
+    judge_response = json.dumps({
+        "should_run": True,
+        "run_command": [sys.executable, "app.py"],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]"
+    })
+    grade_response = json.dumps({"passed": True, "reasoning": "Output contains the expected line."})
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        file_list_response,       # Developer
+        judge_response,           # RunVerifier.judge
+        grade_response,           # RunVerifier.grade
+        "Review: Approved"        # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    res = await we.run_generation_workflow(
+        goal="Run with python app.py; the widgetlib skill applies here",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    assert se.get_skill("widgetlib").verified is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_skill_gap_refuses_url_fetch_under_local_only_egress(tmp_path):
+    """A supplied URL must not be fetched when autonomy.egress_policy is local_only -
+    that's a new outbound-network capability this feature adds, and it should get the
+    same guarantee the rest of Kriya already gives. File/text answers are unaffected -
+    only the URL branch is gated."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.egress_policy = "local_only"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',  # Developer
+        "Review: Approved"        # Reviewer
+    ])
+
+    def skill_gap_cb(reason, names):
+        return "https://example.com/widgetlib-docs"
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.web.fetch_url_text", new_callable=AsyncMock) as mock_fetch:
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=skill_gap_cb,
+        )
+        mock_fetch.assert_not_called()
+
+    assert res["quality_gates_passed"] is True
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("widgetlib")
+    assert skill.verified is False
+    assert skill.rules == ["Existing rule."]
+
+
+@pytest.mark.asyncio
+async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_path):
+    """Declining the skill-gap ask (callback returns None) must not fail generation -
+    it proceeds with the skill as-is, same as today's baseline - and must remember the
+    decline so future runs don't keep re-asking about the same skill."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    calls = []
+    def skill_gap_cb(reason, names):
+        calls.append(names)
+        return None
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something with the widgetlib skill",
+        workspace_path=str(tmp_path),
+        skill_gap_callback=skill_gap_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert calls == [["widgetlib"]]
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    assert se.get_skill("widgetlib").verification_gap_acknowledged is True
+
+@pytest.mark.asyncio
+async def test_workflow_skill_gap_not_reasked_once_acknowledged(tmp_path):
+    """A second run must not re-invoke the callback for a skill already acknowledged
+    by a prior decline."""
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text(
+        "name: widgetlib\ndescription: Test\ntags: [widgetlib]\nverification_gap_acknowledged: true\n"
+    )
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    calls = []
+    def skill_gap_cb(reason, names):
+        calls.append(names)
+        return None
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something with the widgetlib skill",
+        workspace_path=str(tmp_path),
+        skill_gap_callback=skill_gap_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert calls == []
+
