@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.agent import (
@@ -358,6 +359,22 @@ def normalize_written_filepath(filepath: str, workspace_path: str) -> Optional[s
     if filepath == os.pardir or filepath.startswith(os.pardir + os.sep) or os.path.isabs(filepath):
         return None
     return filepath
+
+
+def _resolve_run_command(command: List[str]) -> List[str]:
+    """Substitutes Kriya's own interpreter for a bare 'python' the Runtime
+    Verification judge inferred, if 'python' isn't actually resolvable on PATH - a
+    real, reproducible failure observed live: many systems (Homebrew installs,
+    Debian/Ubuntu without python-is-python3) only ship 'python3', not a bare
+    'python', and running Kriya without an activated venv means the subprocess's
+    inherited PATH may not resolve 'python' either. Without this, subprocess.run
+    raises FileNotFoundError immediately and the run never gets a chance to prove
+    anything - all 4 retry attempts fail the same way regardless of the generated
+    code's actual correctness. sys.executable is guaranteed to exist and be a valid
+    interpreter, unlike a guessed command name."""
+    if command and command[0] == "python" and shutil.which("python") is None:
+        return [sys.executable] + list(command[1:])
+    return command
 
 EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")
 
@@ -1467,9 +1484,15 @@ class WorkflowEngine:
                                 run_verification_declined = True
                         if proceed_with_run:
                             run_verification_confirmed = True
-                            logger.info(f"Quality Gates: Running runtime verification: {' '.join(judgment['run_command'])}")
+                            resolved_run_command = _resolve_run_command(judgment["run_command"])
+                            if resolved_run_command != judgment["run_command"]:
+                                logger.info(
+                                    f"Inferred run command '{judgment['run_command'][0]}' isn't on PATH here - "
+                                    f"using Kriya's own interpreter instead: {resolved_run_command[0]}"
+                                )
+                            logger.info(f"Quality Gates: Running runtime verification: {' '.join(resolved_run_command)}")
                             run_res = validator.run_app(
-                                judgment["run_command"],
+                                resolved_run_command,
                                 timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
                             )
                             if run_res["timed_out"]:

@@ -11,6 +11,7 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.workflow import (
     WorkflowEngine,
+    _resolve_run_command,
     extract_expected_files,
     find_missing_expected_files,
     normalize_written_filepath,
@@ -74,6 +75,22 @@ def test_normalize_written_filepath_rejects_path_escaping_workspace():
 
 def test_normalize_written_filepath_rejects_empty():
     assert normalize_written_filepath("", "/workspace") is None
+
+def test_resolve_run_command_substitutes_when_python_unresolvable():
+    with patch("shutil.which", return_value=None):
+        assert _resolve_run_command(["python", "main.py"]) == [sys.executable, "main.py"]
+
+def test_resolve_run_command_leaves_command_alone_when_python_resolvable():
+    with patch("shutil.which", return_value="/usr/bin/python"):
+        assert _resolve_run_command(["python", "main.py"]) == ["python", "main.py"]
+
+def test_resolve_run_command_ignores_non_python_commands():
+    with patch("shutil.which", return_value=None):
+        assert _resolve_run_command(["python3", "main.py"]) == ["python3", "main.py"]
+        assert _resolve_run_command(["node", "main.js"]) == ["node", "main.js"]
+
+def test_resolve_run_command_handles_empty_command():
+    assert _resolve_run_command([]) == []
 
 @pytest.mark.asyncio
 async def test_workflow_successful_run(tmp_path):
@@ -299,6 +316,45 @@ async def test_workflow_run_verification_goal_explicit_passes_without_confirmati
         workspace_path=str(tmp_path)
     )
 
+    assert res["quality_gates_passed"] is True
+    assert "app.py" in res["files"]
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_path):
+    """Reproduces a real observed failure: the Runtime Verification judge inferred a
+    bare 'python' run command, which isn't on PATH on many real systems (Homebrew
+    installs, Debian/Ubuntu without python-is-python3) - subprocess.run raised
+    FileNotFoundError immediately, failing all retry attempts regardless of whether
+    the generated code was actually correct. Kriya's own interpreter must be
+    substituted so the run gets a real chance to prove the code works."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('[SUCCESS] it worked')\n"}])
+    judge_response = json.dumps({
+        "should_run": True,
+        "run_command": ["python", "app.py"],  # the real observed inference - not sys.executable
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]"
+    })
+    grade_response = json.dumps({"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."})
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code", "Design: Write app.py", file_list_response,
+        judge_response, grade_response, "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("shutil.which", return_value=None):  # simulates no bare 'python' on PATH
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should print [SUCCESS]",
+            workspace_path=str(tmp_path)
+        )
+
+    # If the substitution hadn't happened, this would fail with FileNotFoundError on
+    # every retry attempt and quality_gates_passed would be False.
     assert res["quality_gates_passed"] is True
     assert "app.py" in res["files"]
 
