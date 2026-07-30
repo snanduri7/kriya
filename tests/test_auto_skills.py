@@ -20,6 +20,7 @@ async def test_auto_skills_generation_and_injection(tmp_path):
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
     cfg.paths.skills = str(tmp_path / "skills")
+    cfg.autonomy.run_verification_enabled = False
     
     analyzer = RepositoryAnalyzer(str(src_dir))
     
@@ -39,7 +40,7 @@ async def test_auto_skills_generation_and_injection(tmp_path):
     
     captured_prompts = []
     
-    async def mock_complete(self, system_prompt, user_prompt, stream_callback=None):
+    async def mock_complete(self, system_prompt, user_prompt, stream_callback=None, **kwargs):
         captured_prompts.append(user_prompt)
         return mock_responses.pop(0)
 

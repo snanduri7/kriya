@@ -180,6 +180,21 @@ Compiling and passing unit tests doesn't prove a running system behaves correctl
 
 Controlled by `autonomy.run_verification_enabled` (default `true`). Deliberately *not* merged into the existing full-regression-check tier, which runs later in a spot that turned out to already be timing-fragile relative to worktree cleanup (a separate, since-fixed bug - the full-regression check now always constructs a fresh `PolymorphicValidator` pointed at `workspace_path` rather than reusing a worktree-pointed instance that may already have been `git clean -fd`'d).
 
+### 2.8 Per-Role Model Selection & Escalation
+Originally every agent shared one model (`llm`) plus one escalation chain (`llm_chain`) used exclusively by Developer's quality-gate retry loop. `agent_llms` (`kriya/config/config.py::AgentRolesConfig`) lets Planner, Architect, Reviewer, RunVerifier, and SkillGapAgent each be pointed at a different model, with their own independent escalation chain - motivated by real-world model-tiering (e.g. a leaner reasoning model for planning/review, a fast small model for the structured "utility" JSON calls, the strongest model reserved for Developer's actual code synthesis). **Developer is deliberately excluded** - it keeps using the top-level `llm`/`llm_chain`, escalated by the existing quality-gate retry loop, a fundamentally different failure signal (compile/test failure) than what drives escalation for every other role.
+
+**Config shape**: `AgentModelConfig` (`llm: Optional[LLMConfig]`, `llm_chain: List[FallbackModelConfig]`) per role. `llm: None` (the default - a role never mentioned in `agent_llms`) means "use `LLMClient`'s own primary model," preserving today's exact call shape (no override kwargs reach `LLMClient.complete()` at all) for any project that never touches this config - zero migration needed.
+
+**Mechanism**: `BaseAgent` now takes optional `role_llm`/`role_chain` at construction (wired from `WorkflowEngine.__init__` reading `kernel.config.agent_llms.*`) and exposes `_candidates()` - `[role_llm or None] + role_chain`. A shared `call_with_escalation()` helper (`kriya/agents/agent.py`) tries each candidate in order via `LLMClient.complete()`, now extended with `temperature_override`/`max_tokens_override`/`reasoning_override` alongside the existing `model_override`/`base_url_override`/`api_key_override`, so a role's *entire* config takes effect, not just which model name to call.
+
+**Failure signal differs by role, deliberately conservative**:
+*   **Free-text roles** (Planner, Architect, Reviewer via `BaseAgent.run()`): escalate only on a hard call failure (connection error, timeout, HTTP error, an `egress_policy: local_only` block) - never on response content, so a legitimately short-but-correct plan/review is never wrongly retried.
+*   **JSON-mode roles** (`RunVerifierAgent.judge`/`grade`, `SkillGapAgent.extract_skill_update`/`check_skill_conflicts`): the same hard-call-failure signal, plus an unparseable response (`_is_unparseable_json()`) - these methods lost their old `model_override`/`base_url_override`/`api_key_override` parameters entirely in favor of using `self._candidates()` internally, and RunVerifier's judge/grade calls are no longer tied to whatever model Developer's own retry loop happens to be escalated to at that point in the run (a deliberate decoupling - the old coupling was an accident of not having a dedicated RunVerifier config, not an intentional design).
+
+If every candidate in a role's chain is exhausted, `call_with_escalation()` re-raises the last exception (or returns the last inadequate response, for the `is_failure`-only case) - a role with an empty/unset chain behaves exactly as if this mechanism didn't exist.
+
+**Verified end-to-end against three real local models simultaneously** (Devstral Small 2 24B for Planner/Reviewer, qwen2.5-coder:7b for RunVerifier, qwen3-coder:30b as the unconfigured-role default for Architect/Developer): confirmed via the real trace log that each role's completion request used exactly its configured model, Developer's own pre-existing `llm_chain` escalation still fired independently and correctly when its first attempt failed, and the full pipeline produced a correct, independently-verified final result.
+
 ---
 
 ## 3. Workflows & Pipelines

@@ -86,6 +86,27 @@ class FallbackModelConfig(BaseModel):
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
 
+class AgentModelConfig(BaseModel):
+    # llm=None means "use the top-level llm config" (today's single-model behavior) -
+    # every field here is opt-in, so a project that never touches agent_llms sees zero
+    # behavior change. llm_chain is this role's OWN escalation list, tried in order
+    # after llm (or the top-level llm if unset) fails - independent of Developer's
+    # quality-gate-driven retry loop, which is untouched by this and keeps using the
+    # top-level llm/llm_chain exactly as before.
+    llm: Optional[LLMConfig] = Field(default=None)
+    llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
+
+class AgentRolesConfig(BaseModel):
+    # Developer deliberately has no entry here - it stays on the top-level llm/
+    # llm_chain, escalated by the existing quality-gate retry loop (a fundamentally
+    # different failure signal - "the generated code didn't compile/pass tests" -
+    # than the call-level failures the roles below escalate on).
+    planner: AgentModelConfig = Field(default_factory=AgentModelConfig)
+    architect: AgentModelConfig = Field(default_factory=AgentModelConfig)
+    reviewer: AgentModelConfig = Field(default_factory=AgentModelConfig)
+    run_verifier: AgentModelConfig = Field(default_factory=AgentModelConfig)
+    skill_gap: AgentModelConfig = Field(default_factory=AgentModelConfig)
+
 class KnowledgeConfig(BaseModel):
     training_cutoff: str = Field(default="2023-12-01")  # ISO date
     check_enabled: bool = Field(default=True)
@@ -102,6 +123,7 @@ class AppConfig(BaseModel):
     autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
+    agent_llms: AgentRolesConfig = Field(default_factory=AgentRolesConfig)
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""

@@ -4,9 +4,76 @@ import re
 from abc import ABC
 from typing import Any, Callable, Dict, List, Optional
 
+from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+async def call_with_escalation(
+    llm: LLMClient,
+    system_prompt: str,
+    prompt: str,
+    candidates: List[Optional[Any]],
+    json_mode: bool = False,
+    stream_callback: Optional[Callable[[str], None]] = None,
+    is_failure: Optional[Callable[[str], bool]] = None,
+) -> str:
+    """Tries each candidate in order - a role's own configured model, then its own
+    escalation chain (kriya/config/config.py::AgentModelConfig) - via llm.complete(),
+    returning the first response that doesn't raise and, if is_failure is given,
+    doesn't satisfy is_failure(response). A None candidate (the common case: a role
+    with no dedicated config) calls complete() with no overrides at all, preserving
+    today's exact call shape/behavior - including LLMClient's internal client-reuse
+    fast path - for any project that never touches agent_llms.
+
+    If every candidate is exhausted, re-raises the last exception (or returns the
+    last response if only is_failure judged every attempt inadequate, never a raw
+    exception) - so a role with an empty/unset chain behaves exactly as if escalation
+    didn't exist at all."""
+    last_exc: Optional[Exception] = None
+    last_response: Optional[str] = None
+    for i, cand in enumerate(candidates):
+        try:
+            if cand is None:
+                response = await llm.complete(
+                    system_prompt, prompt, stream_callback=stream_callback, json_mode=json_mode,
+                )
+            else:
+                response = await llm.complete(
+                    system_prompt, prompt, stream_callback=stream_callback, json_mode=json_mode,
+                    model_override=cand.model,
+                    base_url_override=cand.base_url,
+                    api_key_override=cand.api_key,
+                    temperature_override=cand.temperature,
+                    max_tokens_override=cand.max_tokens,
+                    reasoning_override=cand.reasoning,
+                )
+        except Exception as ex:
+            last_exc = ex
+            logger.debug(f"Escalation attempt {i + 1}/{len(candidates)} raised: {ex}")
+            continue
+        if is_failure and is_failure(response):
+            last_response = response
+            last_exc = None
+            logger.debug(f"Escalation attempt {i + 1}/{len(candidates)} produced an unusable response, trying next.")
+            continue
+        return response
+    if last_exc:
+        raise last_exc
+    return last_response
+
+
+def _is_unparseable_json(response: str) -> bool:
+    """Failure signal for JSON-mode roles: escalate to the next candidate if the
+    response doesn't even parse into a JSON object, rather than trusting the first
+    model's output no matter what."""
+    try:
+        parsed = json.loads(DeveloperAgent._strip_markdown_fences(response))
+    except Exception:
+        return True
+    return not isinstance(parsed, dict)
+
 
 # =====================================================================
 # 1. Base Agent
@@ -15,17 +82,37 @@ logger = logging.getLogger(__name__)
 class BaseAgent(ABC):
     """Abstract Base Class for Kriya specialized agents."""
 
-    def __init__(self, name: str, llm_client: LLMClient) -> None:
+    def __init__(
+        self,
+        name: str,
+        llm_client: LLMClient,
+        role_llm: Optional[LLMConfig] = None,
+        role_chain: Optional[List[FallbackModelConfig]] = None,
+    ) -> None:
         self.name = name
         self.llm = llm_client
+        # role_llm=None means "use LLMClient's own default model" - the common case
+        # for a project that never configures agent_llms for this role. role_chain is
+        # this role's OWN escalation list, tried in order if role_llm (or the
+        # default) fails - independent of Developer's quality-gate-driven retry loop.
+        self.role_llm = role_llm
+        self.role_chain = role_chain or []
 
     @property
     def system_prompt(self) -> str:
         raise NotImplementedError
 
+    def _candidates(self) -> List[Optional[Any]]:
+        return [self.role_llm] + list(self.role_chain)
+
     async def run(self, prompt: str, stream_callback: Optional[Callable[[str], None]] = None) -> str:
-        """Execute a text completion request using the LLM Client."""
-        return await self.llm.complete(self.system_prompt, prompt, stream_callback=stream_callback)
+        """Execute a text completion request, escalating through this role's chain
+        only on a hard call failure (connection/timeout/HTTP/egress error) - a
+        legitimately short-but-correct response is never wrongly retried just for
+        being brief."""
+        return await call_with_escalation(
+            self.llm, self.system_prompt, prompt, self._candidates(), stream_callback=stream_callback,
+        )
 
 
 # =====================================================================
@@ -369,9 +456,6 @@ class RunVerifierAgent(BaseAgent):
         goal: str,
         design: str,
         files_written: List[str],
-        model_override: Optional[str] = None,
-        base_url_override: Optional[str] = None,
-        api_key_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         prompt = (
             f"=== Architecture Design ===\n{design}\n\n"
@@ -380,13 +464,9 @@ class RunVerifierAgent(BaseAgent):
             f"=== Goal ===\n{goal}\n\n"
             "Decide whether this goal warrants runtime verification, per the rules above."
         )
-        response_str = await self.llm.complete(
-            self.system_prompt,
-            prompt,
-            json_mode=True,
-            model_override=model_override,
-            base_url_override=base_url_override,
-            api_key_override=api_key_override,
+        response_str = await call_with_escalation(
+            self.llm, self.system_prompt, prompt, self._candidates(),
+            json_mode=True, is_failure=_is_unparseable_json,
         )
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
@@ -414,9 +494,6 @@ class RunVerifierAgent(BaseAgent):
         success_criteria: str,
         output: str,
         returncode: Optional[int],
-        model_override: Optional[str] = None,
-        base_url_override: Optional[str] = None,
-        api_key_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         grader_system_prompt = (
             "You are the Kriya Run Verification Grader.\n"
@@ -436,13 +513,9 @@ class RunVerifierAgent(BaseAgent):
             f"=== Actual Captured Output ===\n{output}\n\n"
             "Did this run actually succeed per the criteria above?"
         )
-        response_str = await self.llm.complete(
-            grader_system_prompt,
-            prompt,
-            json_mode=True,
-            model_override=model_override,
-            base_url_override=base_url_override,
-            api_key_override=api_key_override,
+        response_str = await call_with_escalation(
+            self.llm, grader_system_prompt, prompt, self._candidates(),
+            json_mode=True, is_failure=_is_unparseable_json,
         )
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
@@ -495,9 +568,6 @@ class SkillGapAgent(BaseAgent):
         reference_text: str,
         gap_description: str,
         existing_rules: List[str],
-        model_override: Optional[str] = None,
-        base_url_override: Optional[str] = None,
-        api_key_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         # Reference material (web pages, source files) can be long - the LLM client's
         # own token budget will truncate server-side if needed, but keep this bounded
@@ -510,13 +580,9 @@ class SkillGapAgent(BaseAgent):
             f"=== What's Missing ===\n{gap_description}\n\n"
             "Extract rules/examples per the instructions above."
         )
-        response_str = await self.llm.complete(
-            self.system_prompt,
-            prompt,
-            json_mode=True,
-            model_override=model_override,
-            base_url_override=base_url_override,
-            api_key_override=api_key_override,
+        response_str = await call_with_escalation(
+            self.llm, self.system_prompt, prompt, self._candidates(),
+            json_mode=True, is_failure=_is_unparseable_json,
         )
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
@@ -557,9 +623,6 @@ class SkillGapAgent(BaseAgent):
         skill_a_rules: List[str],
         skill_b_name: str,
         skill_b_rules: List[str],
-        model_override: Optional[str] = None,
-        base_url_override: Optional[str] = None,
-        api_key_override: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """Compares two skills' rule sets for genuine contradictions when both are
         active for the same generation run (e.g. two broker skills each pinning a
@@ -592,13 +655,9 @@ class SkillGapAgent(BaseAgent):
             f"=== Skill B: {skill_b_name} ===\n" + "\n".join(skill_b_rules) + "\n\n"
             "Identify any genuine contradictions per the instructions above."
         )
-        response_str = await self.llm.complete(
-            system_prompt,
-            prompt,
-            json_mode=True,
-            model_override=model_override,
-            base_url_override=base_url_override,
-            api_key_override=api_key_override,
+        response_str = await call_with_escalation(
+            self.llm, system_prompt, prompt, self._candidates(),
+            json_mode=True, is_failure=_is_unparseable_json,
         )
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))

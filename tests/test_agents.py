@@ -3,8 +3,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kriya.agents.agent import DeveloperAgent, PlannerAgent, RunVerifierAgent, SkillGapAgent
-from kriya.config import AppConfig
+from kriya.agents.agent import (
+    DeveloperAgent,
+    PlannerAgent,
+    RunVerifierAgent,
+    SkillGapAgent,
+    call_with_escalation,
+)
+from kriya.config import AppConfig, FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 
 
@@ -20,7 +26,133 @@ async def test_base_agent_complete():
     res = await planner.run("Plan a math library")
     
     assert res == "Mock response text"
-    llm.complete.assert_called_once_with(planner.system_prompt, "Plan a math library", stream_callback=None)
+    llm.complete.assert_called_once_with(
+        planner.system_prompt, "Plan a math library", stream_callback=None, json_mode=False,
+    )
+
+@pytest.mark.asyncio
+async def test_call_with_escalation_no_role_config_preserves_default_call_shape():
+    """A None candidate (the common case: a role with no dedicated agent_llms config)
+    must call complete() with no override kwargs at all, preserving today's exact
+    call shape/behavior for any project that never touches per-role config."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="ok")
+
+    result = await call_with_escalation(llm, "sys", "prompt", [None])
+
+    assert result == "ok"
+    llm.complete.assert_called_once_with("sys", "prompt", stream_callback=None, json_mode=False)
+
+@pytest.mark.asyncio
+async def test_call_with_escalation_passes_full_candidate_config():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="ok")
+    candidate = FallbackModelConfig(
+        model="devstral-small-2:24b", base_url="http://localhost:11434/v1", api_key="k",
+        temperature=0.5, max_tokens=2048, reasoning=True,
+    )
+
+    await call_with_escalation(llm, "sys", "prompt", [candidate], json_mode=True)
+
+    llm.complete.assert_called_once_with(
+        "sys", "prompt", stream_callback=None, json_mode=True,
+        model_override="devstral-small-2:24b", base_url_override="http://localhost:11434/v1",
+        api_key_override="k", temperature_override=0.5, max_tokens_override=2048, reasoning_override=True,
+    )
+
+@pytest.mark.asyncio
+async def test_call_with_escalation_escalates_on_exception():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    fallback = FallbackModelConfig(model="fallback-model")
+    llm.complete = AsyncMock(side_effect=[ConnectionError("primary down"), "recovered"])
+
+    result = await call_with_escalation(llm, "sys", "prompt", [None, fallback])
+
+    assert result == "recovered"
+    assert llm.complete.await_count == 2
+
+@pytest.mark.asyncio
+async def test_call_with_escalation_reraises_after_exhausting_chain():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    fallback = FallbackModelConfig(model="fallback-model")
+    llm.complete = AsyncMock(side_effect=[ConnectionError("primary down"), ConnectionError("fallback down too")])
+
+    with pytest.raises(ConnectionError, match="fallback down too"):
+        await call_with_escalation(llm, "sys", "prompt", [None, fallback])
+
+@pytest.mark.asyncio
+async def test_call_with_escalation_escalates_on_is_failure_predicate():
+    """A candidate that doesn't raise but produces an unusable response (e.g.
+    unparseable JSON) must still trigger escalation to the next candidate."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    fallback = FallbackModelConfig(model="fallback-model")
+    llm.complete = AsyncMock(side_effect=["not json", '{"ok": true}'])
+
+    result = await call_with_escalation(
+        llm, "sys", "prompt", [None, fallback], json_mode=True,
+        is_failure=lambda r: r != '{"ok": true}',
+    )
+
+    assert result == '{"ok": true}'
+    assert llm.complete.await_count == 2
+
+@pytest.mark.asyncio
+async def test_call_with_escalation_returns_last_response_when_all_fail_predicate():
+    """If every candidate is exhausted and none raised, the last (still-inadequate)
+    response is returned rather than raising - callers already handle an empty/bad
+    parse gracefully, same as if no escalation existed."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="always bad")
+
+    result = await call_with_escalation(llm, "sys", "prompt", [None], is_failure=lambda r: True)
+
+    assert result == "always bad"
+
+@pytest.mark.asyncio
+async def test_agent_run_escalates_through_its_own_role_chain():
+    """PlannerAgent (via BaseAgent.run) escalates through its configured role_chain on
+    a hard call failure, independent of Developer's own retry loop."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[TimeoutError("primary timed out"), "Plan: recovered"])
+
+    planner = PlannerAgent(
+        "planner", llm,
+        role_llm=LLMConfig(model="devstral-small-2:24b"),
+        role_chain=[FallbackModelConfig(model="qwen3:8b")],
+    )
+    result = await planner.run("Plan something")
+
+    assert result == "Plan: recovered"
+    assert llm.complete.await_count == 2
+    first_call_kwargs = llm.complete.await_args_list[0].kwargs
+    second_call_kwargs = llm.complete.await_args_list[1].kwargs
+    assert first_call_kwargs["model_override"] == "devstral-small-2:24b"
+    assert second_call_kwargs["model_override"] == "qwen3:8b"
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_escalates_on_unparseable_json():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    good_response = json.dumps({
+        "should_run": True, "run_command": ["python", "app.py"],
+        "command_source": "goal_explicit", "success_criteria": "Prints done",
+    })
+    llm.complete = AsyncMock(side_effect=["not json at all", good_response])
+
+    verifier = RunVerifierAgent(
+        "run_verifier", llm, role_chain=[FallbackModelConfig(model="fallback-verifier")],
+    )
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+
+    assert judgment["should_run"] is True
+    assert llm.complete.await_count == 2
 
 @pytest.mark.asyncio
 async def test_developer_agent_json_parsing():

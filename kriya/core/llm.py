@@ -54,16 +54,25 @@ class LLMClient:
         self.max_tokens = config.llm.max_tokens
 
     async def complete(
-        self, 
-        system_prompt: str, 
-        user_prompt: str, 
+        self,
+        system_prompt: str,
+        user_prompt: str,
         stream_callback: Optional[Callable[[str], None]] = None,
         json_mode: bool = False,
         model_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
-        api_key_override: Optional[str] = None
+        api_key_override: Optional[str] = None,
+        temperature_override: Optional[float] = None,
+        max_tokens_override: Optional[int] = None,
+        reasoning_override: Optional[bool] = None,
     ) -> str:
-        """Call the local LLM server and return the text completion (supporting streaming and JSON mode)."""
+        """Call the local LLM server and return the text completion (supporting streaming and JSON mode).
+
+        temperature_override/max_tokens_override/reasoning_override let a caller fully
+        specify an alternate model's real config (not just model/base_url/api_key) -
+        without them, is_reasoning falls back to scanning the top-level llm_chain for a
+        matching model name (kept for backward compatibility with the existing
+        Developer escalation call sites, which only ever pass the first three)."""
         # Validate egress policy
         if self.config.autonomy.egress_policy == "local_only":
             url_to_check = base_url_override or self.config.llm.base_url
@@ -74,21 +83,26 @@ class LLMClient:
 
         model = model_override or self.model
         client = self.client
-        
+
         if base_url_override or api_key_override:
             client = AsyncOpenAI(
                 api_key=api_key_override or self.config.llm.api_key,
                 base_url=base_url_override or self.config.llm.base_url
             )
-            
-        is_reasoning = self.config.llm.reasoning
-        if model_override:
-            for fb in self.config.llm_chain:
-                if fb.model == model_override:
-                    is_reasoning = fb.reasoning
-                    break
 
-        max_tokens = max(self.max_tokens, 12288) if is_reasoning else self.max_tokens
+        if reasoning_override is not None:
+            is_reasoning = reasoning_override
+        else:
+            is_reasoning = self.config.llm.reasoning
+            if model_override:
+                for fb in self.config.llm_chain:
+                    if fb.model == model_override:
+                        is_reasoning = fb.reasoning
+                        break
+
+        temperature = temperature_override if temperature_override is not None else self.temperature
+        base_max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
+        max_tokens = max(base_max_tokens, 12288) if is_reasoning else base_max_tokens
         extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
         response_format = None if is_reasoning else ({"type": "json_object"} if json_mode else None)
         
@@ -110,7 +124,7 @@ class LLMClient:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        temperature=self.temperature,
+                        temperature=temperature,
                         max_tokens=max_tokens,
                         stream=True,
                         stream_options={"include_usage": True},
@@ -125,7 +139,7 @@ class LLMClient:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        temperature=self.temperature,
+                        temperature=temperature,
                         max_tokens=max_tokens,
                         stream=True,
                         extra_body=extra_body,
@@ -149,7 +163,7 @@ class LLMClient:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    temperature=self.temperature,
+                    temperature=temperature,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
                     response_format=response_format

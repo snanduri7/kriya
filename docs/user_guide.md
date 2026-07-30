@@ -76,7 +76,47 @@ embedding:
 search:
   base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance
   top_k: 3                                 # Candidate results tried per term before giving up on it
+
+# Optional per-role model overrides - see Section 2.1 below. Every role defaults to
+# the primary llm block above if left unset; Developer is never configured here.
+agent_llms:
+  planner:
+    llm:
+      model: "devstral-small-2:24b"
+      base_url: "http://localhost:11434/v1"
+  reviewer:
+    llm:
+      model: "devstral-small-2:24b"
+      base_url: "http://localhost:11434/v1"
+  run_verifier:
+    llm:
+      model: "qwen2.5-coder:7b"
+      base_url: "http://localhost:11434/v1"
+  skill_gap:
+    llm:
+      model: "qwen2.5-coder:7b"
+      base_url: "http://localhost:11434/v1"
 ```
+
+### 2.1 Per-Role Model Selection (`agent_llms`)
+Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model. A common setup: a leaner/reasoning-focused model for planning and review, a fast small model for the structured "utility" JSON calls (RunVerifier's judge/grade, SkillGapAgent's extraction/conflict-check), and your strongest coding model reserved for Developer - the role where accuracy matters most and speed matters least.
+
+Every role in `agent_llms` is independently optional - `llm: null` (the default, i.e. just omitting the role entirely) means "use the primary `llm` block above," so a project that never touches `agent_llms` sees zero behavior change. **Developer is deliberately not configurable here** - it always uses the top-level `llm`/`llm_chain`, escalated by the existing quality-gate retry loop (a compile/test failure is a fundamentally different signal than a call-level failure, so it keeps its own separate mechanism).
+
+Each role also gets its own optional `llm_chain` - a list of fallback models tried in order if the role's own model fails, independent of Developer's chain:
+```yaml
+agent_llms:
+  planner:
+    llm:
+      model: "devstral-small-2:24b"
+      base_url: "http://localhost:11434/v1"
+    llm_chain:
+      - model: "qwen3:8b"
+        base_url: "http://localhost:11434/v1"
+```
+What counts as "failure" differs by role, deliberately conservative so a legitimately short-but-correct response is never wrongly retried:
+- **Planner, Architect, Reviewer** (free text): only a hard call failure - connection error, timeout, HTTP error, an `local_only` egress block. A brief plan or review is never retried just for being brief.
+- **RunVerifier, SkillGapAgent** (JSON-mode): the same hard-call-failure signal, plus an unparseable response - if the first model doesn't even return valid JSON, the next candidate is tried before falling back to that role's existing safe-default behavior.
 
 ---
 

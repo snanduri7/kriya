@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from kriya.config import AppConfig
+from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.workflow import (
@@ -93,12 +93,43 @@ def test_resolve_run_command_handles_empty_command():
     assert _resolve_run_command([]) == []
 
 @pytest.mark.asyncio
+async def test_workflow_uses_per_role_model_config(tmp_path):
+    """Configured agent_llms overrides must actually reach each role's real
+    llm.complete() call - proving the config flows from AppConfig through
+    WorkflowEngine's constructed agents, not just that the config schema parses."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.agent_llms.planner.llm = LLMConfig(model="devstral-small-2:24b")
+    cfg.agent_llms.reviewer.llm = LLMConfig(model="devstral-small-2:24b")
+    # architect is deliberately left unset - should use the default call shape.
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',  # Developer
+        "Review: Approved"        # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    planner_kwargs = llm.complete.await_args_list[0].kwargs
+    architect_kwargs = llm.complete.await_args_list[1].kwargs
+    reviewer_kwargs = llm.complete.await_args_list[3].kwargs
+    assert planner_kwargs.get("model_override") == "devstral-small-2:24b"
+    assert "model_override" not in architect_kwargs  # unset role -> today's default call shape
+    assert reviewer_kwargs.get("model_override") == "devstral-small-2:24b"
+
+@pytest.mark.asyncio
 async def test_workflow_successful_run(tmp_path):
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
-    
+
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
         "Design: Write math.py",
@@ -107,12 +138,12 @@ async def test_workflow_successful_run(tmp_path):
     ])
 
     we = WorkflowEngine(kernel, llm)
-    
+
     res = await we.run_generation_workflow(
         goal="Create math library",
         workspace_path=str(tmp_path)
     )
-    
+
     assert res["quality_gates_passed"] is True
     assert "math.py" in res["files"]
     assert os.path.exists(os.path.join(tmp_path, "math.py"))

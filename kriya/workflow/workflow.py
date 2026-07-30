@@ -592,12 +592,18 @@ class WorkflowEngine:
     def __init__(self, kernel: Kernel, llm_client: LLMClient) -> None:
         self.kernel = kernel
         self.llm = llm_client
-        self.planner = PlannerAgent("planner", llm_client)
-        self.architect = ArchitectAgent("architect", llm_client)
+        # Per-role model config (kriya/config/config.py::AgentRolesConfig) - each
+        # optional, defaulting to None (LLMClient's own primary model) when a project
+        # never configures agent_llms, so this is a zero-behavior-change default.
+        # Developer deliberately isn't here - it stays on the top-level llm/llm_chain,
+        # escalated by the existing quality-gate retry loop below, not this mechanism.
+        roles = kernel.config.agent_llms
+        self.planner = PlannerAgent("planner", llm_client, roles.planner.llm, roles.planner.llm_chain)
+        self.architect = ArchitectAgent("architect", llm_client, roles.architect.llm, roles.architect.llm_chain)
         self.developer = DeveloperAgent("developer", llm_client)
-        self.reviewer = ReviewerAgent("reviewer", llm_client)
-        self.run_verifier = RunVerifierAgent("run_verifier", llm_client)
-        self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client)
+        self.reviewer = ReviewerAgent("reviewer", llm_client, roles.reviewer.llm, roles.reviewer.llm_chain)
+        self.run_verifier = RunVerifierAgent("run_verifier", llm_client, roles.run_verifier.llm, roles.run_verifier.llm_chain)
+        self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client, roles.skill_gap.llm, roles.skill_gap.llm_chain)
 
     async def run_generation_workflow(
         self, 
@@ -1458,9 +1464,6 @@ class WorkflowEngine:
                         goal=goal,
                         design=design,
                         files_written=list(all_files_written),
-                        model_override=model_override,
-                        base_url_override=base_url_override,
-                        api_key_override=api_key_override,
                     )
                     if judgment["should_run"]:
                         proceed_with_run = True
@@ -1505,9 +1508,6 @@ class WorkflowEngine:
                                     success_criteria=judgment["success_criteria"],
                                     output=run_res["output"],
                                     returncode=run_res["returncode"],
-                                    model_override=model_override,
-                                    base_url_override=base_url_override,
-                                    api_key_override=api_key_override,
                                 )
                             gate_outcomes.append({
                                 "attempt": retry_count + 1,
