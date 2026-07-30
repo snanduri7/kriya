@@ -22,6 +22,13 @@ from kriya.workflow import WorkflowEngine
 
 logger = logging.getLogger(__name__)
 
+def _get_global_skills_dir() -> str:
+    """Kriya's own shared, global skill library directory - not any project-local
+    skills override. Extracted as its own function so tests can patch it rather than
+    risk writing test data into the real shared skills on disk."""
+    kriya_install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    return os.path.join(kriya_install_dir, "skills")
+
 def configure_logging(cfg: AppConfig) -> None:
     """Initializes root logging handlers (console + optional file) from AppConfig.logging."""
     if logging.getLogger().handlers:
@@ -513,6 +520,99 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Successfully approved and promoted {len(staged_lines)} rule(s) to rules.txt for skill '{skill_name}'!", fg="green")
     except Exception as e:
         click.secho(f"Failed to approve staged rules: {e}", fg="red")
+
+@skills_group.command(name="promote")
+@click.argument('source_skill')
+@click.argument('target_skill')
+@click.option('--rule', help="Promote exactly this one rule (must already be an approved rule in the source skill's rules.txt).")
+@click.option('--all', 'promote_all', is_flag=True, help="Promote every approved rule in the source skill not already present in the target.")
+@click.pass_context
+def skills_promote(ctx: click.Context, source_skill: str, target_skill: str, rule: Optional[str], promote_all: bool) -> None:
+    """Promote a validated, repo-local lesson into a shared, reusable skill.
+
+    Lesson extraction (kriya generate's auto-debugging loop) and 'kriya skills approve'
+    only ever affect a single repo's private auto-<repo-slug> skill - the same mistake
+    has to be independently rediscovered in every other project that uses the same
+    technology. This promotes an already-approved rule from SOURCE_SKILL up into
+    TARGET_SKILL in Kriya's shared skill library, so every future project benefits.
+
+    Deliberately requires interactive confirmation with no --yes bypass, even under
+    'generate -y' - promoting into a shared skill affects every future project that
+    uses it, not just the current one, and should never happen unattended.
+    """
+    if not rule and not promote_all:
+        click.secho("Specify either --rule \"<exact text>\" or --all.", fg="red")
+        sys.exit(1)
+    if rule and promote_all:
+        click.secho("Specify only one of --rule or --all, not both.", fg="red")
+        sys.exit(1)
+
+    cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
+
+    # Source: the project-local skills dir (cfg.paths.skills), typically where an
+    # auto-<repo-slug> skill's already-human-approved rules.txt lives.
+    source_folder = os.path.join(cfg.paths.skills, source_skill.lower())
+    if not os.path.exists(source_folder):
+        source_folder = os.path.join(cfg.paths.skills, source_skill)
+    source_rules_file = os.path.join(source_folder, "rules.txt")
+    if not os.path.exists(source_rules_file):
+        click.secho(f"No approved rules.txt found for source skill '{source_skill}' at {source_rules_file}.", fg="red")
+        sys.exit(1)
+
+    with open(source_rules_file, "r", encoding="utf-8") as sf:
+        source_rules = [line.strip() for line in sf if line.strip()]
+    if not source_rules:
+        click.secho(f"Source skill '{source_skill}' has no approved rules to promote.", fg="yellow")
+        return
+
+    # Target: always Kriya's own shared, global skill library - not whatever
+    # project-local skills dir happens to be active for this invocation - promotion
+    # is meant to benefit every future project, not just the current one.
+    global_skills_dir = _get_global_skills_dir()
+    target_folder = os.path.join(global_skills_dir, target_skill.lower())
+    if not os.path.exists(target_folder):
+        target_folder = os.path.join(global_skills_dir, target_skill)
+    if not os.path.exists(target_folder):
+        click.secho(
+            f"Target skill '{target_skill}' does not exist in the shared skill library at {global_skills_dir}. "
+            f"Use 'kriya skills create {target_skill}' first if this should be a new shared skill.",
+            fg="red"
+        )
+        sys.exit(1)
+    target_rules_file = os.path.join(target_folder, "rules.txt")
+
+    existing_target_rules = []
+    if os.path.exists(target_rules_file):
+        with open(target_rules_file, "r", encoding="utf-8") as tf:
+            existing_target_rules = [line.strip() for line in tf if line.strip()]
+
+    if rule:
+        if rule not in source_rules:
+            click.secho(f"Rule not found in '{source_skill}'s approved rules.txt: {rule}", fg="red")
+            sys.exit(1)
+        candidates = [rule]
+    else:
+        candidates = source_rules
+
+    to_promote = [r for r in candidates if r not in existing_target_rules]
+    if not to_promote:
+        click.secho("Nothing to promote - the specified rule(s) are already present in the target skill.", fg="yellow")
+        return
+
+    click.secho(f"\nAbout to promote {len(to_promote)} rule(s) from '{source_skill}' into the SHARED skill '{target_skill}':", bold=True, fg="yellow")
+    click.echo(f"  Target: {target_rules_file}")
+    for r in to_promote:
+        click.echo(f"  + {r}")
+    click.secho("\nThis affects every future project that uses this skill, not just the current one.", fg="yellow")
+    if not click.confirm("Proceed?"):
+        click.secho("Aborted.", fg="red")
+        return
+
+    with open(target_rules_file, "a", encoding="utf-8") as tf:
+        for r in to_promote:
+            tf.write(f"\n{r}")
+
+    click.secho(f"Successfully promoted {len(to_promote)} rule(s) into shared skill '{target_skill}'.", fg="green")
 
 @main.command()
 @click.argument('goal', required=False)
