@@ -937,6 +937,65 @@ async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
     assert skill_gap_calls == [["widgetlib"]]  # fell back to asking a human
 
 @pytest.mark.asyncio
+async def test_workflow_web_lookup_accepted_but_empty_falls_back_to_human_ask(tmp_path):
+    """Bug fix: accepting the live-lookup batch doesn't by itself mean the gap is
+    resolved - if extraction across all fetched candidates still comes up empty, the
+    term must fall through to skill_gap_callback exactly as if lookup had never run,
+    not silently leave the skill unverified with no one ever asked. If the human then
+    supplies something usable, it must be applied."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    cfg.search.top_k = 1
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    empty_extraction = json.dumps({"rules": [], "examples": {}, "conflicts": []})
+    real_extraction = json.dumps({"rules": ["The magic widget constant is 42."], "examples": {}, "conflicts": []})
+    llm.complete = AsyncMock(side_effect=[
+        empty_extraction,         # live-lookup's one candidate - nothing usable
+        real_extraction,          # human-supplied reference, after fallback - usable
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',  # Developer
+        "Review: Approved"        # Reviewer
+    ])
+
+    found_result = [{"title": "Widgetlib Landing Page", "url": "https://example.com/widgetlib", "snippet": "..."}]
+    skill_gap_calls = []
+    def skill_gap_cb(reason, names):
+        skill_gap_calls.append(names)
+        return "The magic widget constant is 42."  # pasted text, not a URL - avoids egress_policy entirely
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found_result)), \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="The magic widget constant is 42.")):
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=skill_gap_cb,
+            web_lookup_callback=lambda found: True,  # batch accepted, but content is empty
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert skill_gap_calls == [["widgetlib"]]  # fell through to human ask despite an accepted batch
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("widgetlib")
+    assert "The magic widget constant is 42." in skill.rules
+
+@pytest.mark.asyncio
 async def test_workflow_web_lookup_disabled_by_default_never_calls_search(tmp_path):
     """web_lookup_enabled defaults to False - a project that hasn't opted in must see
     zero behavior change, and search_web must never even be called."""
@@ -1014,6 +1073,61 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
     assert res["quality_gates_passed"] is True
     mock_search.assert_called_once_with("gizmolib documentation", "http://fake-search:8080", top_k=3)
     mock_fetch.assert_called_once_with("https://example.com/gizmolib")
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("gizmolib")
+    assert "Use gizmolib.connect() to open a connection." in skill.rules
+
+@pytest.mark.asyncio
+async def test_workflow_web_lookup_design_derived_falls_back_to_human_ask_on_empty_extraction(tmp_path):
+    """Bug fix, design-derived path: if live lookup finds nothing usable for a
+    technology only the Architect's design named, Kriya must fall back to asking a
+    human (skill_gap_callback) rather than silently generating code against a
+    technology it has zero grounding for."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    cfg.search.top_k = 1
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    empty_extraction = json.dumps({"rules": [], "examples": {}, "conflicts": []})
+    real_extraction = json.dumps({"rules": ["Use gizmolib.connect() to open a connection."], "examples": {}, "conflicts": []})
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",                                     # Planner
+        "Design: use gizmolib==3.1.0 to connect to the service",  # Architect names a new lib
+        empty_extraction,                                         # live lookup's candidate - nothing usable
+        real_extraction,                                          # human-supplied reference, after fallback
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',     # Developer
+        "Review: Approved"                                        # Reviewer
+    ])
+
+    found_result = [{"title": "Gizmolib Landing Page", "url": "https://example.com/gizmolib", "snippet": "..."}]
+    skill_gap_calls = []
+    def skill_gap_cb(reason, names):
+        skill_gap_calls.append(names)
+        return "Use gizmolib.connect() to open a connection."
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found_result)), \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="Marketing copy, no specifics.")):
+        res = await we.run_generation_workflow(
+            goal="Build an app that talks to an external service",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=skill_gap_cb,
+            web_lookup_callback=lambda found: True,
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert skill_gap_calls == [["gizmolib"]]  # fell back to asking a human for the design-derived gap
 
     se = SkillEngine(str(skills_dir), load_global=False)
     se.discover_and_load()
