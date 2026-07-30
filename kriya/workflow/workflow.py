@@ -493,7 +493,8 @@ class WorkflowEngine:
         stream_callback: Optional[Callable[[str, str], None]] = None,
         error_context: Optional[str] = None,
         knowledge_risk_confirmed: bool = False,
-        skill_gap_callback: Optional[Callable[[str, List[str]], Any]] = None
+        skill_gap_callback: Optional[Callable[[str, List[str]], Any]] = None,
+        skill_conflict_callback: Optional[Callable[[str, str, str, str, str], Any]] = None
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming)."""
         
@@ -714,6 +715,63 @@ class WorkflowEngine:
             else:
                 for s in unverified_relevant:
                     se.mark_gap_acknowledged(s.name)
+
+        # 1.3. Skill-to-Skill Conflict Detection & Resolution. Two independently
+        # correct skills can still conflict when both are active in the same run (e.g.
+        # two broker skills each pinning a different value for what must be a single
+        # shared setting) - checked here, after active_skills is finalized (including
+        # anything the gap-detection step above just bootstrapped), so the comparison
+        # always sees the actual skill set this run will use. A previously-resolved
+        # pair is applied silently from the registry; a new one asks once and the
+        # answer is remembered for future runs.
+        if skill_conflict_callback and len(active_skills) >= 2:
+            from kriya.skills.skill import find_conflict_resolution, record_conflict_resolution
+            sorted_active = sorted(set(active_skills))
+            for idx_a in range(len(sorted_active)):
+                for idx_b in range(idx_a + 1, len(sorted_active)):
+                    name_a, name_b = sorted_active[idx_a], sorted_active[idx_b]
+                    try:
+                        skill_a = se.get_skill(name_a)
+                        skill_b = se.get_skill(name_b)
+                    except KeyError:
+                        continue
+                    if not skill_a.rules or not skill_b.rules:
+                        continue
+
+                    try:
+                        conflicts = await self.skill_gap_agent.check_skill_conflicts(
+                            name_a, skill_a.rules, name_b, skill_b.rules
+                        )
+                    except Exception as ex:
+                        logger.warning(f"Skill conflict check failed for '{name_a}' vs '{name_b}': {ex}")
+                        continue
+
+                    for conflict in conflicts:
+                        rule_a, rule_b = conflict["rule_a"], conflict["rule_b"]
+                        resolution = find_conflict_resolution(skills_dir, name_a, rule_a, name_b, rule_b)
+                        if resolution is None:
+                            try:
+                                raw = skill_conflict_callback(name_a, rule_a, name_b, rule_b, conflict.get("explanation", ""))
+                                if asyncio.iscoroutine(raw):
+                                    raw = await raw
+                            except Exception as ex:
+                                logger.warning(f"skill_conflict_callback failed, proceeding without resolving: {ex}")
+                                raw = None
+                            if raw in ("prefer_a", "prefer_b", "both_ok"):
+                                resolution = raw
+                                record_conflict_resolution(skills_dir, name_a, rule_a, name_b, rule_b, resolution)
+                            else:
+                                # No explicit human decision (e.g. -y, or a callback
+                                # failure) - proceed without excluding either rule for
+                                # THIS run only; don't persist a non-decision.
+                                resolution = "both_ok"
+
+                        if resolution == "prefer_a":
+                            convention_prompt = convention_prompt.replace(f"- {rule_b}\n", "")
+                            logger.info(f"Skill conflict resolved: '{name_a}' rule takes precedence over '{name_b}' for this run.")
+                        elif resolution == "prefer_b":
+                            convention_prompt = convention_prompt.replace(f"- {rule_a}\n", "")
+                            logger.info(f"Skill conflict resolved: '{name_b}' rule takes precedence over '{name_a}' for this run.")
 
         # 1.5. Graph RAG Context Retrieval
         matched_files = []

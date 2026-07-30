@@ -551,6 +551,85 @@ class SkillGapAgent(BaseAgent):
 
         return {"rules": rules, "examples": examples, "conflicts": conflicts}
 
+    async def check_skill_conflicts(
+        self,
+        skill_a_name: str,
+        skill_a_rules: List[str],
+        skill_b_name: str,
+        skill_b_rules: List[str],
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        """Compares two skills' rule sets for genuine contradictions when both are
+        active for the same generation run (e.g. two broker skills each pinning a
+        different value for what must be a single shared setting). Two skills merely
+        sharing a topic isn't a conflict - only flag it if following both rules at
+        once is actually impossible."""
+        if not skill_a_rules or not skill_b_rules:
+            return []
+
+        system_prompt = (
+            "You are the Kriya Skill Conflict Checker.\n"
+            "You are given the rule sets of two engineering skills that are both active "
+            "for the same code generation run. Identify pairs of rules that GENUINELY "
+            "contradict each other if both were followed at once (e.g. two different "
+            "version pins for what should be the same dependency, two different values "
+            "for what must be a single shared config setting like a port or protocol). "
+            "Do NOT flag rules that merely share a topic but don't actually conflict "
+            "(e.g. two different brokers each defining their own, independent config "
+            "key is not a conflict).\n"
+            "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
+            "{\n"
+            '  "conflicts": [{"rule_a": "<verbatim from Skill A>", "rule_b": "<verbatim from Skill B>", "explanation": "..."}]\n'
+            "}\n"
+            "rule_a and rule_b MUST be copied verbatim, character-for-character, from "
+            "the provided rule lists - do not paraphrase or summarize them.\n"
+            'If nothing genuinely conflicts, return {"conflicts": []}.'
+        )
+        prompt = (
+            f"=== Skill A: {skill_a_name} ===\n" + "\n".join(skill_a_rules) + "\n\n"
+            f"=== Skill B: {skill_b_name} ===\n" + "\n".join(skill_b_rules) + "\n\n"
+            "Identify any genuine contradictions per the instructions above."
+        )
+        response_str = await self.llm.complete(
+            system_prompt,
+            prompt,
+            json_mode=True,
+            model_override=model_override,
+            base_url_override=base_url_override,
+            api_key_override=api_key_override,
+        )
+        try:
+            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+        except Exception as e:
+            logger.warning(f"Skill Conflict Checker returned unparseable JSON: {e}")
+            return []
+        if not isinstance(parsed, dict):
+            return []
+        conflicts = parsed.get("conflicts")
+        if not isinstance(conflicts, list):
+            return []
+
+        # Defensive, same reasoning as extract_skill_update's mutual-exclusivity fix:
+        # only trust a "conflict" whose rule text is an exact match against the real
+        # rule sets, so a hallucinated or paraphrased conflict can never silently
+        # exclude real rule content from generation context.
+        valid = []
+        for c in conflicts:
+            if not isinstance(c, dict):
+                continue
+            rule_a = c.get("rule_a", "")
+            rule_b = c.get("rule_b", "")
+            if rule_a in skill_a_rules and rule_b in skill_b_rules:
+                valid.append({"rule_a": rule_a, "rule_b": rule_b, "explanation": c.get("explanation", "")})
+            else:
+                logger.warning(
+                    f"Skill Conflict Checker returned a conflict whose rule text didn't "
+                    f"exactly match '{skill_a_name}'/'{skill_b_name}' rules - discarding."
+                )
+        return valid
+
 
 class ReviewerAgent(BaseAgent):
     @property

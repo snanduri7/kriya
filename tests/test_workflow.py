@@ -587,6 +587,190 @@ async def test_workflow_skill_gap_not_reasked_once_acknowledged(tmp_path):
     assert calls == []
 
 
+def _make_conflicting_skills_dir(tmp_path):
+    # Deliberately fictional, non-colliding skill names - the real repo's own
+    # skills/ directory (qpid, activemq-artemis, ...) is also loaded alongside a
+    # project-local skills dir (SkillEngine defaults load_global=True), so reusing
+    # those real names here would spuriously match real skills too.
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "brokeralpha").mkdir(parents=True)
+    (skills_dir / "brokeralpha" / "skill.yaml").write_text("name: brokeralpha\ndescription: Test\ntags: [brokeralpha]\n")
+    (skills_dir / "brokeralpha" / "rules.txt").write_text("Broker must bind AMQP to port 5672.\n")
+    (skills_dir / "brokerbeta").mkdir(parents=True)
+    (skills_dir / "brokerbeta" / "skill.yaml").write_text("name: brokerbeta\ndescription: Test\ntags: [brokerbeta]\n")
+    (skills_dir / "brokerbeta" / "rules.txt").write_text("Configure the broker to listen on port 5673 for AMQP clients.\n")
+    return skills_dir
+
+_ALPHA_RULE = "Broker must bind AMQP to port 5672."
+_BETA_RULE = "Configure the broker to listen on port 5673 for AMQP clients."
+
+# active_skills is sorted alphabetically before pairwise comparison, so
+# "brokeralpha" (< "brokerbeta") is always passed as skill_a/rule_a here.
+_CONFLICT_RESPONSE = json.dumps({
+    "conflicts": [{
+        "rule_a": _ALPHA_RULE,
+        "rule_b": _BETA_RULE,
+        "explanation": "Both skills configure the same embedded broker's AMQP port to a different value."
+    }]
+})
+
+@pytest.mark.asyncio
+async def test_workflow_skill_conflict_excludes_losing_rule_and_persists_resolution(tmp_path):
+    """Two independently valid skills can still conflict when both are active for the
+    same run (e.g. two broker skills each pinning a different port for what must be a
+    single shared setting). A human-resolved 'prefer_a' must exclude the losing rule
+    from THIS run's context, and remember the decision for future runs."""
+    from kriya.skills.skill import load_conflict_resolutions
+
+    skills_dir = _make_conflicting_skills_dir(tmp_path)
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        _CONFLICT_RESPONSE,       # SkillGapAgent.check_skill_conflicts
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',  # Developer
+        "Review: Approved"        # Reviewer
+    ])
+
+    def conflict_cb(skill_a, rule_a, skill_b, rule_b, explanation):
+        return "prefer_a"  # artemis (skill_a, alphabetically first) wins
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something using both the brokeralpha and brokerbeta skills",
+        workspace_path=str(tmp_path),
+        skill_conflict_callback=conflict_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+
+    planner_prompt = llm.complete.call_args_list[1].args[1]
+    assert _ALPHA_RULE in planner_prompt
+    assert _BETA_RULE not in planner_prompt
+
+    records = load_conflict_resolutions(str(skills_dir))
+    assert len(records) == 1
+    assert records[0]["resolution"] == "prefer_a"
+
+@pytest.mark.asyncio
+async def test_workflow_skill_conflict_remembered_resolution_skips_callback(tmp_path):
+    """A conflict already resolved for this exact skill/rule pair on a prior run must
+    be applied silently - the callback should not be re-invoked."""
+    from kriya.skills.skill import record_conflict_resolution
+
+    skills_dir = _make_conflicting_skills_dir(tmp_path)
+    record_conflict_resolution(str(skills_dir), "brokeralpha", _ALPHA_RULE, "brokerbeta", _BETA_RULE, "prefer_b")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        _CONFLICT_RESPONSE,
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    calls = []
+    def conflict_cb(skill_a, rule_a, skill_b, rule_b, explanation):
+        calls.append((skill_a, skill_b))
+        return "prefer_a"
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something using both the brokeralpha and brokerbeta skills",
+        workspace_path=str(tmp_path),
+        skill_conflict_callback=conflict_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert calls == []  # remembered resolution applied without asking again
+
+    planner_prompt = llm.complete.call_args_list[1].args[1]
+    # The remembered resolution was "prefer_b" (qpid wins) - qpid's rule must be the
+    # one that survives, artemis's the one excluded.
+    assert _BETA_RULE in planner_prompt
+    assert _ALPHA_RULE not in planner_prompt
+
+@pytest.mark.asyncio
+async def test_workflow_skill_conflict_no_callback_response_does_not_persist(tmp_path):
+    """A callback that returns nothing usable (e.g. -y auto-skip, or a callback error)
+    must not exclude either rule and must not write a resolution to the registry -
+    only an explicit human decision should be remembered."""
+    from kriya.skills.skill import load_conflict_resolutions
+
+    skills_dir = _make_conflicting_skills_dir(tmp_path)
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        _CONFLICT_RESPONSE,
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    def conflict_cb(skill_a, rule_a, skill_b, rule_b, explanation):
+        return None
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something using both the brokeralpha and brokerbeta skills",
+        workspace_path=str(tmp_path),
+        skill_conflict_callback=conflict_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+
+    planner_prompt = llm.complete.call_args_list[1].args[1]
+    assert _ALPHA_RULE in planner_prompt
+    assert _BETA_RULE in planner_prompt
+
+    assert load_conflict_resolutions(str(skills_dir)) == []
+
+@pytest.mark.asyncio
+async def test_workflow_no_conflict_check_without_callback(tmp_path):
+    """Without a skill_conflict_callback (e.g. the `fix` pipeline, which doesn't wire
+    one in), the conflict-detection LLM call must not fire at all."""
+    skills_dir = _make_conflicting_skills_dir(tmp_path)
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner - no conflict-check call precedes it
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something using both the brokeralpha and brokerbeta skills",
+        workspace_path=str(tmp_path),
+    )
+
+    assert res["quality_gates_passed"] is True
+
+
 @pytest.mark.asyncio
 async def test_workflow_normalizes_absolute_filepath_from_developer_agent(tmp_path):
     """Reproduces a real observed failure: the Developer Agent sometimes returns an

@@ -365,3 +365,75 @@ async def test_skill_gap_agent_unparseable_response_returns_empty_not_error():
     )
 
     assert result == {"rules": [], "examples": {}, "conflicts": []}
+
+
+@pytest.mark.asyncio
+async def test_check_skill_conflicts_returns_valid_conflict():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "conflicts": [{
+            "rule_a": "Broker must bind AMQP to port 5672.",
+            "rule_b": "Configure the broker to listen on port 5673 for AMQP clients.",
+            "explanation": "Both skills configure the same embedded broker's AMQP port to different values."
+        }]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.check_skill_conflicts(
+        "qpid", ["Broker must bind AMQP to port 5672."],
+        "activemq-artemis", ["Configure the broker to listen on port 5673 for AMQP clients."]
+    )
+
+    assert len(result) == 1
+    assert result[0]["rule_a"] == "Broker must bind AMQP to port 5672."
+    assert result[0]["rule_b"] == "Configure the broker to listen on port 5673 for AMQP clients."
+
+@pytest.mark.asyncio
+async def test_check_skill_conflicts_discards_hallucinated_rule_text():
+    # Defensive check mirroring extract_skill_update's mutual-exclusivity fix: a
+    # "conflict" whose rule text doesn't exactly match either skill's actual rules
+    # must never be trusted, since it would silently exclude real rule content.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "conflicts": [{
+            "rule_a": "Paraphrased version of the real rule.",
+            "rule_b": "Use port 5673.",
+            "explanation": "Ports differ."
+        }]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.check_skill_conflicts(
+        "qpid", ["Broker must bind AMQP to port 5672."],
+        "activemq-artemis", ["Use port 5673."]
+    )
+
+    assert result == []
+
+@pytest.mark.asyncio
+async def test_check_skill_conflicts_no_conflict_returns_empty():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({"conflicts": []}))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.check_skill_conflicts(
+        "qpid", ["Use SLF4J for logging."],
+        "activemq-artemis", ["Use artemis-server, not artemis-core-server."]
+    )
+
+    assert result == []
+
+@pytest.mark.asyncio
+async def test_check_skill_conflicts_skips_llm_call_when_either_skill_has_no_rules():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=AssertionError("should not be called"))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.check_skill_conflicts("qpid", [], "activemq-artemis", ["Some rule."])
+
+    assert result == []
+    llm.complete.assert_not_called()

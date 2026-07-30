@@ -254,6 +254,52 @@ def test_skills_list_shows_verification_status(tmp_path):
     matching_line = next(line for line in result.output.splitlines() if "verifiedwidget" in line)
     assert "[VERIFIED - widgetlib 2.0.0, on 2026-01-01]" in matching_line
 
+def test_conflict_registry_round_trips_resolution(tmp_path):
+    from kriya.skills.skill import find_conflict_resolution, record_conflict_resolution
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    assert find_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.") is None
+
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a")
+
+    assert find_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.") == "prefer_a"
+
+def test_conflict_registry_lookup_is_order_independent(tmp_path):
+    from kriya.skills.skill import find_conflict_resolution, record_conflict_resolution
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a")
+
+    # Looked up with the two skills swapped, the resolution must flip accordingly -
+    # "prefer_a" (qpid) becomes "prefer_b" when qpid is now the second argument.
+    assert find_conflict_resolution(str(skills_dir), "artemis", "Use port 5673.", "qpid", "Use port 5672.") == "prefer_b"
+
+def test_conflict_registry_overwrites_prior_resolution_for_same_pair(tmp_path):
+    from kriya.skills.skill import find_conflict_resolution, load_conflict_resolutions, record_conflict_resolution
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a")
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "both_ok")
+
+    assert find_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.") == "both_ok"
+    assert len(load_conflict_resolutions(str(skills_dir))) == 1
+
+def test_conflict_registry_distinct_rule_pairs_tracked_separately(tmp_path):
+    from kriya.skills.skill import find_conflict_resolution, record_conflict_resolution
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a")
+
+    # A different conflicting rule pair between the same two skills is a distinct,
+    # unresolved decision - must not be silently covered by the earlier resolution.
+    assert find_conflict_resolution(str(skills_dir), "qpid", "Use SLF4J.", "artemis", "Use Log4j.") is None
+
+
 def test_skills_show_displays_verification_provenance(tmp_path):
     config_file, _project_skills = _make_local_project(tmp_path, skill_name="verifiedwidget", verified=True)
     runner = CliRunner()

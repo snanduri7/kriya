@@ -743,6 +743,24 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         )
         return supplied.strip() or None
 
+    def on_skill_conflict(skill_a: str, rule_a: str, skill_b: str, rule_b: str, explanation: str) -> Optional[str]:
+        if yes:
+            click.secho(f"\n[Auto-Skipping Skill Conflict Check] '{skill_a}' vs '{skill_b}'", dim=True)
+            return None
+
+        click.secho(f"\n[Possible Skill Conflict] '{skill_a}' and '{skill_b}' are both active for this run:", bold=True, fg="yellow")
+        click.echo(f"  [{skill_a}] {rule_a}")
+        click.echo(f"  [{skill_b}] {rule_b}")
+        if explanation:
+            click.echo(f"  Why: {explanation}")
+        choice = click.prompt(
+            "Which rule should govern this generation? "
+            "(a = prefer skill A's rule, b = prefer skill B's rule, both = not actually conflicting)",
+            type=click.Choice(["a", "b", "both"]), default="both"
+        )
+        click.secho("This decision will be remembered for future runs of these two skills.", dim=True)
+        return {"a": "prefer_a", "b": "prefer_b", "both": "both_ok"}[choice]
+
     async def run_workflow():
         nonlocal goal
         rag_context = ""
@@ -773,7 +791,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             workspace_path=os.getcwd(),
             approval_callback=on_approval,
             stream_callback=on_stream,
-            skill_gap_callback=on_skill_gap
+            skill_gap_callback=on_skill_gap,
+            skill_conflict_callback=on_skill_conflict
         )
 
         if isinstance(res, dict) and res.get("status") == "knowledge_gap":
@@ -791,6 +810,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     approval_callback=on_approval,
                     stream_callback=on_stream,
                     skill_gap_callback=on_skill_gap,
+                    skill_conflict_callback=on_skill_conflict,
                     knowledge_risk_confirmed=True
                 )
             elif knowledge_policy == 'strict':
@@ -826,6 +846,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         approval_callback=on_approval,
                         stream_callback=on_stream,
                         skill_gap_callback=on_skill_gap,
+                        skill_conflict_callback=on_skill_conflict,
                         knowledge_risk_confirmed=True
                     )
                 else:

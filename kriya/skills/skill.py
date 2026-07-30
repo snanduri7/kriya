@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -35,6 +36,72 @@ def git_commit_if_tracked(path: str, message: str) -> None:
             logger.debug(f"git commit for skill change did not create a commit: {res.stdout.strip()} {res.stderr.strip()}")
     except Exception as e:
         logger.debug(f"Failed to git-commit skill change at '{path}' (non-fatal): {e}")
+
+
+def _conflict_registry_path(skills_dir: str) -> str:
+    return os.path.join(os.path.abspath(skills_dir), ".skill_conflicts.json")
+
+
+def _same_conflict_pair(record: Dict[str, str], skill_a: str, rule_a: str, skill_b: str, rule_b: str) -> bool:
+    """Order-independent match: a resolution recorded as (A, ruleA, B, ruleB) also
+    covers a later lookup for (B, ruleB, A, ruleA)."""
+    stored = (record.get("skill_a"), record.get("rule_a"), record.get("skill_b"), record.get("rule_b"))
+    return stored == (skill_a, rule_a, skill_b, rule_b) or stored == (skill_b, rule_b, skill_a, rule_a)
+
+
+def load_conflict_resolutions(skills_dir: str) -> List[Dict[str, str]]:
+    """Loads all remembered skill-pair conflict resolutions. Never raises - a missing
+    or corrupt registry is treated as "nothing resolved yet", not a hard error."""
+    path = _conflict_registry_path(skills_dir)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        logger.warning(f"Failed to read skill conflict registry at '{path}' (treating as empty): {e}")
+        return []
+
+
+def find_conflict_resolution(skills_dir: str, skill_a: str, rule_a: str, skill_b: str, rule_b: str) -> Optional[str]:
+    """Returns a previously-recorded resolution ('prefer_a'/'prefer_b'/'both_ok') for
+    this exact skill-and-rule pair, oriented to match the caller's (skill_a, skill_b)
+    order, or None if this specific pair has never been resolved before."""
+    for record in load_conflict_resolutions(skills_dir):
+        if _same_conflict_pair(record, skill_a, rule_a, skill_b, rule_b):
+            resolution = record.get("resolution")
+            if record.get("skill_a") == skill_a and record.get("rule_a") == rule_a:
+                return resolution
+            return {"prefer_a": "prefer_b", "prefer_b": "prefer_a"}.get(resolution, resolution)
+    return None
+
+
+def record_conflict_resolution(
+    skills_dir: str, skill_a: str, rule_a: str, skill_b: str, rule_b: str, resolution: str, note: str = ""
+) -> None:
+    """Persists a human's resolution of a specific skill-pair rule conflict so future
+    runs that co-activate the same two skills with the same rule text don't re-ask.
+    Best-effort, like every other skill-file write - failing to persist shouldn't fail
+    the generation run that triggered it."""
+    path = _conflict_registry_path(skills_dir)
+    records = [r for r in load_conflict_resolutions(skills_dir) if not _same_conflict_pair(r, skill_a, rule_a, skill_b, rule_b)]
+    records.append({
+        "skill_a": skill_a,
+        "rule_a": rule_a,
+        "skill_b": skill_b,
+        "rule_b": rule_b,
+        "resolution": resolution,
+        "note": note,
+        "resolved_at": date.today().isoformat(),
+    })
+    try:
+        os.makedirs(os.path.abspath(skills_dir), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2)
+        git_commit_if_tracked(path, f"Kriya: record skill-conflict resolution ({skill_a} vs {skill_b}): {resolution}")
+    except Exception as e:
+        logger.warning(f"Failed to persist skill conflict resolution (non-fatal): {e}")
 
 
 def parse_version_parts(v_str: str) -> Tuple[int, int, int]:
