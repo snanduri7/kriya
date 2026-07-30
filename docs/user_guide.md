@@ -160,6 +160,14 @@ kriya -c kriya.yaml skills unverify <skill_name>
 ```
 This does not delete any rules - it only resets the verification flag so future `generate` runs are asked to strengthen/re-confirm the skill again (see 3.4 above). Kriya never auto-demotes a skill on a *failed* Runtime Verification run - attributing a failure to one specific skill among several active ones is unreliable, so demotion is always a deliberate human call.
 
+**Per-rule tracking**: the `verified` flag above is skill-level, but a passing run usually only exercises a handful of a skill's actual rules - marking the whole skill verified on that basis is coarser than it sounds. Kriya separately tracks each *individual* rule extracted from a skill gap or live lookup (Section 3.4 / Section 4.6) as unverified until a passing run's context specifically includes it. `kriya skills show <skill_name>` flags these inline:
+```
+Rules:
+  - Always print output prefixed with [WIDGET].
+  - Use WIDGET_CONSTANT = 999 as the magic widget constant.  [unverified]
+```
+This only applies to rules extracted since this tracking existed - pre-existing rules.txt content (including anything already in your skills before this feature) has no recorded provenance and is treated as already-trusted, not retroactively flagged. Generation prompts show unverified rules in a separate section labeled "use with appropriate caution" so the model has the same signal a human reviewing `kriya skills show` would.
+
 ### 4.3 Promoting Accrued Rules
 When Kriya stages a lesson rule from a bug fix (during an auto-debugging escalation), approve it to promote it into that repo's own private `auto-<repo-slug>` skill:
 ```bash

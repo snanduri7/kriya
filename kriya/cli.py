@@ -473,9 +473,19 @@ def skills_show(ctx: click.Context, skill_name: str) -> None:
 
         if s.rules:
             click.secho("\nRules:", bold=True)
+            unverified_texts = set()
+            if s.source_path:
+                from kriya.skills.skill import load_rule_provenance
+                unverified_texts = {
+                    p["text"] for p in load_rule_provenance(s.source_path) if not p.get("verified", False)
+                }
             for r in s.rules:
-                click.echo(f"  - {r}")
-                
+                if r in unverified_texts:
+                    click.secho(f"  - {r} ", fg="yellow", nl=False)
+                    click.secho("[unverified]", fg="yellow", dim=True)
+                else:
+                    click.echo(f"  - {r}")
+
         if s.instructions:
             click.secho("\nInstructions:", bold=True)
             click.echo(s.instructions)

@@ -403,13 +403,19 @@ def find_missing_expected_files(expected_files: set, written_files: set, goal: s
         missing = {f for f in missing if not _is_test_or_doc_file(f)}
     return sorted(missing)
 
-def _write_skill_extraction(skill: Any, extraction: Dict[str, Any]) -> None:
+def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str = "unknown") -> None:
     """Writes newly extracted rules/examples straight into a skill's own files - per
     the design decision that user-supplied-in-response-to-a-direct-question content is
     a strong enough intent signal to skip the staged/approve flow used for unattended
     lesson extraction. `skill` is the already-loaded Skill object (has source_path set
-    by SkillEngine.discover_and_load), avoiding a redundant re-scan of the skills dir."""
-    from kriya.skills.skill import git_commit_if_tracked
+    by SkillEngine.discover_and_load), avoiding a redundant re-scan of the skills dir.
+
+    `source` (e.g. "live_lookup:<url>", "human_url:<url>", "human_text") is recorded
+    per new rule in a parallel provenance file (kriya/skills/skill.py -
+    record_rule_provenance) - not a rules.txt format change, so existing skills need
+    no migration. Every newly-written rule starts unverified there until a passing
+    Runtime Verification run proves it (see mark_rules_verified)."""
+    from kriya.skills.skill import git_commit_if_tracked, record_rule_provenance
     if not skill.source_path:
         return
 
@@ -423,6 +429,8 @@ def _write_skill_extraction(skill: Any, extraction: Dict[str, Any]) -> None:
                 for r in to_add:
                     rf.write(f"\n{r}")
             git_commit_if_tracked(rules_file, f"Kriya: add {len(to_add)} rule(s) to skill '{skill.name}' from supplied reference material")
+            for r in to_add:
+                record_rule_provenance(skill.source_path, r, source)
 
     new_examples = extraction.get("examples") or {}
     if new_examples:
@@ -539,6 +547,27 @@ def _skill_verification_context(skill: Any, goal: str) -> str:
     except Exception as ex:
         logger.debug(f"Failed to compute skill verification context: {ex}")
     return "version unspecified"
+
+
+def _split_rules_by_verification(skill: Any) -> Tuple[List[str], List[str]]:
+    """Splits a skill's rules into (trusted, unverified) using its per-rule
+    provenance file (kriya/skills/skill.py::load_rule_provenance). A rule with no
+    provenance record - the vast majority of existing content, predating this
+    tracking - is treated as already-trusted, not retroactively flagged; only rules
+    extracted since this tracking existed, and not yet proven by a passing Runtime
+    Verification run, come back as unverified."""
+    if not skill.source_path:
+        return list(skill.rules), []
+    from kriya.skills.skill import load_rule_provenance
+    provenance = {p.get("text"): p for p in load_rule_provenance(skill.source_path)}
+    trusted, unverified = [], []
+    for r in skill.rules:
+        rec = provenance.get(r)
+        if rec and not rec.get("verified", False):
+            unverified.append(r)
+        else:
+            trusted.append(r)
+    return trusted, unverified
 
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
@@ -662,7 +691,15 @@ class WorkflowEngine:
                 if skill.rules or skill.instructions:
                     convention_prompt += f"\n\n=== Engineering Skill Conventions: {skill.name} ===\n"
                     if skill.rules:
-                        convention_prompt += "Rules:\n" + "\n".join(f"- {r}" for r in skill.rules) + "\n"
+                        trusted_rules, unverified_rules = _split_rules_by_verification(skill)
+                        if trusted_rules:
+                            convention_prompt += "Rules:\n" + "\n".join(f"- {r}" for r in trusted_rules) + "\n"
+                        if unverified_rules:
+                            convention_prompt += (
+                                "Unverified Rules (auto-extracted, not yet proven by a passing run - "
+                                "use with appropriate caution, prefer Rules above if they conflict):\n"
+                                + "\n".join(f"- {r}" for r in unverified_rules) + "\n"
+                            )
                     if skill.instructions:
                         convention_prompt += f"Instructions:\n{skill.instructions}\n"
                     if skill.examples:
@@ -726,7 +763,7 @@ class WorkflowEngine:
             # USABLE, not merely because a search/fetch call technically succeeded. A
             # term live lookup tried and came up empty on falls through to the normal
             # human-ask path exactly as if lookup had never run at all.
-            auto_resolutions: List[Tuple[Any, Dict[str, Any]]] = []
+            auto_resolutions: List[Tuple[Any, Dict[str, Any], str]] = []
             if self.kernel.config.autonomy.web_lookup_enabled and self.kernel.config.search.base_url:
                 lookup_terms = [s.name for s in unverified_relevant] + missing_skill_candidates
                 found = await _resolve_via_web_lookup(
@@ -755,7 +792,7 @@ class WorkflowEngine:
                                 continue
                         extraction = await _extract_first_usable(self.skill_gap_agent, target, gap_reason, item["candidates"])
                         if extraction["rules"] or extraction["examples"] or extraction["conflicts"]:
-                            auto_resolutions.append((target, extraction))
+                            auto_resolutions.append((target, extraction, f"live_lookup:{item['url']}"))
                             logger.info(f"Live lookup found usable information for '{term}'.")
                         else:
                             logger.info(
@@ -763,7 +800,7 @@ class WorkflowEngine:
                                 "contained anything usable - falling back to asking for a better source."
                             )
 
-            resolved_names = {t.name for t, _ in auto_resolutions}
+            resolved_names = {t.name for t, _, _ in auto_resolutions}
             remaining_unverified = [s for s in unverified_relevant if s.name not in resolved_names]
             remaining_missing = [m for m in missing_skill_candidates if m not in resolved_names]
 
@@ -778,6 +815,7 @@ class WorkflowEngine:
                     supplied = None
 
             reference_text: Optional[str] = None
+            manual_source = "human_text"
             if supplied:
                 if supplied.startswith("http://") or supplied.startswith("https://"):
                     if self.kernel.config.autonomy.egress_policy == "local_only":
@@ -789,18 +827,20 @@ class WorkflowEngine:
                         try:
                             from kriya.tools.web import fetch_url_text
                             reference_text = await fetch_url_text(supplied)
+                            manual_source = f"human_url:{supplied}"
                         except Exception as ex:
                             logger.warning(f"Failed to fetch skill-gap reference URL '{supplied}': {ex}")
                 elif os.path.isfile(supplied):
                     try:
                         with open(supplied, "r", encoding="utf-8", errors="replace") as fh:
                             reference_text = fh.read()
+                        manual_source = f"human_file:{supplied}"
                     except Exception as ex:
                         logger.warning(f"Failed to read skill-gap reference file '{supplied}': {ex}")
                 else:
                     reference_text = supplied
 
-            manual_resolutions: List[Tuple[Any, Dict[str, Any]]] = []
+            manual_resolutions: List[Tuple[Any, Dict[str, Any], str]] = []
             if reference_text:
                 target_skills = list(remaining_unverified)
                 if not target_skills and remaining_missing:
@@ -813,23 +853,25 @@ class WorkflowEngine:
                         logger.warning(f"Failed to bootstrap new skill '{new_name}': {ex}")
                 for t in target_skills:
                     extraction = await _extract_first_usable(self.skill_gap_agent, t, gap_reason, [{"text": reference_text}])
-                    manual_resolutions.append((t, extraction))
+                    manual_resolutions.append((t, extraction, manual_source))
             else:
                 for s in remaining_unverified:
                     se.mark_gap_acknowledged(s.name)
 
-            for target, extraction in auto_resolutions + manual_resolutions:
+            for target, extraction, source in auto_resolutions + manual_resolutions:
                 if extraction["conflicts"]:
                     _stage_skill_conflicts(target, extraction["conflicts"])
                     logger.info(f"Flagged {len(extraction['conflicts'])} conflicting candidate rule(s) for skill '{target.name}' for human review.")
                 if extraction["rules"] or extraction["examples"]:
-                    _write_skill_extraction(target, extraction)
+                    _write_skill_extraction(target, extraction, source=source)
                     # Fold the newly ingested content into THIS run's context
-                    # immediately, not just future runs.
+                    # immediately, not just future runs - labeled unverified since it
+                    # was just extracted and hasn't been through Runtime Verification.
                     if extraction["rules"]:
                         convention_prompt += (
-                            f"\n\n=== Engineering Skill Conventions: {target.name} (just added) ===\n"
-                            "Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
+                            f"\n\n=== Engineering Skill Conventions: {target.name} (just added, unverified - "
+                            "use with appropriate caution) ===\n"
+                            "Unverified Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
                         )
                     for basename, content in extraction["examples"].items():
                         convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
@@ -1110,6 +1152,7 @@ class WorkflowEngine:
                         extraction = await _extract_first_usable(
                             self.skill_gap_agent, target, design_gap_reason, item["candidates"],
                         )
+                        source = f"live_lookup:{item['url']}"
                         if not (extraction["rules"] or extraction["examples"] or extraction["conflicts"]) and skill_gap_callback:
                             logger.info(
                                 f"Live lookup tried {len(item['candidates'])} reference(s) for design-derived "
@@ -1128,6 +1171,7 @@ class WorkflowEngine:
                                 supplied = None
 
                             reference_text: Optional[str] = None
+                            manual_source = "human_text"
                             if supplied:
                                 if supplied.startswith("http://") or supplied.startswith("https://"):
                                     if self.kernel.config.autonomy.egress_policy == "local_only":
@@ -1139,12 +1183,14 @@ class WorkflowEngine:
                                         try:
                                             from kriya.tools.web import fetch_url_text
                                             reference_text = await fetch_url_text(supplied)
+                                            manual_source = f"human_url:{supplied}"
                                         except Exception as ex:
                                             logger.warning(f"Failed to fetch skill-gap reference URL '{supplied}': {ex}")
                                 elif os.path.isfile(supplied):
                                     try:
                                         with open(supplied, "r", encoding="utf-8", errors="replace") as fh:
                                             reference_text = fh.read()
+                                        manual_source = f"human_file:{supplied}"
                                     except Exception as ex:
                                         logger.warning(f"Failed to read skill-gap reference file '{supplied}': {ex}")
                                 else:
@@ -1154,21 +1200,40 @@ class WorkflowEngine:
                                 extraction = await _extract_first_usable(
                                     self.skill_gap_agent, target, design_gap_reason, [{"text": reference_text}],
                                 )
+                                source = manual_source
 
                         if extraction["conflicts"]:
                             _stage_skill_conflicts(target, extraction["conflicts"])
                         if extraction["rules"] or extraction["examples"]:
-                            _write_skill_extraction(target, extraction)
+                            _write_skill_extraction(target, extraction, source=source)
                             if extraction["rules"]:
                                 skills_prompt += (
-                                    f"\n\n=== Engineering Skill Conventions: {target.name} (just added) ===\n"
-                                    "Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
+                                    f"\n\n=== Engineering Skill Conventions: {target.name} (just added, unverified - "
+                                    "use with appropriate caution) ===\n"
+                                    "Unverified Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
                                 )
                             for basename, content in extraction["examples"].items():
                                 skills_prompt += f"=== Example File: {basename} ===\n{content}\n"
                             if target.name not in active_skills:
                                 active_skills.append(target.name)
                             logger.info(f"Live lookup bootstrapped new skill '{target.name}' from architect design with {len(extraction['rules'])} rule(s).")
+
+        # Snapshot each active skill's rule set now, before the Developer retry loop -
+        # this is what "this run's active context" actually contains (all extraction
+        # is done by this point). If a Runtime Verification run later passes, only
+        # these specific rule texts get marked verified per-skill, not whatever
+        # rules.txt happens to contain by the time verification finishes.
+        # Reload from disk first - extraction writes (Stage 1.2/2B) append directly to
+        # rules.txt without refreshing SkillEngine's in-memory cache for skills that
+        # already existed (only brand-new skills get an explicit reload when
+        # bootstrapped), so the cache could otherwise be missing rules just written.
+        se.discover_and_load()
+        active_skill_rules_snapshot: Dict[str, List[str]] = {}
+        for active_skill_name in active_skills:
+            try:
+                active_skill_rules_snapshot[active_skill_name] = list(se.get_skill(active_skill_name).rules)
+            except Exception as ex:
+                logger.debug(f"Failed to snapshot rules for skill '{active_skill_name}': {ex}")
 
         # 4. Developer & Quality Gates (Auto-debugging loop)
         logger.info("Developer Agent implementing source files...")
@@ -1439,6 +1504,13 @@ class WorkflowEngine:
                                     active_skill_obj = se.get_skill(active_skill_name)
                                     context = _skill_verification_context(active_skill_obj, goal)
                                     se.mark_verified(active_skill_name, context=context)
+                                    # Also flip per-rule provenance for exactly the
+                                    # rules that were part of this skill when this
+                                    # run's context was built (the pre-retry-loop
+                                    # snapshot) - not whatever rules.txt contains now.
+                                    if active_skill_obj.source_path and active_skill_name in active_skill_rules_snapshot:
+                                        from kriya.skills.skill import mark_rules_verified
+                                        mark_rules_verified(active_skill_obj.source_path, active_skill_rules_snapshot[active_skill_name])
                                 except Exception as ex:
                                     logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
 

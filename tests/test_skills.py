@@ -300,6 +300,62 @@ def test_conflict_registry_distinct_rule_pairs_tracked_separately(tmp_path):
     assert find_conflict_resolution(str(skills_dir), "qpid", "Use SLF4J.", "artemis", "Use Log4j.") is None
 
 
+def test_rule_provenance_round_trips(tmp_path):
+    from kriya.skills.skill import load_rule_provenance, record_rule_provenance
+
+    skill_dir = tmp_path / "widgetlib"
+    skill_dir.mkdir()
+
+    assert load_rule_provenance(str(skill_dir)) == []
+
+    record_rule_provenance(str(skill_dir), "The magic constant is 42.", "human_text")
+    records = load_rule_provenance(str(skill_dir))
+    assert len(records) == 1
+    assert records[0]["text"] == "The magic constant is 42."
+    assert records[0]["verified"] is False
+    assert records[0]["source"] == "human_text"
+    assert "added_at" in records[0]
+
+def test_rule_provenance_overwrites_record_for_same_text(tmp_path):
+    from kriya.skills.skill import load_rule_provenance, record_rule_provenance
+
+    skill_dir = tmp_path / "widgetlib"
+    skill_dir.mkdir()
+    record_rule_provenance(str(skill_dir), "Rule A.", "human_text")
+    record_rule_provenance(str(skill_dir), "Rule A.", "live_lookup:https://example.com")
+
+    records = load_rule_provenance(str(skill_dir))
+    assert len(records) == 1
+    assert records[0]["source"] == "live_lookup:https://example.com"
+
+def test_mark_rules_verified_only_flips_existing_records(tmp_path):
+    from kriya.skills.skill import load_rule_provenance, mark_rules_verified, record_rule_provenance
+
+    skill_dir = tmp_path / "widgetlib"
+    skill_dir.mkdir()
+    record_rule_provenance(str(skill_dir), "Rule A.", "human_text")
+    record_rule_provenance(str(skill_dir), "Rule B.", "human_text")
+
+    # "Rule C." has no provenance record (pre-existing/untracked content) - marking it
+    # verified must be a no-op, not create a new record out of thin air.
+    mark_rules_verified(str(skill_dir), ["Rule A.", "Rule C."])
+
+    records = {r["text"]: r for r in load_rule_provenance(str(skill_dir))}
+    assert records["Rule A."]["verified"] is True
+    assert "verified_at" in records["Rule A."]
+    assert records["Rule B."]["verified"] is False
+    assert "Rule C." not in records
+
+def test_mark_rules_verified_noop_when_no_provenance_file(tmp_path):
+    from kriya.skills.skill import mark_rules_verified
+
+    skill_dir = tmp_path / "widgetlib"
+    skill_dir.mkdir()
+    # Must not raise or create a file for a skill with no tracked rules at all.
+    mark_rules_verified(str(skill_dir), ["Some rule."])
+    assert not (skill_dir / "rule_provenance.json").exists()
+
+
 def test_skills_show_displays_verification_provenance(tmp_path):
     config_file, _project_skills = _make_local_project(tmp_path, skill_name="verifiedwidget", verified=True)
     runner = CliRunner()
@@ -310,4 +366,22 @@ def test_skills_show_displays_verification_provenance(tmp_path):
     assert "Verified:    yes" in result.output
     assert "widgetlib 2.0.0" in result.output
     assert "kriya skills unverify verifiedwidget" in result.output
+
+def test_skills_show_flags_unverified_rules_individually(tmp_path):
+    from kriya.skills.skill import record_rule_provenance
+
+    config_file, project_skills = _make_local_project(tmp_path, skill_name="widgetlib", verified=False)
+    (project_skills / "widgetlib" / "rules.txt").write_text("Existing rule.\nFreshly extracted rule.\n")
+    record_rule_provenance(str(project_skills / "widgetlib"), "Freshly extracted rule.", "human_text")
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", config_file, "skills", "show", "widgetlib"])
+
+    assert result.exit_code == 0, result.output
+    assert "- Existing rule." in result.output
+    assert "- Freshly extracted rule." in result.output
+    assert "[unverified]" in result.output
+    # The pre-existing rule's line must not be flagged - only the tracked one.
+    existing_line = next(line for line in result.output.splitlines() if "Existing rule." in line)
+    assert "[unverified]" not in existing_line
 

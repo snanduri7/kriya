@@ -104,6 +104,81 @@ def record_conflict_resolution(
         logger.warning(f"Failed to persist skill conflict resolution (non-fatal): {e}")
 
 
+def _rule_provenance_path(skill_source_path: str) -> str:
+    return os.path.join(skill_source_path, "rule_provenance.json")
+
+
+def load_rule_provenance(skill_source_path: str) -> List[Dict[str, Any]]:
+    """Loads a skill's per-rule provenance records ({text, verified, source,
+    added_at}) - a parallel tracking file, not a rules.txt format change, so every
+    existing skill (including ones written long before this tracking existed) keeps
+    working completely unmodified. A rule with no record here is pre-existing/
+    untracked content and is treated as already-trusted, not retroactively flagged
+    unverified - only rules extracted since this tracking was added ever get a
+    record."""
+    path = _rule_provenance_path(skill_source_path)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        logger.warning(f"Failed to read rule provenance at '{path}' (treating as empty): {e}")
+        return []
+
+
+def record_rule_provenance(skill_source_path: str, rule_text: str, source: str) -> None:
+    """Records a freshly-extracted rule as unverified with where it came from, so
+    generation prompts can flag it distinctly (kriya/workflow/workflow.py) until a
+    passing Runtime Verification run proves it. Best-effort, like every other
+    skill-file write in this subsystem - failing to persist shouldn't fail the
+    generation run that triggered it."""
+    path = _rule_provenance_path(skill_source_path)
+    records = [r for r in load_rule_provenance(skill_source_path) if r.get("text") != rule_text]
+    records.append({
+        "text": rule_text,
+        "verified": False,
+        "source": source,
+        "added_at": date.today().isoformat(),
+    })
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2)
+        git_commit_if_tracked(path, f"Kriya: record provenance for new rule in skill '{os.path.basename(skill_source_path)}'")
+    except Exception as e:
+        logger.warning(f"Failed to persist rule provenance (non-fatal): {e}")
+
+
+def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> None:
+    """Flips verified=True for exactly the given rule texts that already have a
+    provenance record - never creates a new record, since a rule with no record is
+    pre-existing/untracked content that was never flagged unverified in the first
+    place. Called after a passing Runtime Verification run, scoped to only the rules
+    that were part of the skill when that run's context was actually built (a
+    snapshot taken before the retry loop starts), not whatever the skill's rules.txt
+    happens to contain by the time verification finishes."""
+    records = load_rule_provenance(skill_source_path)
+    if not records:
+        return
+    texts = set(rule_texts)
+    changed = False
+    for r in records:
+        if r.get("text") in texts and not r.get("verified", False):
+            r["verified"] = True
+            r["verified_at"] = date.today().isoformat()
+            changed = True
+    if not changed:
+        return
+    path = _rule_provenance_path(skill_source_path)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2)
+        git_commit_if_tracked(path, f"Kriya: mark rule(s) verified in skill '{os.path.basename(skill_source_path)}'")
+    except Exception as e:
+        logger.warning(f"Failed to persist rule verification (non-fatal): {e}")
+
+
 def parse_version_parts(v_str: str) -> Tuple[int, int, int]:
     """Helper to parse a version string into (major, minor, patch) integer tuple."""
     parts = []

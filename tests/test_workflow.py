@@ -451,6 +451,75 @@ async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp
     assert skill.verified_context == "widgetlib 2.0.0"
     assert skill.verified_at is not None
 
+@pytest.mark.asyncio
+async def test_workflow_extracted_rule_unverified_then_promoted_by_passing_run(tmp_path):
+    """A freshly extracted rule must be labeled distinctly as unverified in the SAME
+    run's generation prompt (not blended in as equally authoritative as long-standing
+    rules), and a passing Runtime Verification run must promote exactly that rule -
+    not the skill's pre-existing untracked content, which was never flagged in the
+    first place - to verified in the per-rule provenance file."""
+    from kriya.skills.skill import SkillEngine, load_rule_provenance
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    extraction_response = json.dumps({
+        "rules": ["The magic widget constant is 42."], "examples": {}, "conflicts": []
+    })
+    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('[SUCCESS] WIDGET')\n"}])
+    judge_response = json.dumps({
+        "should_run": True,
+        "run_command": [sys.executable, "app.py"],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]"
+    })
+    grade_response = json.dumps({"passed": True, "reasoning": "Output contains the expected line."})
+
+    llm.complete = AsyncMock(side_effect=[
+        extraction_response,   # SkillGapAgent.extract_skill_update for the human-supplied text
+        "Step 1: Write code",  # Planner
+        "Design: Write app.py",  # Architect
+        file_list_response,    # Developer
+        judge_response,         # RunVerifier.judge
+        grade_response,         # RunVerifier.grade
+        "Review: Approved"      # Reviewer
+    ])
+
+    def skill_gap_cb(reason, names):
+        return "The magic widget constant is 42."
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Run with python app.py; the widgetlib skill applies here",
+        workspace_path=str(tmp_path),
+        skill_gap_callback=skill_gap_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+
+    # The freshly-extracted rule was labeled unverified in the prompt sent to Planner.
+    planner_prompt = llm.complete.call_args_list[1].args[1]
+    assert "Unverified Rules:\n- The magic widget constant is 42." in planner_prompt
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("widgetlib")
+    assert skill.verified is True  # skill-level flag, unchanged existing behavior
+
+    provenance = {p["text"]: p for p in load_rule_provenance(skill.source_path)}
+    assert provenance["The magic widget constant is 42."]["verified"] is True
+    # The pre-existing, never-tracked rule has no provenance record at all - it was
+    # never flagged unverified, so there's nothing for a passing run to "promote".
+    assert "Existing rule." not in provenance
+
 
 @pytest.mark.asyncio
 async def test_workflow_skill_gap_refuses_url_fetch_under_local_only_egress(tmp_path):
