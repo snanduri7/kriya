@@ -7,6 +7,8 @@ Enable peer class loading in Spring XML configuration if dynamic tasks/classes a
 Use Java 17 source and target compatibility in the Maven Compiler Plugin.
 Cache operations like getOrCreateCache must be called on an Ignite instance (returned by Ignition.start), never on the Ignition utility class.
 Do not pass a Spring ApplicationContext object to Ignition.start().
+The cache name argument to ignite.getOrCreateCache(...) or ignite.cache(...) must be a String literal (e.g. "my-cache") - never an Ignite instance, IgniteConfiguration, or ApplicationContext object. Passing the wrong type here ("incompatible types: Ignite cannot be converted to String") has caused repeated compile failures - double check the cache name argument's type before returning generated code.
+Give every variable holding the started Ignite instance (from Ignition.start(...) or context.getBean(Ignite.class)) a name and keep it consistently in scope for the rest of the method - a variable referenced before or without being assigned (e.g. "cannot find symbol: variable igniteInstance") is a common self-inflicted regression when fixing an unrelated compile error.
 To start Ignite using Spring XML, either use:
 1) Direct Ignition: Ignite ignite = Ignition.start("ignite-config.xml");
 2) Spring Bean: Define org.apache.ignite.IgniteSpringBean in the XML and fetch it from ApplicationContext using: Ignite ignite = context.getBean(Ignite.class);

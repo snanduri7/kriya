@@ -114,3 +114,23 @@ try (Connection connection = factory.createConnection()) {
     TextMessage received = (TextMessage) consumer.receive(5000);
 }
 ```
+
+## Running Broker + Client In The Same App
+
+The "Embedding the Broker" and "JMS Client" sections above are two independent
+pieces. If the goal requires BOTH a broker and a client living in the same process
+(as opposed to a client connecting to some already-running external broker), a
+class that only wires the `qpidConnectionFactory` bean - without ever calling
+`SystemLauncher.startup(...)` - will compile fine but fail at runtime with a
+connection-refused error, because nothing is listening on the AMQP port.
+
+Rules for this combined case:
+1. Start the broker (`SystemLauncher.startup(...)`) FIRST, before building the
+   Spring `ApplicationContext` or creating any JMS connection - the AMQP port isn't
+   listening until `startup()` returns.
+2. Keep a reference to the `SystemLauncher` for the lifetime of the app; call
+   `shutdown()` on it only after JMS resources (and the Spring context, if used)
+   are closed.
+3. See `examples/CombinedBrokerClientApp.java` for the full end-to-end pattern:
+   start broker -> build Spring context -> send -> receive -> log -> close JMS ->
+   close context -> stop broker.
