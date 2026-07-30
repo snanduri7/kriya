@@ -772,6 +772,256 @@ async def test_workflow_no_conflict_check_without_callback(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
+    """When web_lookup_enabled and a search backend are configured, an unverified
+    skill gap should be auto-resolved via search+fetch BEFORE ever asking a human for
+    a URL - the human-ask path (skill_gap_callback) must not fire at all if live
+    lookup fully resolves the gap and the batch is confirmed."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    extraction_response = json.dumps({
+        "rules": ["The magic widget constant is 42."],
+        "examples": {},
+        "conflicts": []
+    })
+    llm.complete = AsyncMock(side_effect=[
+        extraction_response,      # SkillGapAgent.extract_skill_update, for the auto-found reference
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',  # Developer
+        "Review: Approved"        # Reviewer
+    ])
+
+    found_result = [{"term": "widgetlib", "title": "Widgetlib Docs", "url": "https://example.com/widgetlib", "snippet": "..."}]
+    skill_gap_calls = []
+    def skill_gap_cb(reason, names):
+        skill_gap_calls.append(names)
+        return None
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found_result)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="The magic widget constant is 42.")) as mock_fetch:
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=skill_gap_cb,
+            web_lookup_callback=lambda found: True,
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once_with("widgetlib documentation", "http://fake-search:8080", top_k=3)
+    mock_fetch.assert_called_once_with("https://example.com/widgetlib")
+    assert skill_gap_calls == []  # human-ask path never fired - live lookup resolved it first
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("widgetlib")
+    assert "The magic widget constant is 42." in skill.rules
+
+@pytest.mark.asyncio
+async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extraction(tmp_path):
+    """A single unhelpful top search result (a landing page with nothing concrete to
+    extract - confirmed to happen in real testing) must not sink the whole lookup:
+    the next candidate should be tried, and the term only counts as unresolved if
+    NONE of the fetched candidates yield anything usable."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    cfg.search.top_k = 2
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    empty_extraction = json.dumps({"rules": [], "examples": {}, "conflicts": []})
+    real_extraction = json.dumps({"rules": ["The magic widget constant is 42."], "examples": {}, "conflicts": []})
+    llm.complete = AsyncMock(side_effect=[
+        empty_extraction,         # candidate 1 (landing page) - nothing usable
+        real_extraction,          # candidate 2 - the real answer
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',  # Developer
+        "Review: Approved"        # Reviewer
+    ])
+
+    found_result = [
+        {"title": "Widgetlib Home", "url": "https://example.com/widgetlib-home", "snippet": "landing page"},
+        {"title": "Widgetlib Reference", "url": "https://example.com/widgetlib-ref", "snippet": "reference docs"},
+    ]
+
+    async def fetch_side_effect(url):
+        return "Marketing copy, no specifics." if url.endswith("-home") else "The magic widget constant is 42."
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found_result)), \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(side_effect=fetch_side_effect)) as mock_fetch:
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=lambda reason, names: None,
+            web_lookup_callback=lambda found: True,
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert mock_fetch.await_count == 2  # both candidates were fetched
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("widgetlib")
+    assert "The magic widget constant is 42." in skill.rules
+
+@pytest.mark.asyncio
+async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
+    """Declining the live-lookup batch confirmation must fall back to the existing
+    human-ask (skill_gap_callback) path, not silently drop the gap."""
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    found_result = [{"term": "widgetlib", "title": "Widgetlib Docs", "url": "https://example.com/widgetlib", "snippet": "..."}]
+    skill_gap_calls = []
+    def skill_gap_cb(reason, names):
+        skill_gap_calls.append(names)
+        return None
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found_result)), \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="text")):
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=skill_gap_cb,
+            web_lookup_callback=lambda found: False,  # decline the batch
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert skill_gap_calls == [["widgetlib"]]  # fell back to asking a human
+
+@pytest.mark.asyncio
+async def test_workflow_web_lookup_disabled_by_default_never_calls_search(tmp_path):
+    """web_lookup_enabled defaults to False - a project that hasn't opted in must see
+    zero behavior change, and search_web must never even be called."""
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    assert cfg.autonomy.web_lookup_enabled is False
+    assert cfg.search.base_url == ""
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code", "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]', "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(side_effect=AssertionError("must not be called"))) as mock_search:
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path):
+    """The goal alone may not name any specific technology, but the Architect's design
+    usually will once it makes real decisions - live lookup should catch that too, not
+    just what the goal-text-only skill-gap check already covers."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    extraction_response = json.dumps({
+        "rules": ["Use gizmolib.connect() to open a connection."],
+        "examples": {},
+        "conflicts": []
+    })
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",                                     # Planner
+        "Design: use gizmolib==3.1.0 to connect to the service",  # Architect names a new lib
+        extraction_response,                                      # Stage 2B SkillGapAgent.extract_skill_update
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',     # Developer
+        "Review: Approved"                                        # Reviewer
+    ])
+
+    found_result = [{"term": "gizmolib", "title": "Gizmolib Docs", "url": "https://example.com/gizmolib", "snippet": "..."}]
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found_result)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="gizmolib docs text")) as mock_fetch:
+        res = await we.run_generation_workflow(
+            goal="Build an app that talks to an external service",
+            workspace_path=str(tmp_path),
+            web_lookup_callback=lambda found: True,
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once_with("gizmolib documentation", "http://fake-search:8080", top_k=3)
+    mock_fetch.assert_called_once_with("https://example.com/gizmolib")
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("gizmolib")
+    assert "Use gizmolib.connect() to open a connection." in skill.rules
+
+
+@pytest.mark.asyncio
 async def test_workflow_normalizes_absolute_filepath_from_developer_agent(tmp_path):
     """Reproduces a real observed failure: the Developer Agent sometimes returns an
     absolute path instead of a relative one. os.path.join(worktree_path, filepath)
