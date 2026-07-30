@@ -161,10 +161,14 @@ class DeveloperAgent(BaseAgent):
             sibling_paths = [p for p in all_paths if p != filepath]
             sibling_section = f"=== Other Files In This Batch ===\n{', '.join(sibling_paths)}\n\n" if sibling_paths else ""
 
+            # Stable, large blocks first (existing code context, then architecture design) so
+            # same-model retries can reuse the inference server's KV-cache prefix; the task
+            # description grows with each retry's error context, so it - along with the
+            # per-file sibling list and instruction, which already vary per call - goes last.
             file_prompt = (
-                f"=== Task ===\n{task_description}\n\n"
-                f"=== Architecture Design ===\n{design_context}\n\n"
                 f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
+                f"=== Architecture Design ===\n{design_context}\n\n"
+                f"=== Task ===\n{task_description}\n\n"
                 f"{sibling_section}"
                 f"Please generate the complete, correct, and production-grade file content for: '{filepath}'"
             )
@@ -205,8 +209,8 @@ class DeveloperAgent(BaseAgent):
         )
 
         list_prompt = (
-            f"=== Task ===\n{task_description}\n\n"
             f"=== Design ===\n{design_context}\n\n"
+            f"=== Task ===\n{task_description}\n\n"
             "Please return the JSON list of files to create/modify."
         )
 
@@ -233,10 +237,11 @@ class DeveloperAgent(BaseAgent):
             logger.warning(f"Failed to resolve file list from Developer Agent: {e}. Falling back to single-stage generation.")
 
         # Fallback to single-stage generation (original implementation)
+        # Same stable-first/volatile-last ordering as _fill_missing_content, for KV-cache reuse across retries.
         prompt = (
-            f"=== User Request & Task ===\n{task_description}\n\n"
-            f"=== Architect Design Guidelines ===\n{design_context}\n\n"
             f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
+            f"=== Architect Design Guidelines ===\n{design_context}\n\n"
+            f"=== User Request & Task ===\n{task_description}\n\n"
             "Please generate the complete, production-grade files. Return ONLY the JSON list of files."
         )
         
