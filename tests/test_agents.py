@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kriya.agents.agent import DeveloperAgent, PlannerAgent, RunVerifierAgent
+from kriya.agents.agent import DeveloperAgent, PlannerAgent, RunVerifierAgent, SkillGapAgent
 from kriya.config import AppConfig
 from kriya.core.llm import LLMClient
 
@@ -262,3 +262,106 @@ async def test_run_verifier_grade_unparseable_response_defaults_to_failure():
     grade = await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
 
     assert grade["passed"] is False
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_extracts_rules_and_examples():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": ["Use modelVersion 8.0, not the broker-core artifact version."],
+        "examples": {"qpid-initial-config.json": '{"modelVersion": "8.0"}'},
+        "conflicts": []
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="The default initial-config.json ships with modelVersion 8.0...",
+        gap_description="What modelVersion value should the initial config JSON use?",
+        existing_rules=[]
+    )
+
+    assert result["rules"] == ["Use modelVersion 8.0, not the broker-core artifact version."]
+    assert "qpid-initial-config.json" in result["examples"]
+    assert result["conflicts"] == []
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_flags_conflicts_instead_of_silently_adding():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": [{
+            "candidate_rule": "Use qpid-broker-core 10.0.0.",
+            "conflicts_with": "Use qpid-broker-core 9.2.1.",
+            "reason": "Different pinned version."
+        }]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="qpid-broker-core 10.0.0 is now the latest release...",
+        gap_description="What version of qpid-broker-core should be used?",
+        existing_rules=["Use qpid-broker-core 9.2.1."]
+    )
+
+    assert result["rules"] == []
+    assert len(result["conflicts"]) == 1
+    assert result["conflicts"][0]["candidate_rule"] == "Use qpid-broker-core 10.0.0."
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_rule_also_flagged_as_conflict_is_not_double_added():
+    # Reproduces a real observed failure: a non-reasoning model correctly flagged a
+    # candidate as conflicting AND separately included the exact same text in "rules"
+    # in the same response, despite the prompt saying not to. Must not trust prompt
+    # adherence alone - enforce mutual exclusivity in code.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": ["The magic widget constant is 42."],
+        "examples": {},
+        "conflicts": [{
+            "candidate_rule": "The magic widget constant is 42.",
+            "conflicts_with": "The magic widget constant is 999.",
+            "reason": "Different value for the same constant."
+        }]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="The correct magic widget constant is 42, not 999.",
+        gap_description="What is the magic widget constant?",
+        existing_rules=["The magic widget constant is 999."]
+    )
+
+    assert result["rules"] == []
+    assert len(result["conflicts"]) == 1
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_irrelevant_reference_returns_empty():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({"rules": [], "examples": {}, "conflicts": []}))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="This page is about an unrelated topic entirely.",
+        gap_description="What modelVersion value should be used?",
+        existing_rules=[]
+    )
+
+    assert result["rules"] == []
+    assert result["examples"] == {}
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_unparseable_response_returns_empty_not_error():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="I cannot comply with this request.")
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="Missing info.", existing_rules=[]
+    )
+
+    assert result == {"rules": [], "examples": {}, "conflicts": []}

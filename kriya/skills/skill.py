@@ -1,12 +1,39 @@
 import logging
 import os
 import re
-from typing import Dict, List, Tuple
+import subprocess
+from typing import Dict, List, Optional, Tuple
 
 import yaml
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+def git_commit_if_tracked(path: str, message: str) -> None:
+    """Best-effort commit of a skill-file change, scoped to `path`, if it lives inside a
+    git work tree. Gives skill content a structured undo/audit trail (git log/revert)
+    instead of relying on the user to notice and manually fix a bad extraction or
+    promotion. Never raises - this is a nice-to-have, not a correctness requirement,
+    and most skill directories won't be their own git repo."""
+    try:
+        directory = path if os.path.isdir(path) else os.path.dirname(path)
+        check = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=directory, capture_output=True, text=True
+        )
+        if check.returncode != 0 or check.stdout.strip() != "true":
+            return
+        subprocess.run(["git", "add", path], cwd=directory, capture_output=True)
+        res = subprocess.run(
+            ["git", "commit", "-m", message], cwd=directory, capture_output=True, text=True
+        )
+        if res.returncode == 0:
+            logger.info(f"Committed skill change: {message}")
+        else:
+            # Commonly just "nothing to commit" (e.g. value unchanged) - not an error.
+            logger.debug(f"git commit for skill change did not create a commit: {res.stdout.strip()} {res.stderr.strip()}")
+    except Exception as e:
+        logger.debug(f"Failed to git-commit skill change at '{path}' (non-fatal): {e}")
 
 
 def parse_version_parts(v_str: str) -> Tuple[int, int, int]:
@@ -74,6 +101,9 @@ class Skill(BaseModel):
         description="Dictionary mapping example file basenames to their contents."
     )
     supported_versions: str = Field(default="*", description="Supported version range (e.g. >=2.15.0 <3.0.0).")
+    verified: bool = Field(default=False, description="True once a Runtime Verification Gate run using this skill has passed, or a human has explicitly promoted a rule into it.")
+    verification_gap_acknowledged: bool = Field(default=False, description="True once the user has been asked to strengthen this unverified skill and declined - suppresses re-asking until it actually becomes verified.")
+    source_path: Optional[str] = Field(default=None, description="Filesystem path to this skill's folder, set by discover_and_load - not part of skill.yaml itself.")
 
 
 class SkillEngine:
@@ -163,7 +193,10 @@ class SkillEngine:
                         instructions=instructions,
                         rules=rules,
                         examples=examples,
-                        supported_versions=meta.get("supported_versions", "*")
+                        supported_versions=meta.get("supported_versions", "*"),
+                        verified=bool(meta.get("verified", False)),
+                        verification_gap_acknowledged=bool(meta.get("verification_gap_acknowledged", False)),
+                        source_path=folder_path
                     )
 
                     self._skills[folder.lower()] = skill
@@ -178,19 +211,10 @@ class SkillEngine:
 
     def get_skill(self, name: str) -> Skill:
         """Retrieves a skill by name."""
-        import re
-        safe_lookup = re.sub(r'[^a-z0-9-_]+', '-', name.lower()).strip('-')
-        
-        # Check folder slug first
-        if safe_lookup in self._skills:
-            return self._skills[safe_lookup]
-            
-        # Fallback to direct name matching
-        for skill in self._skills.values():
-            if skill.name.lower() == name.lower():
-                return skill
-                
-        raise KeyError(f"Skill '{name}' not found.")
+        skill = self._resolve_skill(name)
+        if skill is None:
+            raise KeyError(f"Skill '{name}' not found.")
+        return skill
 
     def find_skills_by_tag(self, tag: str) -> List[Skill]:
         """Finds all skills tagged with the specified keyword."""
@@ -232,4 +256,55 @@ class SkillEngine:
             f.write(rules_content)
 
         logger.info(f"Created skill skeleton for '{name}' at {skill_path}")
+        git_commit_if_tracked(skill_path, f"Kriya: create skill skeleton '{name}'")
         return skill_path
+
+    def _resolve_skill(self, skill_name: str) -> Optional[Skill]:
+        safe_lookup = re.sub(r'[^a-z0-9-_]+', '-', skill_name.lower()).strip('-')
+        if safe_lookup in self._skills:
+            return self._skills[safe_lookup]
+        for skill in self._skills.values():
+            if skill.name.lower() == skill_name.lower():
+                return skill
+        return None
+
+    def _set_skill_yaml_field(self, skill_name: str, field: str, value: bool) -> bool:
+        """Writes a boolean field back to a skill's skill.yaml and keeps the in-memory
+        Skill object consistent. Returns False (logged, non-fatal) if the skill isn't
+        known or has no resolvable source_path rather than raising - callers treat this
+        as best-effort bookkeeping, not something that should block generation."""
+        skill = self._resolve_skill(skill_name)
+        if not skill or not skill.source_path:
+            logger.warning(f"Cannot update skill '{skill_name}': not found or has no known source path.")
+            return False
+
+        yaml_path = os.path.join(skill.source_path, "skill.yaml")
+        try:
+            meta = {}
+            if os.path.exists(yaml_path):
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    meta = yaml.safe_load(f) or {}
+            meta[field] = value
+            with open(yaml_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(meta, f, default_flow_style=False)
+            setattr(skill, field, value)
+            git_commit_if_tracked(yaml_path, f"Kriya: set {field}={value} on skill '{skill.name}'")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to update '{field}' on skill '{skill_name}': {e}")
+            return False
+
+    def mark_verified(self, skill_name: str) -> bool:
+        """Marks a skill verified - called after a Runtime Verification Gate run that
+        used this skill passes, or when a human explicitly promotes a rule into it via
+        `kriya skills promote`. Also clears any prior gap-acknowledgment, since a newly
+        verified skill has nothing left to ask about."""
+        ok = self._set_skill_yaml_field(skill_name, "verified", True)
+        if ok:
+            self._set_skill_yaml_field(skill_name, "verification_gap_acknowledged", False)
+        return ok
+
+    def mark_gap_acknowledged(self, skill_name: str) -> bool:
+        """Marks that the user was asked to strengthen this unverified skill and
+        declined, so future generation runs don't keep re-asking about the same skill."""
+        return self._set_skill_yaml_field(skill_name, "verification_gap_acknowledged", True)

@@ -456,6 +456,102 @@ class RunVerifierAgent(BaseAgent):
         return {"passed": bool(parsed.get("passed")), "reasoning": parsed.get("reasoning") or ""}
 
 
+class SkillGapAgent(BaseAgent):
+    """Turns user-supplied reference material (a fetched URL, a local file, or pasted
+    text) into concrete skill rules/examples when Kriya doesn't have verified
+    information for an active skill. Also checks new candidate rules against the
+    skill's existing ones so a skill's rules.txt doesn't silently accumulate
+    contradictions as it grows from multiple ingestions over time."""
+
+    @property
+    def system_prompt(self) -> str:
+        return (
+            "You are the Kriya Skill Gap Agent.\n"
+            "You are given reference material (documentation, source code, or similar) "
+            "and a description of what specific information is missing. Extract concrete, "
+            "concise engineering rules and/or complete example file content from the "
+            "reference material that fill that gap.\n"
+            "Rules must be single sentences, specific and actionable (e.g. exact field "
+            "names, version numbers, API signatures) - not vague summaries. Only extract "
+            "what the reference material actually supports; do not invent or guess "
+            "anything it doesn't state.\n"
+            "You will also be given the skill's EXISTING rules. Check every candidate rule "
+            "against them: if a candidate contradicts an existing rule (e.g. a different "
+            "version number, a different field value), do NOT add it as a plain rule - put "
+            "it in \"conflicts\" instead so a human can decide, rather than letting "
+            "contradictory rules silently coexist.\n"
+            "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
+            "{\n"
+            '  "rules": ["new rule 1", "new rule 2"],\n'
+            '  "examples": {"filename.ext": "full file content"},\n'
+            '  "conflicts": [{"candidate_rule": "...", "conflicts_with": "...", "reason": "..."}]\n'
+            "}\n"
+            "If the reference material doesn't actually address the described gap, return "
+            "empty lists/objects for all three fields - do not force something irrelevant."
+        )
+
+    async def extract_skill_update(
+        self,
+        reference_text: str,
+        gap_description: str,
+        existing_rules: List[str],
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        # Reference material (web pages, source files) can be long - the LLM client's
+        # own token budget will truncate server-side if needed, but keep this bounded
+        # up front so a huge fetch doesn't dominate the prompt.
+        truncated_reference = reference_text[:20000]
+        prompt = (
+            f"=== Reference Material ===\n{truncated_reference}\n\n"
+            f"=== Existing Rules For This Skill ===\n"
+            f"{chr(10).join(existing_rules) if existing_rules else '(none yet)'}\n\n"
+            f"=== What's Missing ===\n{gap_description}\n\n"
+            "Extract rules/examples per the instructions above."
+        )
+        response_str = await self.llm.complete(
+            self.system_prompt,
+            prompt,
+            json_mode=True,
+            model_override=model_override,
+            base_url_override=base_url_override,
+            api_key_override=api_key_override,
+        )
+        try:
+            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+        except Exception as e:
+            logger.warning(f"Skill Gap Agent returned unparseable JSON: {e}")
+            return {"rules": [], "examples": {}, "conflicts": []}
+
+        if not isinstance(parsed, dict):
+            return {"rules": [], "examples": {}, "conflicts": []}
+
+        rules = parsed.get("rules")
+        rules = [r for r in rules if isinstance(r, str) and r.strip()] if isinstance(rules, list) else []
+
+        examples = parsed.get("examples")
+        examples = examples if isinstance(examples, dict) and all(isinstance(v, str) for v in examples.values()) else {}
+
+        conflicts = parsed.get("conflicts")
+        conflicts = conflicts if isinstance(conflicts, list) else []
+
+        # The prompt tells the model not to put a conflicting candidate in both "rules"
+        # and "conflicts", but that's an instruction, not a guarantee - a real run
+        # showed a non-reasoning model doing exactly that (flagging a rule as
+        # conflicting AND separately listing it as a plain rule in the same response).
+        # Enforce mutual exclusivity in code rather than trusting prompt adherence:
+        # anything already flagged as conflicting must not also be silently added.
+        conflicting_texts = {
+            c.get("candidate_rule", "").strip()
+            for c in conflicts if isinstance(c, dict) and c.get("candidate_rule")
+        }
+        if conflicting_texts:
+            rules = [r for r in rules if r.strip() not in conflicting_texts]
+
+        return {"rules": rules, "examples": examples, "conflicts": conflicts}
+
+
 class ReviewerAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
