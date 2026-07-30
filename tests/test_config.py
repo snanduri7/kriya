@@ -1,7 +1,10 @@
 import os
+
 import pytest
 import yaml
-from kriya.config.config import load_config, AppConfig
+
+from kriya.config.config import AppConfig, load_config
+
 
 def test_load_default_config():
     # Load with no path, should load default_config.yaml automatically

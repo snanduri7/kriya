@@ -1,6 +1,7 @@
-import os
 import logging
-from typing import Dict, Any, Optional
+import os
+from typing import Any, Dict, Optional
+
 from jinja2 import Environment, meta
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class PromptEngine:
                     with open(file_path, "r", encoding="utf-8") as f:
                         return f.read()
                 except Exception as e:
-                    raise PromptEngineError(f"Failed to read custom template '{name}' from {file_path}: {e}")
+                    raise PromptEngineError(f"Failed to read custom template '{name}' from {file_path}: {e}") from e
                     
         if name in DEFAULT_TEMPLATES:
             return DEFAULT_TEMPLATES[name]

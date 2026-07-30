@@ -1,12 +1,13 @@
-import os
-import re
-import json
-import logging
+import ast
 import fnmatch
 import hashlib
-from typing import Dict, List, Any, Optional, Callable
+import json
+import logging
+import os
+import re
+from typing import Any, Callable, Dict, List, Optional
+
 from pydantic import BaseModel, Field
-import ast
 
 logger = logging.getLogger(__name__)
 
@@ -160,9 +161,9 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
                     brace_count = 1
                     i += 1
                     while i < len(lines) and brace_count > 0:
-                        l = lines[i]
-                        method_lines.append(l)
-                        brace_count += l.count("{") - l.count("}")
+                        line = lines[i]
+                        method_lines.append(line)
+                        brace_count += line.count("{") - line.count("}")
                         i += 1
                         
                     header = f"File: {rel_path}\nPackage: {package}\nClass: {current_class}\nClass Javadoc: {current_class_javadoc}\nMethod: {method_name}\n=== Method Body ===\n"
@@ -357,7 +358,6 @@ class RepositoryAnalyzer:
         # Python requirement checks
         pyproject_path = os.path.join(self.root_path, "pyproject.toml")
         req_path = os.path.join(self.root_path, "requirements.txt")
-        setup_path = os.path.join(self.root_path, "setup.py")
 
         # Node / JS requirement checks
         package_json_path = os.path.join(self.root_path, "package.json")
@@ -546,7 +546,7 @@ class RepositoryAnalyzer:
         progress_callback: Optional[Callable[[str, int, int], None]] = None
     ) -> None:
         """Walks the repository, chunks code files, generates semantic embeddings, and stores them in LocalVectorStore."""
-        from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+        from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
         
         # 1. Resolve storage paths
         vector_index_path = os.path.join(cfg.paths.memory, "vector_index.db")
@@ -686,7 +686,7 @@ class RepositoryAnalyzer:
                         # Generate all embeddings concurrently
                         embs = await client.get_embeddings(chunk_texts)
                         
-                        for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs)):
+                        for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs, strict=True)):
                             store.add_document(
                                 filepath=rel_path,
                                 text=chunk_text,
@@ -726,8 +726,9 @@ class RepositoryAnalyzer:
         if not os.path.exists(auto_skill_dir):
             import click
             import yaml
-            from kriya.core.llm import LLMClient
+
             from kriya.agents.extractor import ConventionsExtractorAgent
+            from kriya.core.llm import LLMClient
             
             click.secho("\nAnalyzing repository style guidelines and patterns...", bold=True, fg="yellow")
             

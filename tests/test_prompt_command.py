@@ -1,8 +1,9 @@
-import os
-import pytest
-from click.testing import CliRunner
 from unittest.mock import AsyncMock, patch
+
+from click.testing import CliRunner
+
 from kriya.cli import main
+
 
 def test_prompt_generate_command(tmp_path):
     runner = CliRunner()

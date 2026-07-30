@@ -1,9 +1,9 @@
-import os
-import pytest
+from unittest.mock import AsyncMock, patch
+
 from click.testing import CliRunner
-from unittest.mock import AsyncMock, patch, MagicMock
+
 from kriya.cli import main
-from kriya.config import AppConfig
+
 
 def test_ask_command_injects_files_context(tmp_path):
     # Setup mock workspace files
@@ -26,9 +26,7 @@ def test_ask_command_injects_files_context(tmp_path):
         "    <artifactId>spring-hello</artifactId>\n"
         "</project>"
     )
-    
-    cfg = AppConfig()
-    
+
     async def mock_impl(*args, **kwargs):
         cb = kwargs.get("stream_callback")
         if cb:

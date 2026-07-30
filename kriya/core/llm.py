@@ -1,10 +1,12 @@
-import socket
 import ipaddress
 import logging
 import re
+import socket
+from typing import Callable, Optional
 from urllib.parse import urlparse
-from typing import Optional, Callable
+
 from openai import AsyncOpenAI
+
 from kriya.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ def is_local_url(url: str) -> bool:
             return True
             
         addr_info = socket.getaddrinfo(hostname, None)
-        for family, _, _, _, sockaddr in addr_info:
+        for _family, _, _, _, sockaddr in addr_info:
             ip = sockaddr[0]
             ip_obj = ipaddress.ip_address(ip)
             if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local:
@@ -92,6 +94,7 @@ class LLMClient:
         
         logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}, Reasoning: {is_reasoning}]")
         import time
+
         import click
         
         prompt_tokens = 0

@@ -1,5 +1,7 @@
 import pytest
+
 from kriya.prompt import PromptEngine, PromptEngineError
+
 
 def test_prompt_engine_defaults():
     pe = PromptEngine()

@@ -1,10 +1,13 @@
 import os
+from unittest.mock import AsyncMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.workflow import WorkflowEngine
+
 
 @pytest.mark.asyncio
 async def test_autonomy_sensitive_paths_escalation(tmp_path):

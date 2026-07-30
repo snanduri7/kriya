@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Dict, Any, List
+from typing import Any, Dict
+
 from kriya.agents.agent import BaseAgent
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ class ConventionsExtractorAgent(BaseAgent):
             
         try:
             return json.loads(cleaned)
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             logger.error(f"ConventionsExtractorAgent returned invalid JSON: {response_str}")
             # Attempt fallback parsing by finding JSON bounds
             start = cleaned.find("{")

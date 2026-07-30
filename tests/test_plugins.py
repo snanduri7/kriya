@@ -1,7 +1,8 @@
-import os
 import pytest
+
 from kriya.core.kernel import Kernel
-from kriya.plugins.plugin import PluginManager, BasePlugin
+from kriya.plugins.plugin import PluginManager
+
 
 @pytest.mark.asyncio
 async def test_plugin_discovery_and_lifecycle(tmp_path):

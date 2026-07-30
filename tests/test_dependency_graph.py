@@ -1,6 +1,5 @@
-import os
-import pytest
 from kriya.analyzer.graph import DependencyGraph
+
 
 def test_dependency_graph_indexing(tmp_path):
     db_path = tmp_path / "dep_graph.db"

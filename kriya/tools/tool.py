@@ -1,11 +1,11 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Type, Any
+from typing import Any, Type
+
+from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
-# Let's import Pydantic components
-from pydantic import BaseModel, ValidationError
 
 class ToolExecutionError(Exception):
     """Base class for exceptions raised during tool execution."""

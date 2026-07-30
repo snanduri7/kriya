@@ -1,5 +1,7 @@
 import pytest
+
 from kriya.core.kernel import Kernel
+
 
 @pytest.mark.asyncio
 async def test_kernel_lifecycle_events():

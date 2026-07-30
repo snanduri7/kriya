@@ -1,6 +1,5 @@
-import os
-import pytest
 from kriya.analyzer.analyzer import RepositoryAnalyzer, RepositoryModel
+
 
 def test_analyzer_python_project(tmp_path):
     # Setup dummy Python project structure

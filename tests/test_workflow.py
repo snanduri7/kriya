@@ -1,10 +1,13 @@
 import os
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.workflow import WorkflowEngine, extract_expected_files, find_missing_expected_files
+
 
 def test_extract_expected_files_from_design_tree():
     design = """

@@ -1,10 +1,9 @@
-import os
-import pytest
-import sys
+from unittest.mock import AsyncMock, patch
+
 from click.testing import CliRunner
-from unittest.mock import AsyncMock, patch, MagicMock
+
 from kriya.cli import main
-from kriya.config import AppConfig
+
 
 def test_generate_from_file_goal(tmp_path):
     runner = CliRunner()
@@ -25,7 +24,6 @@ def test_generate_from_file_goal(tmp_path):
         assert "Generation Workflow Completed" in res.output
         mock_run.assert_called_once()
         # Verify the goal read from the file was passed to run_generation_workflow
-        kwargs = mock_run.call_args[1]
         assert "Apache Ignite 2.18" in mock_run.call_args_list[0][1]["goal"]
 
 def test_generate_from_stdin_goal(tmp_path):

@@ -1,11 +1,14 @@
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from kriya.config import AppConfig
+
 from kriya.analyzer.analyzer import RepositoryAnalyzer
+from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.workflow import WorkflowEngine
+
 
 @pytest.mark.asyncio
 async def test_auto_skills_generation_and_injection(tmp_path):

@@ -1,9 +1,12 @@
 import json
+from unittest.mock import AsyncMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+
+from kriya.agents.agent import DeveloperAgent, PlannerAgent
 from kriya.config import AppConfig
 from kriya.core.llm import LLMClient
-from kriya.agents.agent import PlannerAgent, ArchitectAgent, DeveloperAgent, ReviewerAgent
+
 
 @pytest.mark.asyncio
 async def test_base_agent_complete():

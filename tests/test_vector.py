@@ -1,7 +1,9 @@
-import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+
+from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
+
 
 @pytest.mark.asyncio
 async def test_ollama_embedding_client():

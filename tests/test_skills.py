@@ -1,6 +1,7 @@
 import os
-import pytest
-from kriya.skills.skill import SkillEngine, Skill
+
+from kriya.skills.skill import Skill, SkillEngine
+
 
 def test_skills_lifecycle(tmp_path):
     skills_dir = tmp_path / "skills"

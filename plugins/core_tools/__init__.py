@@ -1,16 +1,17 @@
+import ast
+import asyncio
+import fnmatch
+import logging
 import os
 import re
-import ast
-import fnmatch
-import asyncio
-import logging
-from typing import Type, Optional, Any, List, Dict
+from typing import Any, Optional, Type
+
 from pydantic import BaseModel, Field
 
-from kriya.plugins.plugin import BasePlugin
-from kriya.tools.tool import BaseTool, ToolExecutionError
 from kriya.config.config import AutonomyConfig
+from kriya.plugins.plugin import BasePlugin
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+from kriya.tools.tool import BaseTool, ToolExecutionError
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class FilesystemTool(BaseTool):
                     else:
                         return f.read()
             except Exception as e:
-                raise ToolExecutionError(f"Failed to read file '{path}': {e}")
+                raise ToolExecutionError(f"Failed to read file '{path}': {e}") from e
 
         elif op == "write":
             if args.content is None:
@@ -93,7 +94,7 @@ class FilesystemTool(BaseTool):
                     f.write(args.content)
                 return f"Successfully wrote to file '{path}'"
             except Exception as e:
-                raise ToolExecutionError(f"Failed to write to file '{path}': {e}")
+                raise ToolExecutionError(f"Failed to write to file '{path}': {e}") from e
 
         elif op == "list":
             if not os.path.exists(path):
@@ -103,7 +104,7 @@ class FilesystemTool(BaseTool):
             try:
                 return os.listdir(path)
             except Exception as e:
-                raise ToolExecutionError(f"Failed to list directory '{path}': {e}")
+                raise ToolExecutionError(f"Failed to list directory '{path}': {e}") from e
         else:
             raise ToolExecutionError(f"Unsupported filesystem operation '{args.operation}'")
 
@@ -152,7 +153,7 @@ class ShellTool(BaseTool):
                 "stderr": stderr.decode("utf-8", errors="replace")
             }
         except Exception as e:
-            raise ToolExecutionError(f"Shell command execution failed: {e}")
+            raise ToolExecutionError(f"Shell command execution failed: {e}") from e
 
 
 class GitTool(BaseTool):
@@ -208,7 +209,7 @@ class GitTool(BaseTool):
         except Exception as e:
             if isinstance(e, ToolExecutionError):
                 raise e
-            raise ToolExecutionError(f"Git execution failed: {e}")
+            raise ToolExecutionError(f"Git execution failed: {e}") from e
 
 
 class SearchTool(BaseTool):
@@ -232,7 +233,7 @@ class SearchTool(BaseTool):
         try:
             regex = re.compile(args.pattern, re.IGNORECASE)
         except re.error as e:
-            raise ToolExecutionError(f"Invalid search pattern regex: {e}")
+            raise ToolExecutionError(f"Invalid search pattern regex: {e}") from e
 
         ignore_dirs = {
             ".git", ".venv", "venv", "node_modules", "__pycache__", 
@@ -302,7 +303,7 @@ class ASTTool(BaseTool):
                     output.append("=== Python Functions ===\n" + "\n".join(functions))
                 return "\n\n".join(output) if output else "No classes/functions found."
             except Exception as e:
-                raise ToolExecutionError(f"Failed to parse Python AST: {e}")
+                raise ToolExecutionError(f"Failed to parse Python AST: {e}") from e
 
         # 2. Parse Java / Spring Source
         elif path.endswith(".java"):
@@ -329,7 +330,7 @@ class ASTTool(BaseTool):
                     output.append(f"Spring Annotations: {', '.join(set(spring_annots))}")
                 return "\n".join(output)
             except Exception as e:
-                raise ToolExecutionError(f"Failed to parse Java file structure: {e}")
+                raise ToolExecutionError(f"Failed to parse Java file structure: {e}") from e
 
         # 3. Parse Spring XML Bean Config
         elif path.endswith(".xml"):
@@ -351,7 +352,7 @@ class ASTTool(BaseTool):
                     return "Standard XML file (no Spring bean definitions identified)."
                 return "\n".join(output)
             except Exception as e:
-                raise ToolExecutionError(f"Failed to scan XML configuration: {e}")
+                raise ToolExecutionError(f"Failed to scan XML configuration: {e}") from e
 
         else:
             return "File format not supported for static AST analysis."

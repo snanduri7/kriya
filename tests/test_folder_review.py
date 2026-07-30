@@ -1,8 +1,10 @@
 import os
-import pytest
 from unittest.mock import AsyncMock, MagicMock
-from kriya.config import AppConfig
+
+import pytest
+
 from kriya.agents.agent import ReviewerAgent
+
 
 @pytest.mark.asyncio
 async def test_folder_review_prompt_assembly(tmp_path):

@@ -1,3 +1,3 @@
-from kriya.agents.agent import BaseAgent, PlannerAgent, ArchitectAgent, DeveloperAgent, ReviewerAgent
+from kriya.agents.agent import ArchitectAgent, BaseAgent, DeveloperAgent, PlannerAgent, ReviewerAgent
 
 __all__ = ["BaseAgent", "PlannerAgent", "ArchitectAgent", "DeveloperAgent", "ReviewerAgent"]

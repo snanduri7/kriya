@@ -1,10 +1,11 @@
 import os
-import json
-import pytest
-from click.testing import CliRunner
 from unittest.mock import AsyncMock, patch
+
+from click.testing import CliRunner
+
 from kriya.cli import main
 from kriya.config import AppConfig
+
 
 def test_learn_command_multiple_sources(tmp_path):
     # Setup paths configuration

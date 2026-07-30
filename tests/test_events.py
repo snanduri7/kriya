@@ -1,6 +1,9 @@
-import pytest
 import asyncio
+
+import pytest
+
 from kriya.core.events import EventSystem
+
 
 @pytest.mark.asyncio
 async def test_event_emitter_sync_handler():

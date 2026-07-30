@@ -1,7 +1,8 @@
 import logging
 from typing import Any, Optional
-from kriya.core.registry import ComponentRegistry
+
 from kriya.core.events import EventSystem
+from kriya.core.registry import ComponentRegistry
 
 logger = logging.getLogger(__name__)
 

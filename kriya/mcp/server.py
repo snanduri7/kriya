@@ -1,9 +1,8 @@
-import os
 import ast
-import re
 import fnmatch
 import logging
-from typing import Dict, List, Any, Optional
+import os
+import re
 
 # Let's import MCPServer from the mcp SDK (formerly FastMCP, renamed in mcp>=2.0.0)
 from mcp.server.mcpserver import MCPServer

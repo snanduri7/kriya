@@ -1,8 +1,11 @@
 import os
 import sys
+
 import pytest
+
 from kriya.core.kernel import Kernel
 from kriya.mcp.mcp import MCPClient, MCPManager
+
 
 @pytest.mark.asyncio
 async def test_mcp_client_handshake_and_call():

@@ -1,7 +1,7 @@
-import os
-import pytest
 import yaml
-from kriya.config.config import load_config, AppConfig
+
+from kriya.config.config import AppConfig, load_config
+
 
 def test_load_config_with_extra_body(tmp_path):
     custom_yaml = {

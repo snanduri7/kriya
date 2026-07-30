@@ -1,5 +1,7 @@
 import pytest
+
 from kriya.core.registry import ComponentRegistry, ComponentRegistryError
+
 
 def test_registry_registration():
     registry = ComponentRegistry()

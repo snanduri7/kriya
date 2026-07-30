@@ -1,10 +1,12 @@
-import os
 import json
-import pytest
-from click.testing import CliRunner
+import os
 from unittest.mock import AsyncMock, patch
+
+from click.testing import CliRunner
+
 from kriya.cli import main
 from kriya.config import AppConfig
+
 
 def test_ask_command_performs_rag_search(tmp_path):
     # Setup paths configuration

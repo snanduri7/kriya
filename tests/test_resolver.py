@@ -1,6 +1,6 @@
-import pytest
-from unittest.mock import patch, MagicMock
-from kriya.tools.resolver import resolve_maven_class, enrich_java_compiler_errors
+from unittest.mock import MagicMock, patch
+
+from kriya.tools.resolver import enrich_java_compiler_errors, resolve_maven_class
 
 
 def _mock_httpx_response(docs: list) -> MagicMock:

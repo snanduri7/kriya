@@ -1,14 +1,16 @@
 import os
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from kriya.tools.knowledge import (
+    KnowledgeGuard,
+    RegistryAdapterFactory,
     extract_library_versions,
     parse_iso_datetime,
-    RegistryAdapterFactory,
-    KnowledgeGuard,
-    GapReport
 )
+
 
 def test_extract_library_versions():
     goal = "Build a Spring Boot 3.2.0 app with org.apache.ignite:ignite-core:2.18.0 and express@4.18.2 plus requests==2.31.0"
@@ -202,10 +204,10 @@ def test_knowledge_guard_with_cache(tmp_path):
         MockClient.assert_not_called()
 
 def test_workflow_stage_2a_gap(tmp_path):
-    from kriya.workflow.workflow import WorkflowEngine
+    from kriya.config.config import AppConfig
     from kriya.core.kernel import Kernel
     from kriya.core.llm import LLMClient
-    from kriya.config.config import AppConfig
+    from kriya.workflow.workflow import WorkflowEngine
     
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")
@@ -249,11 +251,12 @@ def test_workflow_stage_2a_gap(tmp_path):
         assert mock_approval.called
 
 def test_workflow_auto_accrual(tmp_path):
-    from kriya.workflow.workflow import WorkflowEngine
+    from unittest.mock import AsyncMock
+
+    from kriya.config.config import AppConfig
     from kriya.core.kernel import Kernel
     from kriya.core.llm import LLMClient
-    from kriya.config.config import AppConfig
-    from unittest.mock import AsyncMock
+    from kriya.workflow.workflow import WorkflowEngine
 
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")

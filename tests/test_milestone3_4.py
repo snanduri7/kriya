@@ -1,13 +1,15 @@
-import pytest
 import os
-import shutil
 import sqlite3
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.workflow.workflow import WorkflowEngine
 from kriya.core.trace import TraceLogger
+from kriya.workflow.workflow import WorkflowEngine
+
 
 def test_persistent_trace_logger(tmp_path):
     trace_db = tmp_path / "traces.db"

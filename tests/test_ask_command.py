@@ -1,18 +1,16 @@
-import os
-import pytest
+from unittest.mock import AsyncMock, patch
+
 from click.testing import CliRunner
-from unittest.mock import AsyncMock, patch, MagicMock
+
 from kriya.cli import main
-from kriya.config import AppConfig
+
 
 def test_ask_command_execution(tmp_path):
     # Create mock files to pass RepositoryAnalyzer checks
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     (src_dir / "index.py").write_text("class MyService: pass")
-    
-    cfg = AppConfig()
-    
+
     async def mock_impl(*args, **kwargs):
         cb = kwargs.get("stream_callback")
         if cb:

@@ -1,23 +1,24 @@
+import asyncio
+import json
+import logging
 import os
 import sys
-import urllib.request
 import urllib.error
-import json
-import asyncio
-import logging
-from typing import Optional, List, Dict
+import urllib.request
+from typing import Dict, List, Optional
+
 import click
 
 from kriya import __version__
-from kriya.config import load_config, AppConfig
+from kriya.agents import ReviewerAgent
+from kriya.analyzer import RepositoryAnalyzer
+from kriya.config import AppConfig, load_config
+from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.plugins.plugin import PluginManager
 from kriya.prompt import PromptEngine
-from kriya.analyzer import RepositoryAnalyzer
 from kriya.skills import SkillEngine
-from kriya.core import LLMClient
 from kriya.workflow import WorkflowEngine
-from kriya.agents import ReviewerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ def doctor(ctx: click.Context) -> None:
                 if isinstance(data, dict) and "data" in data:
                     available_models = [m.get("id") for m in data["data"] if isinstance(m, dict)]
                 
-                click.secho(f"  - [SUCCESS] Connected to local LLM server. Status code: 200", fg="green")
+                click.secho("  - [SUCCESS] Connected to local LLM server. Status code: 200", fg="green")
                 if available_models:
                     click.echo(f"  - Available models: {', '.join(available_models)}")
                     if model in available_models:
@@ -216,8 +217,9 @@ def prompt_generate(ctx: click.Context, description: str) -> None:
     """Generate an optimized code-generation prompt based on a high-level description."""
     cfg: AppConfig = ctx.obj['config']
     
-    from kriya.core.llm import LLMClient
     import asyncio
+
+    from kriya.core.llm import LLMClient
     llm = LLMClient(cfg)
     
     system_prompt = (
@@ -420,11 +422,11 @@ def skills_list(ctx: click.Context) -> None:
         if os.path.exists(staged_file):
             try:
                 with open(staged_file, "r", encoding="utf-8") as sf:
-                    lines = [l.strip() for l in sf if l.strip()]
+                    lines = [line.strip() for line in sf if line.strip()]
                 if lines:
                     click.secho(f"    [STAGED RULES PENDING REVIEW ({len(lines)})]:", fg="yellow")
-                    for l in lines:
-                        click.echo(f"      * {l}")
+                    for line in lines:
+                        click.echo(f"      * {line}")
             except Exception as e:
                 logger.debug(f"Failed to read staged rules file '{staged_file}': {e}")
 
@@ -497,7 +499,7 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
         
     try:
         with open(staged_file, "r", encoding="utf-8") as sf:
-            staged_lines = [l.strip() for l in sf if l.strip()]
+            staged_lines = [line.strip() for line in sf if line.strip()]
             
         if not staged_lines:
             click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
@@ -573,7 +575,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
         if os.path.exists(index_path):
             try:
-                from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
                 embed_client = OllamaEmbeddingClient(
                     base_url=cfg.embedding.base_url,
                     model=cfg.embedding.model
@@ -769,7 +771,7 @@ def review(ctx: click.Context, file_path: str) -> None:
             sys.stdout.flush()
 
         async def run_review():
-            click.secho(f"\n=== Code Review Report ===", bold=True, fg="cyan")
+            click.secho("\n=== Code Review Report ===", bold=True, fg="cyan")
             return await reviewer.run(review_prompt, stream_callback=on_stream)
             
         res = asyncio.run(run_review())
@@ -833,7 +835,7 @@ def ask(ctx: click.Context, question: str) -> None:
         index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
         if os.path.exists(index_path):
             try:
-                from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
                 embed_client = OllamaEmbeddingClient(
                     base_url=cfg.embedding.base_url,
                     model=cfg.embedding.model
@@ -876,8 +878,8 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
     cfg: AppConfig = ctx.obj['config']
     
+    from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
     from kriya.tools.web import fetch_url_text
-    from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
     
     embed_client = OllamaEmbeddingClient(
         base_url=cfg.embedding.base_url,
@@ -905,7 +907,7 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
         import datetime
         fetch_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for chunk, emb in zip(chunks, embeddings):
+        for chunk, emb in zip(chunks, embeddings, strict=True):
             vector_store.add_learned_knowledge(
                 text=chunk,
                 embedding=emb,
@@ -1053,7 +1055,7 @@ def traces(ctx: click.Context) -> None:
         
     click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
     click.echo("-" * 100)
-    for r_id, ts, goal, dur, att, status, files in rows:
+    for _r_id, ts, goal, dur, att, status, _files in rows:
         dur_str = f"{dur:.2f}s"
         status_color = "green" if status.lower() == "success" else "red"
         status_styled = click.style(f"{status:<10}", fg=status_color)

@@ -1,9 +1,9 @@
-import os
-import json
-import sqlite3
 import datetime
+import json
+import os
 
 from kriya.core.db import get_connection
+
 
 class TraceLogger:
     def __init__(self, db_path: str) -> None:

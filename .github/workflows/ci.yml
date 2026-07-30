@@ -28,6 +28,23 @@ jobs:
       - name: Run test suite
         run: pytest -q
 
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Kriya (declared dependency ranges)
+        run: pip install -e ".[dev]"
+
+      - name: Run ruff
+        run: ruff check .
+
   lock-file:
     name: Verify dependency lock file
     runs-on: ubuntu-latest

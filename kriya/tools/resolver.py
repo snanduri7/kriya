@@ -1,7 +1,8 @@
-import re
-import httpx
 import logging
-from typing import Optional, Dict, List
+import re
+from typing import Dict, Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 

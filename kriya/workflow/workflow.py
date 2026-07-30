@@ -1,18 +1,16 @@
+import asyncio
+import difflib
+import logging
 import os
 import re
-import sys
-import logging
-import asyncio
-import subprocess
 import shutil
-import random
-import difflib
-from typing import Dict, Any, List, Callable, Optional
+import subprocess
+from typing import Any, Callable, Dict, List, Optional
 
+from kriya.agents.agent import ArchitectAgent, DeveloperAgent, PlannerAgent, ReviewerAgent
+from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.analyzer.analyzer import RepositoryAnalyzer
-from kriya.agents.agent import PlannerAgent, ArchitectAgent, DeveloperAgent, ReviewerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +21,7 @@ def create_git_worktree(repo_path: str) -> str:
         if res.returncode != 0:
             raise ValueError("Not a git repository")
     except Exception as e:
-        raise ValueError(f"Directory is not a git repository: {e}")
+        raise ValueError(f"Directory is not a git repository: {e}") from e
 
     worktree_path = os.path.join(repo_path, ".kriya", "worktree")
     os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
@@ -222,12 +220,12 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
         return skel_cache[key]
 
     def total_len():
-        l = 0
+        total = 0
         for filepath, content in matched_contents.items():
-            l += estimate_tokens(get_skeletonized(content, filepath, matched_tier))
+            total += estimate_tokens(get_skeletonized(content, filepath, matched_tier))
         for filepath, content in related_contents.items():
-            l += estimate_tokens(get_skeletonized(content, filepath, related_tier))
-        return l
+            total += estimate_tokens(get_skeletonized(content, filepath, related_tier))
+        return total
 
     while total_len() > budget_limit:
         if related_tier == "full":
@@ -505,7 +503,7 @@ class WorkflowEngine:
             db_path = os.path.join(self.kernel.config.paths.memory, "dependency_graph.db")
             
             if os.path.exists(vector_index_path):
-                from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
                 embed_client = OllamaEmbeddingClient(
                     base_url=self.kernel.config.embedding.base_url,
                     model=self.kernel.config.embedding.model
@@ -555,7 +553,7 @@ class WorkflowEngine:
         try:
             vector_index_path = os.path.join(self.kernel.config.paths.memory, "vector_index.db")
             if os.path.exists(vector_index_path):
-                from kriya.memory.vector import OllamaEmbeddingClient, LocalVectorStore
+                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
                 embed_client = OllamaEmbeddingClient(
                     base_url=self.kernel.config.embedding.base_url,
                     model=self.kernel.config.embedding.model

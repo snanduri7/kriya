@@ -1,14 +1,14 @@
-import os
-import sys
 import importlib
 import logging
+import os
+import sys
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import Dict, List
+
+from kriya.core.kernel import Kernel
 
 logger = logging.getLogger(__name__)
 
-# Forward declaration or direct import
-from kriya.core.kernel import Kernel
 
 class BasePlugin(ABC):
     """Abstract base class that all Kriya plugins must implement."""

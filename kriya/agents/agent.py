@@ -1,7 +1,7 @@
 import json
 import logging
 from abc import ABC
-from typing import Dict, Any, List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 
 from kriya.core.llm import LLMClient
 
@@ -262,7 +262,7 @@ class DeveloperAgent(BaseAgent):
         try:
             res = json.loads(cleaned)
             if isinstance(res, dict):
-                for key, val in res.items():
+                for _key, val in res.items():
                     if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
                         for item in val:
                             if "path" in item and "filepath" not in item:
@@ -283,7 +283,7 @@ class DeveloperAgent(BaseAgent):
                 try:
                     res = json.loads(cleaned[start_a:end_a+1])
                     if isinstance(res, dict):
-                        for key, val in res.items():
+                        for _key, val in res.items():
                             if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
                                 for item in val:
                                     if "path" in item and "filepath" not in item:
@@ -300,7 +300,7 @@ class DeveloperAgent(BaseAgent):
                 try:
                     res = json.loads(cleaned[start_d:end_d+1])
                     if isinstance(res, dict):
-                        for key, val in res.items():
+                        for _key, val in res.items():
                             if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
                                 for item in val:
                                     if "path" in item and "filepath" not in item:
