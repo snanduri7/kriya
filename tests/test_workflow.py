@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 from unittest.mock import AsyncMock, patch
 
@@ -329,4 +330,51 @@ async def test_workflow_run_verification_declined_still_passes_on_compile_alone(
     # llm.complete's side_effect list has exactly 5 entries - if grade() had been
     # called despite the decline, AsyncMock would have raised StopAsyncIteration.
     assert llm.complete.await_count == 5
+
+
+@pytest.mark.asyncio
+async def test_workflow_full_regression_check_tests_the_applied_change_not_stale_worktree(tmp_path):
+    """The full regression check runs after the worktree sandbox has already been
+    git-clean'd back to its pre-change HEAD state (once files are copied out to the
+    real workspace). It must test the real workspace - which has the just-applied
+    change - not the now-reverted worktree, or it silently reports a false pass based
+    on stale, pre-change content.
+
+    Reproduces this with a real git repo: the committed (pre-change) calc.py has a
+    deliberately WRONG add() implementation that test_calc.py's existing, untouched
+    assertion would fail against. The Developer Agent "fixes" calc.py in this run. If
+    the regression check were still testing the reverted worktree (the bug), it would
+    run test_calc.py against the wrong, pre-change calc.py and fail; testing the real
+    workspace (the fix) runs it against the corrected calc.py and passes.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n")  # deliberately wrong
+    (tmp_path / "test_calc.py").write_text("from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial (buggy) commit"], cwd=tmp_path, check=True)
+
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Fix calc.py",                # Planner
+        "Design: Fix add() in calc.py",        # Architect
+        '[{"filepath": "calc.py", "content": "def add(a, b):\\n    return a + b\\n"}]',  # Developer
+        "Review: Approved"                     # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    res = await we.run_generation_workflow(
+        goal="Fix the add function in calc.py",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    with open(tmp_path / "calc.py") as f:
+        assert "a + b" in f.read()
 

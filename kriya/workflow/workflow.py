@@ -1051,8 +1051,19 @@ class WorkflowEngine:
                     except Exception as ex:
                         logger.warning(f"Failed to extract lesson or update skills: {ex}")
 
-                # If we successfully compiled and passed targeted tests, run the full regression test suite once
+                # If we successfully compiled and passed targeted tests, run the full regression
+                # test suite once. Must use a validator pointed at the real workspace, not the
+                # worktree - the "Clean up worktree sandbox" step above already ran `git checkout
+                # -f HEAD` + `git clean -fd` on the worktree once a separate one was used,
+                # silently reverting it to the pre-change state. Reusing the earlier `validator`
+                # (constructed against the worktree, before that reset) would test stale,
+                # pre-change content and report a false pass. The real workspace already has the
+                # applied changes copied into it by this point either way.
                 logger.info("Quality Gates: Running full test suite regression check...")
+                validator = PolymorphicValidator(
+                    workspace_path, original_workspace_path=workspace_path,
+                    autonomy_cfg=self.kernel.config.autonomy,
+                )
                 full_test_res = validator.run_tests()
                 gate_outcomes.append({
                     "attempt": retry_count + 1,
