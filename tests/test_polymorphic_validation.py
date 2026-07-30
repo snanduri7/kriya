@@ -36,6 +36,34 @@ def test_python_compile_check(tmp_path):
     assert res2["success"] is False
     assert "Syntax error" in res2["output"]
 
+def test_python_run_tests_resolves_src_layout_imports(tmp_path):
+    # Reproduces a real generation failure: a src/ layout project where the
+    # generated test imports the module either bare ("from calculator import x",
+    # the src-layout convention) or package-qualified ("from src.calculator import
+    # x"). Both must resolve regardless of which one the Developer Agent wrote,
+    # since that choice is inconsistent across retries/models.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+    (src_dir / "calculator.py").write_text("def add(a, b):\n    return a + b\n")
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    (tests_dir / "test_calculator.py").write_text(
+        "from calculator import add\n\ndef test_add():\n    assert add(2, 3) == 5\n"
+    )
+    res_bare = validator.run_tests()
+    assert res_bare["success"] is True, res_bare["output"]
+
+    (tests_dir / "test_calculator.py").write_text(
+        "from src.calculator import add\n\ndef test_add():\n    assert add(2, 3) == 5\n"
+    )
+    res_qualified = validator.run_tests()
+    assert res_qualified["success"] is True, res_qualified["output"]
+
 def test_java_ruby_compile_invocation(tmp_path):
     # Test Java compile invocation mocks
     (tmp_path / "pom.xml").write_text("<project></project>")

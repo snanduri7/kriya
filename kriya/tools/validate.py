@@ -193,10 +193,30 @@ class PolymorphicValidator:
         """Runs tech-stack specific test execution suite."""
         try:
             if self.stack == "python":
+                # Explicitly (re-)add the workspace root and, if present, its src/ layout
+                # directory to sys.path after stripping the auto-inserted CWD entry (which
+                # protects pytest's own imports - and everything pytest itself transitively
+                # imports, e.g. stdlib random -> math - from being shadowed by an arbitrary
+                # file in the workspace root, such as a generated math.py). Without this,
+                # whether a generated test's import (`from pkg.module import x` vs. src-layout
+                # `from module import x`) resolves is left entirely up to pytest's own
+                # rootdir-walk, which only adds the workspace root when every directory
+                # between it and the test file has an __init__.py - something the Developer
+                # Agent creates inconsistently across retries/models. Appending (not
+                # prepending) both known-good roots makes either import convention resolve
+                # deterministically without reopening the shadowing risk: stdlib/installed
+                # packages earlier in sys.path still win, so this only kicks in as a fallback.
+                extra_roots = [self.workspace_path]
+                src_dir = os.path.join(self.workspace_path, "src")
+                if os.path.isdir(src_dir):
+                    extra_roots.append(src_dir)
                 cmd = [
                     sys.executable,
                     "-c",
-                    "import sys, os; sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; import pytest; sys.exit(pytest.main(sys.argv[1:]))",
+                    "import sys, os; "
+                    "sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; "
+                    f"sys.path.extend({extra_roots!r}); "
+                    "import pytest; sys.exit(pytest.main(sys.argv[1:]))",
                     "--"
                 ]
                 if target_test:
