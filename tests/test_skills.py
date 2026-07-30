@@ -188,5 +188,80 @@ def test_skills_promote_marks_target_skill_verified(tmp_path):
     assert result.exit_code == 0, result.output
     se = SkillEngine(str(global_skills), load_global=False)
     se.discover_and_load()
-    assert se.get_skill("qpid").verified is True
+    skill = se.get_skill("qpid")
+    assert skill.verified is True
+    assert skill.verified_context == "promoted from 'auto-myrepo'"
+
+
+def _make_local_project(tmp_path, skill_name="widgetlib", verified=False):
+    """A project-local skills dir (not the shared/global one) with a single skill,
+    for testing kriya skills list/show/unverify without touching the real repo's
+    skills - those commands load with load_global=True by default, so the real repo's
+    skills will also appear in output; tests only assert on their own skill's line."""
+    project_skills = tmp_path / "project_skills"
+    skill_folder = project_skills / skill_name
+    skill_folder.mkdir(parents=True)
+    yaml_lines = [f"name: {skill_name}", "description: Test skill.", f"tags: [{skill_name}]"]
+    if verified:
+        yaml_lines += ["verified: true", "verified_context: widgetlib 2.0.0", "verified_at: '2026-01-01'"]
+    (skill_folder / "skill.yaml").write_text("\n".join(yaml_lines) + "\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    config_file = tmp_path / "kriya.yaml"
+    config_file.write_text(f"paths:\n  skills: {project_skills}\n")
+    return str(config_file), project_skills
+
+def test_skills_unverify_resets_verified_skill(tmp_path):
+    config_file, project_skills = _make_local_project(tmp_path, verified=True)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["--config", config_file, "skills", "unverify", "widgetlib"])
+
+    assert result.exit_code == 0, result.output
+    assert "reset to unverified" in result.output
+    se = SkillEngine(str(project_skills), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("widgetlib")
+    assert skill.verified is False
+    assert skill.verification_gap_acknowledged is False
+
+def test_skills_unverify_already_unverified_is_a_noop(tmp_path):
+    config_file, _project_skills = _make_local_project(tmp_path, verified=False)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["--config", config_file, "skills", "unverify", "widgetlib"])
+
+    assert result.exit_code == 0
+    assert "already unverified" in result.output
+
+def test_skills_unverify_unknown_skill_fails(tmp_path):
+    config_file, _project_skills = _make_local_project(tmp_path, verified=False)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["--config", config_file, "skills", "unverify", "no-such-skill"])
+
+    assert result.exit_code != 0
+    assert "not found" in result.output
+
+def test_skills_list_shows_verification_status(tmp_path):
+    config_file, _project_skills = _make_local_project(tmp_path, skill_name="verifiedwidget", verified=True)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["--config", config_file, "skills", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "verifiedwidget" in result.output
+    matching_line = next(line for line in result.output.splitlines() if "verifiedwidget" in line)
+    assert "[VERIFIED - widgetlib 2.0.0, on 2026-01-01]" in matching_line
+
+def test_skills_show_displays_verification_provenance(tmp_path):
+    config_file, _project_skills = _make_local_project(tmp_path, skill_name="verifiedwidget", verified=True)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["--config", config_file, "skills", "show", "verifiedwidget"])
+
+    assert result.exit_code == 0, result.output
+    assert "Verified:    yes" in result.output
+    assert "widgetlib 2.0.0" in result.output
+    assert "kriya skills unverify verifiedwidget" in result.output
 

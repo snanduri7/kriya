@@ -422,7 +422,19 @@ def skills_list(ctx: click.Context) -> None:
         
     click.secho(f"=== Discovered Skills ({len(skills)}) ===", bold=True)
     for s in skills:
-        click.echo(f"  - {s.name}: {s.description} [Category: {s.category}]")
+        if s.verified:
+            provenance = []
+            if s.verified_context:
+                provenance.append(s.verified_context)
+            if s.verified_at:
+                provenance.append(f"on {s.verified_at}")
+            verified_str = " [VERIFIED" + (f" - {', '.join(provenance)}" if provenance else "") + "]"
+            verified_fg = "green"
+        else:
+            verified_str = " [UNVERIFIED]"
+            verified_fg = "yellow"
+        click.echo(f"  - {s.name}: {s.description} [Category: {s.category}]", nl=False)
+        click.secho(verified_str, fg=verified_fg)
         staged_file = os.path.join(cfg.paths.skills, s.name.lower(), "staged_rules.txt")
         if not os.path.exists(staged_file):
             staged_file = os.path.join(cfg.paths.skills, s.name, "staged_rules.txt")
@@ -452,7 +464,13 @@ def skills_show(ctx: click.Context, skill_name: str) -> None:
         click.echo(f"Description: {s.description}")
         click.echo(f"Category:    {s.category}")
         click.echo(f"Tags:        {', '.join(s.tags)}")
-        
+        if s.verified:
+            click.secho(f"Verified:    yes (context: {s.verified_context or 'unspecified'}, on {s.verified_at or 'unknown date'})", fg="green")
+            click.echo("             Run 'kriya skills unverify " + skill_name + "' if you believe this is now stale.")
+        else:
+            click.secho("Verified:    no - future generation runs will be asked to strengthen this skill.", fg="yellow")
+
+
         if s.rules:
             click.secho("\nRules:", bold=True)
             for r in s.rules:
@@ -619,9 +637,43 @@ def skills_promote(ctx: click.Context, source_skill: str, target_skill: str, rul
     # so future generations stop being asked to strengthen it.
     target_engine = SkillEngine(global_skills_dir, load_global=False)
     target_engine.discover_and_load()
-    target_engine.mark_verified(target_skill)
+    target_engine.mark_verified(target_skill, context=f"promoted from '{source_skill}'")
 
     click.secho(f"Successfully promoted {len(to_promote)} rule(s) into shared skill '{target_skill}'.", fg="green")
+
+@skills_group.command(name="unverify")
+@click.argument('skill_name')
+@click.pass_context
+def skills_unverify(ctx: click.Context, skill_name: str) -> None:
+    """Resets a skill's verified status, so future generation runs are asked to
+    strengthen/re-confirm it again.
+
+    Deliberately manual - a failing Runtime Verification run never automatically
+    demotes a previously-verified skill, since attributing a failure to one specific
+    skill among several active ones is unreliable. Use this when you know a skill has
+    gone stale for any reason (a pinned version got yanked, a new major version
+    changed the config shape, an approach became deprecated) - check 'kriya skills
+    show <name>' first to see when/what it was last verified for.
+    """
+    cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
+    se = SkillEngine(cfg.paths.skills)
+    se.discover_and_load()
+
+    try:
+        skill = se.get_skill(skill_name)
+    except KeyError:
+        click.secho(f"Skill '{skill_name}' not found.", fg="red")
+        sys.exit(1)
+
+    if not skill.verified:
+        click.secho(f"Skill '{skill_name}' is already unverified.", fg="yellow")
+        return
+
+    if se.mark_unverified(skill_name):
+        click.secho(f"Skill '{skill_name}' reset to unverified - future generation runs will be asked to strengthen it again.", fg="green")
+    else:
+        click.secho(f"Failed to update skill '{skill_name}'.", fg="red")
+        sys.exit(1)
 
 @main.command()
 @click.argument('goal', required=False)

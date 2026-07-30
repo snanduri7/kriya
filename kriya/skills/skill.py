@@ -2,7 +2,8 @@ import logging
 import os
 import re
 import subprocess
-from typing import Dict, List, Optional, Tuple
+from datetime import date
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 from pydantic import BaseModel, Field
@@ -103,6 +104,8 @@ class Skill(BaseModel):
     supported_versions: str = Field(default="*", description="Supported version range (e.g. >=2.15.0 <3.0.0).")
     verified: bool = Field(default=False, description="True once a Runtime Verification Gate run using this skill has passed, or a human has explicitly promoted a rule into it.")
     verification_gap_acknowledged: bool = Field(default=False, description="True once the user has been asked to strengthen this unverified skill and declined - suppresses re-asking until it actually becomes verified.")
+    verified_at: Optional[str] = Field(default=None, description="Date (YYYY-MM-DD) the skill was last marked verified - advisory provenance for a human to judge staleness, not used to automatically re-trigger anything.")
+    verified_context: Optional[str] = Field(default=None, description="Best-effort description of what was actually verified (e.g. a version mentioned in the goal, or 'promoted from X') - advisory provenance only, same as verified_at.")
     source_path: Optional[str] = Field(default=None, description="Filesystem path to this skill's folder, set by discover_and_load - not part of skill.yaml itself.")
 
 
@@ -196,6 +199,8 @@ class SkillEngine:
                         supported_versions=meta.get("supported_versions", "*"),
                         verified=bool(meta.get("verified", False)),
                         verification_gap_acknowledged=bool(meta.get("verification_gap_acknowledged", False)),
+                        verified_at=meta.get("verified_at"),
+                        verified_context=meta.get("verified_context"),
                         source_path=folder_path
                     )
 
@@ -268,8 +273,9 @@ class SkillEngine:
                 return skill
         return None
 
-    def _set_skill_yaml_field(self, skill_name: str, field: str, value: bool) -> bool:
-        """Writes a boolean field back to a skill's skill.yaml and keeps the in-memory
+    def _set_skill_yaml_fields(self, skill_name: str, fields: Dict[str, Any], commit_message: str) -> bool:
+        """Writes one or more fields back to a skill's skill.yaml in a single read-
+        modify-write (and a single git commit, if tracked) and keeps the in-memory
         Skill object consistent. Returns False (logged, non-fatal) if the skill isn't
         known or has no resolvable source_path rather than raising - callers treat this
         as best-effort bookkeeping, not something that should block generation."""
@@ -284,27 +290,55 @@ class SkillEngine:
             if os.path.exists(yaml_path):
                 with open(yaml_path, "r", encoding="utf-8") as f:
                     meta = yaml.safe_load(f) or {}
-            meta[field] = value
+            meta.update(fields)
             with open(yaml_path, "w", encoding="utf-8") as f:
                 yaml.safe_dump(meta, f, default_flow_style=False)
-            setattr(skill, field, value)
-            git_commit_if_tracked(yaml_path, f"Kriya: set {field}={value} on skill '{skill.name}'")
+            for field, value in fields.items():
+                setattr(skill, field, value)
+            git_commit_if_tracked(yaml_path, commit_message)
             return True
         except Exception as e:
-            logger.warning(f"Failed to update '{field}' on skill '{skill_name}': {e}")
+            logger.warning(f"Failed to update skill '{skill_name}': {e}")
             return False
 
-    def mark_verified(self, skill_name: str) -> bool:
+    def _set_skill_yaml_field(self, skill_name: str, field: str, value: Any) -> bool:
+        return self._set_skill_yaml_fields(skill_name, {field: value}, f"Kriya: set {field}={value} on skill '{skill_name}'")
+
+    def mark_verified(self, skill_name: str, context: str = "") -> bool:
         """Marks a skill verified - called after a Runtime Verification Gate run that
         used this skill passes, or when a human explicitly promotes a rule into it via
         `kriya skills promote`. Also clears any prior gap-acknowledgment, since a newly
-        verified skill has nothing left to ask about."""
-        ok = self._set_skill_yaml_field(skill_name, "verified", True)
-        if ok:
-            self._set_skill_yaml_field(skill_name, "verification_gap_acknowledged", False)
-        return ok
+        verified skill has nothing left to ask about, and records `context` (e.g. the
+        version actually verified, or "promoted from X") plus today's date as advisory
+        provenance - visible via `kriya skills list`/`show` for a human to judge
+        staleness themselves later (e.g. a pinned version gets yanked, or a new major
+        version changes the config shape) - nothing here automatically re-triggers
+        anything; that's a deliberate choice over guessing at staleness automatically."""
+        fields = {
+            "verified": True,
+            "verification_gap_acknowledged": False,
+            "verified_at": date.today().isoformat(),
+        }
+        if context:
+            fields["verified_context"] = context
+        suffix = f" ({context})" if context else ""
+        return self._set_skill_yaml_fields(skill_name, fields, f"Kriya: mark skill '{skill_name}' verified{suffix}")
 
     def mark_gap_acknowledged(self, skill_name: str) -> bool:
         """Marks that the user was asked to strengthen this unverified skill and
         declined, so future generation runs don't keep re-asking about the same skill."""
         return self._set_skill_yaml_field(skill_name, "verification_gap_acknowledged", True)
+
+    def mark_unverified(self, skill_name: str) -> bool:
+        """Explicit human action resetting a skill's verified status (e.g. they know
+        it's stale - a version bump, a deprecated approach) - deliberately manual, not
+        triggered automatically by a failing Runtime Verification run, since failure
+        attribution to one specific skill among several active ones is unreliable and
+        auto-demoting risks skills flip-flopping for reasons unrelated to the skill
+        itself. Also clears verification_gap_acknowledged so future runs ask about it
+        again rather than silently staying unverified forever."""
+        return self._set_skill_yaml_fields(
+            skill_name,
+            {"verified": False, "verification_gap_acknowledged": False},
+            f"Kriya: reset skill '{skill_name}' to unverified"
+        )

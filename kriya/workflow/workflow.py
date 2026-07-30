@@ -455,6 +455,22 @@ def _stage_skill_conflicts(skill: Any, conflicts: List[Dict[str, str]]) -> None:
                 sf.write(f"\n[CONFLICT] {candidate} -- conflicts with existing rule: '{existing}' ({reason})")
     git_commit_if_tracked(staged_file, f"Kriya: flag {len(conflicts)} conflicting candidate rule(s) for skill '{skill.name}'")
 
+def _skill_verification_context(skill: Any, goal: str) -> str:
+    """Best-effort description of what was actually verified (e.g. "qpid 9.2.1"),
+    recorded as advisory provenance on the skill (visible via 'kriya skills list'/
+    'show') so a human can judge staleness themselves later - a pinned version gets
+    yanked, a new major version changes the config shape, etc. Deliberately not used
+    to automatically re-trigger anything; reuses the same version-extraction already
+    used for supported_versions filtering and missing-skill detection."""
+    try:
+        from kriya.tools.knowledge import extract_library_versions
+        for lib, ver in extract_library_versions(goal):
+            if lib.lower() in skill.name.lower() or any(t.lower() in lib.lower() for t in skill.tags):
+                return f"{lib} {ver}"
+    except Exception as ex:
+        logger.debug(f"Failed to compute skill verification context: {ex}")
+    return "version unspecified"
+
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
 
@@ -1118,7 +1134,9 @@ class WorkflowEngine:
                             # future runs stop asking about it.
                             for active_skill_name in active_skills:
                                 try:
-                                    se.mark_verified(active_skill_name)
+                                    active_skill_obj = se.get_skill(active_skill_name)
+                                    context = _skill_verification_context(active_skill_obj, goal)
+                                    se.mark_verified(active_skill_name, context=context)
                                 except Exception as ex:
                                     logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
 

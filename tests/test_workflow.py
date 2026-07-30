@@ -438,7 +438,7 @@ async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp
     we = WorkflowEngine(kernel, llm)
 
     res = await we.run_generation_workflow(
-        goal="Run with python app.py; the widgetlib skill applies here",
+        goal="Run with python app.py; the widgetlib==2.0 skill applies here",
         workspace_path=str(tmp_path)
     )
 
@@ -446,7 +446,10 @@ async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp
 
     se = SkillEngine(str(skills_dir), load_global=False)
     se.discover_and_load()
-    assert se.get_skill("widgetlib").verified is True
+    skill = se.get_skill("widgetlib")
+    assert skill.verified is True
+    assert skill.verified_context == "widgetlib 2.0.0"
+    assert skill.verified_at is not None
 
 
 @pytest.mark.asyncio
