@@ -170,3 +170,23 @@ def test_skills_promote_requires_rule_or_all(tmp_path):
 
     assert result.exit_code != 0
 
+def test_skills_promote_marks_target_skill_verified(tmp_path):
+    config_file, _project_skills, global_skills = _make_promote_project(tmp_path)
+    # _make_promote_project's target skill has no skill.yaml - give it one so
+    # verification-marking has something real to update.
+    (global_skills / "qpid" / "skill.yaml").write_text("name: qpid\ndescription: Test\n")
+    runner = CliRunner()
+
+    with patch("kriya.cli._get_global_skills_dir", return_value=str(global_skills)):
+        result = runner.invoke(
+            main,
+            ["--config", config_file, "skills", "promote", "auto-myrepo", "qpid",
+             "--rule", "Use SLF4J for logging."],
+            input="y\n"
+        )
+
+    assert result.exit_code == 0, result.output
+    se = SkillEngine(str(global_skills), load_global=False)
+    se.discover_and_load()
+    assert se.get_skill("qpid").verified is True
+

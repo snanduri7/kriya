@@ -611,6 +611,15 @@ def skills_promote(ctx: click.Context, source_skill: str, target_skill: str, rul
     with open(target_rules_file, "a", encoding="utf-8") as tf:
         for r in to_promote:
             tf.write(f"\n{r}")
+    from kriya.skills.skill import git_commit_if_tracked
+    git_commit_if_tracked(target_rules_file, f"Kriya: promote {len(to_promote)} rule(s) from '{source_skill}' into skill '{target_skill}'")
+
+    # A human explicitly vouching for a rule is at least as strong a trust signal as an
+    # automated passing Runtime Verification run - mark the target skill verified too,
+    # so future generations stop being asked to strengthen it.
+    target_engine = SkillEngine(global_skills_dir, load_global=False)
+    target_engine.discover_and_load()
+    target_engine.mark_verified(target_skill)
 
     click.secho(f"Successfully promoted {len(to_promote)} rule(s) into shared skill '{target_skill}'.", fg="green")
 
@@ -669,6 +678,19 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 click.echo(f"... and {len(lines) - 15} more lines.")
         return click.confirm("\nDo you approve applying these changes to the codebase?")
 
+    def on_skill_gap(reason: str, skill_names: List[str]) -> Optional[str]:
+        if yes:
+            click.secho(f"\n[Auto-Skipping Skill Gap Check] {reason}", dim=True)
+            return None
+
+        click.secho(f"\n[Skill Gap Detected] {reason}", bold=True, fg="yellow")
+        supplied = click.prompt(
+            "Provide a URL, file path, or paste reference text to strengthen it "
+            "(leave blank to proceed anyway with best-effort generation)",
+            default="", show_default=False
+        )
+        return supplied.strip() or None
+
     async def run_workflow():
         nonlocal goal
         rag_context = ""
@@ -695,10 +717,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
 
         await kernel.start()
         res = await we.run_generation_workflow(
-            goal=goal, 
-            workspace_path=os.getcwd(), 
+            goal=goal,
+            workspace_path=os.getcwd(),
             approval_callback=on_approval,
-            stream_callback=on_stream
+            stream_callback=on_stream,
+            skill_gap_callback=on_skill_gap
         )
 
         if isinstance(res, dict) and res.get("status") == "knowledge_gap":
@@ -715,6 +738,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     workspace_path=os.getcwd(),
                     approval_callback=on_approval,
                     stream_callback=on_stream,
+                    skill_gap_callback=on_skill_gap,
                     knowledge_risk_confirmed=True
                 )
             elif knowledge_policy == 'strict':
@@ -749,6 +773,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         workspace_path=os.getcwd(),
                         approval_callback=on_approval,
                         stream_callback=on_stream,
+                        skill_gap_callback=on_skill_gap,
                         knowledge_risk_confirmed=True
                     )
                 else:
