@@ -28,7 +28,7 @@ Kriya runs entirely on **local infrastructure** — local LLMs, local tools, loc
 - **Skill Conflict Detection**: two skills can each be individually correct and still conflict once both are active for the same run (e.g. two broker skills pinning different values for the same shared port). When skills matched for a goal genuinely contradict each other, `generate` pauses and asks which one should govern — your answer is remembered per exact rule pair, so the same conflict is never asked about twice.
 - **Live Lookup** (`autonomy.web_lookup_enabled`, **off by default** — the one opt-in exception to "zero cloud dependency"): auto-resolves a skill gap by searching a configured backend (e.g. a self-hosted SearXNG instance, `search.base_url`) instead of always waiting on a human to paste a URL. Search queries are built *exclusively* from bare technology-name strings already extracted by code (never goal text, design text, or your actual code) — a hard, code-enforced boundary, not a prompt instruction a model could ignore. Found references are always shown for a single batch confirmation before use. Tries several ranked results per term, not just the first — real testing showed a single top hit for a well-known library is often a landing page with nothing extractable, so one attempt isn't enough to call it "resolved."
 - **Per-Rule Verification Provenance**: a skill's `verified` flag is skill-level, but a passing run usually only exercises a handful of its actual rules. Kriya separately tracks each individual rule extracted from a skill gap or live lookup as unverified until it's specifically part of a passing run's context — `kriya skills show` flags them inline (`[unverified]`), and generation prompts show them in a distinct section so the model treats them with appropriate caution rather than as equally authoritative as long-standing, battle-tested rules. No `rules.txt` format change — pre-existing content is untouched.
-- **Per-Role Model Selection** (`agent_llms`, optional — every role defaults to your primary `llm`): Planner, Architect, Reviewer, RunVerifier, and SkillGapAgent can each be pointed at a different local model — e.g. a leaner model for planning/review and a fast small model for structured utility calls (skill-gap extraction, run-verification judging), keeping the primary/strongest model reserved for Developer's actual code generation. Each role also gets its own optional escalation chain, independent of Developer's existing quality-gate-driven retry chain — free-text roles (Planner/Architect/Reviewer) escalate only on a hard call failure, JSON-mode roles (RunVerifier, SkillGapAgent) also escalate on an unparseable response.
+- **Per-Role Model Selection** (`agent_llms`, optional — every role defaults to your primary `llm`): Planner, Architect, Reviewer, RunVerifier, and SkillGapAgent can each be pointed at a different local model, each with its own independent escalation chain. **Only configure genuinely different models per role if your machine can keep all of them loaded simultaneously** — measured directly, alternating between different models on a machine that can't made a real run ~3.8x *slower*, not faster, because every switch pays Ollama's full model-reload cost. Leave this unset, or point every role at the same model, to guarantee zero reload overhead.
 - **Autonomy Guardrails**:
   - Automatically flags modifications touching sensitive paths (e.g. `.env`, credentials, workflows).
   - Triggers interactive TTY-isolated `[y/n]` confirmation in the CLI if risk thresholds (line limits or sensitive paths) are hit, bypassing piped stream collisions.
@@ -186,25 +186,35 @@ search:
 
 # Optional - every role below defaults to the primary llm block above if unset.
 # Developer is not configurable here; it always uses llm/llm_chain above.
+#
+# IMPORTANT: only configure genuinely DIFFERENT models per role if your machine can
+# keep all of them loaded in memory simultaneously (verify with `ollama ps` - it
+# should show every configured model as resident, not evicting each other). Measured
+# directly: on a machine that can't, alternating between different models on every
+# agent call made a real run ~3.8x SLOWER than using one model throughout (each
+# switch pays Ollama's full model-reload cost, which dwarfs any inference-speed gain
+# from a smaller model). If you haven't verified this, leave agent_llms unset
+# entirely, or point every role at the SAME model as below - there is then never a
+# reload, by construction, since Ollama only swaps when the requested model name
+# actually changes.
 agent_llms:
   planner:
     llm:
-      model: "devstral-small-2:24b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
-    llm_chain: []                          # optional escalation chain, just for this role
   reviewer:
     llm:
-      model: "devstral-small-2:24b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
   run_verifier:
     llm:
-      model: "qwen2.5-coder:7b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
   skill_gap:
     llm:
-      model: "qwen2.5-coder:7b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
-  # architect: left unset -> uses the primary llm model, same as Developer
+  # architect: left unset -> uses the primary llm model too
 
 paths:
   plugins: "./plugins"

@@ -77,29 +77,33 @@ search:
   base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance
   top_k: 3                                 # Candidate results tried per term before giving up on it
 
-# Optional per-role model overrides - see Section 2.1 below. Every role defaults to
-# the primary llm block above if left unset; Developer is never configured here.
+# Optional per-role model overrides - see Section 2.1 below, and read its warning
+# about model-swap cost before configuring anything other than matching models here.
 agent_llms:
   planner:
     llm:
-      model: "devstral-small-2:24b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
   reviewer:
     llm:
-      model: "devstral-small-2:24b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
   run_verifier:
     llm:
-      model: "qwen2.5-coder:7b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
   skill_gap:
     llm:
-      model: "qwen2.5-coder:7b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
 ```
 
 ### 2.1 Per-Role Model Selection (`agent_llms`)
-Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model. A common setup: a leaner/reasoning-focused model for planning and review, a fast small model for the structured "utility" JSON calls (RunVerifier's judge/grade, SkillGapAgent's extraction/conflict-check), and your strongest coding model reserved for Developer - the role where accuracy matters most and speed matters least.
+Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model - each is independently configurable, with its own optional escalation chain.
+
+**Read this before configuring anything other than matching models.** Kriya never explicitly loads or unloads a model - it just sends a `model` name in each request, and your local inference server (e.g. Ollama) decides whether that model is already resident or needs to be swapped in. Measured directly: alternating between three different models across one `generate` run (a leaner model for planning/review, a small model for structured utility calls, the primary model for Developer) made a real run **~3.8x slower** than using one model throughout - every model switch paid a full reload cost that dwarfed any inference-speed gain from the smaller models. The reverse is also true for free: two *consecutive* calls that happen to use the **same** model (e.g. Architect then Developer both on your primary model) pay no reload cost at all, because the model was already loaded - this happens automatically, with no configuration needed beyond picking matching model names.
+
+**The safe default: leave `agent_llms` unset entirely, or point every role at the same model** (as in the example above) - either way, there is never a reload, by construction. Only configure genuinely different models per role if you've verified your machine can keep all of them resident in memory simultaneously (check with `ollama ps` after a run - every configured model should still show as loaded, not evicted by the next one). If you haven't verified that, per-role tiering will very likely make things slower, not faster.
 
 Every role in `agent_llms` is independently optional - `llm: null` (the default, i.e. just omitting the role entirely) means "use the primary `llm` block above," so a project that never touches `agent_llms` sees zero behavior change. **Developer is deliberately not configurable here** - it always uses the top-level `llm`/`llm_chain`, escalated by the existing quality-gate retry loop (a compile/test failure is a fundamentally different signal than a call-level failure, so it keeps its own separate mechanism).
 
@@ -108,10 +112,10 @@ Each role also gets its own optional `llm_chain` - a list of fallback models tri
 agent_llms:
   planner:
     llm:
-      model: "devstral-small-2:24b"
+      model: "qwen3-coder:30b"
       base_url: "http://localhost:11434/v1"
     llm_chain:
-      - model: "qwen3:8b"
+      - model: "qwen3:8b"          # only reached if the primary call itself fails
         base_url: "http://localhost:11434/v1"
 ```
 What counts as "failure" differs by role, deliberately conservative so a legitimately short-but-correct response is never wrongly retried:
