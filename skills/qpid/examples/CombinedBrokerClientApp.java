@@ -46,6 +46,10 @@ public class CombinedBrokerClientApp {
             Queue queue = session.createQueue("example-queue");
 
             MessageProducer producer = session.createProducer(queue);
+            // The example broker config uses a Memory (non-durable) store, which cannot
+            // accept the JMS default PERSISTENT delivery mode - see the official qpid-jms
+            // Sender.java example, which does the same for the same reason.
+            producer.setDeliveryMode(DeliveryMode.NON_PERSISTENT);
             producer.send(session.createTextMessage("hello"));
 
             MessageConsumer consumer = session.createConsumer(queue);

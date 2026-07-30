@@ -62,11 +62,11 @@ public class BrokerServer {
 }
 ```
 
-`src/main/resources/qpid-initial-config.json` must declare the broker name, an AMQP 1.0 port, and at least one virtual host node, e.g.:
+`src/main/resources/qpid-initial-config.json` must declare the broker name, an AMQP 1.0 port with virtual host aliases, and at least one virtual host node with a queue auto-creation policy, e.g.:
 ```json
 {
   "name": "EmbeddedBroker",
-  "modelVersion": "9.2",
+  "modelVersion": "8.0",
   "authenticationproviders": [
     { "name": "anonymous", "type": "Anonymous" }
   ],
@@ -75,7 +75,12 @@ public class BrokerServer {
       "name": "AMQP",
       "port": "5672",
       "authenticationProvider": "anonymous",
-      "protocols": ["AMQP_1_0"]
+      "protocols": ["AMQP_1_0"],
+      "virtualhostaliases": [
+        { "name": "nameAlias", "type": "nameAlias" },
+        { "name": "defaultAlias", "type": "defaultAlias" },
+        { "name": "hostnameAlias", "type": "hostnameAlias" }
+      ]
     }
   ],
   "virtualhostnodes": [
@@ -83,11 +88,15 @@ public class BrokerServer {
       "name": "default",
       "type": "Memory",
       "defaultVirtualHostNode": true,
-      "virtualHostInitialConfiguration": "{\"type\": \"Memory\"}"
+      "virtualHostInitialConfiguration": "{\"type\": \"Memory\", \"nodeAutoCreationPolicies\": [{\"pattern\":\".*\",\"createdOnPublish\":\"true\",\"createdOnConsume\":\"true\",\"nodeType\":\"queue\"}]}"
     }
   ]
 }
 ```
+Every field above is load-bearing, verified against real end-to-end runs (not just "compiles") - omitting any of them produces a broker that starts without error but silently can't actually carry a message:
+- `"modelVersion": "8.0"` - this is the broker's internal domain-model schema version, NOT the qpid-broker-core artifact/release version. Setting it to the broker-core version (e.g. "9.2" for broker-core 9.2.1) fails with `IllegalConfigurationException: No phase upgrader for version 9.2` from inside `SystemLauncher.startup()` - which does NOT throw, so this fails completely silently and the AMQP port never binds. "8.0" is what qpid-broker-core itself ships as its own default `initial-config.json` across its 8.x/9.x/10.x releases.
+- `"virtualhostaliases"` with a `defaultAlias` entry - without this, the client's AMQP `Open` frame hostname (which defaults to whatever host is in the connection URI, e.g. "localhost") can never resolve to any virtualhost, no matter what the virtualhostnode is named. Fails with `JmsResourceNotFoundException: Unknown hostname in connection open: '<host>' [condition = amqp:not-found]`.
+- `"nodeAutoCreationPolicies"` on the virtualhost - `session.createQueue(name)` in JMS is purely a client-side reference; it does not create anything on the broker. Without an auto-creation policy, sending to a queue that doesn't already exist fails with `InvalidDestinationException: Could not find destination for target '...'`.
 
 ## JMS Client (Spring XML wiring)
 `JmsConnectionFactory` has a no-arg constructor and a `setRemoteURI(String)` setter, so it wires directly as a Spring bean:
@@ -108,6 +117,11 @@ try (Connection connection = factory.createConnection()) {
     Queue queue = session.createQueue("example-queue");
 
     MessageProducer producer = session.createProducer(queue);
+    // The example broker config above uses a Memory (non-durable) store, which
+    // cannot accept the JMS default PERSISTENT delivery mode - fails with
+    // "Non-durable message store cannot accept durable message." Set it
+    // explicitly, matching the official qpid-jms Sender.java example.
+    producer.setDeliveryMode(DeliveryMode.NON_PERSISTENT);
     producer.send(session.createTextMessage("hello"));
 
     MessageConsumer consumer = session.createConsumer(queue);
