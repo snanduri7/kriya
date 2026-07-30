@@ -88,7 +88,16 @@ Before Planner/Architect run, the workflow checks the matched skill set for two 
 
 The callback's answer (a URL, a local file path, or pasted text) is fetched/read - URL fetches honor `autonomy.egress_policy` (refused under `local_only`) - and handed to `SkillGapAgent.extract_skill_update()` (`kriya/agents/agent.py`), which extracts candidate rules/examples and cross-checks them against the skill's *existing* rules, routing anything that contradicts an existing rule into a separate `conflicts` list instead of silently appending it (code-level mutual exclusivity is enforced after parsing - a real test against a non-reasoning local model showed prompt instructions alone weren't reliable here). Non-conflicting extractions are written straight into the skill's live files (not staged) - the user actively supplying material in response to Kriya's own question is treated as sufficient intent - and folded into the *current* run's context immediately. Conflicts are staged separately for human review, never silently overwriting the existing rule. Every skill-file write in this whole subsystem (`mark_verified`, extraction writes, conflict staging, `create_skill_skeleton`, `skills promote`) goes through `git_commit_if_tracked()` (`kriya/skills/skill.py`), a best-effort per-file commit that gives skill content an ordinary `git log`/`git revert`-based undo and audit trail.
 
-**Known gaps, not yet built**: skill-to-skill conflict/overlap detection (e.g. two skills both claiming the same broker port) has no definition of "overlapping" yet; there's no automatic staleness trigger (expiry, version-drift) - only the manual `unverify` escape hatch; a bad extraction is live in a skill's `rules.txt`, unverified, before it's ever proven right or wrong - current mitigation is that nothing *marked* verified until a real pass proves it, which limits but doesn't eliminate the exposure window.
+#### 2.3.3 Skill-to-Skill Conflict Detection & Resolution
+Two independently correct skills can still conflict when both are active for the same run (e.g. two broker skills each pinning a different value for what must be a single shared setting, like an AMQP port). This is checked only for skills actually co-activated in a real `generate` run - not as a standalone library-wide audit (not built; see gaps below) - since a conflict only matters once both skills are about to be used together.
+
+Once `active_skills` is finalized (§2.3.2 may have just bootstrapped one), the workflow compares every pair with `SkillGapAgent.check_skill_conflicts()` (`kriya/agents/agent.py`) - an LLM call that identifies genuine rule contradictions, not just topical overlap (two skills independently defining their own, different config keys is not a conflict). The same defensive pattern as §2.3.2's mutual-exclusivity fix applies: a returned conflict is only trusted if its `rule_a`/`rule_b` text is an exact, verbatim match against the real rule lists, so a hallucinated or paraphrased "conflict" can never silently exclude real rule content.
+
+A detected conflict is resolved against a persisted registry (`.skill_conflicts.json` at the skills-dir root, order-independent lookup, git-audit-trailed like every other skill-file write) keyed on the exact `(skill_a, rule_a, skill_b, rule_b)` tuple:
+*   **Already resolved** (this exact rule pair was decided before): applied silently, no prompt. The losing rule's exact line is stripped back out of the already-built `convention_prompt` string.
+*   **Not yet resolved**: a `skill_conflict_callback` asks once whether skill A's rule, skill B's rule, or neither (both are actually fine) should govern this run. The answer is persisted - including an explicit "both fine" - so the same pair is never asked again. A callback that returns nothing usable (declined, `-y` auto-skip, a callback error) proceeds without excluding either rule for that run only, and does **not** persist a non-decision - only an explicit human choice is remembered.
+
+**Known gaps, not yet built**: a standalone library-wide `kriya skills audit` (checking every skill pair regardless of co-activation) was explicitly scoped out in favor of the cheaper, more relevant per-run check; there's no automatic staleness trigger (expiry, version-drift) - only the manual `unverify` escape hatch; a bad extraction is live in a skill's `rules.txt`, unverified, before it's ever proven right or wrong - current mitigation is that nothing *marked* verified until a real pass proves it, which limits but doesn't eliminate the exposure window.
 
 ### 2.4 Structured Output & Verification Contracts
 To guarantee that the Developer Agent always returns valid code modifications:
@@ -125,9 +134,9 @@ To prevent context overflow, Kriya splits the LLM's context window:
 *   **RunVerifierAgent** (§2.7):
     *   *Input (judge)*: Goal + repository facts. *Output*: whether a run is implied, an inferred run command, and success criteria.
     *   *Input (grade)*: Goal + success criteria + captured stdout/stderr/exit code. *Output*: pass/fail verdict with cited evidence.
-*   **SkillGapAgent** (§2.3.2):
-    *   *Input*: A skill's existing rules + supplied reference material (URL/file/text).
-    *   *Output*: extracted candidate rules/examples, plus a separate `conflicts` list for anything contradicting an existing rule.
+*   **SkillGapAgent** (§2.3.2, §2.3.3):
+    *   *Input (extract_skill_update)*: A skill's existing rules + supplied reference material (URL/file/text). *Output*: extracted candidate rules/examples, plus a separate `conflicts` list for anything contradicting an existing rule.
+    *   *Input (check_skill_conflicts)*: two co-active skills' full rule sets. *Output*: rule pairs that genuinely contradict each other, with an explanation.
 
 ### 2.7 Runtime Verification Gate
 Compiling and passing unit tests doesn't prove a running system behaves correctly - the gate that motivated this was catching messaging-config mistakes (wrong broker settings, wrong delivery semantics) that only manifest at runtime, invisible to compile-only checking. Placed as a new tier right after targeted-test success, deliberately *before* the pre-apply human-approval gate and before worktree cleanup, so the generated files are guaranteed to still be present to run:
@@ -160,7 +169,7 @@ Kriya builds its AST and vector indices incrementally using **Content-Hash Keyin
 7.  **Human Approval**: Proposes the structured diff and root-cause hypothesis to the user.
 8.  **Apply / Rollback**: The user approves, rejects, or amends the changes.
 
-Before step 1, the workflow also checks matched skills for gaps (§2.3.2) - an unverified-but-relevant skill, or a goal-named technology with no matching skill at all - and can pause for a human-supplied reference before Planner ever runs.
+Before step 1, the workflow also checks matched skills for gaps (§2.3.2) - an unverified-but-relevant skill, or a goal-named technology with no matching skill at all - and can pause for a human-supplied reference before Planner ever runs. It then checks every pair of co-active skills for genuine rule conflicts (§2.3.3), which can pause once more to ask which rule should govern this run.
 
 ### 3.3 The Fix Pipeline (`kriya fix`)
 1.  **Reproduce & Localize**: Runs the build/execution log, inspects stack frames, and extracts relevant files via graph retrieval.

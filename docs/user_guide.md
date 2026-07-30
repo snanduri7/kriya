@@ -110,9 +110,10 @@ Launch the autonomous developer workflow:
 kriya -c kriya.yaml generate "Create a Spring-XML Java 17 app running Ignite 2.18.0"
 ```
 
-Two things can pause a `generate` run beyond the usual human-approval gate:
+Three things can pause a `generate` run beyond the usual human-approval gate:
 *   **Runtime Verification Gate**: once compile checks and targeted tests pass, Kriya judges whether the goal implies something runnable, and if so actually runs it and has an LLM grade the captured output against the goal - compiling and unit tests don't prove a Spring app actually starts or a message actually round-trips through a broker. If Kriya *inferred* (rather than you explicitly stating) a run command, it asks for confirmation once per run (skip with `-y`). Disable entirely with `autonomy.run_verification_enabled: false`.
 *   **Skill gap detection**: if the goal touches a skill Kriya doesn't have verified information for, or names a technology with no matching skill at all, Kriya pauses and asks you for a URL, a file path, or pasted text before proceeding - see [Section 6](#6-creating-custom-engineering-skills) and [Section 4](#4-engineering-skills) below. `-y` skips the prompt (the run proceeds on unverified skill content, same as before this feature existed).
+*   **Skill conflict detection**: if two or more skills matched for this goal turn out to have rules that genuinely contradict each other (e.g. two broker skills each pinning a different port for what must be a single shared setting), Kriya pauses and asks which one should govern this run - see [Section 4.4](#44-resolving-skill-conflicts) below. Your answer is remembered, so the same pair of skills is never asked about again. `-y` skips the prompt for that run without excluding either rule and without remembering anything.
 
 ### 3.5 Fix Bugs (`fix`)
 Locate and repair bugs in your project using reproduced test outputs or stack traces:
@@ -166,7 +167,20 @@ kriya -c kriya.yaml skills promote auto-myrepo qpid --all
 ```
 `promote` always targets Kriya's shared/global skill library (not whatever project-local `paths.skills` is active) and requires interactive `[y/n]` confirmation with **no `-y` bypass**, even under `generate -y` - it permanently changes shared knowledge every future project inherits, so it's the one Kriya gate that's always manual. It also marks the target skill `verified` (context: `promoted from '<source>'`).
 
-### 4.4 Viewing Past Runs (`traces`)
+### 4.4 Resolving Skill Conflicts
+Two skills can each be individually correct and still conflict once both are active for the same `generate` run - e.g. a `qpid` skill and an `activemq-artemis` skill both pinning a different value for what has to be a single shared AMQP port. Kriya only checks for this among skills actually matched together for a given goal (not as a standalone whole-library scan), and only flags a genuine contradiction - two skills independently defining their own, unrelated settings is not a conflict.
+
+When one is found, you'll be asked which rule should govern generation:
+```
+[Possible Skill Conflict] 'qpid' and 'activemq-artemis' are both active for this run:
+  [qpid] Broker must bind AMQP to port 5672.
+  [activemq-artemis] Configure the broker to listen on port 5673 for AMQP clients.
+  Why: Both skills configure the same embedded broker's AMQP port to a different value.
+Which rule should govern this generation? (a = prefer skill A's rule, b = prefer skill B's rule, both = not actually conflicting):
+```
+Your answer is remembered for that exact pair of rules - future runs that co-activate the same two skills with the same rule text won't ask again. Choosing "both" is itself a real decision that gets remembered too, not a way to defer the question. Under `-y`, the prompt is skipped and neither rule is excluded for that run - a skipped run doesn't get silently remembered, so you'll still be asked interactively next time.
+
+### 4.5 Viewing Past Runs (`traces`)
 Inspect traces of all past generation and repair runs:
 ```bash
 kriya -c kriya.yaml traces
