@@ -40,5 +40,11 @@
     "verified": false,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "When using a Memory store broker, JMS senders must explicitly call setDeliveryMode(DeliveryMode.NON_PERSISTENT) before sending messages, as the Memory store cannot accept the default PERSISTENT delivery mode.",
+    "verified": false,
+    "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
+    "added_at": "2026-07-31"
   }
 ]
