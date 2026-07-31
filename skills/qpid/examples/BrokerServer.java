@@ -11,7 +11,7 @@ public class BrokerServer {
         configMap.put("initialSystemPropertiesLocation", BrokerServer.class.getClassLoader().getResource("system.properties").toExternalForm());
         configMap.put("startupLoggedToSystemOut", true);
         systemLauncher.startup(configMap);
-        // ... your app logic here ...
+        // ... run application logic here ...
         systemLauncher.shutdown();
     }
 }
