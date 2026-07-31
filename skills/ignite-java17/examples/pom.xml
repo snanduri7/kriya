@@ -4,8 +4,17 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <groupId>com.example</groupId>
+    <artifactId>ignite-server</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
     <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <ignite.version>2.18.0</ignite.version>
+        <!-- Default exec:exec target - override per-run with -Dexec.mainClass=... -->
+        <exec.mainClass>com.example.App</exec.mainClass>
     </properties>
 
     <dependencies>
@@ -25,4 +34,79 @@
             <version>${ignite.version}</version>
         </dependency>
     </dependencies>
+
+    <!--
+      VERIFIED WORKING (real `mvn compile exec:exec` run against this exact shape, not
+      hypothetical). exec-maven-plugin 3.1.0's "java" goal (exec:java) has NO
+      "jvmArguments" parameter at all - confirmed by reading the actual mojo descriptor
+      from the jar. exec:java also runs inside Maven's own already-started JVM, so there
+      is no way for it to apply module-opening flags even in principle (JVM startup flags
+      can only be set at startup). Use exec:exec instead - it spawns a genuinely new `java`
+      process via <executable>java</executable>, with every add-opens flag as its own
+      <argument>, followed by <argument>-classpath</argument> and the bare, self-closing
+      <classpath/> element (exec-maven-plugin's own placeholder for the resolved project
+      classpath - not wrapped in <argument>), followed by the main class as the final
+      argument. Confirmed live: this exact shape starts a real Ignite node and completes a
+      cache put/get without the "ExceptionInInitializerError:
+      java.nio.DirectByteBuffer.address field is unavailable" failure the broken
+      exec:java+jvmArguments pattern produces.
+
+      The final argument MUST be ${exec.mainClass}, never a hardcoded literal class name -
+      also confirmed live: a literal argument value ignores `-Dexec.mainClass=...` on the
+      command line. This matters whenever a project has more than one runnable entrypoint
+      (e.g. this skill combined with another in the same project) - only ${exec.mainClass}
+      keeps every class independently runnable via its own -Dexec.mainClass override.
+
+      Run via: mvn -q compile exec:exec -Dexec.mainClass=com.example.App (NOT exec:java).
+    -->
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>17</source>
+                    <target>17</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <executable>java</executable>
+                    <arguments>
+                        <argument>--add-opens=java.base/jdk.internal.access=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/sun.nio.ch=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/sun.util.calendar=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED</argument>
+                        <argument>--add-opens=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED</argument>
+                        <argument>--add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.io=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.nio=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.net=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.util=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.util.concurrent=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.lang=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.lang.invoke=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.math=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.sql/java.sql=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.lang.reflect=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.time=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.text=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.management/sun.management=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.desktop/java.awt.font=ALL-UNNAMED</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${exec.mainClass}</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

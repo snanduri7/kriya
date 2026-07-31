@@ -25,6 +25,7 @@ from kriya.workflow.workflow import (
     _augment_error_with_live_lookup,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
+    _is_near_duplicate_rule,
     _resolve_run_command,
     extract_error_search_terms,
     extract_expected_files,
@@ -96,6 +97,77 @@ def test_find_missing_expected_files_excludes_readme_unless_requested():
     written = {"App.java"}
     assert find_missing_expected_files(expected, written, goal="Build an app") == []
     assert find_missing_expected_files(expected, written, goal="Build an app with documentation") == ["README.md"]
+
+def test_is_near_duplicate_rule_catches_real_observed_rephrasings():
+    """Regression test using the actual duplicate pairs observed live: qpid/rules.txt
+    accumulated ~11 near-duplicate rules across one session's repeated skill-gap
+    prompts against overlapping reference material - each pair exact-string-distinct
+    (so the pre-existing `r not in existing` check missed all of them) but restating
+    the identical fact in shorter, differently-worded form."""
+    original_model_version = (
+        "The initial configuration JSON's \"modelVersion\" field is the broker's internal "
+        "domain-model schema version, NOT the qpid-broker-core artifact/release version - "
+        "do not set it to match the broker-core version (e.g. \"9.2\" for broker-core 9.2.1). "
+        "Use \"8.0\", which is what qpid-broker-core itself ships as its own default "
+        "initial-config.json across its 8.x/9.x/10.x releases. A mismatched modelVersion "
+        "fails with \"IllegalConfigurationException: No phase upgrader for version X\" during "
+        "SystemLauncher.startup() - this does NOT throw from startup() itself, so the broker "
+        "silently never binds its AMQP port and any client connection attempt fails with a "
+        "plain connection-refused error that gives no hint the root cause was the config file."
+    )
+    dup_model_version = (
+        "Use modelVersion \"8.0\" in the initial configuration JSON, not the qpid-broker-core "
+        "artifact version (e.g., do not use \"9.2\" for broker-core 9.2.1)."
+    )
+    assert dup_model_version not in [original_model_version]  # exact-string check would miss it
+    assert _is_near_duplicate_rule(dup_model_version, [original_model_version])
+
+    original_alias = (
+        "The AMQP port in the initial configuration JSON must declare \"virtualhostaliases\" "
+        "including a {\"type\": \"defaultAlias\"} entry. Without it, the client's AMQP "
+        "Open-frame hostname (defaulting to whatever host is in the connection URI, e.g. "
+        "\"localhost\") can never resolve to any virtualhost regardless of what that "
+        "virtualhost is named - fails with \"JmsResourceNotFoundException: Unknown hostname "
+        "in connection open\" even though the broker itself started and the port opened "
+        "without error."
+    )
+    dup_alias = (
+        "The AMQP port definition in the initial configuration JSON MUST include a "
+        "virtualhostaliases entry with a defaultAlias, or client connections will fail to "
+        "resolve the virtualhost."
+    )
+    assert _is_near_duplicate_rule(dup_alias, [original_alias])
+
+    original_url = (
+        "\"initialConfigurationLocation\" must be a real java.net.URL string, obtained via "
+        "YourClass.class.getClassLoader().getResource(\"qpid-initial-config.json\")."
+        "toExternalForm() (resolves to a file:/jar: URL the JDK understands). Do NOT build it "
+        "as \"classpath:qpid-initial-config.json\" or new URL(\"classpath:...\") - "
+        "\"classpath:\" is a Spring-only convention that plain java.net.URL does not recognize."
+    )
+    dup_url = (
+        "The initial configuration JSON file must be loaded via a java.net.URL obtained using "
+        "YourClass.class.getClassLoader().getResource(\"qpid-initial-config.json\")."
+        "toExternalForm()."
+    )
+    assert _is_near_duplicate_rule(dup_url, [original_url])
+
+def test_is_near_duplicate_rule_does_not_flag_genuinely_different_rules():
+    rule_a = (
+        "\"Red Hat Qpid MRG\" and \"Red Hat AMQ\" (classic messaging line) both refer to "
+        "Apache Qpid - use genuine Apache Qpid Broker-J and qpid-jms, not ActiveMQ Artemis, "
+        "even though both speak AMQP."
+    )
+    rule_b = (
+        "Use org.apache.qpid:qpid-jms-client for the JMS client - version 1.16.0 for "
+        "javax.jms (JMS 2.0), or 2.10.0 for jakarta.jms (Jakarta Messaging 3.1). Match "
+        "whichever javax/jakarta convention the rest of the Spring project uses; do not mix "
+        "the two."
+    )
+    assert not _is_near_duplicate_rule(rule_b, [rule_a])
+
+def test_is_near_duplicate_rule_ignores_short_rules_below_min_words():
+    assert not _is_near_duplicate_rule("Use version 9.2.1.", ["Use version 9.2.1 always."])
 
 def test_normalize_written_filepath_passes_through_relative_path():
     assert normalize_written_filepath("src/app.py", "/workspace") == "src/app.py"
@@ -2011,3 +2083,71 @@ async def test_workflow_missing_file_recovery_does_not_escalate_or_consume_fulls
     assert recovery_model_override is None
     assert "MISSING-FILE recovery attempt" in recovery_prompt
     assert "helper.py" in recovery_prompt
+
+
+def test_write_skill_extraction_never_overwrites_existing_example(tmp_path):
+    """Regression test for a real bug caught live: a skill-gap/live-lookup extraction
+    writing a new 'examples' entry whose basename matches an already-existing example
+    file used to silently overwrite it - destroying previously-curated content (a real
+    exec-maven-plugin pom.xml example was clobbered by a bare-dependencies-only
+    version during live testing). Existing example files must never be overwritten by
+    extraction - only genuinely new filenames get written."""
+    from kriya.skills.skill import Skill
+    from kriya.workflow.workflow import _write_skill_extraction
+
+    _init_git_repo(tmp_path)
+    skill_dir = tmp_path / "myskill"
+    examples_dir = skill_dir / "examples"
+    examples_dir.mkdir(parents=True)
+    (examples_dir / "pom.xml").write_text("ORIGINAL CURATED CONTENT")
+
+    skill = Skill(name="myskill", description="test", source_path=str(skill_dir))
+
+    _write_skill_extraction(
+        skill,
+        {"examples": {"pom.xml": "OVERWRITTEN BY EXTRACTION", "new_file.txt": "brand new content"}},
+        source="test",
+    )
+
+    assert (examples_dir / "pom.xml").read_text() == "ORIGINAL CURATED CONTENT"
+    assert (examples_dir / "new_file.txt").read_text() == "brand new content"
+
+
+def test_create_git_worktree_carries_over_uncommitted_changes(tmp_path):
+    """Regression test for a real bug caught live: create_git_worktree only ever
+    reflected git HEAD, so any uncommitted work in the real workspace (the normal
+    state of an in-progress project) was invisible inside the sandbox - a goal
+    building additively on a previous uncommitted change failed every retry with
+    confusing "package does not exist" errors, since the file it was told to
+    preserve/extend simply didn't exist in the sandbox at all."""
+    from kriya.workflow.workflow import create_git_worktree
+
+    _init_git_repo(tmp_path)
+
+    # Modify a tracked file without committing.
+    (tmp_path / "README.md").write_text("modified but uncommitted\n")
+    # Add a brand-new untracked file.
+    (tmp_path / "pom.xml").write_text("<project>uncommitted new file</project>\n")
+
+    worktree_path = create_git_worktree(str(tmp_path))
+
+    readme = open(os.path.join(worktree_path, "README.md")).read()
+    assert readme == "modified but uncommitted\n"
+    pom = open(os.path.join(worktree_path, "pom.xml")).read()
+    assert pom == "<project>uncommitted new file</project>\n"
+
+
+def test_create_git_worktree_removes_files_deleted_in_working_tree(tmp_path):
+    """A file deleted (uncommitted) in the real workspace must not linger as a stale
+    HEAD-only copy in the worktree sandbox."""
+    from kriya.workflow.workflow import create_git_worktree
+
+    _init_git_repo(tmp_path)
+    (tmp_path / "extra.txt").write_text("will be committed then deleted\n")
+    subprocess.run(["git", "add", "extra.txt"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add extra.txt"], cwd=tmp_path, check=True)
+    os.remove(tmp_path / "extra.txt")
+
+    worktree_path = create_git_worktree(str(tmp_path))
+
+    assert not os.path.exists(os.path.join(worktree_path, "extra.txt"))

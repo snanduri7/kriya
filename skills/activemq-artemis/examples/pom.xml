@@ -13,6 +13,8 @@
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <artemis.version>2.31.2</artemis.version>
+        <!-- Default exec:exec target - override per-run with -Dexec.mainClass=... -->
+        <exec.mainClass>com.example.BrokerServer</exec.mainClass>
     </properties>
 
     <dependencies>
@@ -34,17 +36,27 @@
     </dependencies>
 
     <!--
-      VERIFIED WORKING exec-maven-plugin SHAPE for the exec:java goal (structure confirmed
-      via a real `mvn compile exec:java` run against this exact <mainClass>/<jvmArguments>
-      pattern with a different skill's dependencies - the plugin config shape itself is
-      goal-specific, not library-specific, so it applies here identically): <mainClass> plus
-      <jvmArguments> as a single space-separated string. Do NOT add an <arguments> element -
-      that belongs to the different exec:exec goal (spawns a separate process, needs an
-      explicit -classpath and main class as arguments) and fails with "Unable to parse
-      configuration of mojo ...:java for parameter arguments" if mixed into exec:java.
-      The --add-opens flags below are the general Java 17 encapsulation set needed by most
+      VERIFIED WORKING exec-maven-plugin SHAPE (structure confirmed via a real
+      `mvn compile exec:exec` run against this exact pattern with a different skill's
+      dependencies - the plugin config shape itself is goal-specific, not
+      library-specific, so it applies here identically). exec-maven-plugin 3.1.0's "java"
+      goal (exec:java) has NO "jvmArguments" parameter at all - confirmed by reading the
+      actual mojo descriptor from the jar - and runs inside Maven's own already-started
+      JVM, so it cannot apply module-opening flags even in principle (JVM startup flags can
+      only be set at startup). Use exec:exec instead: it spawns a genuinely new `java`
+      process via <executable>java</executable>, with every add-opens flag as its own
+      <argument>, followed by <argument>-classpath</argument> and the bare, self-closing
+      <classpath/> element (exec-maven-plugin's own placeholder for the resolved project
+      classpath - not wrapped in <argument>), followed by the main class as the final
+      argument. Run via `mvn -q compile exec:exec -Dexec.mainClass=...`, not exec:java.
+      The add-opens flags below are the general Java 17 encapsulation set needed by most
       reflection-heavy embedded server libraries - trim or extend based on the actual
       "InaccessibleObjectException"/reflection errors a real run surfaces, if any.
+
+      The final argument MUST be ${exec.mainClass}, never a hardcoded literal class name -
+      also confirmed live: a literal argument value ignores `-Dexec.mainClass=...` on the
+      command line. Only ${exec.mainClass} keeps every class in a multi-entrypoint project
+      independently runnable via its own -Dexec.mainClass override.
     -->
     <build>
         <plugins>
@@ -62,8 +74,18 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.1.0</version>
                 <configuration>
-                    <mainClass>com.example.BrokerServer</mainClass>
-                    <jvmArguments>--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED</jvmArguments>
+                    <executable>java</executable>
+                    <arguments>
+                        <argument>--add-opens=java.base/java.lang=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.util=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.io=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.net=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.util.concurrent=ALL-UNNAMED</argument>
+                        <argument>--add-opens=java.base/java.lang.reflect=ALL-UNNAMED</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${exec.mainClass}</argument>
+                    </arguments>
                 </configuration>
             </plugin>
         </plugins>

@@ -32,6 +32,60 @@ from kriya.workflow.checkpoint import (
 
 logger = logging.getLogger(__name__)
 
+def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) -> None:
+    """After create_git_worktree resets the sandbox to a clean git HEAD checkout, copy
+    over any uncommitted changes (modified tracked files, new untracked files) from the
+    real workspace so the Developer's sandbox reflects what's actually on disk, not just
+    git history. Without this, a project with any uncommitted work - the normal state of
+    an in-progress feature branch - looks to the sandbox exactly like a completely fresh
+    checkout of HEAD: every uncommitted file the goal expects to already exist (and any
+    goal asking to "preserve"/"extend" existing work) silently vanishes from compilation,
+    producing confusing "package does not exist" failures that have nothing to do with
+    the actual generated code. Confirmed live: an additive goal building on a previous
+    run's uncommitted output failed every retry attempt this way, with pom.xml (never
+    touched by the Developer, since the goal said to leave it as-is) simply absent from
+    the sandbox because it was never git-committed.
+
+    Excludes .kriya/ (checkpoints, this very worktree) via the same pathspec already used
+    for workspace-fingerprint dirty checks, and deleted-in-working-tree files are removed
+    from the worktree rather than left as a stale HEAD-only copy."""
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", ".", ":!.kriya"],
+            cwd=repo_path, capture_output=True, text=True,
+        )
+        if status.returncode != 0 or not status.stdout.strip():
+            return
+        for line in status.stdout.splitlines():
+            if len(line) < 4:
+                continue
+            code, rest = line[:2], line[3:]
+            # Renames: "R  old -> new" - treat as delete-old + copy-new.
+            if code.startswith("R") and " -> " in rest:
+                old_rel, rest = rest.split(" -> ", 1)
+                old_abs = os.path.join(worktree_path, old_rel.strip().strip('"'))
+                if os.path.exists(old_abs):
+                    os.remove(old_abs)
+            rel = rest.strip().strip('"')
+            if not rel or rel.startswith(".kriya"):
+                continue
+            src = os.path.join(repo_path, rel)
+            dst = os.path.join(worktree_path, rel)
+            if code.strip() == "D" or not os.path.exists(src):
+                if os.path.exists(dst):
+                    try:
+                        os.remove(dst)
+                    except IsADirectoryError:
+                        shutil.rmtree(dst, ignore_errors=True)
+                continue
+            if os.path.isdir(src):
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+    except Exception as e:
+        logger.warning(f"Failed to sync uncommitted changes into worktree sandbox (non-fatal, sandbox may be missing uncommitted work): {e}")
+
+
 def create_git_worktree(repo_path: str) -> str:
     # 1. Quick pre-check: Is this a git repository?
     try:
@@ -74,7 +128,12 @@ def create_git_worktree(repo_path: str) -> str:
             # Reset but preserve target/ and other build directories
             subprocess.run(["git", "checkout", "-f", "HEAD"], cwd=worktree_path, check=True, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, check=True, capture_output=True)
-        
+
+    # A worktree only ever reflects git HEAD - it knows nothing about uncommitted
+    # changes in the real workspace, which is the normal state of an in-progress
+    # project. Copy those over now so the sandbox matches what's actually on disk.
+    _sync_uncommitted_changes_into_worktree(repo_path, worktree_path)
+
     return worktree_path
 
 def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
@@ -443,6 +502,42 @@ def find_missing_expected_files(expected_files: set, written_files: set, goal: s
         missing = {f for f in missing if not _is_test_or_doc_file(f)}
     return sorted(missing)
 
+_RULE_DEDUP_STOPWORDS = frozenset({
+    "the", "a", "an", "is", "are", "was", "were", "must", "to", "of", "in", "on",
+    "for", "and", "or", "not", "be", "this", "that", "with", "as", "when", "if",
+    "do", "does", "it", "its", "your", "you", "will", "can", "e", "g", "see", "at",
+    "by", "from", "into", "than", "any", "no", "so", "such", "which", "even",
+    "though", "either", "both", "same", "before", "after", "then", "here", "there",
+})
+
+def _rule_content_words(text: str) -> set:
+    words = re.findall(r"[a-z0-9][a-z0-9._:/-]*", text.lower())
+    return {w for w in words if w not in _RULE_DEDUP_STOPWORDS and len(w) > 1}
+
+def _is_near_duplicate_rule(candidate: str, existing_rules: Iterable[str], min_words: int = 4, threshold: float = 0.5) -> bool:
+    """Best-effort, no-LLM check for whether `candidate` just restates an existing
+    rule in different words - exact-string dedup (see _write_skill_extraction) misses
+    this, since independent SkillGapAgent extraction calls against overlapping
+    reference material phrase the same underlying fact differently each time
+    (confirmed live: qpid/rules.txt accumulated ~11 such near-duplicates across one
+    session's repeated skill-gap prompts, all exact-string-distinct). Uses a content-
+    word overlap coefficient (intersection / smaller set's size, stopwords stripped)
+    rather than Jaccard similarity, since Jaccard penalizes a short rule being fully
+    subsumed by a longer, more detailed one - exactly the real pattern observed
+    (a terse rephrasing vs. the original's fuller explanation)."""
+    candidate_words = _rule_content_words(candidate)
+    if len(candidate_words) < min_words:
+        return False
+    for existing in existing_rules:
+        existing_words = _rule_content_words(existing)
+        smaller = min(len(candidate_words), len(existing_words))
+        if smaller < min_words:
+            continue
+        overlap = len(candidate_words & existing_words) / smaller
+        if overlap >= threshold:
+            return True
+    return False
+
 def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str = "unknown") -> None:
     """Writes newly extracted rules/examples straight into a skill's own files - per
     the design decision that user-supplied-in-response-to-a-direct-question content is
@@ -462,7 +557,16 @@ def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str 
     new_rules = extraction.get("rules") or []
     if new_rules:
         existing = set(skill.rules)
-        to_add = [r for r in new_rules if r not in existing]
+        to_add = []
+        effective_existing = list(skill.rules)
+        for r in new_rules:
+            if r in existing:
+                continue
+            if _is_near_duplicate_rule(r, effective_existing):
+                logger.info(f"Skipping near-duplicate rule for skill '{skill.name}' (already covered by an existing rule): {r[:100]}")
+                continue
+            to_add.append(r)
+            effective_existing.append(r)
         if to_add:
             rules_file = os.path.join(skill.source_path, "rules.txt")
             with open(rules_file, "a", encoding="utf-8") as rf:
@@ -481,6 +585,17 @@ def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str 
             if not safe_basename:
                 continue
             example_path = os.path.join(examples_dir, safe_basename)
+            # An existing example file represents previously-curated/verified content
+            # (often hand-written or fixed after a real live failure) - a fresh,
+            # unreviewed extraction must never silently clobber it. Confirmed live:
+            # this exact path overwrote a verified exec-maven-plugin/compiler-plugin
+            # pom.xml example with a bare-dependencies-only version extracted from
+            # generic reference material, discarding real prior work. Same protective
+            # philosophy as the rules.txt dedup above - existing content wins, new
+            # content is additive only.
+            if os.path.exists(example_path):
+                logger.info(f"Skipping example '{safe_basename}' for skill '{skill.name}' - a file already exists at that path and existing examples are never overwritten by extraction.")
+                continue
             with open(example_path, "w", encoding="utf-8") as ef:
                 ef.write(content)
             git_commit_if_tracked(example_path, f"Kriya: add example '{safe_basename}' to skill '{skill.name}' from supplied reference material")

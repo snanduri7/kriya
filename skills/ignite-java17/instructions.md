@@ -45,23 +45,38 @@ Because of package encapsulation starting in JDK 16+, Apache Ignite requires ope
 --add-opens=java.management/sun.management=ALL-UNNAMED
 --add-opens=java.desktop/java.awt.font=ALL-UNNAMED
 
-### 2a. CRITICAL - the ONLY correct way to wire these into exec-maven-plugin's "java" goal
-Put ALL of the flags above into a SINGLE `<jvmArguments>` element, as one space-separated
-string. Do NOT add an `<arguments>` element to the plugin configuration at all - the
-`exec:java` goal (which is what `mvn exec:java` invokes) runs in Maven's own JVM process
-using the project's already-resolved classpath automatically; it does not need or accept
-an explicit `-classpath` argument, and `<arguments>` in this goal is only for passing
-program arguments to your main method (rarely needed here), never JVM flags.
+### 2a. CRITICAL - the ONLY correct way to wire these into exec-maven-plugin: use `exec:exec`, NOT `exec:java`
+**`<jvmArguments>` is NOT a real configuration parameter of exec-maven-plugin 3.1.0's `java`
+goal at all** - confirmed by extracting and reading the actual mojo descriptor
+(`META-INF/maven/plugin.xml`) from the real jar. Maven silently ignores unknown
+`<configuration>` elements (a warning, not a hard error), so a pom using
+`<mainClass>+<jvmArguments>` can *look* fine and even run successfully for an app that
+happens not to need any of those flags - but the flags themselves are NEVER actually
+applied. This is a real, previously-undetected bug repeated across this skill's own
+guidance for a full session: it only surfaced once tested against Apache Ignite
+specifically, which genuinely needs `--add-opens=java.base/java.nio=ALL-UNNAMED` (among
+others) and fails with `ExceptionInInitializerError:
+java.nio.DirectByteBuffer.address field is unavailable ... module java.base does not
+"opens java.nio" to unnamed module` when the flags silently never apply.
 
-This is a real, repeatedly observed failure mode, not a hypothetical one - do NOT write
-`<arguments><argument>-classpath</argument><classpath/><argument>com.example.App</argument></arguments>`.
-That pattern belongs to the DIFFERENT `exec:exec` goal (which spawns a separate `java`
-process and therefore does need an explicit classpath and main class as arguments) - mixing
-it into `exec:java` fails with "Unable to parse configuration of mojo
-org.codehaus.mojo:exec-maven-plugin:...:java for parameter arguments: Cannot store value
-into array". Unless the goal explicitly asks for `exec:exec`, always use `exec:java` with
-ONLY `<mainClass>` and `<jvmArguments>` as shown below - see examples/pom.xml in this
-skill for a complete, correct, verified-working reference.
+The deeper reason: `exec:java` runs your main() **inside Maven's own already-started JVM
+process** - by the time your code runs, that JVM's module system is already locked in, so
+there is no way for ANY exec-maven-plugin parameter to retroactively add `--add-opens`
+flags to it. JVM startup flags can only be set when a JVM is *started*, which `exec:java`
+never does.
+
+The fix: use the **`exec:exec`** goal instead, which spawns a genuinely new `java` process
+you have full command-line control over - `<executable>java</executable>` with an
+`<arguments>` list containing every `--add-opens` flag as its own `<argument>`, followed
+by `<argument>-classpath</argument><classpath/>` (the bare, self-closing `<classpath/>`
+element - not wrapped in `<argument>` - is exec-maven-plugin's own recognized placeholder
+for the resolved project classpath), followed by the main class name as the final
+argument. Use `${exec.mainClass}` (a property, with a sensible default) for that final
+argument rather than a hardcoded literal class name, so it stays overridable via
+`-Dexec.mainClass=...` on the command line - see examples/pom.xml in this skill for a
+complete, verified-working reference (confirmed live: with the correct project's
+dependencies, this exact shape starts a real Ignite node, gets/puts/retrieves a cache
+value, and prints the result correctly).
 
 ```xml
 <plugin>
@@ -69,12 +84,19 @@ skill for a complete, correct, verified-working reference.
     <artifactId>exec-maven-plugin</artifactId>
     <version>3.1.0</version>
     <configuration>
-        <mainClass>com.example.App</mainClass>
-        <jvmArguments>--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED</jvmArguments>
+        <executable>java</executable>
+        <arguments>
+            <argument>--add-opens=java.base/java.lang=ALL-UNNAMED</argument>
+            <argument>--add-opens=java.base/java.util=ALL-UNNAMED</argument>
+            <argument>--add-opens=java.base/java.io=ALL-UNNAMED</argument>
+            <argument>-classpath</argument>
+            <classpath/>
+            <argument>${exec.mainClass}</argument>
+        </arguments>
     </configuration>
 </plugin>
 ```
-(the real, complete flag list from above goes in `<jvmArguments>`, abbreviated here for readability)
+(the real, complete flag list from section 2 above goes as individual `<argument>` elements, abbreviated here for readability; run via `mvn -q compile exec:exec -Dexec.mainClass=com.example.App`, not `exec:java`)
 
 ##3. Spring XML Bean Configuration Example
 When configuring the Ignite instance in Spring XML, use:

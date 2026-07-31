@@ -293,6 +293,9 @@ If a failure doesn't clearly point at one of your files (a bare exit code, a bui
 ### 4.8 Completeness Prevention & Missing-File Recovery
 No configuration needed - this is always on. Before the Developer generates anything, Kriya scans the Architect's design for the files it calls for and hands the Developer an explicit "Required files" checklist as part of the task description - not just a check applied after the fact. If a required file is still missing once generation finishes, the next retry asks specifically for that missing file (with the rest of your codebase shown as reference), instead of either silently accepting an incomplete result or regenerating everything from scratch. This shares Targeted Single-File Retry's budget (3 attempts) and never escalates models, for the same reasons.
 
+### 4.9 Working on an Uncommitted/In-Progress Project
+No configuration needed. The Developer & Quality Gates sandbox (`.kriya/worktree`) is synced with whatever is actually on disk in your workspace before every run - including uncommitted changes and new, not-yet-`git add`ed files - not just your last commit. You don't need to commit in-progress work before running `kriya generate`; a goal that builds on or preserves existing (even uncommitted) code sees it correctly either way.
+
 ---
 
 ## 5. Local Model Performance Optimization (Apple Silicon)
