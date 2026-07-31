@@ -34,5 +34,11 @@
     "verified": false,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "Any virtualhost in the initial configuration that should accept publishes to not-yet-existing queues MUST have a nodeAutoCreationPolicies entry with pattern \".*\", createdOnPublish/createdOnConsume \"true\", and nodeType \"queue\".",
+    "verified": false,
+    "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
+    "added_at": "2026-07-31"
   }
 ]
