@@ -274,6 +274,62 @@ def test_strip_markdown_fences_picks_largest_of_multiple_fences():
     )
     assert DeveloperAgent._strip_markdown_fences(text) == "def add(a, b):\n    return a + b"
 
+def test_extract_json_value_direct_parse():
+    assert DeveloperAgent._extract_json_value('["a.txt", "b.txt"]') == ["a.txt", "b.txt"]
+
+def test_extract_json_value_recovers_prose_prefixed_array():
+    # Reproduces a real observed deepseek-r1 failure: response_format=json_object
+    # doesn't stop a reasoning model from explaining itself in prose before finally
+    # emitting the JSON - there's no markdown fence here at all, so
+    # _strip_markdown_fences alone can't recover it; only bracket-span recovery can.
+    text = (
+        "To fix the compile error, we need to modify the CacheAndMessagingClient.java "
+        "file to include the correct imports for JmsConnectionFactory.\n\n"
+        '["pom.xml", "src/main/java/CacheAndMessagingClient.java"]'
+    )
+    assert DeveloperAgent._extract_json_value(text) == [
+        "pom.xml", "src/main/java/CacheAndMessagingClient.java"
+    ]
+
+def test_extract_json_value_recovers_prose_prefixed_object():
+    text = 'Here is the result you asked for:\n\n{"filepath": "App.java", "content": "class App {}"}'
+    assert DeveloperAgent._extract_json_value(text) == {"filepath": "App.java", "content": "class App {}"}
+
+def test_extract_json_value_prefers_array_over_object_when_array_starts_first():
+    text = '["a.txt"] is the list, derived from {"note": "context"}'
+    assert DeveloperAgent._extract_json_value(text) == ["a.txt"]
+
+def test_extract_json_value_raises_on_pure_prose_with_no_json():
+    with pytest.raises(json.JSONDecodeError):
+        DeveloperAgent._extract_json_value("I think we should add an import statement here.")
+
+@pytest.mark.asyncio
+async def test_run_generation_recovers_prose_prefixed_file_list_without_fallback():
+    """The real-world case that used to force the expensive single-stage fallback:
+    a reasoning model's file-list response has prose before the JSON array. This
+    must now be recovered directly - the single-stage fallback (a much bigger,
+    slower call) should never be triggered."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    prose_prefixed_list = (
+        "We need to fix the missing import.\n\n"
+        '["src/main/java/App.java"]'
+    )
+    llm.complete = AsyncMock(side_effect=[
+        prose_prefixed_list,
+        "package com.example;\npublic class App {}",  # per-file content for App.java
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation("Task", "Design", "Existing code")
+
+    # Exactly two calls: the file-list call, then one per-file call for App.java -
+    # if the prose prefix had forced the single-stage fallback instead, there would
+    # be a third, much bigger call (a different system prompt/call shape).
+    assert llm.complete.call_count == 2
+    assert files == [{"filepath": "src/main/java/App.java", "content": "package com.example;\npublic class App {}"}]
+
 @pytest.mark.asyncio
 async def test_developer_agent_nested_json_parsing():
     cfg = AppConfig()

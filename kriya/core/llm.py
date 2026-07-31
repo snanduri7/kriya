@@ -104,59 +104,72 @@ class LLMClient:
         base_max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
         max_tokens = max(base_max_tokens, 12288) if is_reasoning else base_max_tokens
         extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
-        response_format = None if is_reasoning else ({"type": "json_object"} if json_mode else None)
-        
+        # Reasoning models are NOT excluded from response_format here - Ollama (at
+        # least) keeps a reasoning model's <think>-equivalent output in a separate
+        # "reasoning" field and json_object-constrains only the "content" field, so
+        # forcing valid JSON and letting the model reason are not mutually exclusive.
+        # Without this, a reasoning model has nothing forcing it to ever commit to
+        # JSON at all - it can (and, observed live, sometimes does) just respond with
+        # plain prose explaining its reasoning instead, which no amount of downstream
+        # JSON-extraction fallback can recover since there's no JSON substring in it.
+        response_format = {"type": "json_object"} if json_mode else None
+
         logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}, Reasoning: {is_reasoning}]")
         import time
 
         import click
-        
+
+        start_time = time.time()
+
+        try:
+            try:
+                content, prompt_tokens, completion_tokens = await self._request_once(
+                    client, model, system_prompt, user_prompt, temperature, max_tokens,
+                    extra_body, response_format, stream_callback
+                )
+            except Exception as e:
+                # Only reasoning models risk this combination being unsupported by some
+                # backend - a plain json_mode call already worked fine unconditionally
+                # before this change, so there's no need to retry that case.
+                if response_format is not None and is_reasoning:
+                    logger.warning(
+                        f"Completion request with response_format={response_format} failed for "
+                        f"reasoning model '{model}' ({e}) - retrying once without it (this backend/"
+                        "model combination may not support JSON mode together with reasoning)."
+                    )
+                    content, prompt_tokens, completion_tokens = await self._request_once(
+                        client, model, system_prompt, user_prompt, temperature, max_tokens,
+                        extra_body, None, stream_callback
+                    )
+                else:
+                    raise
+
+            if is_reasoning:
+                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+            elapsed_time = time.time() - start_time
+            if prompt_tokens == 0:
+                prompt_tokens = int((len(system_prompt) + len(user_prompt)) / 4)
+            if completion_tokens == 0:
+                completion_tokens = int(len(content) / 4)
+
+            click.secho(f"\n[Usage: {prompt_tokens} input tokens, {completion_tokens} output tokens | Time: {elapsed_time:.2f}s]", fg="blue", dim=True)
+            return content
+        except Exception as e:
+            logger.error(f"Local LLM call failed: {e}", exc_info=True)
+            raise e
+
+    async def _request_once(
+        self, client, model, system_prompt, user_prompt, temperature, max_tokens,
+        extra_body, response_format, stream_callback
+    ):
+        """Issues a single completion request (streaming or not) and returns
+        (content, prompt_tokens, completion_tokens). Split out from complete() so a
+        reasoning model's response_format can be retried once without it on failure."""
         prompt_tokens = 0
         completion_tokens = 0
-        start_time = time.time()
-        
-        try:
-            if stream_callback:
-                try:
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        stream=True,
-                        stream_options={"include_usage": True},
-                        extra_body=extra_body,
-                        response_format=response_format
-                    )
-                except Exception as e:
-                    logger.debug(f"Streaming request with stream_options failed, retrying without it (server may not support it): {e}")
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        stream=True,
-                        extra_body=extra_body,
-                        response_format=response_format
-                    )
-                
-                chunks = []
-                async for chunk in response:
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        prompt_tokens = chunk.usage.prompt_tokens
-                        completion_tokens = chunk.usage.completion_tokens
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        delta = chunk.choices[0].delta.content
-                        chunks.append(delta)
-                        stream_callback(delta)
-                content = "".join(chunks).strip()
-            else:
+        if stream_callback:
+            try:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=[
@@ -165,26 +178,51 @@ class LLMClient:
                     ],
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    stream=True,
+                    stream_options={"include_usage": True},
                     extra_body=extra_body,
                     response_format=response_format
                 )
-                if hasattr(response, "usage") and response.usage:
-                    prompt_tokens = response.usage.prompt_tokens
-                    completion_tokens = response.usage.completion_tokens
-                content = response.choices[0].message.content or ""
-                content = content.strip()
-                
-            if is_reasoning:
-                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-                
-            elapsed_time = time.time() - start_time
-            if prompt_tokens == 0:
-                prompt_tokens = int((len(system_prompt) + len(user_prompt)) / 4)
-            if completion_tokens == 0:
-                completion_tokens = int(len(content) / 4)
-                
-            click.secho(f"\n[Usage: {prompt_tokens} input tokens, {completion_tokens} output tokens | Time: {elapsed_time:.2f}s]", fg="blue", dim=True)
-            return content
-        except Exception as e:
-            logger.error(f"Local LLM call failed: {e}", exc_info=True)
-            raise e
+            except Exception as e:
+                logger.debug(f"Streaming request with stream_options failed, retrying without it (server may not support it): {e}")
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                    extra_body=extra_body,
+                    response_format=response_format
+                )
+
+            chunks = []
+            async for chunk in response:
+                if hasattr(chunk, "usage") and chunk.usage:
+                    prompt_tokens = chunk.usage.prompt_tokens
+                    completion_tokens = chunk.usage.completion_tokens
+                if chunk.choices and chunk.choices[0].delta.content:
+                    delta = chunk.choices[0].delta.content
+                    chunks.append(delta)
+                    stream_callback(delta)
+            content = "".join(chunks).strip()
+        else:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                extra_body=extra_body,
+                response_format=response_format
+            )
+            if hasattr(response, "usage") and response.usage:
+                prompt_tokens = response.usage.prompt_tokens
+                completion_tokens = response.usage.completion_tokens
+            content = response.choices[0].message.content or ""
+            content = content.strip()
+        return content, prompt_tokens, completion_tokens

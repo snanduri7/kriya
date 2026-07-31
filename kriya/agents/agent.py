@@ -187,6 +187,39 @@ class DeveloperAgent(BaseAgent):
         return cleaned
 
     @staticmethod
+    def _extract_json_value(text: str) -> Any:
+        """Recovers a JSON value from a response that's supposed to be JSON but might
+        have prose preamble/postamble around it - observed live: a reasoning model
+        sometimes explains its reasoning in plain text before finally emitting the
+        JSON, even under response_format=json_object (not every backend enforces that
+        as a hard token-level constraint). Tries, in order: direct parse, parse after
+        stripping markdown fences, and parsing the first '['..last ']' or first
+        '{'..last '}' span found in the text (array preferred when both are present
+        and the array starts first). Raises the direct-parse JSONDecodeError if
+        nothing works, so callers see the original diagnostic."""
+        cleaned = DeveloperAgent._strip_markdown_fences(text)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            start_a, end_a = cleaned.find("["), cleaned.rfind("]")
+            start_d, end_d = cleaned.find("{"), cleaned.rfind("}")
+
+            if start_a != -1 and end_a != -1 and (start_d == -1 or start_a < start_d):
+                try:
+                    return json.loads(cleaned[start_a:end_a + 1])
+                except Exception:
+                    pass
+
+            if start_d != -1 and end_d != -1:
+                try:
+                    return json.loads(cleaned[start_d:end_d + 1])
+                except Exception:
+                    pass
+
+            logger.warning(f"Could not recover a JSON value from response text: {text[:200]}...")
+            raise e
+
+    @staticmethod
     def _normalize_file_entries(parsed: Any) -> Optional[List[Dict[str, Any]]]:
         """Normalizes whatever shape the file-list completion parsed into - a list of
         path strings, a list of dicts with filepath/path (+ optional content/edits), or
@@ -321,7 +354,7 @@ class DeveloperAgent(BaseAgent):
                 api_key_override=api_key_override
             )
 
-            parsed = json.loads(self._strip_markdown_fences(response_str))
+            parsed = self._extract_json_value(response_str)
             file_entries = self._normalize_file_entries(parsed)
 
             if file_entries:
@@ -352,68 +385,22 @@ class DeveloperAgent(BaseAgent):
             api_key_override=api_key_override
         )
         
-        cleaned = response_str.strip()
-        if cleaned.startswith("```"):
-            lines = cleaned.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            cleaned = "\n".join(lines).strip()
-            
         try:
-            res = json.loads(cleaned)
-            if isinstance(res, dict):
-                for _key, val in res.items():
-                    if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
-                        for item in val:
-                            if "path" in item and "filepath" not in item:
-                                item["filepath"] = item["path"]
-                        return val
-                return [res]
-            if isinstance(res, list):
-                return [item for item in res if isinstance(item, dict)]
-            return res
+            res = self._extract_json_value(response_str)
         except json.JSONDecodeError as e:
-            logger.error(f"Developer Agent returned invalid JSON: {response_str}")
-            start_d = cleaned.find("{")
-            end_d = cleaned.rfind("}")
-            start_a = cleaned.find("[")
-            end_a = cleaned.rfind("]")
-            
-            if start_a != -1 and end_a != -1 and (start_d == -1 or start_a < start_d):
-                try:
-                    res = json.loads(cleaned[start_a:end_a+1])
-                    if isinstance(res, dict):
-                        for _key, val in res.items():
-                            if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
-                                for item in val:
-                                    if "path" in item and "filepath" not in item:
-                                        item["filepath"] = item["path"]
-                                return val
-                        return [res]
-                    if isinstance(res, list):
-                        return [item for item in res if isinstance(item, dict)]
-                    return res
-                except Exception:
-                    pass
-            
-            if start_d != -1 and end_d != -1:
-                try:
-                    res = json.loads(cleaned[start_d:end_d+1])
-                    if isinstance(res, dict):
-                        for _key, val in res.items():
-                            if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
-                                for item in val:
-                                    if "path" in item and "filepath" not in item:
-                                        item["filepath"] = item["path"]
-                                return val
-                        return [res]
-                    return [res]
-                except Exception:
-                    pass
-                    
             raise ValueError(f"Failed to parse Developer Agent response as JSON: {e}. Raw response: {response_str}") from e
+
+        if isinstance(res, dict):
+            for _key, val in res.items():
+                if isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) and ("filepath" in x or "path" in x) for x in val):
+                    for item in val:
+                        if "path" in item and "filepath" not in item:
+                            item["filepath"] = item["path"]
+                    return val
+            return [res]
+        if isinstance(res, list):
+            return [item for item in res if isinstance(item, dict)]
+        return res
 
 
 class RunVerifierAgent(BaseAgent):
