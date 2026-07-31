@@ -1,9 +1,11 @@
-name: ignite-java17
-description: Coding guidelines and configurations for Apache Ignite 2.18.0 on Java 17 using Maven.
 category: Database
+description: Coding guidelines and configurations for Apache Ignite 2.18.0 on Java
+  17 using Maven.
+name: ignite-java17
 tags:
-  - java
-  - maven
-  - ignite
-  - spring
-  - java-17
+- java
+- maven
+- ignite
+- spring
+- java-17
+verification_gap_acknowledged: true
