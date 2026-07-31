@@ -25,8 +25,11 @@ from kriya.workflow.workflow import (
     _augment_error_with_live_lookup,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
+    _filter_misattributed_extraction,
     _is_near_duplicate_rule,
+    _likely_misattributed_sibling,
     _resolve_run_command,
+    _scoped_skill_gap_description,
     extract_error_search_terms,
     extract_expected_files,
     extract_implicated_files,
@@ -2151,3 +2154,128 @@ def test_create_git_worktree_removes_files_deleted_in_working_tree(tmp_path):
     worktree_path = create_git_worktree(str(tmp_path))
 
     assert not os.path.exists(os.path.join(worktree_path, "extra.txt"))
+
+
+@pytest.mark.asyncio
+async def test_workflow_multi_skill_gap_prompt_does_not_misattribute_extraction(tmp_path):
+    """Regression test for a real bug caught live: when a single skill-gap prompt
+    covers MULTIPLE unverified skills at once, a single human-supplied reference
+    used to get extraction-attempted against EVERY co-flagged skill using the same
+    ambiguous multi-skill gap description - Ignite-specific reference material
+    supplied for a combined "qpid, ignite-java17" gap got Ignite content written
+    into qpid/rules.txt. This simulates the worst case directly: even if the
+    (mocked) extraction call misbehaves IDENTICALLY for both co-flagged skills (as
+    if the scoped-prompt fix had no effect at all), the deterministic code-level
+    guard (_filter_misattributed_extraction) must still keep the misattributed
+    content out of the wrong skill and only apply it to the one it's actually about."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    broker_dir = skills_dir / "acmebroker"
+    broker_dir.mkdir(parents=True)
+    (broker_dir / "skill.yaml").write_text("name: acmebroker\ndescription: Test\ntags: [acmebroker]\n")
+    (broker_dir / "rules.txt").write_text("")
+
+    cache_dir = skills_dir / "acmecache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "skill.yaml").write_text("name: acmecache\ndescription: Test\ntags: [acmecache]\n")
+    (cache_dir / "rules.txt").write_text("")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    cache_flavored_extraction = json.dumps({
+        "rules": ["Use acmecache.start() to begin caching; acmecache handles get/put operations."],
+        "examples": {}, "conflicts": []
+    })
+
+    llm.complete = AsyncMock(side_effect=[
+        cache_flavored_extraction,  # extraction call for the first co-flagged skill
+        cache_flavored_extraction,  # extraction call for the second co-flagged skill
+        "Step 1: Write code",  # Planner
+        "Design: Write app.py",  # Architect
+        json.dumps([{"filepath": "app.py", "content": "print('ok')\n"}]),  # Developer
+        "Review: Approved",  # Reviewer
+    ])
+
+    def skill_gap_cb(reason, names):
+        assert set(names) == {"acmebroker", "acmecache"}
+        return "Use acmecache.start() to begin caching; acmecache handles get/put operations."
+
+    we = WorkflowEngine(kernel, llm)
+    await we.run_generation_workflow(
+        goal="Build an app using acmebroker and acmecache",
+        workspace_path=str(tmp_path),
+        skill_gap_callback=skill_gap_cb,
+    )
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    broker_skill = se.get_skill("acmebroker")
+    cache_skill = se.get_skill("acmecache")
+
+    assert broker_skill.rules == []
+    assert "Use acmecache.start() to begin caching; acmecache handles get/put operations." in cache_skill.rules
+
+
+def _make_skill(name, tags):
+    from kriya.skills.skill import Skill
+    return Skill(name=name, description="test", tags=tags)
+
+def test_scoped_skill_gap_description_names_only_the_one_skill():
+    desc = _scoped_skill_gap_description("qpid")
+    assert "qpid" in desc
+    assert "ignite" not in desc.lower()
+
+def test_likely_misattributed_sibling_catches_real_observed_case():
+    """Uses the real qpid/ignite-java17 tag sets and the actual kind of Ignite
+    content that was misattributed into qpid/rules.txt live this session."""
+    qpid = _make_skill("qpid", ["qpid", "qpid-jms", "qpid-broker-j", "redhat-mrg", "mrg", "amqp-1.0"])
+    ignite = _make_skill("ignite-java17", ["ignite", "apache-ignite", "ignite-cache"])
+    misattributed_rule = (
+        "Use Apache Ignite 2.18.0 with Java 17 source/target and add the required "
+        "--add-opens JVM flags. Bootstrap Ignite from Spring XML using either "
+        "Ignition.start(\"ignite-config.xml\") or by declaring an "
+        "org.apache.ignite.IgniteSpringBean in the XML."
+    )
+    assert _likely_misattributed_sibling(misattributed_rule, qpid, [ignite]) == "ignite-java17"
+    # And the reverse direction: genuinely qpid content targeted at ignite-java17.
+    qpid_rule = (
+        "Embed the broker via org.apache.qpid.server.SystemLauncher: call "
+        "startup(Map<String,Object>) with a config map containing \"type\": \"Memory\"."
+    )
+    assert _likely_misattributed_sibling(qpid_rule, ignite, [qpid]) == "qpid"
+
+def test_likely_misattributed_sibling_accepts_genuinely_on_topic_content():
+    qpid = _make_skill("qpid", ["qpid", "qpid-jms", "qpid-broker-j", "redhat-mrg", "mrg", "amqp-1.0"])
+    ignite = _make_skill("ignite-java17", ["ignite", "apache-ignite", "ignite-cache"])
+    on_topic_qpid_rule = (
+        "Use org.apache.qpid:qpid-broker-core, org.apache.qpid:qpid-broker-plugins-amqp-1-0-protocol, "
+        "and org.apache.qpid:qpid-broker-plugins-memory-store (version 9.2.1) for an embedded Qpid Broker-J server."
+    )
+    assert _likely_misattributed_sibling(on_topic_qpid_rule, qpid, [ignite]) is None
+
+def test_likely_misattributed_sibling_no_siblings_never_flags():
+    qpid = _make_skill("qpid", ["qpid"])
+    assert _likely_misattributed_sibling("Use Apache Ignite for caching.", qpid, []) is None
+
+def test_filter_misattributed_extraction_drops_only_the_misattributed_entries():
+    qpid = _make_skill("qpid", ["qpid", "qpid-jms", "qpid-broker-j", "redhat-mrg", "mrg", "amqp-1.0"])
+    ignite = _make_skill("ignite-java17", ["ignite", "apache-ignite", "ignite-cache"])
+    extraction = {
+        "rules": [
+            "Use org.apache.qpid:qpid-broker-core for an embedded Qpid Broker-J server.",
+            "Bootstrap Ignite from Spring XML using Ignition.start(\"ignite-config.xml\").",
+        ],
+        "examples": {
+            "qpid-initial-config.json": "{\"name\": \"EmbeddedBroker\"}",
+            "ignite-config.xml": "<bean class=\"org.apache.ignite.IgniteSpringBean\"/>",
+        },
+        "conflicts": [],
+    }
+    filtered = _filter_misattributed_extraction(extraction, qpid, [ignite])
+    assert filtered["rules"] == ["Use org.apache.qpid:qpid-broker-core for an embedded Qpid Broker-J server."]
+    assert list(filtered["examples"].keys()) == ["qpid-initial-config.json"]

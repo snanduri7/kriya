@@ -538,6 +538,105 @@ def _is_near_duplicate_rule(candidate: str, existing_rules: Iterable[str], min_w
             return True
     return False
 
+def _scoped_skill_gap_description(skill_name: str) -> str:
+    """Per-skill extraction gap description, used instead of reusing the full
+    (possibly multi-skill) human-facing gap_reason text for every skill resolved
+    from one skill-gap prompt - the shared, ambiguous description was the real
+    cause of a confirmed live bug: when several skills are simultaneously
+    unverified for one goal, Kriya asks a SINGLE combined question ("unverified
+    skill(s) relevant to this goal: qpid, ignite-java17..."), but a human only
+    supplies ONE reference in response. Every co-flagged skill's extraction call
+    was reusing that same combined description, so a model extracting against
+    Ignite-only reference material while told the gap was "qpid, ignite-java17"
+    had no unambiguous signal that *this* call was about qpid specifically -
+    confirmed live: Ignite-specific rules got written into qpid/rules.txt this
+    way. Narrowing the description to name only the one skill this call is
+    actually for gives the model's own "return empty if irrelevant" instruction
+    (see SkillGapAgent.system_prompt) something unambiguous to act on."""
+    return (
+        f"Kriya doesn't have verified information for the skill '{skill_name}' (never had a "
+        "passing Runtime Verification Gate run, and no rule in it has been human-promoted). "
+        f"Extract ONLY rules/examples that are actually about '{skill_name}' from the reference "
+        "material below. If the material is about a different technology entirely (even if that "
+        "technology was also mentioned as part of a separate, unrelated gap in the same run), "
+        "return empty lists/objects for all fields rather than forcing something irrelevant."
+    )
+
+def _loose_identity_words(text: str) -> set:
+    """Tokenizer for _likely_misattributed_sibling only - splits on ANY non-
+    alphanumeric character (dots, colons, slashes, hyphens included), unlike
+    _rule_content_words which deliberately keeps those joined for whole-rule-
+    phrasing comparison. An identity term like "ignite" needs to be found
+    inside a Maven coordinate ("org.apache.ignite:ignite-core") or a package
+    import ("org.apache.ignite.Ignition") or a filename ("ignite-config.xml"),
+    none of which _rule_content_words' tokenizer would split apart."""
+    return {w for w in re.split(r"[^a-z0-9]+", text.lower()) if len(w) > 2 and w not in _RULE_DEDUP_STOPWORDS}
+
+# Words too generic to discriminate between two skills even when they show up
+# in a skill's own name/tags - e.g. "apache" is shared by "apache-ignite" and
+# any org.apache.* package (Qpid, Artemis, ...), so without this exclusion a
+# genuinely qpid-only rule mentioning "org.apache.qpid..." would spuriously
+# "hit" ignite-java17's identity via the word "apache" alone, masking a real
+# misattribution the other direction. Only applied to a skill's own identity
+# fingerprint, not to arbitrary rule/example text - a name or tag needs to be
+# distinctive to be useful as an identity signal.
+_IDENTITY_GENERIC_WORDS = frozenset({"apache", "org", "com", "software", "foundation", "project", "java"})
+
+def _skill_identity_words(skill: Any) -> set:
+    words = set(_loose_identity_words(skill.name))
+    for tag in skill.tags:
+        words.update(_loose_identity_words(tag))
+    return words - _IDENTITY_GENERIC_WORDS
+
+def _likely_misattributed_sibling(text: str, target: Any, siblings: Iterable[Any]) -> Optional[str]:
+    """Deterministic (no LLM call) code-level guard against the same multi-
+    skill-gap-prompt misattribution bug _scoped_skill_gap_description addresses
+    at the prompt level - a properly scoped prompt reduces the failure rate but
+    isn't a guarantee the model always complies, so this is a second, cheap
+    check in the same spirit as _is_near_duplicate_rule. Compares a candidate
+    rule/example's own identity words against the TARGET skill's identity (name
+    + tags) versus each SIBLING skill's (the other skills co-flagged in the
+    same combined gap prompt - the only other plausible source of this
+    content). Only flags when the target's OWN identity terms are completely
+    ABSENT from the text while a sibling's ARE present - a specific, concrete
+    signal, not a vague topical-similarity guess, so a rule that genuinely
+    mentions both skills (a legitimate comparison/contrast) is never wrongly
+    dropped. A false negative here (missing a real misattribution) is far
+    cheaper than a false positive (discarding genuinely on-topic content), so
+    the check is deliberately conservative in that direction."""
+    text_words = _loose_identity_words(text)
+    if not text_words or _skill_identity_words(target) & text_words:
+        return None
+    for sibling in siblings:
+        sibling_words = _skill_identity_words(sibling)
+        if sibling_words and (text_words & sibling_words):
+            return sibling.name
+    return None
+
+def _filter_misattributed_extraction(extraction: Dict[str, Any], target: Any, siblings: List[Any]) -> Dict[str, Any]:
+    """Applies _likely_misattributed_sibling to every candidate rule/example in
+    an extraction result, dropping (not redirecting - a wrong redirect could
+    actively corrupt a different skill, a wrong drop just loses one candidate
+    that can be re-supplied on a future run) anything that looks like it
+    belongs to a co-flagged sibling skill instead of the target."""
+    if not siblings:
+        return extraction
+    kept_rules = []
+    for r in extraction.get("rules") or []:
+        sibling = _likely_misattributed_sibling(r, target, siblings)
+        if sibling:
+            logger.warning(f"Dropping a rule extracted for skill '{target.name}' - identity-term match suggests it's actually about co-flagged sibling skill '{sibling}': {r[:100]}")
+            continue
+        kept_rules.append(r)
+    kept_examples = {}
+    for basename, content in (extraction.get("examples") or {}).items():
+        sibling = _likely_misattributed_sibling(f"{basename} {content}", target, siblings)
+        if sibling:
+            logger.warning(f"Dropping example '{basename}' extracted for skill '{target.name}' - identity-term match suggests it's actually about co-flagged sibling skill '{sibling}'.")
+            continue
+        kept_examples[basename] = content
+    return {"rules": kept_rules, "examples": kept_examples, "conflicts": extraction.get("conflicts") or []}
+
 def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str = "unknown") -> None:
     """Writes newly extracted rules/examples straight into a skill's own files - per
     the design decision that user-supplied-in-response-to-a-direct-question content is
@@ -1150,6 +1249,7 @@ class WorkflowEngine:
                         logger.warning(f"web_lookup_callback failed, discarding auto-found references: {ex}")
                         proceed = False
                 if proceed:
+                    all_lookup_targets = list(unverified_relevant)
                     for item in found:
                         term = item["term"]
                         target = next((s for s in unverified_relevant if s.name == term), None)
@@ -1158,10 +1258,14 @@ class WorkflowEngine:
                                 se.create_skill_skeleton(term)
                                 se.discover_and_load()
                                 target = se.get_skill(term)
+                                all_lookup_targets.append(target)
                             except Exception as ex:
                                 logger.warning(f"Failed to bootstrap new skill '{term}' from live lookup: {ex}")
                                 continue
-                        extraction = await _extract_first_usable(self.skill_gap_agent, target, gap_reason, item["candidates"])
+                        scoped_gap_reason = _scoped_skill_gap_description(term)
+                        extraction = await _extract_first_usable(self.skill_gap_agent, target, scoped_gap_reason, item["candidates"])
+                        lookup_siblings = [s for s in all_lookup_targets if s.name != target.name]
+                        extraction = _filter_misattributed_extraction(extraction, target, lookup_siblings)
                         if extraction["rules"] or extraction["examples"] or extraction["conflicts"]:
                             auto_resolutions.append((target, extraction, f"live_lookup:{item['url']}"))
                             logger.info(f"Live lookup found usable information for '{term}'.")
@@ -1223,7 +1327,10 @@ class WorkflowEngine:
                     except Exception as ex:
                         logger.warning(f"Failed to bootstrap new skill '{new_name}': {ex}")
                 for t in target_skills:
-                    extraction = await _extract_first_usable(self.skill_gap_agent, t, gap_reason, [{"text": reference_text}])
+                    scoped_gap_reason = _scoped_skill_gap_description(t.name)
+                    extraction = await _extract_first_usable(self.skill_gap_agent, t, scoped_gap_reason, [{"text": reference_text}])
+                    siblings = [s for s in target_skills if s.name != t.name]
+                    extraction = _filter_misattributed_extraction(extraction, t, siblings)
                     manual_resolutions.append((t, extraction, manual_source))
             else:
                 for s in remaining_unverified:
