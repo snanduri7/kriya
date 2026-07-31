@@ -22,5 +22,11 @@
     "verified": false,
     "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "Set the IGNITE_HOME environment variable to point to the installation folder and ensure there is no trailing / in the path when using binary distribution",
+    "verified": false,
+    "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
+    "added_at": "2026-07-31"
   }
 ]
