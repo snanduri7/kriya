@@ -1,32 +1,37 @@
 [
   {
     "text": "When running Ignite with Java 11 or later, pass the following JVM flags: --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-exports=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED --add-exports=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED --add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --illegal-access=permit --add-opens=java.base/jdk.internal.access=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-opens=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED --add-opens=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED --add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.math=ALL-UNNAMED --add-opens=java.sql/java.sql=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.time=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.management/sun.management=ALL-UNNAMED --add-opens=java.desktop/java.awt.font=ALL-UNNAMED",
-    "verified": false,
+    "verified": true,
     "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-08-01"
   },
   {
     "text": "Use Maven dependency <groupId>org.apache.ignite</groupId> <artifactId>ignite-core</artifactId> <version>2.18.0</version>",
-    "verified": false,
+    "verified": true,
     "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-08-01"
   },
   {
     "text": "Use Maven dependency <groupId>org.apache.ignite</groupId> <artifactId>ignite-spring</artifactId> <version>2.18.0</version>",
-    "verified": false,
+    "verified": true,
     "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-08-01"
   },
   {
     "text": "Set the JAVA_HOME environment variable to point to the Java installation directory when running Ignite with Java 11 or later",
-    "verified": false,
+    "verified": true,
     "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-08-01"
   },
   {
     "text": "Set the IGNITE_HOME environment variable to point to the installation folder and ensure there is no trailing / in the path when using binary distribution",
-    "verified": false,
+    "verified": true,
     "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-08-01"
   }
 ]
