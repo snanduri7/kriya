@@ -167,6 +167,13 @@ Four things can pause a `generate` run beyond the usual human-approval gate:
 *   **Skill conflict detection**: if two or more skills matched for this goal turn out to have rules that genuinely contradict each other (e.g. two broker skills each pinning a different port for what must be a single shared setting), Kriya pauses and asks which one should govern this run - see [Section 4.4](#44-resolving-skill-conflicts) below. Your answer is remembered, so the same pair of skills is never asked about again. `-y` skips the prompt for that run without excluding either rule and without remembering anything.
 *   **Live lookup batch confirmation**: if `autonomy.web_lookup_enabled` is on and Kriya auto-resolved one or more skill gaps via search, it shows you everything it found in one batch and asks for a single confirm/decline before using any of it - see [Section 4.6](#46-live-lookup) below.
 
+#### Resuming an interrupted run
+`generate` (and `fix`, below) checkpoint after each stage - Plan, Design, and Developer output that's already passed Quality Gates - to `.kriya/checkpoints/` in your workspace. If a run gets killed or crashes partway through, re-run the *exact same command* (same goal, same workspace, same config) with `--resume` to pick up the most recent checkpoint, or `--resume-id <id>` for a specific one (the `id` is printed if the run finishes without quality gates passing):
+```bash
+kriya -c kriya.yaml generate "Create a Spring-XML Java 17 app running Ignite 2.18.0" --resume
+```
+This is opt-in only - Kriya never guesses that you're resuming from goal text alone. It's also strict: if anything about the workspace (a new commit, uncommitted changes), the config, or the goal text has changed since the checkpoint was saved, Kriya refuses to resume and starts over instead, with a warning explaining why. A checkpoint is deleted the moment its run finishes normally (success or an explicit rejection at the approval gate) - it only ever survives a kill/crash. Requires the workspace to be a git repository.
+
 ### 3.5 Fix Bugs (`fix`)
 Locate and repair bugs in your project using reproduced test outputs or stack traces:
 ```bash
@@ -176,6 +183,7 @@ kriya -c kriya.yaml fix -e "SyntaxError: invalid syntax in App.java line 12"
 # Or pipe build output directly into the fix command
 mvn clean compile | kriya -c kriya.yaml fix
 ```
+`fix` supports the same `--resume`/`--resume-id` checkpoint resume as `generate` (above) - re-run with the same `-e`/piped error text plus `--resume` after a crash.
 
 ---
 

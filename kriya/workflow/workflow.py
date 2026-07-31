@@ -1,5 +1,6 @@
 import asyncio
 import difflib
+import hashlib
 import logging
 import os
 import re
@@ -19,6 +20,15 @@ from kriya.agents.agent import (
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.workflow.checkpoint import (
+    compute_config_fingerprint,
+    compute_workspace_fingerprint,
+    delete_checkpoint,
+    find_latest_checkpoint,
+    load_checkpoint,
+    new_run_id,
+    save_checkpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -616,10 +626,60 @@ class WorkflowEngine:
         knowledge_risk_confirmed: bool = False,
         skill_gap_callback: Optional[Callable[[str, List[str]], Any]] = None,
         skill_conflict_callback: Optional[Callable[[str, str, str, str, str], Any]] = None,
-        web_lookup_callback: Optional[Callable[[List[Dict[str, str]]], Any]] = None
+        web_lookup_callback: Optional[Callable[[List[Dict[str, str]]], Any]] = None,
+        resume: bool = False,
+        resume_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming)."""
-        
+        """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
+
+        resume=True resumes the most recently saved checkpoint for this workspace;
+        resume_id resumes a specific one. Checkpoints are stage-level (post-Plan,
+        post-Design, post-Developer-quality-gates) and only survive a crash/kill -
+        a normal completion always deletes its own checkpoint. Any drift in the
+        workspace git state, resolved config, or goal/error text since the
+        checkpoint was saved invalidates it (strict - falls back to a fresh run
+        with a warning, never a partial/best-effort resume).
+        """
+
+        # Resume resolution (opt-in only - no auto-detection from goal-text matching)
+        run_id = None
+        resume_state: Optional[Dict[str, Any]] = None
+        if resume or resume_id:
+            target_id = resume_id or find_latest_checkpoint(workspace_path)
+            if not target_id:
+                logger.warning("No saved checkpoint found for this workspace - starting a fresh run instead.")
+            else:
+                candidate = load_checkpoint(workspace_path, target_id)
+                if not candidate:
+                    logger.warning(f"Checkpoint '{target_id}' not found or unreadable - starting a fresh run instead.")
+                else:
+                    current_ws_fp = compute_workspace_fingerprint(workspace_path)
+                    current_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
+                    current_goal_fp = hashlib.sha256(f"{goal}\x00{error_context or ''}".encode("utf-8")).hexdigest()
+                    drift_reasons = []
+                    if current_ws_fp is None:
+                        # Not a git repo (or git unavailable) - there's no reliable way to
+                        # confirm the workspace hasn't changed since the checkpoint was
+                        # saved, so refuse rather than resume against an unverifiable state.
+                        drift_reasons.append("workspace is not a git repository, so drift can't be verified")
+                    elif candidate.get("workspace_fingerprint") != current_ws_fp:
+                        drift_reasons.append("workspace has changed (git HEAD/dirty-state differs)")
+                    if candidate.get("config_fingerprint") != current_cfg_fp:
+                        drift_reasons.append("config has changed")
+                    if candidate.get("goal_fingerprint") != current_goal_fp:
+                        drift_reasons.append("goal/error text differs")
+                    if drift_reasons:
+                        logger.warning(
+                            f"Refusing to resume checkpoint '{target_id}': {'; '.join(drift_reasons)}. "
+                            "Starting a fresh run instead."
+                        )
+                    else:
+                        run_id = target_id
+                        resume_state = candidate
+                        logger.info(f"Resuming checkpoint '{run_id}' at stage '{candidate.get('stage')}'.")
+        if run_id is None:
+            run_id = new_run_id()
+
         # 0. KnowledgeGuard Stage 0 Check
         from kriya.tools.knowledge import KnowledgeGuard
         knowledge_config = self.kernel.config.knowledge
@@ -635,6 +695,10 @@ class WorkflowEngine:
         )
 
         gap_report = guard.check_goal(goal, workspace_path)
+        # A resumed checkpoint proves this gate was already cleared earlier in the
+        # same run (goal is drift-checked identical), so it shouldn't re-block here.
+        if resume_state:
+            knowledge_risk_confirmed = True
         if gap_report.has_gaps and not knowledge_risk_confirmed:
             if step_callback:
                 step_callback("knowledge_gap", gap_report.format_report())
@@ -1057,32 +1121,57 @@ class WorkflowEngine:
         # Track trace statistics
         import time
         import uuid
-        run_id = str(uuid.uuid4())[:8]
+        trace_id = str(uuid.uuid4())[:8]
         start_time = time.time()
 
+        # Fingerprints for any checkpoint saved during this run - computed once,
+        # goal/workspace/config are all fixed for the remainder of the call.
+        checkpoint_ws_fp = compute_workspace_fingerprint(workspace_path)
+        checkpoint_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
+        checkpoint_goal_fp = hashlib.sha256(f"{goal}\x00{error_context or ''}".encode("utf-8")).hexdigest()
+
+        def _save_stage_checkpoint(stage: str, **extra: Any) -> None:
+            save_checkpoint(workspace_path, run_id, {
+                "stage": stage,
+                "workspace_fingerprint": checkpoint_ws_fp,
+                "config_fingerprint": checkpoint_cfg_fp,
+                "goal_fingerprint": checkpoint_goal_fp,
+                **extra,
+            })
+
         # 2. Plan
-        logger.info("Planner Agent drafting execution steps...")
-        plan_stream = (lambda token: stream_callback("Planning", token)) if stream_callback else None
         plan_prompt = f"Goal: {goal}\n\nWorkspace Context:\n{repo_context}"
         if error_context:
             plan_prompt = f"Fix the following compile/test error:\n{error_context}\n\n" + plan_prompt
         plan_prompt += convention_prompt
-        
-        plan = await self.planner.run(
-            plan_prompt, 
-            stream_callback=plan_stream
-        )
+
+        if resume_state and resume_state.get("plan"):
+            plan = resume_state["plan"]
+            logger.info(f"Resuming checkpoint '{run_id}': using saved Plan, skipping Planner Agent call.")
+        else:
+            logger.info("Planner Agent drafting execution steps...")
+            plan_stream = (lambda token: stream_callback("Planning", token)) if stream_callback else None
+            plan = await self.planner.run(
+                plan_prompt,
+                stream_callback=plan_stream
+            )
+            _save_stage_checkpoint("plan", plan=plan)
         if step_callback:
             step_callback("Plan", plan)
 
         # 3. Architect
-        logger.info("Architect Agent defining interface designs...")
-        architect_stream = (lambda token: stream_callback("Architect Design", token)) if stream_callback else None
         design_prompt = f"Plan:\n{plan}\n\nWorkspace Context:\n{repo_context}" + convention_prompt
-        design = await self.architect.run(
-            design_prompt, 
-            stream_callback=architect_stream
-        )
+        if resume_state and resume_state.get("design"):
+            design = resume_state["design"]
+            logger.info(f"Resuming checkpoint '{run_id}': using saved Design, skipping Architect Agent call.")
+        else:
+            logger.info("Architect Agent defining interface designs...")
+            architect_stream = (lambda token: stream_callback("Architect Design", token)) if stream_callback else None
+            design = await self.architect.run(
+                design_prompt,
+                stream_callback=architect_stream
+            )
+            _save_stage_checkpoint("design", plan=plan, design=design)
         if step_callback:
             step_callback("Design", design)
 
@@ -1288,46 +1377,73 @@ class WorkflowEngine:
 
         while retry_count < max_retries:
             try:
-                task_desc = f"Goal: {goal}\nPlan: {plan}"
-                if error_context:
-                    task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
+                # Needed unconditionally below (both the normal compile/test gate
+                # path and the always-run full regression check use it) - imported
+                # here rather than only inside the skippable gate block so a
+                # resumed "developer_success" checkpoint iteration (which skips
+                # that block entirely) still has it in scope.
+                from kriya.tools.validate import PolymorphicValidator
 
-                # Re-run context budget allocator dynamically for escalated model context window size
-                current_limit = int(self.kernel.config.llm.context_window * 0.75)
-                model_override = None
-                base_url_override = None
-                api_key_override = None
-                
-                if retry_count > 0 and chain:
-                    fallback_idx = min(retry_count - 1, len(chain) - 1)
-                    fallback = chain[fallback_idx]
-                    model_override = fallback.model
-                    base_url_override = fallback.base_url
-                    api_key_override = fallback.api_key
-                    current_limit = int(fallback.context_window * 0.75)
-                    logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} tokens)")
-                
-                current_graph_context = build_code_context(matched_files, related_files, workspace_path, current_limit)
-                active_code_context = skills_prompt
-                if current_graph_context:
-                    active_code_context += current_graph_context
-                if learned_rag_context:
-                    active_code_context += learned_rag_context
-
-                # Track model hops
-                model_hops.append(model_override or self.kernel.config.llm.model)
-
-                # Generate code files
-                dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
-                files = await self.developer.run_generation(
-                    task_description=task_desc,
-                    design_context=design,
-                    existing_code_context=active_code_context,
-                    stream_callback=dev_stream,
-                    model_override=model_override,
-                    base_url_override=base_url_override,
-                    api_key_override=api_key_override
+                # A "developer_success" checkpoint means Developer generation + all
+                # Quality Gates already passed once, before this process was
+                # interrupted - only usable on the very first iteration of a resumed
+                # run; any retry after that needs a real, fresh generation attempt.
+                resuming_developer_stage = bool(
+                    resume_state and resume_state.get("stage") == "developer_success" and retry_count == 0
                 )
+
+                if resuming_developer_stage:
+                    logger.info(f"Resuming checkpoint '{run_id}': using saved Developer output, skipping generation + Quality Gates.")
+                    files = [
+                        {"filepath": fp, "content": content}
+                        for fp, content in resume_state.get("final_files", {}).items()
+                    ]
+                    gate_outcomes = resume_state.get("gate_outcomes", gate_outcomes)
+                    model_hops = resume_state.get("model_hops", model_hops)
+                    model_override = None
+                    base_url_override = None
+                    api_key_override = None
+                else:
+                    task_desc = f"Goal: {goal}\nPlan: {plan}"
+                    if error_context:
+                        task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
+
+                    # Re-run context budget allocator dynamically for escalated model context window size
+                    current_limit = int(self.kernel.config.llm.context_window * 0.75)
+                    model_override = None
+                    base_url_override = None
+                    api_key_override = None
+
+                    if retry_count > 0 and chain:
+                        fallback_idx = min(retry_count - 1, len(chain) - 1)
+                        fallback = chain[fallback_idx]
+                        model_override = fallback.model
+                        base_url_override = fallback.base_url
+                        api_key_override = fallback.api_key
+                        current_limit = int(fallback.context_window * 0.75)
+                        logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} tokens)")
+
+                    current_graph_context = build_code_context(matched_files, related_files, workspace_path, current_limit)
+                    active_code_context = skills_prompt
+                    if current_graph_context:
+                        active_code_context += current_graph_context
+                    if learned_rag_context:
+                        active_code_context += learned_rag_context
+
+                    # Track model hops
+                    model_hops.append(model_override or self.kernel.config.llm.model)
+
+                    # Generate code files
+                    dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
+                    files = await self.developer.run_generation(
+                        task_description=task_desc,
+                        design_context=design,
+                        existing_code_context=active_code_context,
+                        stream_callback=dev_stream,
+                        model_override=model_override,
+                        base_url_override=base_url_override,
+                        api_key_override=api_key_override
+                    )
 
                 # Normalize filepaths before anything downstream uses them - the
                 # Developer Agent occasionally returns an absolute path instead of a
@@ -1395,151 +1511,173 @@ class WorkflowEngine:
                     all_files_written.add(filepath)
                     logger.info(f"Wrote generated/edited file to sandbox: {filepath}")
 
-                # Completeness Check: catch the Developer Agent silently under-delivering
-                # (e.g. only writing pom.xml when the Architect's design called for 7 files).
-                # A trivially-passing compile on a near-empty sandbox would otherwise report
-                # PASSED and get applied to the workspace despite the goal not being met.
-                expected_files = extract_expected_files(design)
-                missing_files = find_missing_expected_files(expected_files, all_files_written, goal=goal)
-                if missing_files:
-                    raise ValueError(
-                        "INCOMPLETE GENERATION: The design called for the following files, but "
-                        f"they were never written: {', '.join(missing_files)}. "
-                        f"You must generate ALL files listed in the Architect Design Guidelines, "
-                        f"not just a subset."
-                    )
+                if not resuming_developer_stage:
+                    # Completeness Check: catch the Developer Agent silently under-delivering
+                    # (e.g. only writing pom.xml when the Architect's design called for 7 files).
+                    # A trivially-passing compile on a near-empty sandbox would otherwise report
+                    # PASSED and get applied to the workspace despite the goal not being met.
+                    expected_files = extract_expected_files(design)
+                    missing_files = find_missing_expected_files(expected_files, all_files_written, goal=goal)
+                    if missing_files:
+                        raise ValueError(
+                            "INCOMPLETE GENERATION: The design called for the following files, but "
+                            f"they were never written: {', '.join(missing_files)}. "
+                            f"You must generate ALL files listed in the Architect Design Guidelines, "
+                            f"not just a subset."
+                        )
 
-                # Quality Gates: Polymorphic compile & test checks inside sandbox
-                logger.info("Quality Gates: Running polymorphic compiler and test checks...")
-                from kriya.tools.validate import PolymorphicValidator
-                validator = PolymorphicValidator(
-                    worktree_path, original_workspace_path=workspace_path,
-                    autonomy_cfg=self.kernel.config.autonomy,
-                )
+                    # Quality Gates: Polymorphic compile & test checks inside sandbox
+                    logger.info("Quality Gates: Running polymorphic compiler and test checks...")
+                    validator = PolymorphicValidator(
+                        worktree_path, original_workspace_path=workspace_path,
+                        autonomy_cfg=self.kernel.config.autonomy,
+                    )
                 
-                compile_res = validator.run_compile_check(list(all_files_written))
-                gate_outcomes.append({
-                    "attempt": retry_count + 1,
-                    "type": "compile",
-                    "success": compile_res["success"],
-                    "output": compile_res.get("output", "")
-                })
-                if not compile_res["success"]:
-                    raise ValueError(f"COMPILATION FAILURE:\n{compile_res['output']}")
-                    
-                target_test = extract_target_test(error_context, list(all_files_written))
-                if target_test:
-                    logger.info(f"Quality Gates: Running targeted tests: {target_test}")
-                    test_res = validator.run_tests(target_test=target_test)
+                    compile_res = validator.run_compile_check(list(all_files_written))
                     gate_outcomes.append({
                         "attempt": retry_count + 1,
-                        "type": "targeted_test",
-                        "success": test_res["success"],
-                        "output": test_res.get("output", "")
+                        "type": "compile",
+                        "success": compile_res["success"],
+                        "output": compile_res.get("output", "")
                     })
-                    if not test_res["success"]:
-                        raise ValueError(f"TARGETED TEST FAILURE:\n{test_res['output']}")
-                else:
-                    test_written = any("test" in f.lower() or "spec" in f.lower() for f in all_files_written)
-                    if test_written:
-                        logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
-                        test_res = validator.run_tests()
+                    if not compile_res["success"]:
+                        raise ValueError(f"COMPILATION FAILURE:\n{compile_res['output']}")
+                    
+                    target_test = extract_target_test(error_context, list(all_files_written))
+                    if target_test:
+                        logger.info(f"Quality Gates: Running targeted tests: {target_test}")
+                        test_res = validator.run_tests(target_test=target_test)
                         gate_outcomes.append({
                             "attempt": retry_count + 1,
-                            "type": "test",
+                            "type": "targeted_test",
                             "success": test_res["success"],
                             "output": test_res.get("output", "")
                         })
                         if not test_res["success"]:
-                            raise ValueError(f"TEST FAILURE:\n{test_res['output']}")
-
-                # Quality Gates: Runtime Verification. Compiling and passing whatever tests
-                # exist only proves the code is valid - it says nothing about whether it does
-                # what the goal actually asked for, which matters most for goals with no test
-                # suite at all. Judgment decides per-attempt whether this goal describes
-                # self-terminating runtime behavior worth actually running and checking.
-                autonomy_cfg_rv = self.kernel.config.autonomy
-                if autonomy_cfg_rv.run_verification_enabled and not run_verification_declined:
-                    judgment = await self.run_verifier.judge(
-                        goal=goal,
-                        design=design,
-                        files_written=list(all_files_written),
-                    )
-                    if judgment["should_run"]:
-                        proceed_with_run = True
-                        if judgment["command_source"] == "inferred" and not run_verification_confirmed:
-                            if autonomy_cfg_rv.mode == "human-in-the-loop":
-                                confirm_reason = (
-                                    "Kriya judged that this goal describes runtime behavior compile/test "
-                                    "checks can't verify, and wants to actually run the generated app:\n"
-                                    f"  Command: {' '.join(judgment['run_command'])}\n"
-                                    f"  Looking for: {judgment['success_criteria']}\n"
-                                    "Allow Kriya to execute this command inside the sandboxed worktree?"
-                                )
-                                if approval_callback:
-                                    approved = approval_callback([], confirm_reason)
-                                    if asyncio.iscoroutine(approved):
-                                        approved = await approved
-                                    proceed_with_run = bool(approved)
-                                else:
-                                    logger.warning("Runtime verification warrants human approval but no approval_callback is available. Proceeding under default policy.")
-                            if not proceed_with_run:
-                                run_verification_declined = True
-                        if proceed_with_run:
-                            run_verification_confirmed = True
-                            resolved_run_command = _resolve_run_command(judgment["run_command"])
-                            if resolved_run_command != judgment["run_command"]:
-                                logger.info(
-                                    f"Inferred run command '{judgment['run_command'][0]}' isn't on PATH here - "
-                                    f"using Kriya's own interpreter instead: {resolved_run_command[0]}"
-                                )
-                            logger.info(f"Quality Gates: Running runtime verification: {' '.join(resolved_run_command)}")
-                            run_res = validator.run_app(
-                                resolved_run_command,
-                                timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
-                            )
-                            if run_res["timed_out"]:
-                                grade = {"passed": False, "reasoning": f"Run timed out after {autonomy_cfg_rv.run_verification_timeout_seconds}s."}
-                            elif run_res["returncode"] != 0:
-                                grade = {"passed": False, "reasoning": f"Process exited with code {run_res['returncode']}."}
-                            else:
-                                grade = await self.run_verifier.grade(
-                                    goal=goal,
-                                    success_criteria=judgment["success_criteria"],
-                                    output=run_res["output"],
-                                    returncode=run_res["returncode"],
-                                )
+                            raise ValueError(f"TARGETED TEST FAILURE:\n{test_res['output']}")
+                    else:
+                        test_written = any("test" in f.lower() or "spec" in f.lower() for f in all_files_written)
+                        if test_written:
+                            logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
+                            test_res = validator.run_tests()
                             gate_outcomes.append({
                                 "attempt": retry_count + 1,
-                                "type": "run_verification",
-                                "success": grade["passed"],
-                                "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
+                                "type": "test",
+                                "success": test_res["success"],
+                                "output": test_res.get("output", "")
                             })
-                            if not grade["passed"]:
-                                raise ValueError(f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}\n\nCaptured output:\n{run_res['output']}")
-                            logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
-                            # A passing real-world run is exactly the proof the
-                            # skill-verification gap check is looking for - mark every
-                            # skill that contributed to this generation as verified so
-                            # future runs stop asking about it.
-                            for active_skill_name in active_skills:
-                                try:
-                                    active_skill_obj = se.get_skill(active_skill_name)
-                                    context = _skill_verification_context(active_skill_obj, goal)
-                                    se.mark_verified(active_skill_name, context=context)
-                                    # Also flip per-rule provenance for exactly the
-                                    # rules that were part of this skill when this
-                                    # run's context was built (the pre-retry-loop
-                                    # snapshot) - not whatever rules.txt contains now.
-                                    if active_skill_obj.source_path and active_skill_name in active_skill_rules_snapshot:
-                                        from kriya.skills.skill import mark_rules_verified
-                                        mark_rules_verified(active_skill_obj.source_path, active_skill_rules_snapshot[active_skill_name])
-                                except Exception as ex:
-                                    logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
+                            if not test_res["success"]:
+                                raise ValueError(f"TEST FAILURE:\n{test_res['output']}")
+
+                    # Quality Gates: Runtime Verification. Compiling and passing whatever tests
+                    # exist only proves the code is valid - it says nothing about whether it does
+                    # what the goal actually asked for, which matters most for goals with no test
+                    # suite at all. Judgment decides per-attempt whether this goal describes
+                    # self-terminating runtime behavior worth actually running and checking.
+                    autonomy_cfg_rv = self.kernel.config.autonomy
+                    if autonomy_cfg_rv.run_verification_enabled and not run_verification_declined:
+                        judgment = await self.run_verifier.judge(
+                            goal=goal,
+                            design=design,
+                            files_written=list(all_files_written),
+                        )
+                        if judgment["should_run"]:
+                            proceed_with_run = True
+                            if judgment["command_source"] == "inferred" and not run_verification_confirmed:
+                                if autonomy_cfg_rv.mode == "human-in-the-loop":
+                                    confirm_reason = (
+                                        "Kriya judged that this goal describes runtime behavior compile/test "
+                                        "checks can't verify, and wants to actually run the generated app:\n"
+                                        f"  Command: {' '.join(judgment['run_command'])}\n"
+                                        f"  Looking for: {judgment['success_criteria']}\n"
+                                        "Allow Kriya to execute this command inside the sandboxed worktree?"
+                                    )
+                                    if approval_callback:
+                                        approved = approval_callback([], confirm_reason)
+                                        if asyncio.iscoroutine(approved):
+                                            approved = await approved
+                                        proceed_with_run = bool(approved)
+                                    else:
+                                        logger.warning("Runtime verification warrants human approval but no approval_callback is available. Proceeding under default policy.")
+                                if not proceed_with_run:
+                                    run_verification_declined = True
+                            if proceed_with_run:
+                                run_verification_confirmed = True
+                                resolved_run_command = _resolve_run_command(judgment["run_command"])
+                                if resolved_run_command != judgment["run_command"]:
+                                    logger.info(
+                                        f"Inferred run command '{judgment['run_command'][0]}' isn't on PATH here - "
+                                        f"using Kriya's own interpreter instead: {resolved_run_command[0]}"
+                                    )
+                                logger.info(f"Quality Gates: Running runtime verification: {' '.join(resolved_run_command)}")
+                                run_res = validator.run_app(
+                                    resolved_run_command,
+                                    timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                                )
+                                if run_res["timed_out"]:
+                                    grade = {"passed": False, "reasoning": f"Run timed out after {autonomy_cfg_rv.run_verification_timeout_seconds}s."}
+                                elif run_res["returncode"] != 0:
+                                    grade = {"passed": False, "reasoning": f"Process exited with code {run_res['returncode']}."}
+                                else:
+                                    grade = await self.run_verifier.grade(
+                                        goal=goal,
+                                        success_criteria=judgment["success_criteria"],
+                                        output=run_res["output"],
+                                        returncode=run_res["returncode"],
+                                    )
+                                gate_outcomes.append({
+                                    "attempt": retry_count + 1,
+                                    "type": "run_verification",
+                                    "success": grade["passed"],
+                                    "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
+                                })
+                                if not grade["passed"]:
+                                    raise ValueError(f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}\n\nCaptured output:\n{run_res['output']}")
+                                logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
+                                # A passing real-world run is exactly the proof the
+                                # skill-verification gap check is looking for - mark every
+                                # skill that contributed to this generation as verified so
+                                # future runs stop asking about it.
+                                for active_skill_name in active_skills:
+                                    try:
+                                        active_skill_obj = se.get_skill(active_skill_name)
+                                        context = _skill_verification_context(active_skill_obj, goal)
+                                        se.mark_verified(active_skill_name, context=context)
+                                        # Also flip per-rule provenance for exactly the
+                                        # rules that were part of this skill when this
+                                        # run's context was built (the pre-retry-loop
+                                        # snapshot) - not whatever rules.txt contains now.
+                                        if active_skill_obj.source_path and active_skill_name in active_skill_rules_snapshot:
+                                            from kriya.skills.skill import mark_rules_verified
+                                            mark_rules_verified(active_skill_obj.source_path, active_skill_rules_snapshot[active_skill_name])
+                                    except Exception as ex:
+                                        logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
 
                 # If we made it here, Quality Gates passed successfully!
                 logger.info("Quality Gates check PASSED.")
-                
+
+                # Checkpoint here (before the human approval gate, which can block
+                # indefinitely on interactive input) so a kill/crash while waiting on
+                # approval - or during the apply/regression steps just below - doesn't
+                # force redoing the expensive Developer generation + Quality Gates work.
+                final_files_for_checkpoint = {}
+                for filepath in all_files_written:
+                    try:
+                        with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                            final_files_for_checkpoint[filepath] = fh.read()
+                    except Exception as ex:
+                        logger.debug(f"Failed to snapshot '{filepath}' for checkpoint: {ex}")
+                _save_stage_checkpoint(
+                    "developer_success",
+                    plan=plan,
+                    design=design,
+                    final_files=final_files_for_checkpoint,
+                    original_files=all_original_contents,
+                    gate_outcomes=gate_outcomes,
+                    model_hops=model_hops,
+                    retry_count=retry_count,
+                )
+
                 # 4.5. Pre-Apply Human Approval Gate
                 diffs_to_show = []
                 for filepath in sorted(all_files_written):
@@ -1603,12 +1741,14 @@ class WorkflowEngine:
                                         fh.write(orig_content)
                                 elif os.path.exists(actual_file):
                                     os.remove(actual_file)
+                        delete_checkpoint(workspace_path, run_id)
                         return {
                             "plan": plan,
                             "design": design,
                             "files": [],
                             "quality_gates_passed": False,
-                            "review": "Rejected by user during approval gate review."
+                            "review": "Rejected by user during approval gate review.",
+                            "run_id": run_id,
                         }
                         
                 # If approved, write files to the actual workspace
@@ -1789,7 +1929,7 @@ class WorkflowEngine:
             trace_logger = TraceLogger(trace_db)
             duration = time.time() - start_time
             trace_logger.log_run(
-                run_id=run_id,
+                run_id=trace_id,
                 goal=goal,
                 duration_sec=duration,
                 attempts=retry_count,
@@ -1801,14 +1941,24 @@ class WorkflowEngine:
                 gate_outcomes=gate_outcomes,
                 model_hops=model_hops
             )
-            logger.info(f"Persistent run trace recorded: {run_id}")
+            logger.info(f"Persistent run trace recorded: {trace_id}")
         except Exception as trace_ex:
             logger.warning(f"Failed to write run trace: {trace_ex}")
+
+        if quality_passed:
+            # Full success - nothing left a resumed run would need to redo.
+            delete_checkpoint(workspace_path, run_id)
+        else:
+            logger.info(
+                f"Quality Gates never passed after {retry_count} attempt(s) - checkpoint '{run_id}' "
+                "left on disk in case a later `--resume-id` run wants to skip Plan/Design and retry Developer."
+            )
 
         return {
             "plan": plan,
             "design": design,
             "files": list(all_files_written),
             "quality_gates_passed": quality_passed,
-            "review": review
+            "review": review,
+            "run_id": run_id,
         }

@@ -6,9 +6,19 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import hashlib
+
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.workflow.checkpoint import (
+    checkpoint_path,
+    compute_config_fingerprint,
+    compute_workspace_fingerprint,
+    find_latest_checkpoint,
+    load_checkpoint,
+    save_checkpoint,
+)
 from kriya.workflow.workflow import (
     WorkflowEngine,
     _resolve_run_command,
@@ -16,6 +26,25 @@ from kriya.workflow.workflow import (
     find_missing_expected_files,
     normalize_written_filepath,
 )
+
+
+def _init_git_repo(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("placeholder\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True)
+
+
+def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, **extra):
+    save_checkpoint(str(tmp_path), run_id, {
+        "stage": stage,
+        "workspace_fingerprint": compute_workspace_fingerprint(str(tmp_path)),
+        "config_fingerprint": compute_config_fingerprint(cfg.model_dump()),
+        "goal_fingerprint": hashlib.sha256(f"{goal}\x00".encode("utf-8")).hexdigest(),
+        **extra,
+    })
 
 
 def test_extract_expected_files_from_design_tree():
@@ -1335,4 +1364,220 @@ async def test_workflow_normalizes_absolute_filepath_from_developer_agent(tmp_pa
     assert (tmp_path / "app.py").exists()
     with open(tmp_path / "app.py") as f:
         assert f.read() == "print(1)\n"
+
+
+@pytest.mark.asyncio
+async def test_workflow_successful_run_deletes_its_own_checkpoint(tmp_path):
+    """A checkpoint is only useful across a crash - a normal completion should
+    leave nothing behind for a future --resume to (mis)pick up."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert res.get("run_id")
+    assert not os.path.exists(checkpoint_path(str(tmp_path), res["run_id"]))
+    assert find_latest_checkpoint(str(tmp_path)) is None
+
+
+@pytest.mark.asyncio
+async def test_workflow_resumes_from_plan_checkpoint_skips_planner_only(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    goal = "Create math library"
+
+    _seed_checkpoint(tmp_path, cfg, goal, "ckpt-plan", "plan", plan="Step 1: Write code (from checkpoint)")
+
+    llm.complete = AsyncMock(side_effect=[
+        "Design: Write math.py",  # Architect
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',  # Developer
+        "Review: Approved",  # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume=True)
+
+    assert res["quality_gates_passed"] is True
+    assert res["plan"] == "Step 1: Write code (from checkpoint)"
+    assert llm.complete.await_count == 3  # Planner call skipped
+
+
+@pytest.mark.asyncio
+async def test_workflow_resumes_from_design_checkpoint_skips_planner_and_architect(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    goal = "Create math library"
+
+    _seed_checkpoint(
+        tmp_path, cfg, goal, "ckpt-design", "design",
+        plan="Step 1 (from checkpoint)", design="Design: Write math.py (from checkpoint)",
+    )
+
+    llm.complete = AsyncMock(side_effect=[
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',  # Developer
+        "Review: Approved",  # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume_id="ckpt-design")
+
+    assert res["quality_gates_passed"] is True
+    assert res["design"] == "Design: Write math.py (from checkpoint)"
+    assert llm.complete.await_count == 2  # Planner + Architect calls both skipped
+
+
+@pytest.mark.asyncio
+async def test_workflow_resumes_from_developer_success_checkpoint_skips_quality_gates(tmp_path):
+    """The most valuable resume point: Developer generation + compile/test gates
+    already passed before the crash, so only the human-approval/apply/regression
+    tail and the Reviewer need to run - no re-generation, no re-compiling."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    goal = "Create math library"
+
+    _seed_checkpoint(
+        tmp_path, cfg, goal, "ckpt-dev", "developer_success",
+        plan="Step 1 (from checkpoint)",
+        design="Design: Write math.py (from checkpoint)",
+        final_files={"math.py": "def add(a,b):\n    return a+b"},
+        original_files={},
+        gate_outcomes=[],
+        model_hops=[],
+        retry_count=0,
+    )
+
+    llm.complete = AsyncMock(side_effect=["Review: Approved"])  # only the Reviewer should run
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume=True)
+
+    assert res["quality_gates_passed"] is True
+    assert "math.py" in res["files"]
+    assert (tmp_path / "math.py").read_text() == "def add(a,b):\n    return a+b"
+    assert llm.complete.await_count == 1  # Planner, Architect, Developer all skipped
+
+
+@pytest.mark.asyncio
+async def test_workflow_refuses_resume_on_goal_drift(tmp_path):
+    """Strict drift detection: any goal-text difference since the checkpoint was
+    saved must invalidate it entirely and fall back to a normal fresh run rather
+    than a partial/best-effort resume."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    _seed_checkpoint(tmp_path, cfg, "Create math library", "ckpt-stale", "plan", plan="Stale plan")
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create a DIFFERENT math library",  # deliberately not the checkpoint's goal
+        workspace_path=str(tmp_path),
+        resume=True,
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["plan"] == "Step 1: Write code"  # real Planner call, not the stale checkpoint value
+    assert llm.complete.await_count == 4  # nothing was skipped
+
+
+@pytest.mark.asyncio
+async def test_workflow_resume_with_no_checkpoint_falls_back_to_fresh_run(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path), resume=True)
+
+    assert res["quality_gates_passed"] is True
+    assert llm.complete.await_count == 4
+
+
+def test_checkpoint_save_load_delete_roundtrip(tmp_path):
+    save_checkpoint(str(tmp_path), "run-1", {"stage": "plan", "plan": "hello"})
+    loaded = load_checkpoint(str(tmp_path), "run-1")
+    assert loaded["stage"] == "plan"
+    assert loaded["plan"] == "hello"
+    assert loaded["run_id"] == "run-1"
+
+    from kriya.workflow.checkpoint import delete_checkpoint
+    delete_checkpoint(str(tmp_path), "run-1")
+    assert load_checkpoint(str(tmp_path), "run-1") is None
+
+
+def test_checkpoint_workspace_fingerprint_changes_on_new_commit(tmp_path):
+    _init_git_repo(tmp_path)
+    fp1 = compute_workspace_fingerprint(str(tmp_path))
+    assert fp1 is not None and fp1.endswith(":clean")
+
+    (tmp_path / "app.py").write_text("print(1)\n")
+    fp2 = compute_workspace_fingerprint(str(tmp_path))
+    assert fp2.endswith(":dirty")
+    assert fp2 != fp1
+
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "second"], cwd=tmp_path, check=True)
+    fp3 = compute_workspace_fingerprint(str(tmp_path))
+    assert fp3.endswith(":clean")
+    assert fp3 != fp1 and fp3 != fp2
+
+
+def test_checkpoint_workspace_fingerprint_none_for_non_git_dir(tmp_path):
+    assert compute_workspace_fingerprint(str(tmp_path)) is None
+
+
+def test_checkpoint_config_fingerprint_stable_and_sensitive_to_changes():
+    cfg_a = AppConfig()
+    cfg_b = AppConfig()
+    assert compute_config_fingerprint(cfg_a.model_dump()) == compute_config_fingerprint(cfg_b.model_dump())
+
+    cfg_b.autonomy.run_verification_enabled = not cfg_b.autonomy.run_verification_enabled
+    assert compute_config_fingerprint(cfg_a.model_dump()) != compute_config_fingerprint(cfg_b.model_dump())
+
+
+def test_checkpoint_find_latest_returns_most_recently_saved(tmp_path):
+    save_checkpoint(str(tmp_path), "older", {"stage": "plan"})
+    import time as _time
+    _time.sleep(0.01)
+    save_checkpoint(str(tmp_path), "newer", {"stage": "design"})
+    assert find_latest_checkpoint(str(tmp_path)) == "newer"
 

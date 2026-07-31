@@ -691,8 +691,10 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
 @click.option('--yes', '-y', is_flag=True, default=False, help="Auto-approve all proposed code changes.")
 @click.option('--knowledge-policy', type=click.Choice(['strict', 'warn', 'permissive']), default='warn', help="KnowledgeGuard policy for handling detected gaps.")
 @click.option('--ack-knowledge-gap', multiple=True, help="Acknowledge specific coordinates (e.g. org.apache.ignite:ignite-core) to bypass check.")
+@click.option('--resume', is_flag=True, default=False, help="Resume the most recently saved checkpoint for this workspace (only exists if a prior run was interrupted mid-Plan/Design/Developer).")
+@click.option('--resume-id', default=None, help="Resume a specific checkpoint by run_id instead of the latest one.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     if file:
         try:
@@ -815,7 +817,9 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             stream_callback=on_stream,
             skill_gap_callback=on_skill_gap,
             skill_conflict_callback=on_skill_conflict,
-            web_lookup_callback=on_web_lookup
+            web_lookup_callback=on_web_lookup,
+            resume=resume,
+            resume_id=resume_id
         )
 
         if isinstance(res, dict) and res.get("status") == "knowledge_gap":
@@ -835,7 +839,9 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     skill_gap_callback=on_skill_gap,
                     skill_conflict_callback=on_skill_conflict,
                     web_lookup_callback=on_web_lookup,
-                    knowledge_risk_confirmed=True
+                    knowledge_risk_confirmed=True,
+                    resume=resume,
+                    resume_id=resume_id
                 )
             elif knowledge_policy == 'strict':
                 click.secho("\n[KRIYA BLOCKED] Knowledge gap detected in strict mode:", bold=True, fg="red")
@@ -872,7 +878,9 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         skill_gap_callback=on_skill_gap,
                         skill_conflict_callback=on_skill_conflict,
                         web_lookup_callback=on_web_lookup,
-                        knowledge_risk_confirmed=True
+                        knowledge_risk_confirmed=True,
+                        resume=resume,
+                        resume_id=resume_id
                     )
                 else:
                     if click.confirm("Would you like Kriya to scaffold skill templates for these libraries?"):
@@ -911,6 +919,13 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     f"Files attempted but NOT applied to workspace (quality gates failed): {', '.join(res['files'])}",
                     fg="red"
                 )
+                if res.get("run_id"):
+                    click.secho(
+                        f"Checkpoint saved - re-run with the same goal and add "
+                        f"--resume-id {res['run_id']} (or just --resume) to retry Developer generation "
+                        "without redoing Plan/Design.",
+                        fg="yellow"
+                    )
             if res.get("review"):
                 click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
                 click.echo(res.get("review"))
@@ -921,6 +936,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         asyncio.run(run_workflow())
     except Exception as e:
         click.secho(f"Workflow error: {e}", fg="red")
+        click.secho(
+            "If a Plan/Design/Developer stage had already completed before this error, "
+            "re-run the same command with --resume to pick up where it left off instead of starting over.",
+            fg="yellow"
+        )
         sys.exit(1)
 
 @main.command()
@@ -1193,8 +1213,10 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
 @click.option('--error', '-e', help="Compilation or test error log string. If omitted, reads from stdin.")
 @click.option('--workspace', '-w', default=".", type=click.Path(exists=True, file_okay=False), help="Workspace directory path.")
 @click.option('--yes', '-y', is_flag=True, help="Auto-approve patch application without prompting.")
+@click.option('--resume', is_flag=True, default=False, help="Resume the most recently saved checkpoint for this workspace.")
+@click.option('--resume-id', default=None, help="Resume a specific checkpoint by run_id instead of the latest one.")
 @click.pass_context
-def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool) -> None:
+def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, resume: bool, resume_id: Optional[str]) -> None:
     """Diagnose and automatically apply patches for compiler or test errors."""
     piped_stdin = not sys.stdin.isatty()
     if not error:
@@ -1242,17 +1264,31 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool) -> 
             workspace_path=workspace,
             step_callback=step_cb,
             approval_callback=approval_cb,
-            error_context=error
+            error_context=error,
+            resume=resume,
+            resume_id=resume_id
         )
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:
             click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
-            
+            if res.get("run_id"):
+                click.secho(
+                    f"Checkpoint saved - re-run with the same --error and add "
+                    f"--resume-id {res['run_id']} (or just --resume) to retry Developer generation "
+                    "without redoing Plan/Design.",
+                    fg="yellow"
+                )
+
     try:
         asyncio.run(run_fix())
     except Exception as e:
         click.secho(f"Error executing fix workflow: {e}", fg="red")
+        click.secho(
+            "If a Plan/Design/Developer stage had already completed before this error, "
+            "re-run the same command with --resume to pick up where it left off instead of starting over.",
+            fg="yellow"
+        )
         sys.exit(1)
 
 @main.command(name="traces")
