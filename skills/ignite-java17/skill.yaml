@@ -8,4 +8,4 @@ tags:
 - ignite
 - spring
 - java-17
-verification_gap_acknowledged: true
+verification_gap_acknowledged: false

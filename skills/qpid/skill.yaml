@@ -10,4 +10,4 @@ tags:
 - redhat-mrg
 - mrg
 - amqp-1.0
-verification_gap_acknowledged: true
+verification_gap_acknowledged: false
