@@ -16,5 +16,11 @@
     "verified": false,
     "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "Set the JAVA_HOME environment variable to point to the Java installation directory when running Ignite with Java 11 or later",
+    "verified": false,
+    "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
+    "added_at": "2026-07-31"
   }
 ]
