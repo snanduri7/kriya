@@ -46,5 +46,11 @@
     "verified": false,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "The qpid-jms client library version to use is 1.16.0 for javax.jms (JMS 2.0) or 2.10.0 for jakarta.jms (Jakarta Messaging 3.1).",
+    "verified": false,
+    "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
+    "added_at": "2026-07-31"
   }
 ]
