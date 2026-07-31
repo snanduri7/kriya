@@ -19,7 +19,7 @@ Add these dependencies to the `pom.xml`:
 </dependency>
 
 ##2. Java 17 JVM Command Line Arguments
-Because of package encapsulation starting in JDK 16+, Apache Ignite requires opening internal packages to access system unsafe and reflections. Ensure any execution command (e.g. exec-maven-plugin or runner scripts) passes the following JVM parameters:
+Because of package encapsulation starting in JDK 16+, Apache Ignite requires opening internal packages to access system unsafe and reflections. Any execution command (e.g. exec-maven-plugin or runner scripts) must pass these JVM flags:
 --add-opens=java.base/jdk.internal.access=ALL-UNNAMED
 --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
 --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
@@ -43,7 +43,38 @@ Because of package encapsulation starting in JDK 16+, Apache Ignite requires ope
 --add-opens=java.base/java.time=ALL-UNNAMED
 --add-opens=java.base/java.text=ALL-UNNAMED
 --add-opens=java.management/sun.management=ALL-UNNAMED
---add-opens java.desktop/java.awt.font=ALL-UNNAMED
+--add-opens=java.desktop/java.awt.font=ALL-UNNAMED
+
+### 2a. CRITICAL - the ONLY correct way to wire these into exec-maven-plugin's "java" goal
+Put ALL of the flags above into a SINGLE `<jvmArguments>` element, as one space-separated
+string. Do NOT add an `<arguments>` element to the plugin configuration at all - the
+`exec:java` goal (which is what `mvn exec:java` invokes) runs in Maven's own JVM process
+using the project's already-resolved classpath automatically; it does not need or accept
+an explicit `-classpath` argument, and `<arguments>` in this goal is only for passing
+program arguments to your main method (rarely needed here), never JVM flags.
+
+This is a real, repeatedly observed failure mode, not a hypothetical one - do NOT write
+`<arguments><argument>-classpath</argument><classpath/><argument>com.example.App</argument></arguments>`.
+That pattern belongs to the DIFFERENT `exec:exec` goal (which spawns a separate `java`
+process and therefore does need an explicit classpath and main class as arguments) - mixing
+it into `exec:java` fails with "Unable to parse configuration of mojo
+org.codehaus.mojo:exec-maven-plugin:...:java for parameter arguments: Cannot store value
+into array". Unless the goal explicitly asks for `exec:exec`, always use `exec:java` with
+ONLY `<mainClass>` and `<jvmArguments>` as shown below - see examples/pom.xml in this
+skill for a complete, correct, verified-working reference.
+
+```xml
+<plugin>
+    <groupId>org.codehaus.mojo</groupId>
+    <artifactId>exec-maven-plugin</artifactId>
+    <version>3.1.0</version>
+    <configuration>
+        <mainClass>com.example.App</mainClass>
+        <jvmArguments>--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED</jvmArguments>
+    </configuration>
+</plugin>
+```
+(the real, complete flag list from above goes in `<jvmArguments>`, abbreviated here for readability)
 
 ##3. Spring XML Bean Configuration Example
 When configuring the Ignite instance in Spring XML, use:

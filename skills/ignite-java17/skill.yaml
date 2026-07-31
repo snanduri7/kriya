@@ -3,9 +3,7 @@ description: Coding guidelines and configurations for Apache Ignite 2.18.0 on Ja
   17 using Maven.
 name: ignite-java17
 tags:
-- java
-- maven
 - ignite
-- spring
-- java-17
+- apache-ignite
+- ignite-cache
 verification_gap_acknowledged: false

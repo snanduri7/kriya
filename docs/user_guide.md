@@ -285,6 +285,14 @@ Declining, or `-y`, discards everything found for that run without excluding eit
 
 **A third trigger, inside the Developer retry loop**: with the same `autonomy.web_lookup_enabled`/`search.base_url` switches on, a compile or Runtime Verification failure that repeats *identically* on a second consecutive retry attempt also triggers a lookup - a repeated failure suggests the model isn't self-correcting on its own. This one is silent (no batch confirmation, nothing written to a skill) since it's folding a hint into an already-fully-automated retry, not asking you to trust something new. It only searches for well-known tool/plugin/library coordinates found in the error text itself, never the error or stack trace as a whole. Real testing found this genuinely helps for actual unfamiliar-library knowledge gaps, but many repeated retry failures turn out to be the model losing track of something across a large multi-file response rather than missing information - this feature doesn't fix that class of failure, only the knowledge-gap class.
 
+### 4.7 Targeted Single-File Retry
+No configuration needed - this is always on. When a Quality Gates failure (compile or Runtime Verification) names one of the files Kriya already wrote, the next retry focuses on fixing just that file instead of regenerating your entire project again - the target file is shown to the model as the thing to fix, every other file is included as reference material so nothing else gets accidentally rewritten (though the model can still touch another file if the fix genuinely needs it, e.g. a missing import that also needs a new dependency added). This runs on its own budget (3 attempts) separate from the normal retry count, and always uses your primary model - never the fallback chain, since a model swap costs real time and the whole point of a targeted retry is to be fast.
+
+If a failure doesn't clearly point at one of your files (a bare exit code, a build-tool configuration error with no source file involved), Kriya falls back to a normal full-file-set retry - targeting is a bonus when it can confidently narrow the fix, never a guess.
+
+### 4.8 Completeness Prevention & Missing-File Recovery
+No configuration needed - this is always on. Before the Developer generates anything, Kriya scans the Architect's design for the files it calls for and hands the Developer an explicit "Required files" checklist as part of the task description - not just a check applied after the fact. If a required file is still missing once generation finishes, the next retry asks specifically for that missing file (with the rest of your codebase shown as reference), instead of either silently accepting an incomplete result or regenerating everything from scratch. This shares Targeted Single-File Retry's budget (3 attempts) and never escalates models, for the same reasons.
+
 ---
 
 ## 5. Local Model Performance Optimization (Apple Silicon)

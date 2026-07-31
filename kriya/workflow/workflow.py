@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.agents.agent import (
     ArchitectAgent,
@@ -410,6 +410,19 @@ def _goal_requests_tests_or_docs(goal: str) -> bool:
     lower = (goal or "").lower()
     return any(phrase in lower for phrase in TEST_OR_DOC_REQUEST_PHRASES)
 
+class IncompleteGenerationError(ValueError):
+    """Raised when the completeness check finds design-required files the Developer
+    never wrote. A distinct type (not a bare ValueError) so the retry loop's except
+    block can recognize this specific failure and route to a missing-file recovery
+    retry - asking the Developer for exactly the missing file(s) - instead of either
+    a full-file-set regeneration or a compile/test-error-style targeted retry, neither
+    of which addresses "the model just didn't write this file" at all."""
+
+    def __init__(self, missing_files: List[str], message: str) -> None:
+        super().__init__(message)
+        self.missing_files = missing_files
+
+
 def find_missing_expected_files(expected_files: set, written_files: set, goal: str = "") -> List[str]:
     """Compares expected basenames (from the design) against actually-written filepaths
     (matched by basename, since the design typically doesn't list full paths).
@@ -593,6 +606,105 @@ async def _augment_error_with_live_lookup(
         )
         logger.info(f"Live lookup found reference material for repeated failure term '{item['term']}' ({item['url']}).")
     return augmented
+
+
+def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> List[str]:
+    """Deterministically identifies which of this run's already-written files a
+    Quality Gate failure implicates, for the Developer retry loop's targeted-retry
+    path - no LLM call. A known file counts as implicated if its basename (or full
+    relative path) literally appears in the error/output text, which naturally
+    covers every failure type without per-tool-specific parsing: compiler errors
+    name the file directly (`path/File.java:[19,45] ...`), test runners name the
+    failing test file, and even some runtime stack traces mention a class/file
+    name. A failure that names no known file (a bare exit code, a Maven plugin
+    config error with no source file involved, etc.) simply yields no matches -
+    that attempt falls back to a full-file-set retry instead, exactly as if this
+    function didn't exist. Best-effort/heuristic by design: a false-positive match
+    is low-cost since targeted retries are soft-scoped (the model may still touch
+    other files if a fix genuinely needs it), not a hard restriction."""
+    implicated = []
+    for filepath in known_files:
+        basename = os.path.basename(filepath)
+        if basename and (basename in error_text or filepath in error_text):
+            implicated.append(filepath)
+    return implicated
+
+
+def _build_targeted_retry_prompt(
+    goal: str, plan: str, error_context: str, target_files: List[str],
+    all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+) -> Tuple[str, str]:
+    """Builds the task description and code context for a targeted (single/few-
+    file) retry: the target file(s) are framed as the fix, every other already-
+    written file is included as read-only reference context (not asked to be
+    regenerated) rather than omitted entirely - this is what makes soft-scoping
+    real rather than just a prompt instruction with nothing behind it, and it's a
+    genuine improvement over the full-set retry path, which never shows the model
+    its own previous attempt's content at all, only the error text describing what
+    went wrong with it."""
+    target_set = set(target_files)
+    target_section = ""
+    reference_section = ""
+    for filepath in sorted(all_files_written):
+        try:
+            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                current_content = fh.read()
+        except Exception as ex:
+            logger.debug(f"Failed to read '{filepath}' from worktree for targeted retry context: {ex}")
+            continue
+        if filepath in target_set:
+            target_section += f"=== File to fix: {filepath} ===\n{current_content}\n\n"
+        else:
+            reference_section += (
+                f"=== Existing file (already correct, reference only - regenerate ONLY if your fix "
+                f"genuinely requires changing it too): {filepath} ===\n{current_content}\n\n"
+            )
+
+    task_desc = (
+        f"Goal: {goal}\nPlan: {plan}\n\n=== Previous Error to Fix ===\n{error_context}\n\n"
+        f"This is a TARGETED fix attempt. Based on the error above, the following file(s) are most "
+        f"likely responsible: {', '.join(sorted(target_set))}. Focus your fix there - the rest of the "
+        "codebase (given below as reference) is already correct, so only touch another file if your "
+        "fix genuinely cannot be made without it."
+    )
+    targeted_context = active_code_context + "\n\n" + reference_section + target_section
+    return task_desc, targeted_context
+
+
+def _build_missing_files_retry_prompt(
+    goal: str, plan: str, design: str, missing_files: List[str],
+    all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+) -> Tuple[str, str]:
+    """Builds the task description and code context for a missing-file recovery
+    retry, used after an IncompleteGenerationError: the Architect's design called
+    for these file(s) but the Developer never wrote them, so instead of re-describing
+    a compile/test error, this asks for exactly the named file(s), with every
+    already-written file included as read-only reference context so the model can
+    see the existing package layout/imports it needs to match - mirroring
+    _build_targeted_retry_prompt's soft-scoping approach."""
+    reference_section = ""
+    for filepath in sorted(all_files_written):
+        try:
+            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                current_content = fh.read()
+        except Exception as ex:
+            logger.debug(f"Failed to read '{filepath}' from worktree for missing-files retry context: {ex}")
+            continue
+        reference_section += (
+            f"=== Existing file (already written, reference only - do not regenerate unless "
+            f"integrating the new file(s) genuinely requires a change to it too): {filepath} ===\n{current_content}\n\n"
+        )
+
+    task_desc = (
+        f"Goal: {goal}\nPlan: {plan}\n\n"
+        f"This is a MISSING-FILE recovery attempt. The Architect's design (below, in the code context) "
+        f"calls for the following file(s), which were NOT generated in the previous attempt: "
+        f"{', '.join(sorted(missing_files))}. Generate ONLY these missing file(s) now, in full - do not "
+        f"regenerate any file already listed as existing below unless integrating the new file(s) "
+        f"genuinely requires a change to it too."
+    )
+    targeted_context = active_code_context + "\n\n=== Architect Design ===\n" + design + "\n\n" + reference_section
+    return task_desc, targeted_context
 
 
 async def _extract_first_usable(
@@ -1409,6 +1521,52 @@ class WorkflowEngine:
         chain = self.kernel.config.llm_chain
         max_retries = max(4, 1 + len(chain)) if chain else 4
         retry_count = 0
+        # A separate, independent budget for targeted (single/few-file) retries -
+        # deliberately NOT folded into max_retries/retry_count, which governs the
+        # full-file-set path and its model-escalation chain. Targeted attempts
+        # always use the primary model (never escalate) - they're meant to be
+        # fast and cheap, and a model swap on Ollama measured 19-43s in this same
+        # session, which would defeat that. Exhausting the targeted budget falls
+        # through to the full-set path's own budget/escalation, unchanged.
+        TARGETED_MAX_RETRIES = 3
+        targeted_retry_count = 0
+        # The file(s) extract_implicated_files() found in the MOST RECENT failure
+        # - re-evaluated after every failure, not fixed at the first one, so a
+        # targeted attempt against a different file (a new error surfaced by
+        # fixing the last one) is still eligible. None whenever the last failure
+        # named no known file, or scoping is disabled by mode above (goes to the
+        # full-set path exactly as before this feature existed).
+        last_implicated_files: Optional[List[str]] = None
+        # The file(s) the completeness check (extract_expected_files vs. what got
+        # written) found missing after the MOST RECENT attempt. Mutually exclusive
+        # with last_implicated_files - an IncompleteGenerationError sets this and
+        # clears last_implicated_files (nothing to implicate: the file was never
+        # written, so it can't appear in known_files), any other failure clears this
+        # and re-evaluates last_implicated_files as before. Shares the same
+        # targeted_retry_count/TARGETED_MAX_RETRIES budget and no-escalation
+        # philosophy as the implicated-file targeted retry - this is recovery from
+        # the same class of problem (the model didn't finish the job), not a new
+        # kind of retry that deserves its own budget.
+        last_missing_files: Optional[List[str]] = None
+        # Rendered once (design does not change across retries) and appended to the
+        # full-set task description on every attempt, so the Developer sees an
+        # explicit, unambiguous checklist of what the design requires BEFORE
+        # generating - not just a punitive check afterward. This is the prevention
+        # half of the completeness fix; the missing-file recovery retry below is the
+        # cheaper, targeted recovery half for when prevention still doesn't work.
+        required_files_prompt_block = ""
+        _expected_files_upfront = sorted(extract_expected_files(design))
+        if _expected_files_upfront:
+            required_files_prompt_block = (
+                "\n\nRequired files (from the Architect's design - you must generate ALL of these, "
+                "not a subset; do not omit any or defer them to a future step):\n"
+                + "\n".join(f"- {f}" for f in _expected_files_upfront)
+            )
+        # Unified attempt counter for gate_outcomes/logging only - retry_count and
+        # targeted_retry_count are the actual budget counters, but a single
+        # chronological attempt number reads far more sensibly in the trace than
+        # two counters that don't both advance on every iteration.
+        attempt_number = 0
         error_context = error_context or ""
         files_written = []
         all_files_written = set()
@@ -1428,6 +1586,11 @@ class WorkflowEngine:
         # from a normal first-time failure - only a repeat is eligible for
         # error-triggered live lookup (see the except block below).
         last_failure_signature: Optional[Tuple[str, Any]] = None
+        # Set True only right before the success-path `break` - retry_count alone
+        # can no longer indicate success/failure now that a run can succeed via a
+        # targeted attempt after the full-set budget (retry_count >= max_retries)
+        # was already exhausted.
+        quality_gates_succeeded = False
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -1437,7 +1600,14 @@ class WorkflowEngine:
         except Exception as e:
             logger.warning(f"Failed to create git worktree sandbox: {e}. Falling back to default workspace.")
 
-        while retry_count < max_retries:
+        while retry_count < max_retries or (
+            (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+        ):
+            attempt_number += 1
+            use_targeted = bool(last_implicated_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+            use_missing_files = (
+                not use_targeted and bool(last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+            )
             try:
                 # Needed unconditionally below (both the normal compile/test gate
                 # path and the always-run full regression check use it) - imported
@@ -1451,7 +1621,7 @@ class WorkflowEngine:
                 # interrupted - only usable on the very first iteration of a resumed
                 # run; any retry after that needs a real, fresh generation attempt.
                 resuming_developer_stage = bool(
-                    resume_state and resume_state.get("stage") == "developer_success" and retry_count == 0
+                    resume_state and resume_state.get("stage") == "developer_success" and attempt_number == 1
                 )
 
                 if resuming_developer_stage:
@@ -1465,10 +1635,81 @@ class WorkflowEngine:
                     model_override = None
                     base_url_override = None
                     api_key_override = None
+                elif use_targeted:
+                    # Targeted retry: always the primary model, never escalated
+                    # (see the budget comment above) - so the context budget is
+                    # always the primary model's own window, not a fallback's.
+                    current_limit = int(self.kernel.config.llm.context_window * 0.75)
+                    model_override = None
+                    base_url_override = None
+                    api_key_override = None
+
+                    current_graph_context = build_code_context(matched_files, related_files, workspace_path, current_limit)
+                    base_code_context = skills_prompt
+                    if current_graph_context:
+                        base_code_context += current_graph_context
+                    if learned_rag_context:
+                        base_code_context += learned_rag_context
+
+                    task_desc, active_code_context = _build_targeted_retry_prompt(
+                        goal, plan, error_context, last_implicated_files,
+                        all_files_written, worktree_path, base_code_context,
+                    )
+                    logger.info(f"Targeted retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: focusing on {', '.join(last_implicated_files)}.")
+
+                    model_hops.append(self.kernel.config.llm.model)
+
+                    dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
+                    files = await self.developer.run_generation(
+                        task_description=task_desc,
+                        design_context=design,
+                        existing_code_context=active_code_context,
+                        stream_callback=dev_stream,
+                        model_override=model_override,
+                        base_url_override=base_url_override,
+                        api_key_override=api_key_override
+                    )
+                elif use_missing_files:
+                    # Missing-file recovery: same primary-model-only, non-escalating
+                    # budget as a targeted retry (see the comment on
+                    # last_missing_files above) - asks for exactly the file(s) the
+                    # completeness check found missing, instead of re-describing an
+                    # error or regenerating the whole file set.
+                    current_limit = int(self.kernel.config.llm.context_window * 0.75)
+                    model_override = None
+                    base_url_override = None
+                    api_key_override = None
+
+                    current_graph_context = build_code_context(matched_files, related_files, workspace_path, current_limit)
+                    base_code_context = skills_prompt
+                    if current_graph_context:
+                        base_code_context += current_graph_context
+                    if learned_rag_context:
+                        base_code_context += learned_rag_context
+
+                    task_desc, active_code_context = _build_missing_files_retry_prompt(
+                        goal, plan, design, last_missing_files,
+                        all_files_written, worktree_path, base_code_context,
+                    )
+                    logger.info(f"Missing-file recovery retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: adding {', '.join(last_missing_files)}.")
+
+                    model_hops.append(self.kernel.config.llm.model)
+
+                    dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
+                    files = await self.developer.run_generation(
+                        task_description=task_desc,
+                        design_context=design,
+                        existing_code_context=active_code_context,
+                        stream_callback=dev_stream,
+                        model_override=model_override,
+                        base_url_override=base_url_override,
+                        api_key_override=api_key_override
+                    )
                 else:
                     task_desc = f"Goal: {goal}\nPlan: {plan}"
                     if error_context:
                         task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
+                    task_desc += required_files_prompt_block
 
                     # Re-run context budget allocator dynamically for escalated model context window size
                     current_limit = int(self.kernel.config.llm.context_window * 0.75)
@@ -1581,7 +1822,8 @@ class WorkflowEngine:
                     expected_files = extract_expected_files(design)
                     missing_files = find_missing_expected_files(expected_files, all_files_written, goal=goal)
                     if missing_files:
-                        raise ValueError(
+                        raise IncompleteGenerationError(
+                            missing_files,
                             "INCOMPLETE GENERATION: The design called for the following files, but "
                             f"they were never written: {', '.join(missing_files)}. "
                             f"You must generate ALL files listed in the Architect Design Guidelines, "
@@ -1597,7 +1839,7 @@ class WorkflowEngine:
                 
                     compile_res = validator.run_compile_check(list(all_files_written))
                     gate_outcomes.append({
-                        "attempt": retry_count + 1,
+                        "attempt": attempt_number,
                         "type": "compile",
                         "success": compile_res["success"],
                         "output": compile_res.get("output", "")
@@ -1610,7 +1852,7 @@ class WorkflowEngine:
                         logger.info(f"Quality Gates: Running targeted tests: {target_test}")
                         test_res = validator.run_tests(target_test=target_test)
                         gate_outcomes.append({
-                            "attempt": retry_count + 1,
+                            "attempt": attempt_number,
                             "type": "targeted_test",
                             "success": test_res["success"],
                             "output": test_res.get("output", "")
@@ -1623,7 +1865,7 @@ class WorkflowEngine:
                             logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                             test_res = validator.run_tests()
                             gate_outcomes.append({
-                                "attempt": retry_count + 1,
+                                "attempt": attempt_number,
                                 "type": "test",
                                 "success": test_res["success"],
                                 "output": test_res.get("output", "")
@@ -1688,7 +1930,7 @@ class WorkflowEngine:
                                         returncode=run_res["returncode"],
                                     )
                                 gate_outcomes.append({
-                                    "attempt": retry_count + 1,
+                                    "attempt": attempt_number,
                                     "type": "run_verification",
                                     "success": grade["passed"],
                                     "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
@@ -1738,6 +1980,7 @@ class WorkflowEngine:
                     gate_outcomes=gate_outcomes,
                     model_hops=model_hops,
                     retry_count=retry_count,
+                    targeted_retry_count=targeted_retry_count,
                 )
 
                 # 4.5. Pre-Apply Human Approval Gate
@@ -1913,7 +2156,7 @@ class WorkflowEngine:
                 )
                 full_test_res = validator.run_tests()
                 gate_outcomes.append({
-                    "attempt": retry_count + 1,
+                    "attempt": attempt_number,
                     "type": "regression_test",
                     "success": full_test_res["success"],
                     "output": full_test_res.get("output", "")
@@ -1921,15 +2164,22 @@ class WorkflowEngine:
                 if not full_test_res["success"]:
                     raise ValueError(f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}")
 
+                quality_gates_succeeded = True
                 break
 
             except Exception as e:
-                retry_count += 1
-                logger.warning(f"Quality Gates FAILED (Attempt {retry_count}/{max_retries}): {e}")
                 raw_error_context = str(e)
+                attempt_mode = "targeted" if use_targeted else "missing_files" if use_missing_files else "full-set"
+                logger.warning(
+                    f"Quality Gates FAILED (Attempt {attempt_number}, "
+                    f"{attempt_mode}, full-set {retry_count}/{max_retries} + "
+                    f"targeted {targeted_retry_count}/{TARGETED_MAX_RETRIES}): {e}"
+                )
 
+                is_incomplete_generation = isinstance(e, IncompleteGenerationError)
                 fail_type = (
-                    "compile" if "COMPILATION" in raw_error_context
+                    "incomplete_generation" if is_incomplete_generation
+                    else "compile" if "COMPILATION" in raw_error_context
                     else "run_verification" if "RUNTIME VERIFICATION" in raw_error_context
                     else "test" if "TEST" in raw_error_context
                     else "general_error"
@@ -1963,16 +2213,43 @@ class WorkflowEngine:
                     )
                 last_failure_signature = current_failure_signature
 
-                if not any(o.get("attempt") == retry_count and o.get("type") == fail_type for o in gate_outcomes):
+                # Re-evaluate which file(s) THIS failure implicates/is missing -
+                # independent of whether this attempt was itself targeted, missing-
+                # files, or full-set, so any attempt's failure can still kick off
+                # (or redirect) a scoped retry afterward. An IncompleteGenerationError
+                # sets last_missing_files and clears last_implicated_files (the
+                # missing file, by definition, was never written, so it can never
+                # appear in all_files_written for extract_implicated_files to find);
+                # any other failure does the reverse - the two trackers are mutually
+                # exclusive per attempt, matching that they route to different,
+                # differently-built retry prompts.
+                if is_incomplete_generation:
+                    last_missing_files = e.missing_files
+                    last_implicated_files = None
+                else:
+                    implicated = extract_implicated_files(raw_error_context, all_files_written)
+                    last_implicated_files = implicated if implicated else None
+                    last_missing_files = None
+
+                if use_targeted or use_missing_files:
+                    targeted_retry_count += 1
+                else:
+                    retry_count += 1
+
+                if not any(o.get("attempt") == attempt_number and o.get("type") == fail_type for o in gate_outcomes):
                     gate_outcomes.append({
-                        "attempt": retry_count,
+                        "attempt": attempt_number,
                         "type": fail_type,
                         "success": False,
-                        "output": raw_error_context
+                        "output": raw_error_context,
+                        "mode": attempt_mode,
                     })
 
-                if retry_count >= max_retries:
-                    logger.error("Quality Gates exceeded maximum debug retries. Continuing to review with errors.")
+                budgets_exhausted = retry_count >= max_retries and not (
+                    (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+                )
+                if budgets_exhausted:
+                    logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
                     if worktree_path != workspace_path:
                         for filepath in all_files_written:
                             worktree_file = os.path.join(worktree_path, filepath)
@@ -2011,7 +2288,7 @@ class WorkflowEngine:
         if step_callback:
             step_callback("Review", review)
 
-        quality_passed = retry_count < max_retries
+        quality_passed = quality_gates_succeeded
         
         # Write persistent trace log
         try:

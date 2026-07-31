@@ -21,10 +21,14 @@ from kriya.workflow.checkpoint import (
 )
 from kriya.workflow.workflow import (
     WorkflowEngine,
+    IncompleteGenerationError,
     _augment_error_with_live_lookup,
+    _build_missing_files_retry_prompt,
+    _build_targeted_retry_prompt,
     _resolve_run_command,
     extract_error_search_terms,
     extract_expected_files,
+    extract_implicated_files,
     find_missing_expected_files,
     normalize_written_filepath,
 )
@@ -256,33 +260,46 @@ async def test_workflow_fallback_chain(tmp_path):
     llm = LLMClient(cfg)
     
     model_overrides = []
-    
+
     async def mock_complete(*args, **kwargs):
         model_overrides.append(kwargs.get("model_override"))
-        if len(model_overrides) == 1:
+        n = len(model_overrides)
+        if n == 1:
             return "Step 1: Write code"
-        elif len(model_overrides) == 2:
+        elif n == 2:
             return "Design: Write math.py"
-        elif len(model_overrides) == 3:
+        elif n in (3, 4, 5, 6):
+            # Attempt 1 (full-set, primary model) then 3 targeted retries (also
+            # primary model - targeted retries never escalate) - all still broken,
+            # to exhaust the targeted budget before the fallback chain ever gets
+            # a chance to run.
             return '[{"filepath": "math.py", "content": "def add(a,b)\\n    return a+b"}]'
-        elif len(model_overrides) == 4:
+        elif n == 7:
+            # Targeted budget now exhausted - back to the full-set path, which
+            # escalates to fallback-1 as retry_count > 0. Fixed this time.
             return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
-        elif len(model_overrides) == 5:
+        elif n == 8:
             return "Avoid missing colon in function definition."
         else:
             return "Review: Approved"
-            
+
     llm.complete = mock_complete
-    
+
     we = WorkflowEngine(kernel, llm)
     cfg.paths.skills = str(tmp_path / "skills")
-    
+
     res = await we.run_generation_workflow(
         goal="Create math library with fallback chain",
         workspace_path=str(tmp_path)
     )
-    
+
     assert res["quality_gates_passed"] is True
+    # The 3 targeted retries (attempts 2-4) must never escalate - only once that
+    # budget is exhausted does the full-set path's fallback chain kick in.
+    assert model_overrides[3] is None
+    assert model_overrides[4] is None
+    assert model_overrides[5] is None
+    assert model_overrides[6] == "fallback-1"
     assert "fallback-1" in model_overrides
     
     repo_slug = os.path.basename(tmp_path).lower().strip(".")
@@ -1735,3 +1752,262 @@ async def test_workflow_error_triggered_live_lookup_disabled_by_default_never_se
     assert res["quality_gates_passed"] is True
     mock_search.assert_not_called()
 
+
+def test_extract_implicated_files_matches_basename_in_error():
+    error = "path/to/CacheAndMessagingClient.java:[22,13] cannot find symbol"
+    known = ["src/main/java/com/example/CacheAndMessagingClient.java", "pom.xml"]
+    assert extract_implicated_files(error, known) == ["src/main/java/com/example/CacheAndMessagingClient.java"]
+
+def test_extract_implicated_files_matches_multiple():
+    error = "App.java:[5,1] error, and also BrokerServer.java:[10,2] error"
+    known = ["src/App.java", "src/BrokerServer.java", "pom.xml"]
+    assert extract_implicated_files(error, known) == ["src/App.java", "src/BrokerServer.java"]
+
+def test_extract_implicated_files_empty_when_no_known_file_named():
+    error = "Process exited with code 1. No further details available."
+    known = ["App.java", "pom.xml"]
+    assert extract_implicated_files(error, known) == []
+
+def test_extract_implicated_files_matches_full_relative_path_too():
+    error = "Traceback: File \"src/main/py/app.py\", line 3, in <module>"
+    known = ["src/main/py/app.py"]
+    assert extract_implicated_files(error, known) == ["src/main/py/app.py"]
+
+
+def test_build_targeted_retry_prompt_frames_target_and_reference_files(tmp_path):
+    (tmp_path / "App.java").write_text("class App { /* broken */ }")
+    (tmp_path / "Helper.java").write_text("class Helper { /* fine */ }")
+
+    task_desc, context = _build_targeted_retry_prompt(
+        goal="Build the app",
+        plan="Fix App.java",
+        error_context="cannot find symbol in App.java",
+        target_files=["App.java"],
+        all_files_written=["App.java", "Helper.java"],
+        worktree_path=str(tmp_path),
+        active_code_context="=== base RAG context ===\n",
+    )
+
+    assert "TARGETED fix attempt" in task_desc
+    assert "App.java" in task_desc
+    assert "cannot find symbol in App.java" in task_desc
+    assert "=== base RAG context ===" in context
+    assert "File to fix: App.java" in context
+    assert "class App { /* broken */ }" in context
+    assert "already correct, reference only" in context
+    assert "Helper.java" in context
+    assert "class Helper { /* fine */ }" in context
+
+
+@pytest.mark.asyncio
+async def test_workflow_targeted_retry_fixes_implicated_file_without_escalating(tmp_path):
+    """A compile failure that names a known file should trigger a targeted retry
+    on the very next attempt (not a full-file-set regeneration), using the
+    primary model even with a fallback chain configured - and the targeted
+    attempt's prompt should show the model its own previous (broken) content,
+    which the full-set path never does."""
+    from kriya.config import FallbackModelConfig
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    prompts_seen = []
+
+    async def mock_complete(*args, **kwargs):
+        prompts_seen.append((args[1] if len(args) > 1 else None, kwargs.get("model_override")))
+        n = len(prompts_seen)
+        if n == 1:
+            return "Step 1: Write code"
+        elif n == 2:
+            return "Design: Write math.py"
+        elif n == 3:
+            return '[{"filepath": "math.py", "content": "def add(a,b)\\n    return a+b"}]'
+        elif n == 4:
+            return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
+        else:
+            return "Review: Approved"
+
+    llm.complete = mock_complete
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    # Attempt 2 (index 3 in prompts_seen) must be the targeted retry: primary
+    # model (no override, despite a configured fallback chain) and a prompt that
+    # shows the model its own broken previous content, not just the error text.
+    targeted_prompt, targeted_model_override = prompts_seen[3]
+    assert targeted_model_override is None
+    assert "TARGETED fix attempt" in targeted_prompt
+    assert "def add(a,b)" in targeted_prompt  # the actual previous (broken) content
+
+@pytest.mark.asyncio
+async def test_workflow_no_targeted_retry_when_error_names_no_known_file(tmp_path):
+    """An error that doesn't mention any known file must never trigger a
+    targeted attempt - it should escalate through the full-set fallback chain
+    exactly as before this feature existed."""
+    from kriya.config import FallbackModelConfig
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    model_overrides = []
+
+    async def mock_complete(*args, **kwargs):
+        model_overrides.append(kwargs.get("model_override"))
+        n = len(model_overrides)
+        if n == 1:
+            return "Step 1: Write code"
+        elif n == 2:
+            return "Design: Write math.py"
+        elif n in (3, 4):
+            return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
+        else:
+            return "Review: Approved"
+
+    llm.complete = mock_complete
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "Process exited with code 1. No file information available."},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    # Attempt 2 must escalate to the fallback chain (full-set path), never a
+    # targeted (primary-model) attempt, since no file was implicated.
+    assert model_overrides[3] == "fallback-1"
+
+@pytest.mark.asyncio
+async def test_workflow_success_via_targeted_attempt_after_full_set_budget_exhausted(tmp_path):
+    """Regression test for a real bug caught while implementing this: quality_passed
+    used to be computed as `retry_count < max_retries`, which is wrong once a run
+    can succeed via a targeted attempt AFTER the full-set budget is already
+    exhausted - this must still report success correctly."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    # No llm_chain configured -> max_retries defaults to 4.
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    same_error = "Failed to build math.py"
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        # 4 full-set failures (exhausts the default max_retries=4 full-set budget,
+        # each one naming math.py so a targeted attempt becomes eligible), then a
+        # 5th, targeted attempt succeeds.
+        mock_compile.side_effect = [
+            {"success": False, "output": same_error},
+            {"success": False, "output": same_error},
+            {"success": False, "output": same_error},
+            {"success": False, "output": same_error},
+            {"success": True, "output": ""},
+        ]
+        # Every Developer call (1 full-set + 3 targeted + 1 more targeted) returns
+        # the same file - content doesn't matter here since run_compile_check is
+        # mocked directly.
+        we.developer.run_generation = AsyncMock(
+            return_value=[{"filepath": "math.py", "content": "def add(a,b): return a+b"}]
+        )
+        res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+
+
+
+def test_incomplete_generation_error_carries_missing_files():
+    err = IncompleteGenerationError(["Helper.java", "config.xml"], "INCOMPLETE GENERATION: ...")
+    assert err.missing_files == ["Helper.java", "config.xml"]
+    assert isinstance(err, ValueError)
+    assert str(err) == "INCOMPLETE GENERATION: ..."
+
+
+def test_build_missing_files_retry_prompt_frames_missing_and_reference_files(tmp_path):
+    (tmp_path / "BrokerServer.java").write_text("class BrokerServer { /* written */ }")
+
+    task_desc, context = _build_missing_files_retry_prompt(
+        goal="Build the broker",
+        plan="Write BrokerServer.java and BrokerConfig.java",
+        design="## Files to Create\n- BrokerServer.java\n- BrokerConfig.java",
+        missing_files=["BrokerConfig.java"],
+        all_files_written=["BrokerServer.java"],
+        worktree_path=str(tmp_path),
+        active_code_context="=== base RAG context ===\n",
+    )
+
+    assert "MISSING-FILE recovery attempt" in task_desc
+    assert "BrokerConfig.java" in task_desc
+    assert "=== base RAG context ===" in context
+    assert "=== Architect Design ===" in context
+    assert "## Files to Create" in context
+    assert "Existing file (already written, reference only" in context
+    assert "class BrokerServer { /* written */ }" in context
+
+
+@pytest.mark.asyncio
+async def test_workflow_missing_file_recovery_does_not_escalate_or_consume_fullset_budget(tmp_path):
+    """A completeness-check failure (Developer omitted a design-required file) must
+    trigger a missing-file recovery retry on the very next attempt - primary model
+    only, even with a fallback chain configured - not a full-file-set regeneration
+    and not model escalation, mirroring the existing implicated-file targeted retry's
+    no-escalation budget."""
+    from kriya.config import FallbackModelConfig
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    prompts_seen = []
+
+    async def mock_complete(*args, **kwargs):
+        prompts_seen.append((args[1] if len(args) > 1 else None, kwargs.get("model_override")))
+        n = len(prompts_seen)
+        if n == 1:
+            return "Step 1: Write code"
+        elif n == 2:
+            return "Design: Write math.py and helper.py"
+        elif n == 3:
+            # Attempt 1 (full-set): only writes math.py, omitting helper.py.
+            return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
+        elif n == 4:
+            # Attempt 2 (missing-file recovery): writes the omitted file.
+            return '[{"filepath": "helper.py", "content": "def helper():\\n    pass"}]'
+        else:
+            return "Review: Approved"
+
+    llm.complete = mock_complete
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create math library with a helper module", workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert "helper.py" in res["files"]
+    # Attempt 2 (index 3) must be the missing-file recovery retry: primary model
+    # (no override, despite a configured fallback chain) and a prompt that names
+    # the specific missing file, not a generic full-set regeneration.
+    recovery_prompt, recovery_model_override = prompts_seen[3]
+    assert recovery_model_override is None
+    assert "MISSING-FILE recovery attempt" in recovery_prompt
+    assert "helper.py" in recovery_prompt
