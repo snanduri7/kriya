@@ -362,3 +362,38 @@ In a separate terminal session, run the client application which connects to the
 ```bash
 mvn compile exec:exec
 ```
+
+---
+
+## 8. Appendix: What It Actually Took to Get Kriya to Build This Reliably
+
+This section is not a feature reference - it's a case study, kept honest and specific on purpose, meant to calibrate what to expect from Kriya and clarify what your own role is in making it reliable for the technologies you actually use.
+
+### 8.1 The scenario
+
+A single, genuinely real-world goal: a standalone Java 17 Maven application combining an embedded Apache Qpid Broker-J broker, an embedded Apache Ignite node, and Spring XML-wired JMS messaging between them - not a toy "hello world," but the kind of multi-technology integration a production task actually looks like. It was built up incrementally as three milestones (broker-only, cache-only, then wiring both together), specifically so each mechanism below could be tested and fixed in isolation before combining them.
+
+**Milestone 1 (broker-only) took 9 live attempts to pass.** Milestones 2 and 3 each passed on the *first* attempt, zero retries, once the lessons from Milestone 1 (and a few more found along the way) were written into skill content and Kriya's own code. That gap - 9 attempts vs. 0 - is the entire point of this section.
+
+### 8.2 What actually made the difference
+
+None of the fixes were about the LLM "trying harder." Every one was either (a) real, previously-unverified/wrong information sitting in a skill's `rules.txt`/`examples/`, or (b) a real gap in Kriya's own workflow code:
+
+- **Skill content bugs**: an exec-maven-plugin configuration pattern (`<mainClass>+<jvmArguments>`) that looked plausible, ran without a hard error, and was wrong - `jvmArguments` was never a real parameter for that goal, confirmed only by reading the actual plugin's own descriptor. A Qpid Broker-J internal default (`initialConfigurationLocation`'s hardcoded `classpath:system.properties`) that fails specifically under `exec:java`'s classloader, found via bytecode inspection, not documentation. Maven's `-q` flag silently dropping SLF4J logger output under `exec:java`, found by direct A/B comparison.
+- **Workflow code bugs**: the Developer wasn't told the Architect's required-file list *before* generating, only checked against afterward, so a required file could simply be missing. A skill's overly-generic tags (`java`, `maven`, `spring`) caused it to activate on unrelated goals, once causing real skill-content cross-contamination. The sandbox used for compiling/testing generated code never reflected uncommitted work already in the workspace - the normal state of an in-progress project.
+
+**The common thread**: every one of these was found by actually running the thing, not by reading the generated code and judging it plausible. A `PrivilegedActionException` or a silently-dropped log line doesn't show up in a code review - it shows up when you run `mvn compile exec:java` for real and watch it fail.
+
+### 8.3 Your role: skills are the compounding asset
+
+Kriya's autonomous mechanisms - Skill Gap Detection, Live Lookup, Targeted Single-File Retry, Completeness Prevention & Recovery - exist to make a *first* encounter with an unfamiliar technology survivable without you sitting there debugging it turn by turn. They reduce the pain. They do not eliminate the need for someone to have gone through the hard version once, correctly, and written down what they learned. That's what a skill's `rules.txt` and `examples/` actually are: a compounding memory of mistakes already made, so the next `generate` run against the same technology doesn't have to make them again.
+
+Concretely, this means:
+
+1. **For any technology or pattern your team uses repeatedly, invest in curating its skill** - even just capturing your first hard-won working example into `examples/` and the specific gotchas you hit into `rules.txt`. This is the direct cause of the 9-attempts-to-0-retries difference above. A skill with real, verified content is worth more than any amount of prompt tuning.
+2. **When Kriya's Skill Gap Detection asks you for a reference, a real working example beats a documentation link.** Live Lookup genuinely struggles to extract anything usable from a generic doc page (observed repeatedly during this validation - "tried 2 reference(s) but none contained anything usable"); an actual verified `pom.xml` or class file is unambiguous and directly reusable.
+3. **Kriya's own automatic learning is helpful but not infallible - review it occasionally.** Rules extracted from a skill gap or live lookup are written automatically; this validation surfaced real (and now-fixed) cases of near-duplicate rules accumulating and, before the fix, an extraction that silently overwrote a previously-curated example. `kriya skills show <skill_name>` and the `[unverified]` per-rule markers exist precisely so you can spot-check what's been auto-added.
+4. **A single passing run doesn't prove everything it looks like it proves.** The `jvmArguments` mistake above was "verified" by a real, successful live test - that test simply never exercised the one thing that was actually broken, because the app under test didn't need it. Treat "verified" as "verified for what was actually tested," and be willing to dig one level deeper (the tool's own source or spec, not just another behavioral test) when something doesn't add up.
+5. **Expect to be asked, and expect that to be normal, not a failure.** A Skill Gap or Skill Conflict prompt during `generate` is Kriya correctly recognizing the edge of its own verified knowledge, not a bug. The goal isn't zero questions - it's that the same question is never asked twice for the same fact.
+
+The practical takeaway: Kriya is most reliable exactly where you or your team have already paid down the "first encounter" cost into a skill. For a brand-new, uncurated technology pairing, expect something closer to Milestone 1's experience than Milestone 3's - and treat that first hard session as the investment that makes every future run against the same stack look like Milestone 3 instead.
