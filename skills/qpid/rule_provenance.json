@@ -76,5 +76,11 @@
     "verified": false,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "The broker's startupLoggedToSystemOut flag in the config map passed to SystemLauncher.startup() should be set to true for debugging purposes.",
+    "verified": false,
+    "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
+    "added_at": "2026-07-31"
   }
 ]
