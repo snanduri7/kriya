@@ -283,6 +283,8 @@ Declining, or `-y`, discards everything found for that run without excluding eit
 
 **Real-world caveat, confirmed via testing against a real search backend**: the single top search result for a well-known library is often a landing/marketing page with nothing concrete to extract, not deep technical documentation. Kriya tries up to `search.top_k` ranked results per term and only gives up on that term - falling back to asking you - if none of them yield anything usable. Accepting the batch confirmation above means "try these," not "these are good enough" - if none of them turn out to be, you'll still be asked for a better source, same as if live lookup had never run.
 
+**A third trigger, inside the Developer retry loop**: with the same `autonomy.web_lookup_enabled`/`search.base_url` switches on, a compile or Runtime Verification failure that repeats *identically* on a second consecutive retry attempt also triggers a lookup - a repeated failure suggests the model isn't self-correcting on its own. This one is silent (no batch confirmation, nothing written to a skill) since it's folding a hint into an already-fully-automated retry, not asking you to trust something new. It only searches for well-known tool/plugin/library coordinates found in the error text itself, never the error or stack trace as a whole. Real testing found this genuinely helps for actual unfamiliar-library knowledge gaps, but many repeated retry failures turn out to be the model losing track of something across a large multi-file response rather than missing information - this feature doesn't fix that class of failure, only the knowledge-gap class.
+
 ---
 
 ## 5. Local Model Performance Optimization (Apple Silicon)

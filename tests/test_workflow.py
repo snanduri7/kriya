@@ -21,7 +21,9 @@ from kriya.workflow.checkpoint import (
 )
 from kriya.workflow.workflow import (
     WorkflowEngine,
+    _augment_error_with_live_lookup,
     _resolve_run_command,
+    extract_error_search_terms,
     extract_expected_files,
     find_missing_expected_files,
     normalize_written_filepath,
@@ -1580,4 +1582,156 @@ def test_checkpoint_find_latest_returns_most_recently_saved(tmp_path):
     _time.sleep(0.01)
     save_checkpoint(str(tmp_path), "newer", {"stage": "design"})
     assert find_latest_checkpoint(str(tmp_path)) == "newer"
+
+
+def test_extract_error_search_terms_finds_maven_coordinate():
+    error = (
+        "[ERROR] Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java "
+        "for parameter arguments: Cannot store value into array"
+    )
+    assert extract_error_search_terms(error) == ["org.codehaus.mojo:exec-maven-plugin"]
+
+def test_extract_error_search_terms_dedups_multiple_occurrences():
+    error = (
+        "org.codehaus.mojo:exec-maven-plugin failed. See org.codehaus.mojo:exec-maven-plugin docs."
+    )
+    assert extract_error_search_terms(error) == ["org.codehaus.mojo:exec-maven-plugin"]
+
+def test_extract_error_search_terms_finds_multiple_distinct_coordinates():
+    error = "org.apache.maven.plugins:maven-compiler-plugin failed after org.codehaus.mojo:exec-maven-plugin succeeded"
+    assert extract_error_search_terms(error) == [
+        "org.apache.maven.plugins:maven-compiler-plugin",
+        "org.codehaus.mojo:exec-maven-plugin",
+    ]
+
+def test_extract_error_search_terms_ignores_plain_symbols_and_paths():
+    # Neither a bare class/package name (no colon) nor a filesystem path (colon-free
+    # on this platform, and even Windows-style drive letters don't match groupId
+    # shape) should be treated as a safe search term - only real dotted-namespace
+    # coordinate syntax should match.
+    error = (
+        "cannot find symbol: class JmsConnectionFactory\n"
+        "location: class com.example.CacheAndMessagingClient\n"
+        "at /Users/dev/project/src/main/java/com/example/App.java:19"
+    )
+    assert extract_error_search_terms(error) == []
+
+@pytest.mark.asyncio
+async def test_augment_error_with_live_lookup_no_terms_never_searches():
+    with patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
+        result = await _augment_error_with_live_lookup("some error", [], "http://fake-search:8080", 3)
+    assert result == "some error"
+    mock_search.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_augment_error_with_live_lookup_appends_found_content():
+    found = [{"term": "org.codehaus.mojo:exec-maven-plugin", "url": "https://example.com/exec-plugin", "snippet": "..."}]
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)), \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="Remove the <arguments> block.")):
+        result = await _augment_error_with_live_lookup(
+            "COMPILATION FAILURE: ...", ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
+        )
+    assert "COMPILATION FAILURE: ..." in result
+    assert "Reference material found for 'org.codehaus.mojo:exec-maven-plugin'" in result
+    assert "Remove the <arguments> block." in result
+
+@pytest.mark.asyncio
+async def test_augment_error_with_live_lookup_nothing_found_returns_unchanged():
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=[])):
+        result = await _augment_error_with_live_lookup(
+            "some error", ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
+        )
+    assert result == "some error"
+
+
+@pytest.mark.asyncio
+async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(tmp_path):
+    """A compile failure that repeats identically across two consecutive Developer
+    retry attempts (the model isn't self-correcting) should trigger live lookup,
+    folding found reference material into the THIRD attempt's prompt - not the
+    first attempt (no repeat yet), and search must fire exactly once."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    repeated_error = (
+        "Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java "
+        "for parameter arguments: Cannot store value into array"
+    )
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',  # attempt 1 - fails
+        '[{"filepath": "App.java", "content": "class App {}"}]',  # attempt 2 - fails identically (repeat)
+        '[{"filepath": "App.java", "content": "class App {}"}]',  # attempt 3 - succeeds
+        "Review: Approved",
+    ])
+
+    found = [{"term": "org.codehaus.mojo:exec-maven-plugin", "url": "https://example.com/exec-plugin", "snippet": "..."}]
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="Remove the <arguments> block - exec:java doesn't need it.")):
+        mock_compile.side_effect = [
+            {"success": False, "output": repeated_error},
+            {"success": False, "output": repeated_error},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once_with(
+        "org.codehaus.mojo:exec-maven-plugin documentation", "http://fake-search:8080", top_k=3
+    )
+
+    third_attempt_prompt = llm.complete.await_args_list[4].args[1]
+    assert "Reference material found for 'org.codehaus.mojo:exec-maven-plugin'" in third_attempt_prompt
+    assert "Remove the <arguments> block" in third_attempt_prompt
+
+    # And the first (non-repeat) failure must not have triggered anything - the
+    # second Developer call's prompt has the raw error but no lookup content yet.
+    second_attempt_prompt = llm.complete.await_args_list[3].args[1]
+    assert "Reference material found" not in second_attempt_prompt
+
+@pytest.mark.asyncio
+async def test_workflow_error_triggered_live_lookup_disabled_by_default_never_searches(tmp_path):
+    """Same repeated-failure scenario, but web_lookup_enabled left at its default
+    (False) - must never call search_web, even though the failure repeats and
+    contains an extractable coordinate."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    # web_lookup_enabled left False (default) - no search.base_url either.
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    repeated_error = "Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java"
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
+        mock_compile.side_effect = [
+            {"success": False, "output": repeated_error},
+            {"success": False, "output": repeated_error},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_not_called()
 

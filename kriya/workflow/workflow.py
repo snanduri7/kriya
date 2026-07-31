@@ -538,6 +538,63 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
     return resolved
 
 
+_ERROR_COORDINATE_PATTERN = re.compile(
+    r"\b([a-zA-Z][\w]*(?:\.[a-zA-Z][\w-]*)+):([a-zA-Z][\w-]*)(?::[\w.-]+)?\b"
+)
+
+
+def extract_error_search_terms(error_text: str) -> List[str]:
+    """Extracts safe search terms from Quality Gate error/output text for
+    error-triggered live lookup (kriya/workflow/workflow.py's Developer retry
+    loop) - restricted to well-known, publicly-referenceable Maven/Gradle-style
+    artifact coordinates (groupId:artifactId, e.g. "org.codehaus.mojo:exec-maven-
+    plugin") found IN the error text. This is a hard, code-enforced boundary, not
+    a prompt instruction: never the raw error/stack-trace text itself (which can
+    contain project-specific class/variable/file names), never goal/design/code
+    text - the same principle as the existing extract_library_versions()-based
+    goal/design-stage live lookup. A failure with no such coordinate in it (e.g.
+    a plain "cannot find symbol" compile error naming only a class, not an
+    artifact) simply yields no terms and is never searched - most such failures
+    are code-coherence issues a search wouldn't help with anyway."""
+    seen = set()
+    terms = []
+    for m in _ERROR_COORDINATE_PATTERN.finditer(error_text):
+        term = f"{m.group(1)}:{m.group(2)}"
+        if term not in seen:
+            seen.add(term)
+            terms.append(term)
+    return terms
+
+
+async def _augment_error_with_live_lookup(
+    error_text: str, terms: List[str], search_base_url: str, top_k: int
+) -> str:
+    """When the SAME Quality Gate failure repeats across consecutive Developer
+    retry attempts - a sign the model isn't self-correcting on its own - tries
+    live lookup for the extracted tool/library terms and appends anything found
+    directly to the error text for the next retry's prompt. Deliberately skips
+    the SkillGapAgent extraction call used elsewhere (Stage 1.2/2B) - that's
+    another slow LLM round-trip, which would work against the whole point of
+    this feature (fewer/faster retries) - and doesn't persist anything to a
+    skill's rules.txt; this is ephemeral, scoped to the current retry only, not
+    durable knowledge. Best-effort: returns error_text unchanged if lookup finds
+    nothing usable."""
+    found = await _resolve_via_web_lookup(terms, search_base_url, top_k)
+    if not found:
+        return error_text
+
+    augmented = error_text
+    for item in found:
+        snippet = item["candidates"][0]["text"][:2000]
+        augmented += (
+            f"\n\n=== Reference material found for '{item['term']}' (from {item['url']}) - "
+            "this repeated failure may be resolved by it, but verify before relying on it ===\n"
+            f"{snippet}"
+        )
+        logger.info(f"Live lookup found reference material for repeated failure term '{item['term']}' ({item['url']}).")
+    return augmented
+
+
 async def _extract_first_usable(
     skill_gap_agent: Any, target: Any, gap_description: str, candidates: List[Dict[str, str]]
 ) -> Dict[str, Any]:
@@ -1366,6 +1423,11 @@ class WorkflowEngine:
         # generation run rather than on every retry attempt.
         run_verification_confirmed = False
         run_verification_declined = False
+        # Tracks (fail_type, signature) of the previous attempt's failure so a
+        # REPEATED failure (the model isn't self-correcting) can be distinguished
+        # from a normal first-time failure - only a repeat is eligible for
+        # error-triggered live lookup (see the except block below).
+        last_failure_signature: Optional[Tuple[str, Any]] = None
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -1864,22 +1926,51 @@ class WorkflowEngine:
             except Exception as e:
                 retry_count += 1
                 logger.warning(f"Quality Gates FAILED (Attempt {retry_count}/{max_retries}): {e}")
-                error_context = str(e)
-                
+                raw_error_context = str(e)
+
                 fail_type = (
-                    "compile" if "COMPILATION" in error_context
-                    else "run_verification" if "RUNTIME VERIFICATION" in error_context
-                    else "test" if "TEST" in error_context
+                    "compile" if "COMPILATION" in raw_error_context
+                    else "run_verification" if "RUNTIME VERIFICATION" in raw_error_context
+                    else "test" if "TEST" in raw_error_context
                     else "general_error"
                 )
+
+                # Error-triggered live lookup: only for a REPEATED failure (same
+                # fail_type + same extracted tool/library terms, or identical raw
+                # text if none were extracted) - a first-time failure resolves
+                # normally most of the time and doesn't need it. Scoped to
+                # compile/run_verification failures, since those are the ones most
+                # likely to be a generic tooling/config gap a search can actually
+                # resolve (a test-assertion failure is usually application-logic-
+                # specific, not something external docs fix). Terms are extracted
+                # via a hard, code-enforced regex restricted to Maven/Gradle-style
+                # groupId:artifactId coordinates found IN the error text - the same
+                # query-safety boundary as the existing goal/design-stage live
+                # lookup: never the raw error/stack-trace text itself, which can
+                # contain project-specific class/variable names.
+                error_terms = extract_error_search_terms(raw_error_context)
+                current_failure_signature = (fail_type, tuple(sorted(error_terms)) if error_terms else raw_error_context)
+                error_context = raw_error_context
+                if (
+                    current_failure_signature == last_failure_signature
+                    and fail_type in ("compile", "run_verification")
+                    and self.kernel.config.autonomy.web_lookup_enabled
+                    and self.kernel.config.search.base_url
+                ):
+                    error_context = await _augment_error_with_live_lookup(
+                        raw_error_context, error_terms,
+                        self.kernel.config.search.base_url, self.kernel.config.search.top_k
+                    )
+                last_failure_signature = current_failure_signature
+
                 if not any(o.get("attempt") == retry_count and o.get("type") == fail_type for o in gate_outcomes):
                     gate_outcomes.append({
                         "attempt": retry_count,
                         "type": fail_type,
                         "success": False,
-                        "output": error_context
+                        "output": raw_error_context
                     })
-                
+
                 if retry_count >= max_retries:
                     logger.error("Quality Gates exceeded maximum debug retries. Continuing to review with errors.")
                     if worktree_path != workspace_path:
