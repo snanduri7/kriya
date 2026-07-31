@@ -1,10 +1,13 @@
-name: qpid
-description: Apache Qpid Broker-J (embedded) and qpid-jms AMQP 1.0 client setup rules. Also covers "Red Hat Qpid MRG" / "Red Hat AMQ" branded requests, which map to the same underlying Apache Qpid broker and qpid-jms client, not ActiveMQ Artemis.
 category: Messaging
+description: Apache Qpid Broker-J (embedded) and qpid-jms AMQP 1.0 client setup rules.
+  Also covers "Red Hat Qpid MRG" / "Red Hat AMQ" branded requests, which map to the
+  same underlying Apache Qpid broker and qpid-jms client, not ActiveMQ Artemis.
+name: qpid
 tags:
-  - qpid
-  - qpid-jms
-  - qpid-broker-j
-  - redhat-mrg
-  - mrg
-  - amqp-1.0
+- qpid
+- qpid-jms
+- qpid-broker-j
+- redhat-mrg
+- mrg
+- amqp-1.0
+verification_gap_acknowledged: true
