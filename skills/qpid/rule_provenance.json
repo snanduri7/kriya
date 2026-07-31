@@ -4,5 +4,11 @@
     "verified": false,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_ignite.txt",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "Bootstrap Ignite from Spring XML using either Ignition.start(\"ignite-config.xml\") or by declaring an org.apache.ignite.IgniteSpringBean in the XML and fetching it via context.getBean(Ignite.class).",
+    "verified": false,
+    "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_ignite.txt",
+    "added_at": "2026-07-31"
   }
 ]
