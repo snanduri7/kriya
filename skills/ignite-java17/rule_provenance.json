@@ -4,5 +4,11 @@
     "verified": false,
     "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "Use Maven dependency <groupId>org.apache.ignite</groupId> <artifactId>ignite-core</artifactId> <version>2.18.0</version>",
+    "verified": false,
+    "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
+    "added_at": "2026-07-31"
   }
 ]
