@@ -25,68 +25,79 @@
   },
   {
     "text": "Use modelVersion \"8.0\" in the initial configuration JSON, not the qpid-broker-core artifact version (e.g., do not use \"9.2\" for broker-core 9.2.1).",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "The AMQP port definition in the initial configuration JSON MUST include a virtualhostaliases entry with a defaultAlias, or client connections will fail to resolve the virtualhost.",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "Any virtualhost in the initial configuration that should accept publishes to not-yet-existing queues MUST have a nodeAutoCreationPolicies entry with pattern \".*\", createdOnPublish/createdOnConsume \"true\", and nodeType \"queue\".",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "When using a Memory store broker, JMS senders must explicitly call setDeliveryMode(DeliveryMode.NON_PERSISTENT) before sending messages, as the Memory store cannot accept the default PERSISTENT delivery mode.",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "The qpid-jms client library version to use is 1.16.0 for javax.jms (JMS 2.0) or 2.10.0 for jakarta.jms (Jakarta Messaging 3.1).",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "The JMS ConnectionFactory class is org.apache.qpid.jms.JmsConnectionFactory, which supports a no-arg constructor and setRemoteURI(String) setter.",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "Connection URIs for the JMS client must use the amqp:// scheme (e.g., amqp://localhost:5672), not ActiveMQ Artemis's tcp:// syntax.",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "The initial configuration JSON file must be loaded via a java.net.URL obtained using YourClass.class.getClassLoader().getResource(\"qpid-initial-config.json\").toExternalForm().",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "When running via mvn exec:java, use only <jvmArguments> and avoid adding an <arguments> element to the exec-maven-plugin configuration.",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "The broker's startupLoggedToSystemOut flag in the config map passed to SystemLauncher.startup() should be set to true for debugging purposes.",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   },
   {
     "text": "Use modelVersion \"8.0\" in the initial configuration JSON file, not the qpid-broker-core artifact version (e.g., do not use \"9.2\" for broker-core 9.2.1).",
-    "verified": false,
+    "verified": true,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
-    "added_at": "2026-07-31"
+    "added_at": "2026-07-31",
+    "verified_at": "2026-07-31"
   }
 ]
