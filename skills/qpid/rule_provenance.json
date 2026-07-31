@@ -64,5 +64,11 @@
     "verified": false,
     "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
     "added_at": "2026-07-31"
+  },
+  {
+    "text": "The initial configuration JSON file must be loaded via a java.net.URL obtained using YourClass.class.getClassLoader().getResource(\"qpid-initial-config.json\").toExternalForm().",
+    "verified": false,
+    "source": "human_file:/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/kriya-full-validation-ignite-qpid/reference_qpid.txt",
+    "added_at": "2026-07-31"
   }
 ]
