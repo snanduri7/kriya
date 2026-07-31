@@ -675,7 +675,7 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Skill '{skill_name}' not found.", fg="red")
         sys.exit(1)
 
-    if not skill.verified:
+    if not skill.verified and not skill.verification_gap_acknowledged:
         click.secho(f"Skill '{skill_name}' is already unverified.", fg="yellow")
         return
 

@@ -193,7 +193,7 @@ def test_skills_promote_marks_target_skill_verified(tmp_path):
     assert skill.verified_context == "promoted from 'auto-myrepo'"
 
 
-def _make_local_project(tmp_path, skill_name="widgetlib", verified=False):
+def _make_local_project(tmp_path, skill_name="widgetlib", verified=False, gap_acknowledged=False):
     """A project-local skills dir (not the shared/global one) with a single skill,
     for testing kriya skills list/show/unverify without touching the real repo's
     skills - those commands load with load_global=True by default, so the real repo's
@@ -204,6 +204,8 @@ def _make_local_project(tmp_path, skill_name="widgetlib", verified=False):
     yaml_lines = [f"name: {skill_name}", "description: Test skill.", f"tags: [{skill_name}]"]
     if verified:
         yaml_lines += ["verified: true", "verified_context: widgetlib 2.0.0", "verified_at: '2026-01-01'"]
+    if gap_acknowledged:
+        yaml_lines += ["verification_gap_acknowledged: true"]
     (skill_folder / "skill.yaml").write_text("\n".join(yaml_lines) + "\n")
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
@@ -233,6 +235,28 @@ def test_skills_unverify_already_unverified_is_a_noop(tmp_path):
 
     assert result.exit_code == 0
     assert "already unverified" in result.output
+
+def test_skills_unverify_resets_stuck_gap_acknowledged_even_when_already_unverified(tmp_path):
+    """Regression test for a real bug caught live this session: a skill can be
+    verified=False AND verification_gap_acknowledged=True at the same time (the
+    user was once asked to strengthen it and declined, but it was never later
+    verified) - in that exact state, the old code's `if not skill.verified: ...
+    return` fired before ever calling mark_unverified(), so
+    verification_gap_acknowledged stayed stuck True forever and the skill-gap
+    prompt could never fire again for that skill. Worked around live by hand-
+    editing skill.yaml directly since the CLI command couldn't actually help."""
+    config_file, project_skills = _make_local_project(tmp_path, verified=False, gap_acknowledged=True)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["--config", config_file, "skills", "unverify", "widgetlib"])
+
+    assert result.exit_code == 0, result.output
+    assert "reset to unverified" in result.output
+    se = SkillEngine(str(project_skills), load_global=False)
+    se.discover_and_load()
+    skill = se.get_skill("widgetlib")
+    assert skill.verified is False
+    assert skill.verification_gap_acknowledged is False
 
 def test_skills_unverify_unknown_skill_fails(tmp_path):
     config_file, _project_skills = _make_local_project(tmp_path, verified=False)
