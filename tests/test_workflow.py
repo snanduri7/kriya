@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -5,8 +6,6 @@ import sys
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-import hashlib
 
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
@@ -20,8 +19,8 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
 )
 from kriya.workflow.workflow import (
-    WorkflowEngine,
     IncompleteGenerationError,
+    WorkflowEngine,
     _augment_error_with_live_lookup,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,

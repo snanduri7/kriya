@@ -12,20 +12,20 @@ import argparse
 import asyncio
 from collections import defaultdict
 
-from kriya.config.config import load_config
-from kriya.core.llm import LLMClient
-from kriya.memory.vector import OllamaEmbeddingClient
-
 from classify import (
+    CLARIFY,
+    UNROUTABLE,
     AskWhenUncertainClassifier,
     CentroidClassifier,
-    CLARIFY,
     ExemplarClassifier,
     HybridGateClassifier,
-    UNROUTABLE,
 )
 from exemplars import EXEMPLARS
 from test_set import TEST_SET
+
+from kriya.config.config import load_config
+from kriya.core.llm import LLMClient
+from kriya.memory.vector import OllamaEmbeddingClient
 
 
 def _build_classifier(args, cfg, embed_client):
@@ -158,7 +158,7 @@ async def main() -> None:
     else:
         print("  none")
 
-    print(f"\nGo/no-go bar: >=90% effective accuracy, zero dangerous misroutes.")
+    print("\nGo/no-go bar: >=90% effective accuracy, zero dangerous misroutes.")
     verdict = "GO" if effective_accuracy >= 0.9 and not dangerous_misroutes else "NO-GO"
     print(f"Verdict: {verdict}")
 

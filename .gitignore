@@ -123,8 +123,13 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# Kriya Memory and cached indexes
-memory/
+# Kriya Memory and cached indexes - anchored to repo root (leading slash) so
+# this doesn't also match kriya/memory/, the real source package (vector
+# store, embedding client) - an unanchored "memory/" matches a directory of
+# that name at ANY depth, which silently kept kriya/memory/ out of git
+# entirely, undetected until a genuinely fresh checkout (CI) failed with
+# ModuleNotFoundError: No module named 'kriya.memory'.
+/memory/
 .system_generated/
 *.log
 
@@ -132,7 +137,7 @@ memory/
 *.db
 *.db-wal
 *.db-shm
-logs/
+/logs/
 
 # Scratch generation folders
 scratch_generate/
