@@ -1,4 +1,18 @@
 <!--
+  THIS SHAPE IS ONLY FOR WHEN JVM STARTUP FLAGS (e.g. add-opens) ARE ACTUALLY NEEDED
+  (typically Ignite, not a Qpid-only app). If the goal needs no JVM flags at all, do NOT
+  use any of this - use the much simpler plain form instead, invoked via exec:java (not
+  exec:exec), even if nothing below mentions it:
+    <configuration>
+      <mainClass>${exec.mainClass}</mainClass>
+    </configuration>
+  run via `mvn -q compile exec:java -Dexec.mainClass=...`. Confirmed live: combining THIS
+  file's <executable>/<arguments>/<classpath/> shape with an exec:java invocation instead
+  of exec:exec crashes immediately with "Cannot store value into array ... element type
+  mismatch" - exec:java binds "arguments" to the target class's own main(String[] args),
+  not Maven launch flags, and <classpath/> is not a plain string, so it can never go there.
+  The two shapes must never be mixed.
+
   exec-maven-plugin 3.1.0's "java" goal (exec:java) has NO "jvmArguments" parameter at
   all - confirmed by reading the actual mojo descriptor from the jar. It also runs inside
   Maven's own already-started JVM, so it cannot apply module-opening flags even in
