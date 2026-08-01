@@ -45,10 +45,20 @@ _EXIT_COMMANDS = {"/exit", "/quit"}
 def _print_banner(config_path: Optional[str]) -> None:
     from kriya import __version__
 
-    click.secho(f"╭─ Kriya {__version__} interactive session " + "─" * 20, fg="blue")
-    click.secho(f"│  config: {config_path or '(default resolution)'}", fg="blue")
-    click.secho("│  Type /help for session commands, /exit to quit.", fg="blue")
-    click.secho("╰" + "─" * 58, fg="blue")
+    title = f"Kriya {__version__} interactive session"
+    body_lines = [
+        f"config: {config_path or '(default resolution)'}",
+        "Type /help for session commands, /exit to quit.",
+    ]
+    # Top/bottom border length is derived from whichever line is longest -
+    # title or body - so the box stays a clean rectangle regardless of
+    # version-string length or how long a --config path is.
+    width = max(len(title) + 3, *(len(line) + 3 for line in body_lines))
+
+    click.secho(f"╭─ {title} " + "─" * (width - len(title) - 3), fg="blue")
+    for line in body_lines:
+        click.secho(f"│  {line}", fg="blue")
+    click.secho("╰" + "─" * width, fg="blue")
 
 
 _META_COMMANDS = [
