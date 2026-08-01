@@ -37,7 +37,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
+          # No cache: pip here - this version overlaps the test matrix's own
+          # 3.12 job, and actions/setup-python's auto-generated cache key has
+          # no per-job discriminator, so two jobs sharing a Python version
+          # race to save the same key ("Failed to save: Unable to reserve
+          # cache... another job may be creating this cache" - harmless, but
+          # noisy). This job does one pip install; caching isn't worth the
+          # collision. Only the 5-way test matrix actually benefits.
 
       - name: Install Kriya (declared dependency ranges)
         run: pip install -e ".[dev]"
@@ -54,7 +60,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-          cache: pip
+          # No cache: pip - see the lint job's comment; this overlaps the
+          # test matrix's own 3.14 job.
 
       - name: Install from requirements.txt (pinned lock file)
         run: |
@@ -86,7 +93,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
+          # No cache: pip - see the lint job's comment; this overlaps both
+          # the test matrix's own 3.12 job and the lint job.
 
       - name: Install Kriya (declared dependency ranges)
         run: pip install -e ".[dev]"
