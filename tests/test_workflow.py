@@ -2156,6 +2156,60 @@ def test_create_git_worktree_removes_files_deleted_in_working_tree(tmp_path):
     assert not os.path.exists(os.path.join(worktree_path, "extra.txt"))
 
 
+def test_create_git_worktree_reset_advances_to_new_commits_on_reuse(tmp_path):
+    """Regression test for a real bug caught live: a worktree created via
+    `git worktree add --detach` gets its own fixed HEAD pointer from creation
+    time, not a moving ref - so `git checkout -f HEAD` run to "reset" it on a
+    later, separate create_git_worktree call (a real, normal case: a second
+    `generate` invocation on the same project) resolved against the worktree's
+    own frozen pointer and was a no-op. Any commit landed on the real repo
+    after the worktree's first creation became permanently invisible to the
+    sandbox - confirmed live: a goal explicitly telling the model to preserve
+    an already-committed pom.xml correctly didn't rewrite it, so the sandbox
+    compiled with a `pom.xml` that had reverted to a state from before ANY of
+    that project's real work existed, failing every import."""
+    from kriya.workflow.workflow import create_git_worktree
+
+    _init_git_repo(tmp_path)
+
+    # First creation - detaches the worktree at this initial commit.
+    worktree_path = create_git_worktree(str(tmp_path))
+    assert not os.path.exists(os.path.join(worktree_path, "pom.xml"))
+
+    # A separate, later `generate` invocation commits new content to the real
+    # repo (e.g. a prior milestone's output actually being applied+committed).
+    (tmp_path / "pom.xml").write_text("<project>committed after worktree creation</project>\n")
+    subprocess.run(["git", "add", "pom.xml"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add pom.xml"], cwd=tmp_path, check=True)
+
+    # Reusing the same (already-registered) worktree must pick up that commit,
+    # not silently stay frozen at the original creation-time commit.
+    worktree_path_again = create_git_worktree(str(tmp_path))
+    assert worktree_path_again == worktree_path
+    pom = open(os.path.join(worktree_path, "pom.xml")).read()
+    assert pom == "<project>committed after worktree creation</project>\n"
+
+
+def test_remove_git_worktree_resets_to_current_commit_not_creation_time_commit(tmp_path):
+    """Same underlying bug as the reset-on-reuse case above, but for
+    remove_git_worktree specifically: despite the name, it does not actually
+    delete/unregister the worktree (by design - it's reused across runs so
+    compile caches survive), it only resets it - and that reset had the exact
+    same "HEAD resolves against itself" no-op bug."""
+    from kriya.workflow.workflow import create_git_worktree, remove_git_worktree
+
+    _init_git_repo(tmp_path)
+    worktree_path = create_git_worktree(str(tmp_path))
+
+    (tmp_path / "pom.xml").write_text("<project>added after worktree creation</project>\n")
+    subprocess.run(["git", "add", "pom.xml"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add pom.xml"], cwd=tmp_path, check=True)
+
+    remove_git_worktree(str(tmp_path), worktree_path)
+
+    assert os.path.exists(os.path.join(worktree_path, "pom.xml"))
+
+
 @pytest.mark.asyncio
 async def test_workflow_multi_skill_gap_prompt_does_not_misattribute_extraction(tmp_path):
     """Regression test for a real bug caught live: when a single skill-gap prompt

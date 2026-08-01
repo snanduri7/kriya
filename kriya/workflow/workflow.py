@@ -86,6 +86,26 @@ def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) 
         logger.warning(f"Failed to sync uncommitted changes into worktree sandbox (non-fatal, sandbox may be missing uncommitted work): {e}")
 
 
+def _resolve_repo_head(repo_path: str) -> Optional[str]:
+    """Resolves repo_path's actual current HEAD commit SHA. Needed because a
+    worktree created with `git worktree add --detach` gets its own fixed HEAD
+    pointer at creation time, not a moving ref to repo_path's branch - so
+    `git checkout -f HEAD` run *inside* that worktree resolves against its own
+    frozen pointer and is a no-op, never advancing to match new commits landed
+    on repo_path since. Returns None if resolution fails (e.g. an empty repo
+    with no commits yet), in which case callers fall back to the old "HEAD"
+    behavior rather than crash."""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_path, capture_output=True, text=True,
+        )
+        if res.returncode == 0:
+            return res.stdout.strip()
+    except Exception as e:
+        logger.debug(f"Failed to resolve HEAD for '{repo_path}': {e}")
+    return None
+
+
 def create_git_worktree(repo_path: str) -> str:
     # 1. Quick pre-check: Is this a git repository?
     try:
@@ -125,8 +145,11 @@ def create_git_worktree(repo_path: str) -> str:
                 logger.debug(f"git worktree prune failed (non-fatal): {e}")
             subprocess.run(["git", "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
         else:
-            # Reset but preserve target/ and other build directories
-            subprocess.run(["git", "checkout", "-f", "HEAD"], cwd=worktree_path, check=True, capture_output=True)
+            # Reset but preserve target/ and other build directories. "HEAD" here
+            # must be resolved against repo_path, not checked out literally inside
+            # the worktree - see _resolve_repo_head for why.
+            target = _resolve_repo_head(repo_path)
+            subprocess.run(["git", "checkout", "-f", target or "HEAD"], cwd=worktree_path, check=True, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, check=True, capture_output=True)
 
     # A worktree only ever reflects git HEAD - it knows nothing about uncommitted
@@ -137,9 +160,19 @@ def create_git_worktree(repo_path: str) -> str:
     return worktree_path
 
 def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
+    """Despite the name, this resets the worktree back to repo_path's current
+    commit rather than truly deleting it - the worktree is deliberately reused
+    across runs so compile caches inside it (target/, node_modules/, etc.)
+    survive between retries and between separate generate/fix invocations. See
+    _resolve_repo_head for why "HEAD" can't be checked out literally here -
+    without it, this "cleanup" was a no-op that left the worktree permanently
+    frozen at whatever commit existed the first time it was ever created,
+    silently hiding every commit made since from any future run that doesn't
+    itself rewrite the affected files."""
     if os.path.exists(worktree_path):
         try:
-            subprocess.run(["git", "checkout", "-f", "HEAD"], cwd=worktree_path, capture_output=True)
+            target = _resolve_repo_head(repo_path)
+            subprocess.run(["git", "checkout", "-f", target or "HEAD"], cwd=worktree_path, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, capture_output=True)
         except Exception as e:
             logger.debug(f"Failed to clean up worktree at '{worktree_path}' (non-fatal): {e}")
