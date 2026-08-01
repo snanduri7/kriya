@@ -107,6 +107,32 @@ class AgentRolesConfig(BaseModel):
     run_verifier: AgentModelConfig = Field(default_factory=AgentModelConfig)
     skill_gap: AgentModelConfig = Field(default_factory=AgentModelConfig)
 
+class RoutingConfig(BaseModel):
+    # Off by default - kriya repl's natural-language routing (Version B) depends on
+    # local model/embedding quality that varies a lot by what's actually pulled, and
+    # an explicit opt-in avoids surprising an existing user with new behavior on
+    # upgrade. See spikes/version_b_routing/README.md for the feasibility validation
+    # this config directly reflects.
+    enabled: bool = Field(default=False)
+    # Deliberately separate from embedding.model, which stays tuned for the RAG
+    # code/doc index - a different task (long-form retrieval vs. short natural-
+    # language intent phrases). Validated head-to-head on a 136-case held-out test
+    # set: the packaged default RAG embedding model (nomic-embed-text) scored 77.2%
+    # effective routing accuracy vs 95.6% for embeddinggemma - not a marginal gap,
+    # and not something a silent fallback should paper over (see kriya/routing.py,
+    # which fails loudly rather than falling back to embedding.model on this
+    # model being unavailable).
+    embed_model: str = Field(default="embeddinggemma:latest")
+    # Below this cosine similarity to every command's exemplar centroid, treat the
+    # input as out of scope even if the LLM gate said otherwise - defense in depth.
+    reject_threshold: float = Field(default=0.3)
+    # If the best and second-best candidate commands are within this similarity
+    # margin of each other, ask which one instead of guessing (see
+    # kriya.routing.Router.route). Ported from AskWhenUncertainClassifier in the
+    # spike, where this was the single biggest lever separating a wrong guess from
+    # a safe outcome.
+    ask_margin: float = Field(default=0.05)
+
 class KnowledgeConfig(BaseModel):
     training_cutoff: str = Field(default="2023-12-01")  # ISO date
     check_enabled: bool = Field(default=True)
@@ -124,6 +150,7 @@ class AppConfig(BaseModel):
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     agent_llms: AgentRolesConfig = Field(default_factory=AgentRolesConfig)
+    routing: RoutingConfig = Field(default_factory=RoutingConfig)
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""

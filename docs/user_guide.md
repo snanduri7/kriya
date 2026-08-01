@@ -205,6 +205,47 @@ Type `/` to see every command Kriya supports, filtered live as you keep typing (
 
 This is deliberately a thin wrapper, not a new command language: every line dispatches into the exact same command group the regular one-shot CLI uses, so there's nothing REPL-specific to learn beyond what's documented in this guide already, and no risk of the session's behavior drifting from `kriya <command>` run standalone.
 
+#### 3.6.1 Natural-Language Routing (optional, off by default)
+
+Instead of typing an explicit command, you can type what you want in plain English and Kriya will figure out which command to run. Off by default - turn it on in your config:
+```yaml
+routing:
+  enabled: true
+```
+This needs its own embedding model pulled (separate from whatever `embedding.model` you use for code search - short natural-language phrases and long-form code retrieval are different jobs, and the packaged default embedding model scored meaningfully worse at this specific task in testing):
+```bash
+ollama pull embeddinggemma
+```
+Once enabled:
+```
+╭─ kriya
+╰─> why is this test flaky
+-> routed to: ask
+...
+╭─ kriya
+╰─> add a health check endpoint
+-> routed to: generate
+...
+```
+If Kriya can't tell between two commands, it asks instead of guessing:
+```
+╭─ kriya
+╰─> explain why this test keeps failing
+Not sure which you meant:
+  [1] fix        repair a specific error, bug, or failing test
+  [2] ask        answer a question about how the repo works
+Pick a number, or press Enter to cancel:
+```
+And if what you typed isn't something Kriya does (installing packages, deploying, git operations, and similar are explicitly out of scope - Kriya only writes/edits files inside a reviewable, human-approved change), it says so rather than guessing at the closest command:
+```
+╭─ kriya
+╰─> install express and add it to package.json
+I don't think that's something I can do - I write/fix/review/analyze code
+and manage skills, but I don't run commands, install packages, or touch
+live infrastructure. Type /help to see what I can do.
+```
+An explicit command you type always takes priority over routing - `generate "..."` still dispatches directly, with zero LLM/embedding overhead, exactly as if routing were off.
+
 ---
 
 ## 4. Engineering Skills

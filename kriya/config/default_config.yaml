@@ -41,6 +41,18 @@ embedding:
   model: "nomic-embed-text:latest"
   base_url: "http://localhost:11434/v1"
 
+# Natural-language command routing inside `kriya repl` (type a request instead of
+# an explicit command, e.g. "why is this test flaky" instead of `ask "..."`).
+# Off by default - flip enabled to true to turn it on. embed_model is separate
+# from embedding.model on purpose (see spikes/version_b_routing/README.md);
+# requires `ollama pull embeddinggemma` (or whatever embed_model you set) in
+# addition to whatever model embedding.model already uses.
+routing:
+  enabled: false
+  embed_model: "embeddinggemma:latest"
+  reject_threshold: 0.3
+  ask_margin: 0.05
+
 autonomy:
   mode: "human-in-the-loop"
   sensitive_paths:

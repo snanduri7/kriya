@@ -1,8 +1,11 @@
+from unittest.mock import AsyncMock, MagicMock
+
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
 from kriya.cli import main as cli_main
-from kriya.repl import _dispatch, _inject_config, _SlashCommandCompleter
+from kriya.repl import _dispatch, _inject_config, _resolve_clarify, _route_line, _SlashCommandCompleter
+from kriya.routing import CLARIFY, UNROUTABLE, RoutingModelUnavailable, RoutingResult
 
 
 def _complete(text):
@@ -97,3 +100,107 @@ def test_no_completions_once_a_command_and_space_have_been_typed():
 
 def test_no_completions_for_a_non_slash_line():
     assert _complete("generate") == []
+
+
+def _mock_router(result: RoutingResult) -> MagicMock:
+    router = MagicMock()
+    router.route = AsyncMock(return_value=result)
+    return router
+
+
+def test_route_line_bypasses_routing_for_a_known_command():
+    # A recognized command always dispatches directly, even with routing
+    # enabled - no LLM/embedding call should happen at all.
+    router = _mock_router(RoutingResult(label="generate", score=0.9))
+    tokens, returned_router = _route_line(
+        cli_main, router, session=MagicMock(), line="ask something", tokens=["ask", "something"]
+    )
+    assert tokens == ["ask", "something"]
+    router.route.assert_not_called()
+    assert returned_router is router
+
+
+def test_route_line_returns_tokens_unchanged_when_routing_disabled():
+    tokens, returned_router = _route_line(
+        cli_main, router=None, session=MagicMock(), line="not a command", tokens=["not-a-real-command"]
+    )
+    assert tokens == ["not-a-real-command"]
+    assert returned_router is None
+
+
+def test_route_line_reports_unroutable_and_dispatches_nothing(capsys):
+    router = _mock_router(RoutingResult(label=UNROUTABLE, score=0.1))
+    tokens, returned_router = _route_line(
+        cli_main, router, session=MagicMock(), line="delete all my files",
+        tokens=["delete", "all", "my", "files"],
+    )
+    assert tokens is None
+    assert returned_router is router
+    assert "I don't think that's something I can do" in capsys.readouterr().out
+
+
+def test_route_line_dispatches_the_resolved_command(capsys):
+    router = _mock_router(RoutingResult(label="ask", score=0.8))
+    tokens, _ = _route_line(
+        cli_main, router, session=MagicMock(), line="why is this slow",
+        tokens=["why", "is", "this", "slow"],
+    )
+    assert tokens == ["ask", "why is this slow"]
+    assert "routed to: ask" in capsys.readouterr().out
+
+
+def test_route_line_clarify_dispatches_the_users_choice():
+    router = _mock_router(RoutingResult(label=CLARIFY, score=0.7, candidates=["fix", "ask"]))
+    session = MagicMock()
+    session.prompt = MagicMock(return_value="2")
+    tokens, _ = _route_line(
+        cli_main, router, session=session, line="explain why this test keeps failing",
+        tokens=["explain", "why", "this", "test", "keeps", "failing"],
+    )
+    assert tokens == ["ask", "explain why this test keeps failing"]
+
+
+def test_route_line_clarify_cancelled_dispatches_nothing():
+    router = _mock_router(RoutingResult(label=CLARIFY, score=0.7, candidates=["fix", "ask"]))
+    session = MagicMock()
+    session.prompt = MagicMock(return_value="")
+    tokens, _ = _route_line(
+        cli_main, router, session=session, line="something ambiguous", tokens=["something", "ambiguous"]
+    )
+    assert tokens is None
+
+
+def test_route_line_disables_router_on_model_unavailable(capsys):
+    router = MagicMock()
+    router.route = AsyncMock(side_effect=RoutingModelUnavailable("embeddinggemma not pulled"))
+    tokens, returned_router = _route_line(
+        cli_main, router, session=MagicMock(), line="add a feature", tokens=["add", "a", "feature"]
+    )
+    assert tokens is None
+    assert returned_router is None
+    assert "Disabling natural-language routing" in capsys.readouterr().out
+
+
+def test_resolve_clarify_accepts_a_numeric_choice():
+    session = MagicMock()
+    session.prompt = MagicMock(return_value="1")
+    assert _resolve_clarify(session, ["fix", "ask"]) == "fix"
+
+
+def test_resolve_clarify_accepts_a_typed_command_name():
+    session = MagicMock()
+    session.prompt = MagicMock(return_value="ask")
+    assert _resolve_clarify(session, ["fix", "ask"]) == "ask"
+
+
+def test_resolve_clarify_cancels_on_empty_input():
+    session = MagicMock()
+    session.prompt = MagicMock(return_value="")
+    assert _resolve_clarify(session, ["fix", "ask"]) is None
+
+
+def test_resolve_clarify_cancels_on_invalid_choice(capsys):
+    session = MagicMock()
+    session.prompt = MagicMock(return_value="banana")
+    assert _resolve_clarify(session, ["fix", "ask"]) is None
+    assert "Not a valid choice" in capsys.readouterr().out
