@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from click.testing import CliRunner
 
@@ -27,6 +29,47 @@ def test_top_level_help(runner):
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0, result.output
     assert "Kriya" in result.output
+
+
+def test_bare_invocation_on_non_tty_prints_help_and_exits_cleanly(runner):
+    # CliRunner's stdin is never a real TTY, so bare invocation must fall back
+    # to today's exact behavior (help text, clean exit) rather than trying to
+    # start the interactive session - a script/CI job hitting bare `kriya` by
+    # accident must fail fast, not hang waiting on stdin.
+    result = runner.invoke(main, [])
+    assert result.exit_code == 0, result.output
+    assert "Usage:" in result.output and "Kriya" in result.output
+
+
+def _invoke_bare_in_process(args):
+    """CliRunner.invoke() swaps out sys.stdin internally to simulate piped
+    input, which would make a `patch("sys.stdin.isatty", ...)` applied before
+    the swap invisible to the code under test - so the two tests below invoke
+    Click's own programmatic-invocation entry point directly instead, the
+    same mechanism kriya/repl.py itself uses to dispatch commands, with
+    sys.stdin.isatty patched on the real (unswapped) sys.stdin."""
+    import click
+    try:
+        main.main(args=args, prog_name="kriya", standalone_mode=False)
+    except click.exceptions.Exit:
+        pass
+
+
+def test_bare_invocation_on_a_real_tty_starts_the_repl():
+    with patch("sys.stdin.isatty", return_value=True), \
+         patch("kriya.repl.run_repl") as mock_run_repl:
+        _invoke_bare_in_process([])
+    # invoked without --config: config_path should be None
+    mock_run_repl.assert_called_once_with(None)
+
+
+def test_bare_invocation_on_a_real_tty_passes_through_the_config_path(tmp_path):
+    config_file = tmp_path / "kriya.yaml"
+    config_file.write_text("paths:\n  skills: ./skills\n")
+    with patch("sys.stdin.isatty", return_value=True), \
+         patch("kriya.repl.run_repl") as mock_run_repl:
+        _invoke_bare_in_process(["--config", str(config_file)])
+    mock_run_repl.assert_called_once_with(str(config_file))
 
 
 @pytest.mark.parametrize("command", TOP_LEVEL_COMMANDS)

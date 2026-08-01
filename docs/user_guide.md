@@ -186,10 +186,14 @@ mvn clean compile | kriya -c kriya.yaml fix
 `fix` supports the same `--resume`/`--resume-id` checkpoint resume as `generate` (above) - re-run with the same `-e`/piped error text plus `--resume` after a crash.
 
 ### 3.6 Interactive Session (`repl`)
-Instead of restarting the CLI for every command, start a session and issue several in a row:
+Instead of restarting the CLI for every command, start a session and issue several in a row. On a real terminal, this is now the default for bare invocation - no subcommand needed:
 ```bash
+kriya -c kriya.yaml
+# equivalent, if you prefer to be explicit (e.g. in a script/alias):
 kriya -c kriya.yaml repl
 ```
+Bare invocation only starts the session when stdin is an actual interactive terminal - piped input or a non-interactive context (a script, CI) gets today's usual help text instead, so nothing hangs waiting on input by accident. Use `kriya repl` explicitly if you want to be unambiguous either way.
+
 Inside the session, type commands exactly as you would after `kriya` on the command line, just without `kriya` itself and without repeating `-c kriya.yaml` (it's captured once at startup and applied to every command automatically, unless a line supplies its own `-c`/`--config`):
 ```
 ╭─ kriya

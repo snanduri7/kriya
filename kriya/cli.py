@@ -55,7 +55,7 @@ def configure_logging(cfg: AppConfig) -> None:
 
     logging.basicConfig(level=level, handlers=handlers)
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')
 @click.pass_context
 def main(ctx: click.Context, config: Optional[str]) -> None:
@@ -68,6 +68,21 @@ def main(ctx: click.Context, config: Optional[str]) -> None:
         click.secho(f"Error loading configuration: {e}", fg="red", err=True)
         sys.exit(1)
     configure_logging(ctx.obj['config'])
+
+    # No subcommand given: drop into the interactive session, same as bare
+    # `python`/`node`/`claude` - but only on a real interactive terminal.
+    # prompt_toolkit actively breaks on non-TTY input (garbled/hangs), and a
+    # script or CI job that hits bare `kriya` by accident (a typo, a bad
+    # pipeline) should fail fast with the usual help text, not hang waiting
+    # on stdin forever - same TTY-safety judgment already used elsewhere in
+    # this CLI (generate/fix's approval gates).
+    if ctx.invoked_subcommand is None:
+        if sys.stdin.isatty():
+            from kriya.repl import run_repl
+            run_repl(ctx.obj.get('config_path'))
+        else:
+            click.echo(ctx.get_help())
+        ctx.exit()
 
 @main.command()
 def version() -> None:
