@@ -8,7 +8,7 @@ from click.testing import CliRunner
 from kriya.cli import main
 
 TOP_LEVEL_COMMANDS = [
-    "version", "config", "doctor", "plugins", "analyze",
+    "version", "config", "doctor", "repl", "plugins", "analyze",
     "generate", "review", "ask", "learn", "fix", "traces",
 ]
 SUBCOMMAND_GROUPS = {

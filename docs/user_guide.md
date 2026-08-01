@@ -185,6 +185,22 @@ mvn clean compile | kriya -c kriya.yaml fix
 ```
 `fix` supports the same `--resume`/`--resume-id` checkpoint resume as `generate` (above) - re-run with the same `-e`/piped error text plus `--resume` after a crash.
 
+### 3.6 Interactive Session (`repl`)
+Instead of restarting the CLI for every command, start a session and issue several in a row:
+```bash
+kriya -c kriya.yaml repl
+```
+Inside the session, type commands exactly as you would after `kriya` on the command line, just without `kriya` itself and without repeating `-c kriya.yaml` (it's captured once at startup and applied to every command automatically, unless a line supplies its own `-c`/`--config`):
+```
+╭─ kriya
+╰─> generate "add a health check endpoint" -y
+╭─ kriya
+╰─> ask "how does the retry loop work?"
+```
+Type `/` to see every command Kriya supports, filtered live as you keep typing (e.g. `/gen` narrows to `generate`) - selecting one replaces what you typed with the bare command name, ready to add arguments. A few session-only commands are always available: `/help`, `/clear`, and `/exit`/`/quit` (Ctrl-D also works) to end the session.
+
+This is deliberately a thin wrapper, not a new command language: every line dispatches into the exact same command group the regular one-shot CLI uses, so there's nothing REPL-specific to learn beyond what's documented in this guide already, and no risk of the session's behavior drifting from `kriya <command>` run standalone.
+
 ---
 
 ## 4. Engineering Skills

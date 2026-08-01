@@ -169,6 +169,16 @@ def doctor(ctx: click.Context) -> None:
 
 @main.command()
 @click.pass_context
+def repl(ctx: click.Context) -> None:
+    """Start an interactive session - issue several commands in a row without
+    restarting the CLI each time. Each command inside the session is the exact
+    same 'kriya <command>' you'd run standalone (e.g. generate "goal" -y), just
+    without the leading 'kriya' and with --config applied automatically."""
+    from kriya.repl import run_repl
+    run_repl(ctx.obj.get('config_path'))
+
+@main.command()
+@click.pass_context
 def plugins(ctx: click.Context) -> None:
     """List loaded plugins and their lifecycle status."""
     cfg: AppConfig = ctx.obj['config']

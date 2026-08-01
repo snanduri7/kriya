@@ -17,6 +17,7 @@ dependencies = [
     "mcp>=2.0.0",
     "httpx>=0.24.0",
     "numpy>=1.24.0",
+    "prompt_toolkit>=3.0.0",
 ]
 
 [project.optional-dependencies]
