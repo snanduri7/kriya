@@ -37,6 +37,13 @@ include = ["kriya*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
+markers = [
+    "live_model: requires a real local LLM/embedding endpoint - excluded by default (see tests/test_live_smoke.py), run explicitly with `pytest -m live_model`",
+]
+# Excluded by default so a bare `pytest` never unexpectedly hangs/fails for
+# lacking a local Ollama instance - CI's live-model job opts back in with
+# `pytest -m live_model`, and so can a developer who has Ollama running.
+addopts = "-m \"not live_model\""
 
 [tool.ruff]
 line-length = 120

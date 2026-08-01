@@ -19,12 +19,16 @@ pip install -e .                    # installs `kriya` and `kriya-mcp` console s
 .venv/bin/kriya --config kriya.yaml <command>   # -c/--config points at a project config
 
 # Tests
-.venv/bin/pytest                     # full suite (asyncio_mode = strict, see pyproject.toml)
+.venv/bin/pytest                     # full suite (asyncio_mode = strict, see pyproject.toml) - entirely mocked, no live model calls
 .venv/bin/pytest tests/test_workflow.py            # single file
 .venv/bin/pytest tests/test_workflow.py::test_workflow_fallback_chain   # single test
+.venv/bin/pytest -m live_model       # tests/test_live_smoke.py only - needs a real local Ollama running, excluded by default
 ```
 
 There is no separate lint/format command configured in this repo — don't invent one.
+
+## Live-model CI tier (`tests/test_live_smoke.py`, `.github/workflows/ci.yml`'s `live-model-smoke` job)
+Every other test in this repo runs against mocks - zero live LLM/embedding calls. `pyproject.toml`'s `addopts = '-m "not live_model"'` excludes this tier by default (both locally and in the `test`/`lint`/`lock-file` CI jobs); pass `-m live_model` explicitly to run it. CI runs it in a separate, `continue-on-error: true` job that installs Ollama fresh and pulls two small models (`qwen2.5-coder:1.5b`, `all-minilm`) - free on GitHub-hosted runners since this repo is public. The bar is deliberately narrow: "did the real pipeline complete without crashing on a real API response shape," not code-generation quality - a small CI-pulled model isn't held to the same bar as whatever model a real project configures. Note `SkillEngine` always loads Kriya's own global skill library (`load_global=True`, no config override) in addition to any project-local skills, which meaningfully inflates prompt size regardless of goal relevance - confirmed live to matter for a small model's throughput, hence the generous 600s timeout on the `generate` smoke test.
 
 ## Configuration resolution
 

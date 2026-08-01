@@ -159,10 +159,15 @@ Run the local MCP tool server:
 ```
 
 ### Run Tests
-Execute the comprehensive test suite (42 unit tests):
+Execute the test suite (entirely mocked - no live LLM/embedding calls, runs offline):
 ```bash
 .venv/bin/pytest
 ```
+A separate, deliberately excluded tier (`tests/test_live_smoke.py`, marked `live_model`) runs the real CLI against an actual local LLM/embedding endpoint - narrow assertions ("did the real pipeline complete without crashing", not code-generation quality). Needs Ollama running locally:
+```bash
+.venv/bin/pytest -m live_model
+```
+CI runs this tier in a separate, non-blocking job (`.github/workflows/ci.yml`'s `live-model-smoke`) that installs Ollama and pulls a small model fresh - it exists to catch integration/regression bugs in Kriya's own request/response handling that only a real model response can trigger, not to grade generation quality.
 
 ---
 
