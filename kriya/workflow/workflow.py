@@ -929,6 +929,30 @@ def _check_java_toolchain_mismatch(stack: str) -> Optional[str]:
     )
 
 
+def _java_toolchain_fact() -> Optional[str]:
+    """Surfaces the actual, resolved target JVM as a concrete fact for the
+    Planner/Architect/Developer prompts - not a warning like
+    _check_java_toolchain_mismatch(), just ground truth. Skill rules that are
+    genuinely JDK-version-conditional (e.g. a startup flag required on one JDK
+    range and fatal on another) are otherwise unverifiable at generation time:
+    the model has no way to reason about "is my applicable range satisfied"
+    without knowing the actual number. Confirmed as a real gap during
+    golden-use-case validation - a skill rule correct for JDK 17.0.10-23
+    (-Djava.security.manager=allow) was silently wrong on JDK 24+ (JEP 486
+    removed the Security Manager entirely), and nothing in the prompt ever told
+    the model what JDK it was actually generating for. Prefers the JDK 'mvn'
+    itself will build/run against (what a generated app's exec:java/exec:exec
+    invocation actually executes under) over plain 'java', falling back to
+    'java' if mvn isn't present. Returns None if neither tool is found - a
+    non-Java project never pays for or sees this."""
+    from kriya.tools.validate import check_java_toolchain
+    toolchain = check_java_toolchain()
+    version = toolchain["mvn_java_version"] or toolchain["java_version"]
+    if not version:
+        return None
+    return f"Target JVM (resolved on this machine via 'mvn'/'java'): JDK {version}."
+
+
 def classify_environment_failure(error_text: str) -> Optional[str]:
     """Returns a short, human-readable description if error_text shows a failure
     class no amount of code regeneration can ever fix - a JVM crashing during its
@@ -1363,6 +1387,9 @@ class WorkflowEngine:
         se.discover_and_load()
         
         convention_prompt = ""
+        java_toolchain_fact = _java_toolchain_fact()
+        if java_toolchain_fact:
+            convention_prompt += f"\n\n=== Environment Fact ===\n{java_toolchain_fact}\n"
         if gap_report.has_gaps:
             convention_prompt += "\n\n=== KNOWLEDGE GUARD SAFETY CONSTRAINTS ===\n"
             for g in gap_report.gaps:

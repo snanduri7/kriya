@@ -28,6 +28,7 @@ from kriya.workflow.workflow import (
     _check_java_toolchain_mismatch,
     _filter_misattributed_extraction,
     _is_near_duplicate_rule,
+    _java_toolchain_fact,
     _likely_misattributed_sibling,
     _normalize_error_for_repeat_detection,
     _resolve_file_paths_from_design,
@@ -705,7 +706,10 @@ async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
     assert res["quality_gates_passed"] is True
     assert res["toolchain_warning"] is not None
     assert "JDK 17" in res["toolchain_warning"] and "JDK 26" in res["toolchain_warning"]
-    mock_toolchain.assert_called_once()
+    # Called twice total: once early/unconditionally for the "Target JVM" fact
+    # (before stack is even known), once more from the retry loop's own
+    # mismatch check once stack resolves to java - not once per retry attempt.
+    assert mock_toolchain.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -747,7 +751,9 @@ async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
         )
 
     assert res["quality_gates_passed"] is True
-    mock_toolchain.assert_called_once()
+    # Called twice total (fact + mismatch-check), not once per retry attempt -
+    # the "only once across retries" property this test is really guarding.
+    assert mock_toolchain.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -766,7 +772,16 @@ async def test_workflow_skips_toolchain_check_for_non_java_stack(tmp_path):
 
     we = WorkflowEngine(kernel, llm)
 
-    with patch("kriya.tools.validate.check_java_toolchain") as mock_toolchain:
+    # check_java_toolchain() IS called once, early and unconditionally, to
+    # surface the "Target JVM" fact (see test_java_toolchain_fact_* and
+    # test_workflow_injects_target_jvm_fact_into_planner_prompt) - stack isn't
+    # knowable that early. What must NOT happen is a second call once the
+    # retry loop confirms this run's actual stack is python, not java.
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": False, "java_version": None,
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }) as mock_toolchain:
         res = await we.run_generation_workflow(
             goal="Create app",
             workspace_path=str(tmp_path)
@@ -774,7 +789,74 @@ async def test_workflow_skips_toolchain_check_for_non_java_stack(tmp_path):
 
     assert res["quality_gates_passed"] is True
     assert res["toolchain_warning"] is None
-    mock_toolchain.assert_not_called()
+    assert mock_toolchain.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
+    """A JDK-version-conditional skill rule (e.g. a JVM startup flag required on
+    one JDK range, fatal on another) is unverifiable at generation time unless
+    the model has a concrete resolved JDK number to reason against - the fact
+    must reach the Planner prompt itself, not just be logged."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        res = await we.run_generation_workflow(
+            goal="Create app",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    planner_prompt = llm.complete.call_args_list[0].args[1]
+    assert "Target JVM" in planner_prompt
+    assert "JDK 26" in planner_prompt
+
+
+@pytest.mark.asyncio
+async def test_workflow_omits_target_jvm_fact_when_no_java_toolchain(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": False, "java_version": None,
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }):
+        res = await we.run_generation_workflow(
+            goal="Create app",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    planner_prompt = llm.complete.call_args_list[0].args[1]
+    assert "Target JVM" not in planner_prompt
 
 
 @pytest.mark.asyncio
@@ -2145,6 +2227,38 @@ def test_check_java_toolchain_mismatch_returns_message_on_mismatch():
         result = _check_java_toolchain_mismatch("java")
     assert result is not None
     assert "JDK 17" in result and "JDK 26" in result
+
+def test_java_toolchain_fact_none_when_neither_tool_found():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": False, "java_version": None,
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }):
+        assert _java_toolchain_fact() is None
+
+def test_java_toolchain_fact_prefers_mvn_version_over_java():
+    # mvn is what a generated app's exec:java/exec:exec invocation actually
+    # executes under - that's the number a JDK-version-conditional skill rule
+    # needs, even if it differs from plain 'java'.
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        result = _java_toolchain_fact()
+    assert result is not None
+    assert "JDK 26" in result
+    assert "JDK 17" not in result
+
+def test_java_toolchain_fact_falls_back_to_java_version_when_mvn_absent():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }):
+        result = _java_toolchain_fact()
+    assert result is not None
+    assert "JDK 17" in result
 
 @pytest.mark.asyncio
 async def test_augment_error_with_live_lookup_no_terms_never_searches():
