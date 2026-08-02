@@ -1530,7 +1530,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
         )
 
     assert res["quality_gates_passed"] is True
-    mock_search.assert_called_once_with("widgetlib documentation", "http://fake-search:8080", top_k=3)
+    mock_search.assert_called_once_with("widgetlib example", "http://fake-search:8080", top_k=3)
     mock_fetch.assert_called_once_with("https://example.com/widgetlib")
     assert skill_gap_calls == []  # human-ask path never fired - live lookup resolved it first
 
@@ -1935,7 +1935,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
         )
 
     assert res["quality_gates_passed"] is True
-    mock_search.assert_called_once_with("gizmolib documentation", "http://fake-search:8080", top_k=3)
+    mock_search.assert_called_once_with("gizmolib example", "http://fake-search:8080", top_k=3)
     mock_fetch.assert_called_once_with("https://example.com/gizmolib")
 
     se = SkillEngine(str(skills_dir), load_global=False)
@@ -2546,7 +2546,7 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
 
     assert res["quality_gates_passed"] is True
     mock_search.assert_called_once_with(
-        "org.codehaus.mojo:exec-maven-plugin documentation", "http://fake-search:8080", top_k=3
+        "org.codehaus.mojo:exec-maven-plugin example", "http://fake-search:8080", top_k=3
     )
 
     third_attempt_prompt = llm.complete.await_args_list[4].args[1]

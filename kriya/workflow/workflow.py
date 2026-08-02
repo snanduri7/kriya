@@ -834,14 +834,32 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
     something extractable - a single unhelpful top result (a marketing/landing page,
     confirmed to happen in real testing) shouldn't sink the whole lookup. `url`/
     `snippet` at the top level mirror the best candidate, for a simple human-facing
-    confirmation summary that doesn't need to enumerate every candidate."""
+    confirmation summary that doesn't need to enumerate every candidate.
+
+    Query suffix is "example", not "documentation" - confirmed live against a real
+    search backend (both a self-hosted SearXNG instance and, separately, Claude's
+    own web search, using the exact Maven-coordinate term shape this function
+    actually sends): "{term} documentation" consistently surfaces a project's
+    landing/index page (qpid.apache.org/documentation.html, qpid.apache.org/) with
+    nothing concrete to extract - "the landing-page problem" already documented
+    below. "{term} example" instead surfaced genuinely extractable content for
+    both Ignite and Qpid in the same live test - a GitHub example config file, an
+    official quick-start code sample with the correct top-level IgniteCache import
+    (the exact fact a real skill rule this session had to be hand-written for,
+    after a JAR was manually unzipped to find it), and a wiki how-to page with a
+    real Maven dependency block, confirmed independently to extract cleanly via
+    this project's own fetch_url_text(). Deliberately kept as a single query, not
+    a multi-variant fallback chain - a real self-hosted SearXNG instance got
+    rate-limited/CAPTCHA'd by its own upstream engines during this same live
+    testing after a modest handful of requests, so multiplying query volume
+    per term is a real reliability risk, not just a latency cost."""
     from kriya.tools.search import search_web
     from kriya.tools.web import fetch_url_text
 
     resolved = []
     for term in terms:
         try:
-            results = await search_web(f"{term} documentation", search_base_url, top_k=top_k)
+            results = await search_web(f"{term} example", search_base_url, top_k=top_k)
         except Exception as ex:
             logger.debug(f"Live lookup search failed for '{term}': {ex}")
             continue
