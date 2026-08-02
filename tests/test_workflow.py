@@ -251,6 +251,85 @@ def test_resolve_run_command_ignores_non_maven_commands_for_dash_e():
     assert _resolve_run_command(["gradle", "run"]) == ["gradle", "run"]
     assert _resolve_run_command(["node", "main.js"]) == ["node", "main.js"]
 
+_EXEC_EXEC_SHAPED_POM = """<project>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <configuration>
+          <executable>java</executable>
+          <arguments>
+            <argument>--add-opens=java.base/java.nio=ALL-UNNAMED</argument>
+            <argument>-classpath</argument>
+            <classpath/>
+            <argument>${exec.mainClass}</argument>
+          </arguments>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+
+_EXEC_JAVA_SHAPED_POM = """<project>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>${exec.mainClass}</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+
+def test_resolve_run_command_corrects_exec_java_to_exec_exec_when_pom_needs_it(tmp_path):
+    """Regression test for a real bug found via a live golden-use-case run
+    (Ignite Spring XML app): RunVerifierAgent.judge() only ever sees the
+    Architect's own already-minimized design text (confirmed live: just a
+    bare file list, not the richer Planner plan that correctly said
+    "exec:exec") - never the matched skill's rules or the actual pom.xml
+    written - so it inferred `mvn -e exec:java` against a pom.xml written in
+    the exec:exec-only <arguments>/<classpath/> shape (correctly, per the
+    ignite-java17 skill's own --add-opens guidance). exec:java's "arguments"
+    parameter is a plain String[] and cannot parse the bare <classpath/>
+    placeholder at all - it crashed identically on every retry ("Cannot
+    store value into array: ... cannot cast ... to ... String"), burning the
+    entire retry budget on a problem that was never in the generated code.
+    The real pom.xml is ground truth for which goal will work - checking it
+    directly doesn't depend on skill/plan/design guidance surviving intact
+    through the pipeline."""
+    (tmp_path / "pom.xml").write_text(_EXEC_EXEC_SHAPED_POM)
+    assert _resolve_run_command(
+        ["mvn", "-e", "exec:java"], str(tmp_path)
+    ) == ["mvn", "-e", "exec:exec"]
+
+def test_resolve_run_command_leaves_exec_java_alone_when_pom_does_not_need_exec_exec(tmp_path):
+    (tmp_path / "pom.xml").write_text(_EXEC_JAVA_SHAPED_POM)
+    assert _resolve_run_command(
+        ["mvn", "-e", "exec:java"], str(tmp_path)
+    ) == ["mvn", "-e", "exec:java"]
+
+def test_resolve_run_command_skips_exec_goal_correction_without_workspace_path(tmp_path):
+    # Same exec:exec-shaped pom as the fix-triggering test above, but no
+    # workspace_path given - must not attempt the check at all (also proves
+    # every pre-existing single-arg call site/test keeps working unchanged).
+    (tmp_path / "pom.xml").write_text(_EXEC_EXEC_SHAPED_POM)
+    assert _resolve_run_command(["mvn", "-e", "exec:java"]) == ["mvn", "-e", "exec:java"]
+
+def test_resolve_run_command_handles_missing_pom_gracefully(tmp_path):
+    assert _resolve_run_command(
+        ["mvn", "-e", "exec:java"], str(tmp_path)
+    ) == ["mvn", "-e", "exec:java"]
+
+def test_resolve_run_command_exec_goal_correction_ignores_non_maven_commands(tmp_path):
+    (tmp_path / "pom.xml").write_text(_EXEC_EXEC_SHAPED_POM)
+    assert _resolve_run_command(["gradle", "exec:java"], str(tmp_path)) == ["gradle", "exec:java"]
+
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):
     """Configured agent_llms overrides must actually reach each role's real

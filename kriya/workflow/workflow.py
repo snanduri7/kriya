@@ -463,7 +463,7 @@ def normalize_written_filepath(filepath: str, workspace_path: str) -> Optional[s
     return filepath
 
 
-def _resolve_run_command(command: List[str]) -> List[str]:
+def _resolve_run_command(command: List[str], workspace_path: Optional[str] = None) -> List[str]:
     """Substitutes Kriya's own interpreter for a bare 'python' the Runtime
     Verification judge inferred, if 'python' isn't actually resolvable on PATH - a
     real, reproducible failure observed live: many systems (Homebrew installs,
@@ -489,6 +489,33 @@ def _resolve_run_command(command: List[str]) -> List[str]:
     # -e adds no output on a successful run, so this is safe to always apply.
     if command and os.path.basename(command[0]) == "mvn" and "-e" not in command:
         command = [command[0], "-e"] + list(command[1:])
+    # Correct an exec:java/exec:exec goal mismatch against the actual pom.xml on
+    # disk, when workspace_path is given. RunVerifierAgent.judge() only ever sees
+    # the Architect's own already-minimized design text (just a file list by
+    # convention - see extract_expected_files above), never the matched skill's
+    # rules or the file actually written, so a goal needing exec:exec (JVM
+    # startup flags, which exec:java can never apply - it runs inside Maven's
+    # own already-started JVM) can get judged as exec:java anyway. A bare,
+    # self-closing <classpath/> element inside exec-maven-plugin's <arguments>
+    # list is exec:exec's own recognized placeholder for the resolved project
+    # classpath - exec:java's "arguments" parameter is a plain String[] and
+    # cannot parse that element at all, crashing immediately and identically on
+    # every retry regardless of the generated code's correctness ("Cannot store
+    # value into array: ... cannot cast ... to ... String", confirmed live).
+    # The pom.xml itself is ground truth for which goal will actually work,
+    # more reliable than hoping skill guidance survives intact through the
+    # pipeline to judge(). Deliberately one-directional - only the confirmed,
+    # observed failure (exec:java chosen against an exec:exec-shaped pom) is
+    # corrected, not a speculative, unobserved reverse case.
+    if workspace_path and command and os.path.basename(command[0]) == "mvn" and "exec:java" in command:
+        pom_path = os.path.join(workspace_path, "pom.xml")
+        try:
+            with open(pom_path, "r", encoding="utf-8") as f:
+                pom_content = f.read()
+        except Exception:
+            pom_content = ""
+        if re.search(r"<classpath\s*/>", pom_content):
+            command = [tok if tok != "exec:java" else "exec:exec" for tok in command]
     return command
 
 EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")
@@ -2251,7 +2278,7 @@ class WorkflowEngine:
                                     run_verification_declined = True
                             if proceed_with_run:
                                 run_verification_confirmed = True
-                                resolved_run_commands = [_resolve_run_command(cmd) for cmd in judgment["run_commands"]]
+                                resolved_run_commands = [_resolve_run_command(cmd, worktree_path) for cmd in judgment["run_commands"]]
                                 if resolved_run_commands != judgment["run_commands"]:
                                     logger.info(
                                         "One or more inferred run commands aren't resolvable as given here - "
