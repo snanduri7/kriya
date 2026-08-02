@@ -115,6 +115,13 @@ Print the fully-merged config (defaults + your `kriya.yaml`) as JSON - useful fo
 ```
 Every `api_key` field and every MCP server's `env` values are redacted (`***REDACTED***`) before printing - safe to paste into a bug report or share on a call.
 
+### Check Plugin Health
+List every discovered plugin under `plugins.directory` and whether it actually initialized successfully (not just whether its class loaded):
+```bash
+.venv/bin/kriya plugins
+```
+Exits non-zero if any plugin's `initialize()` failed - each plugin is attempted independently, so one broken plugin doesn't hide the status of the others.
+
 ### Discover Active Tools
 List all active native and custom MCP tools:
 ```bash

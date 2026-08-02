@@ -236,20 +236,51 @@ def repl(ctx: click.Context) -> None:
 def plugins(ctx: click.Context) -> None:
     """List loaded plugins and their lifecycle status."""
     cfg: AppConfig = ctx.obj['config']
-    
+
     kernel = Kernel(config=cfg)
     pm = PluginManager(kernel=kernel, plugin_dir=cfg.plugins.directory)
-    
+
     try:
         pm.discover_and_load(enabled_plugins=cfg.plugins.enabled)
         loaded = pm.list_plugins()
         if not loaded:
             click.echo("No plugins loaded.")
             return
-            
-        click.secho(f"=== Loaded Plugins ({len(loaded)}) ===", bold=True)
-        for p in loaded:
-            click.echo(f"  - {p.name} (v{p.version})")
+
+        # Discovery (a successful __init__) only proves the plugin class exists
+        # and constructs cleanly - it does NOT prove initialize() (where a plugin
+        # actually registers its tools/listeners) succeeds. Every real call site
+        # that uses plugins for real (tools list/execute, generate) calls
+        # initialize() too, so this status command must actually attempt it as
+        # well - otherwise a plugin that discovers fine but fails to initialize
+        # would show here as if everything's fine while real usage breaks.
+        # Deliberately does its own per-plugin try/except here rather than
+        # calling PluginManager.initialize_all() (which raises on the first
+        # failure, aborting before later plugins are even attempted) - a status
+        # command should report every plugin's status, not stop at the first
+        # broken one.
+        errors_found = False
+
+        async def run_status():
+            nonlocal errors_found
+            await kernel.start()
+            click.secho(f"=== Loaded Plugins ({len(loaded)}) ===", bold=True)
+            for p in loaded:
+                try:
+                    await p.initialize()
+                    await kernel.events.emit("plugin_initialized", {"plugin_name": p.name, "plugin": p})
+                    status = click.style("INITIALIZED", fg="green")
+                except Exception as e:
+                    status = click.style(f"FAILED: {e}", fg="red")
+                    errors_found = True
+                click.echo(f"  - {p.name} (v{p.version}) [{status}]")
+            await pm.shutdown_all()
+            await kernel.stop()
+
+        asyncio.run(run_status())
+
+        if errors_found:
+            sys.exit(1)
     except Exception as e:
         click.secho(f"Error loading plugins: {e}", fg="red")
         sys.exit(1)
