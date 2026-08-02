@@ -768,5 +768,6 @@ class ReviewerAgent(BaseAgent):
             "Please adhere to these guidelines:\n"
             "1. Be pragmatic: If the user goal does not explicitly request unit tests, test files, or documentation (like a README), do not reject the submission solely for their absence. Instead, list them as optional recommendations.\n"
             "2. Avoid hallucinations: When checking long configuration files (like pom.xml or build files), double-check your analysis. Do not claim parameters, arguments, or dependencies are missing unless you are absolutely certain they are absent from the generated content.\n"
-            "3. Run Instructions: At the end of your review report, always include a section '## How to Run the Application' detailing exactly how to compile, start, and verify the generated application (e.g. specifying 'mvn clean compile', 'python main.py', etc.)."
+            "3. Run Instructions: At the end of your review report, always include a section '## How to Run the Application' detailing exactly how to compile, start, and verify the generated application (e.g. specifying 'mvn clean compile', 'python main.py', etc.).\n"
+            "4. Truncation awareness: if any file's content is marked TRUNCATED (content omitted because it exceeded the review size budget), you MUST explicitly say so at the top of your report and make clear your review only covers the portion you were actually shown - never silently review a partial file as if it were complete."
         )

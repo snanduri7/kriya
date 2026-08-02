@@ -974,27 +974,54 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
 def review(ctx: click.Context, file_path: str) -> None:
     """Run code review agent on a file or a folder."""
     cfg: AppConfig = ctx.obj['config']
-    
+
     llm = LLMClient(cfg)
-    reviewer = ReviewerAgent("reviewer", llm)
-    
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    REVIEW_EXTENSIONS = (".py", ".java", ".xml", ".rb")
+
     try:
         files_to_review = []
-        
+        truncated = False
+
         if os.path.isdir(file_path):
             click.secho(f"Scanning directory: {file_path}", fg="cyan")
-            # Try git status first
+            # Try git status first. -z gives NUL-separated, unquoted paths - the
+            # default porcelain format quotes paths containing spaces/special
+            # characters (e.g. `M "path with spaces/file.py"`), which a naive
+            # whitespace-split silently mangles.
             import subprocess
-            res = subprocess.run(["git", "status", "--porcelain"], cwd=file_path, capture_output=True, text=True)
-            if res.returncode == 0 and res.stdout.strip():
-                for line in res.stdout.splitlines():
-                    parts = line.strip().split()
-                    if len(parts) >= 2:
-                        filepath = parts[-1]
-                        full = os.path.join(file_path, filepath)
-                        if os.path.isfile(full) and filepath.endswith((".py", ".java", ".xml")):
-                            files_to_review.append((filepath, full))
-            
+            res = subprocess.run(["git", "status", "--porcelain", "-z"], cwd=file_path, capture_output=True, text=True)
+            if res.returncode == 0 and res.stdout.strip("\x00"):
+                entries = res.stdout.split("\x00")
+                i = 0
+                while i < len(entries):
+                    entry = entries[i]
+                    if not entry:
+                        i += 1
+                        continue
+                    # Normal entry: "XY PATH" (2-char status, space, path) - fixed
+                    # positions, not a whitespace split, so paths containing spaces
+                    # are handled correctly. A rename/copy entry is "XY NEW_PATH",
+                    # i.e. entry[3:] is ALREADY the current/destination path (the
+                    # one that exists on disk and is worth reviewing) - confirmed
+                    # directly against real git output, not assumed: `git status
+                    # --porcelain -z` puts the new path first and follows it with
+                    # a SEPARATE bare (no status prefix) entry holding the OLD
+                    # path, the opposite of what seems intuitive. That old-path
+                    # continuation entry must be consumed (to keep the NUL-split
+                    # stream aligned for whatever comes next) but never used as
+                    # the file to review - using it looks up a path that no
+                    # longer exists, silently finding nothing and falling through
+                    # to the fallback recursive scan instead.
+                    status, filepath = entry[:2], entry[3:]
+                    if status[0] in ("R", "C") and i + 1 < len(entries):
+                        i += 1  # consume and discard the old-path continuation entry
+                    full = os.path.join(file_path, filepath)
+                    if os.path.isfile(full) and filepath.endswith(REVIEW_EXTENSIONS):
+                        files_to_review.append((filepath, full))
+                    i += 1
+
             # Fallback to scanning folder recursively if no modified files found
             if not files_to_review:
                 ignore_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__"}
@@ -1002,14 +1029,21 @@ def review(ctx: click.Context, file_path: str) -> None:
                     dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
                     for file in files:
                         _, ext = os.path.splitext(file)
-                        if ext.lower() in {".py", ".java", ".xml"}:
+                        if ext.lower() in REVIEW_EXTENSIONS:
                             full = os.path.join(root, file)
                             rel = os.path.relpath(full, file_path)
                             files_to_review.append((rel, full))
                             if len(files_to_review) >= 10: # Cap at 10 files
+                                truncated = True
                                 break
-                    if len(files_to_review) >= 10:
+                    if truncated:
                         break
+                if truncated:
+                    click.secho(
+                        "Note: more than 10 reviewable files found - only the first 10 (by directory "
+                        "scan order) are being reviewed. Re-run against a subdirectory for full coverage.",
+                        fg="yellow",
+                    )
         else:
             files_to_review.append((os.path.basename(file_path), os.path.abspath(file_path)))
 
@@ -1018,20 +1052,72 @@ def review(ctx: click.Context, file_path: str) -> None:
             return
 
         click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan")
-        review_prompt = ""
         from kriya.analyzer.analyzer import chunk_file_syntactically
-        
+        from kriya.workflow.workflow import estimate_tokens
+
+        # Budget-aware batching. Confirmed live as a real, severe bug: with no
+        # size control at all, a file (or file set) exceeding the model's context
+        # window got silently truncated from the FRONT by the backend, cutting
+        # off every "=== File: ... ===" framing marker along with it - the model
+        # received an unlabeled fragment of raw code with no indication it was
+        # even being asked to review anything, produced a confused non-review
+        # response, and Kriya still reported success (exit 0) with no warning
+        # at all. Same context_window * 0.75 budget convention used throughout
+        # workflow.py, via the same estimate_tokens() heuristic - not a new one.
+        budget = int(cfg.llm.context_window * 0.75)
+        file_blobs = []  # (rel, blob_text, token_estimate)
         for rel, full in files_to_review:
             try:
                 with open(full, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read()
-                
+
                 chunks = chunk_file_syntactically(content, max_lines=150, overlap=15)
+                blob = ""
                 for c_idx, chunk_data in enumerate(chunks, 1):
                     suffix = f" (Part {c_idx})" if len(chunks) > 1 else ""
-                    review_prompt += f"\n=== File: {rel}{suffix} ===\n{chunk_data['text']}\n"
+                    blob += f"\n=== File: {rel}{suffix} ===\n{chunk_data['text']}\n"
+
+                if estimate_tokens(blob) > budget:
+                    # Even this one file alone doesn't fit - keep as many whole
+                    # chunks as fit and say so explicitly, both to the model (so
+                    # it knows it's working from a partial view, not confidently
+                    # reviewing what it thinks is the complete file) and to the
+                    # user.
+                    click.secho(
+                        f"Warning: '{rel}' is too large to review in full within the "
+                        f"configured context window - reviewing only the portion that fits.",
+                        fg="yellow",
+                    )
+                    kept = ""
+                    for c_idx, chunk_data in enumerate(chunks, 1):
+                        suffix = f" (Part {c_idx})" if len(chunks) > 1 else ""
+                        candidate = kept + f"\n=== File: {rel}{suffix} ===\n{chunk_data['text']}\n"
+                        if estimate_tokens(candidate) > budget:
+                            break
+                        kept = candidate
+                    blob = kept + f"\n=== File: {rel} - TRUNCATED: remainder omitted, file exceeds the review token budget ===\n"
+
+                file_blobs.append((rel, blob, estimate_tokens(blob)))
             except Exception as e:
                 click.secho(f"Failed to read file {rel}: {e}", fg="yellow")
+
+        # Greedily group files into batches that each fit the budget - the
+        # common case (a handful of small/medium files) still produces exactly
+        # ONE batch, unchanged behavior: one combined call, full cross-file
+        # architectural context for the reviewer. Only degrades to multiple
+        # separate calls when the combined content genuinely wouldn't fit.
+        batches: List[str] = []
+        current_batch = ""
+        current_tokens = 0
+        for _rel, blob, tokens in file_blobs:
+            if current_batch and current_tokens + tokens > budget:
+                batches.append(current_batch)
+                current_batch = ""
+                current_tokens = 0
+            current_batch += blob
+            current_tokens += tokens
+        if current_batch:
+            batches.append(current_batch)
 
         import sys
         def on_stream(token: str):
@@ -1039,11 +1125,13 @@ def review(ctx: click.Context, file_path: str) -> None:
             sys.stdout.flush()
 
         async def run_review():
-            click.secho("\n=== Code Review Report ===", bold=True, fg="cyan")
-            return await reviewer.run(review_prompt, stream_callback=on_stream)
-            
-        res = asyncio.run(run_review())
-        click.echo()
+            for i, batch_prompt in enumerate(batches, 1):
+                label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
+                click.secho(f"\n{label}", bold=True, fg="cyan")
+                await reviewer.run(batch_prompt, stream_callback=on_stream)
+                click.echo()
+
+        asyncio.run(run_review())
     except Exception as e:
         click.secho(f"Review failed: {e}", fg="red")
         sys.exit(1)
