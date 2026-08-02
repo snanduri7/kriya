@@ -358,16 +358,45 @@ def prompt_generate(ctx: click.Context, description: str) -> None:
     )
     
     async def run_gen():
-        click.secho("Generating optimized prompt...", fg="cyan")
+        click.secho("Generating optimized prompt...", fg="cyan", err=True)
         return await llm.complete(
             system_prompt=system_prompt,
             user_prompt=f"Create a developer prompt for: {description}"
         )
-        
+
     try:
         res = asyncio.run(run_gen())
-        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green")
+        # Status/header chrome goes to stderr, err=True - stdout carries ONLY
+        # the generated prompt text, so `kriya prompt generate "x" | kriya
+        # generate -y` (real shell piping, standalone CLI use) gets a clean
+        # goal rather than the two lines above mixed into it. Verified live
+        # before this fix: both lines appeared in stdout, which would have
+        # been fed to `generate` as if they were part of the actual goal.
+        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green", err=True)
         click.echo(res)
+
+        # Inside `kriya repl` there's no shell pipe between two typed lines -
+        # each dispatches independently and control returns to the prompt
+        # afterward - so the stdout/stderr split above doesn't help a REPL
+        # user chain this into a follow-up `generate` call. Auto-save to a
+        # fixed, predictable path and reuse generate's EXISTING --file flag
+        # (no new mechanism) rather than inventing REPL-specific reference
+        # syntax for what is, deliberately, a single concrete use case.
+        try:
+            kriya_dir = os.path.join(os.getcwd(), ".kriya")
+            os.makedirs(kriya_dir, exist_ok=True)
+            saved_path = os.path.join(kriya_dir, "last_prompt.md")
+            with open(saved_path, "w", encoding="utf-8") as f:
+                f.write(res)
+            click.secho(
+                f"\nSaved to {os.path.relpath(saved_path)} - run: generate --file {os.path.relpath(saved_path)} -y",
+                fg="blue", dim=True, err=True,
+            )
+        except Exception as e:
+            # Don't claim a save that didn't happen - warn instead of silently
+            # printing nothing, so the user isn't left wondering why the hint
+            # they expected never showed up.
+            click.secho(f"\n[WARNING] Could not auto-save the generated prompt to .kriya/last_prompt.md: {e}", fg="yellow", err=True)
     except Exception as e:
         click.secho(f"Failed to generate prompt: {e}", fg="red")
         sys.exit(1)
@@ -506,41 +535,48 @@ def analyze(ctx: click.Context, path: str, changed: bool, force: bool) -> None:
     # error or indication that a directory was actually required, despite the
     # command's own docstring saying exactly that.
     if not os.path.isdir(path):
-        click.secho(f"Error: '{path}' is a file, not a directory - analyze requires a repository directory.", fg="red")
+        click.secho(f"Error: '{path}' is a file, not a directory - analyze requires a repository directory.", fg="red", err=True)
         sys.exit(1)
     analyzer = RepositoryAnalyzer(path)
     try:
         model = analyzer.analyze()
+        # The JSON payload is the only thing that belongs on stdout - everything
+        # from here down is progress/status narration and goes to stderr
+        # (err=True / file=sys.stderr), so `kriya analyze . | jq .` (or any
+        # other downstream JSON consumer) doesn't choke on trailing chrome
+        # printed after the closing brace. Confirmed live before this fix: the
+        # index-building messages and progress bar were plain stdout output,
+        # appended right after the JSON on the same stream.
         click.echo(model.model_dump_json(indent=2))
-        
+
         if os.path.isdir(path):
-            click.secho("\nBuilding semantic repository index...", bold=True, fg="cyan")
-            
+            click.secho("\nBuilding semantic repository index...", bold=True, fg="cyan", err=True)
+
             progress_bar = None
-            
+
             def progress_callback(filepath: str, idx: int, total: int):
                 nonlocal progress_bar
                 if progress_bar is None:
-                    progress_bar = click.progressbar(length=total, label="Indexing repository files")
-                
+                    progress_bar = click.progressbar(length=total, label="Indexing repository files", file=sys.stderr)
+
                 # Check if it is a skip or compile
                 if "[Up-to-date]" in filepath:
                     label_text = f"Skipping: {filepath[:30]}"
                 else:
                     label_text = f"Indexing: {filepath[:30]}"
-                
+
                 progress_bar.label = label_text.ljust(45)
                 progress_bar.update(1)
-                
+
             async def run_indexing():
                 await analyzer.index_repository(cfg, changed=changed, force=force, progress_callback=progress_callback)
-                
+
             asyncio.run(run_indexing())
             if progress_bar:
                 progress_bar.render_finish()
-            click.secho("Success: Semantic index compiled and cached to disk.", fg="green")
+            click.secho("Success: Semantic index compiled and cached to disk.", fg="green", err=True)
     except Exception as e:
-        click.secho(f"Analysis failed: {e}", fg="red")
+        click.secho(f"Analysis failed: {e}", fg="red", err=True)
         sys.exit(1)
 
 @main.group(name="skills")
@@ -1111,8 +1147,15 @@ def review(ctx: click.Context, file_path: str) -> None:
         files_to_review = []
         truncated = False
 
+        # Every click.secho below this point is progress/status narration, not
+        # the review itself - kept on stderr (err=True) so only the reviewer's
+        # actual streamed output lands on stdout, the same convention applied
+        # to `prompt generate`/`analyze` for the identical reason: a real
+        # shell pipe consuming this command's stdout (or a REPL-side "save
+        # this review" redirect) shouldn't have to filter out narration mixed
+        # into the same stream as the real content.
         if os.path.isdir(file_path):
-            click.secho(f"Scanning directory: {file_path}", fg="cyan")
+            click.secho(f"Scanning directory: {file_path}", fg="cyan", err=True)
             # Try git status first. -z gives NUL-separated, unquoted paths - the
             # default porcelain format quotes paths containing spaces/special
             # characters (e.g. `M "path with spaces/file.py"`), which a naive
@@ -1169,16 +1212,16 @@ def review(ctx: click.Context, file_path: str) -> None:
                     click.secho(
                         "Note: more than 10 reviewable files found - only the first 10 (by directory "
                         "scan order) are being reviewed. Re-run against a subdirectory for full coverage.",
-                        fg="yellow",
+                        fg="yellow", err=True,
                     )
         else:
             files_to_review.append((os.path.basename(file_path), os.path.abspath(file_path)))
 
         if not files_to_review:
-            click.secho("No Python, Java, or XML source files found to review.", fg="yellow")
+            click.secho("No Python, Java, or XML source files found to review.", fg="yellow", err=True)
             return
 
-        click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan")
+        click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan", err=True)
         from kriya.analyzer.analyzer import chunk_file_syntactically
         from kriya.workflow.workflow import estimate_tokens
 
@@ -1213,7 +1256,7 @@ def review(ctx: click.Context, file_path: str) -> None:
                     click.secho(
                         f"Warning: '{rel}' is too large to review in full within the "
                         f"configured context window - reviewing only the portion that fits.",
-                        fg="yellow",
+                        fg="yellow", err=True,
                     )
                     kept = ""
                     for c_idx, chunk_data in enumerate(chunks, 1):
@@ -1226,7 +1269,7 @@ def review(ctx: click.Context, file_path: str) -> None:
 
                 file_blobs.append((rel, blob, estimate_tokens(blob)))
             except Exception as e:
-                click.secho(f"Failed to read file {rel}: {e}", fg="yellow")
+                click.secho(f"Failed to read file {rel}: {e}", fg="yellow", err=True)
 
         # Greedily group files into batches that each fit the budget - the
         # common case (a handful of small/medium files) still produces exactly
@@ -1254,13 +1297,13 @@ def review(ctx: click.Context, file_path: str) -> None:
         async def run_review():
             for i, batch_prompt in enumerate(batches, 1):
                 label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
-                click.secho(f"\n{label}", bold=True, fg="cyan")
+                click.secho(f"\n{label}", bold=True, fg="cyan", err=True)
                 await reviewer.run(batch_prompt, stream_callback=on_stream)
                 click.echo()
 
         asyncio.run(run_review())
     except Exception as e:
-        click.secho(f"Review failed: {e}", fg="red")
+        click.secho(f"Review failed: {e}", fg="red", err=True)
         sys.exit(1)
 
 @main.command(name="ask")

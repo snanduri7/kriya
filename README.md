@@ -135,6 +135,7 @@ Recursively scan and compile the semantic vector index for a directory:
 .venv/bin/kriya analyze kriya/core
 ```
 *Note: Subsequent runs on the same folder will check `mtimes` and index incrementally (completing instantly).*
+Only the repository model JSON lands on stdout - progress/status output (including auto-generated-skill narration) goes to stderr, so `kriya analyze . | jq .` works cleanly.
 
 ### Render & Generate Prompt Templates
 Render one of the 4 built-in templates (`system_instructions`, `code_review`, `refactor`, `generate_code`), or your own custom `<name>.jinja` files via `-t/--template-dir` (checked first, before falling back to the built-ins):
@@ -146,6 +147,15 @@ Or ask a local model to draft a well-structured prompt from a one-line descripti
 ```bash
 .venv/bin/kriya prompt generate "a REST API for managing a todo list"
 ```
+Prints the generated prompt to stdout (safe to pipe: `kriya prompt generate "..." | kriya generate -y`) and auto-saves it to `.kriya/last_prompt.md`, printing the exact follow-up command to run - the easy path inside `kriya repl`, where there's no shell pipe between two typed lines:
+```
+╭─ kriya
+╰─> prompt generate "a REST API for managing a todo list"
+...
+Saved to .kriya/last_prompt.md - run: generate --file .kriya/last_prompt.md -y
+╭─ kriya
+╰─> generate --file .kriya/last_prompt.md -y
+```
 
 ### Run Code Review
 Analyze files or directories for bugs, style consistency, and architectural quality:
@@ -156,6 +166,7 @@ Analyze files or directories for bugs, style consistency, and architectural qual
 # Review all modified files in a directory (via Git)
 .venv/bin/kriya review kriya/core
 ```
+Only the review text itself lands on stdout - scanning/progress narration goes to stderr, so the output is safe to redirect straight to a file.
 
 ### Autonomous Generation Workflow
 Generate or refactor code autonomously based on a goal:

@@ -133,6 +133,14 @@ cython_debug/
 .system_generated/
 *.log
 
+# Kriya's own runtime working directory when dogfooding kriya generate/
+# analyze/prompt against this repo itself - checkpoints, the sandboxed
+# worktree, and prompt generate's auto-saved .kriya/last_prompt.md. Found
+# missing while adding last_prompt.md: checkpoint.py/worktree.py already
+# wrote here with no corresponding .gitignore entry, so any real dogfooding
+# run showed these as untracked files.
+/.kriya/
+
 # SQLite databases and temp files
 *.db
 *.db-wal

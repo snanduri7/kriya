@@ -749,13 +749,21 @@ class RepositoryAnalyzer:
                     f"directory ({os.path.abspath(skills_dir)}) instead of a project-local one - "
                     f"every other project using Kriya would inherit this. If that's not intended, "
                     f"stop now and set paths.skills in this project's kriya.yaml, e.g. \"./skills\".",
-                    fg="red", bold=True,
+                    fg="red", bold=True, err=True,
                 )
 
             from kriya.agents.extractor import ConventionsExtractorAgent
             from kriya.core.llm import LLMClient
-            
-            click.secho("\nAnalyzing repository style guidelines and patterns...", bold=True, fg="yellow")
+
+            # This whole block is narration/status about the auto-skill-
+            # bootstrap side effect, not the `analyze` command's actual JSON
+            # payload (already printed to stdout by cli.py before this runs)
+            # - found via a test written to check the SAME stdout-pollution
+            # bug class already fixed in cli.py's prompt generate/analyze/
+            # review, which this block, living in analyzer.py rather than
+            # cli.py, wasn't touched by. Everything here goes to stderr so it
+            # can't corrupt a downstream JSON consumer piping analyze's stdout.
+            click.secho("\nAnalyzing repository style guidelines and patterns...", bold=True, fg="yellow", err=True)
             
             # Gather sample code files (first 3 files)
             samples = []
@@ -778,11 +786,11 @@ class RepositoryAnalyzer:
                 
                 import sys
                 def extractor_stream(token: str):
-                    click.echo(token, nl=False)
-                    sys.stdout.flush()
-                    
+                    click.echo(token, nl=False, err=True)
+                    sys.stderr.flush()
+
                 res = await extractor.extract_conventions(struct_str, samples_str, stream_callback=extractor_stream)
-                click.echo()
+                click.echo(err=True)
                 
                 os.makedirs(auto_skill_dir, exist_ok=True)
                 os.makedirs(os.path.join(auto_skill_dir, "examples"), exist_ok=True)
@@ -803,10 +811,10 @@ class RepositoryAnalyzer:
                 with open(os.path.join(auto_skill_dir, "rules.txt"), "w", encoding="utf-8") as f:
                     f.write(rules_text)
                     
-                click.secho(f"Success: Auto-generated engineering skill created for repository '{repo_slug}'!", fg="green")
-                click.echo("You can inspect and tweak the conventions at:")
-                click.echo(f"  - Rules: [rules.txt](file://{os.path.abspath(os.path.join(auto_skill_dir, 'rules.txt'))})")
-                click.echo(f"  - Instructions: [instructions.md](file://{os.path.abspath(os.path.join(auto_skill_dir, 'instructions.md'))})")
+                click.secho(f"Success: Auto-generated engineering skill created for repository '{repo_slug}'!", fg="green", err=True)
+                click.echo("You can inspect and tweak the conventions at:", err=True)
+                click.echo(f"  - Rules: [rules.txt](file://{os.path.abspath(os.path.join(auto_skill_dir, 'rules.txt'))})", err=True)
+                click.echo(f"  - Instructions: [instructions.md](file://{os.path.abspath(os.path.join(auto_skill_dir, 'instructions.md'))})", err=True)
             except Exception as ex:
                 logger.error(f"Failed to auto-generate skill conventions: {ex}", exc_info=True)
-                click.secho(f"Failed to auto-generate skill conventions: {ex}", fg="red")
+                click.secho(f"Failed to auto-generate skill conventions: {ex}", fg="red", err=True)

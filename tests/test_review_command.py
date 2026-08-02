@@ -221,3 +221,31 @@ def test_review_small_files_still_use_a_single_combined_call(tmp_path):
     assert mock_complete.await_count == 1
     prompt = mock_complete.await_args_list[0][0][1]
     assert "a.py" in prompt and "b.py" in prompt
+
+
+def test_review_stdout_contains_only_the_review_text(tmp_path):
+    """Regression test for a real bug found while auditing other commands for
+    the same stdout-pollution shape as `prompt generate`: "Scanning
+    directory: ...", "Reviewing N file(s)...", and the "=== Code Review
+    Report ===" batch header were all plain click.secho() with no err=True,
+    mixed into stdout alongside the reviewer's actual streamed output.
+    Verified live before fixing. Chrome now goes to stderr; stdout must
+    contain ONLY the streamed review text."""
+    (tmp_path / "app.py").write_text("def add(a, b):\n    return a + b\n")
+
+    async def fake_complete(*args, stream_callback=None, **kwargs):
+        if stream_callback:
+            stream_callback("This looks correct.")
+        return "This looks correct."
+
+    runner = CliRunner()
+    with patch("kriya.core.llm.LLMClient.complete", new=AsyncMock(side_effect=fake_complete)):
+        res = runner.invoke(main, ["review", str(tmp_path / "app.py")])
+
+    assert res.exit_code == 0, res.output
+    assert res.stdout.strip() == "This looks correct."
+    assert "Scanning directory" not in res.stdout
+    assert "Reviewing" not in res.stdout
+    assert "Code Review Report" not in res.stdout
+    assert "Reviewing 1 file(s)" in res.stderr
+    assert "Code Review Report" in res.stderr
