@@ -1,8 +1,12 @@
 <!--
-  THIS SHAPE IS ONLY FOR WHEN JVM STARTUP FLAGS (e.g. add-opens) ARE ACTUALLY NEEDED
-  (typically Ignite, not a Qpid-only app). If the goal needs no JVM flags at all, do NOT
-  use any of this - use the much simpler plain form instead, invoked via exec:java (not
-  exec:exec), even if nothing below mentions it:
+  THIS SHAPE IS ONLY FOR WHEN JVM STARTUP FLAGS ARE ACTUALLY NEEDED - which includes any
+  Qpid app that EMBEDS the broker via SystemLauncher.startup() (needs at minimum
+  -Djava.security.manager=allow on Java 17.0.10+, or SystemLauncher's own internal startup
+  logging crashes with "UnsupportedOperationException: getSubject is not supported" -
+  confirmed live, unrelated to anything the generated app code does), not just Ignite. A
+  Qpid app that's ONLY a client connecting to an already-running EXTERNAL broker (no
+  SystemLauncher call anywhere) genuinely needs no JVM flags - use the much simpler plain
+  form instead, invoked via exec:java (not exec:exec), even if nothing below mentions it:
     <configuration>
       <mainClass>${exec.mainClass}</mainClass>
     </configuration>
@@ -38,7 +42,10 @@
   <configuration>
     <executable>java</executable>
     <arguments>
-      <argument>--add-opens=java.base/java.lang=ALL-UNNAMED</argument>
+      <!-- Required whenever the app embeds the broker (SystemLauncher.startup()) - see the
+           -Djava.security.manager=allow rule above. Add --add-opens flags too if the app
+           also embeds Ignite or another JVM-17-reflection-heavy library in the same class. -->
+      <argument>-Djava.security.manager=allow</argument>
       <argument>-classpath</argument>
       <classpath/>
       <argument>${exec.mainClass}</argument>
