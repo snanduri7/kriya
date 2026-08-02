@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -1274,10 +1275,29 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
             
         click.echo(f"Generating embeddings for {len(chunks)} chunks of {source_name}...")
         embeddings = await embed_client.get_embeddings(chunks)
-        
+
+        # get_embeddings() silently substitutes an all-zero "dummy" vector on any
+        # failure (embedding server unreachable, malformed response) to degrade
+        # gracefully - reasonable for a caller like ask's RAG lookup, where a
+        # dummy query vector is naturally filtered out by the similarity-score
+        # threshold. But here that dummy vector gets WRITTEN permanently into the
+        # index - confirmed live as a real bug: the content becomes silently
+        # unsearchable forever (a zero vector never ranks meaningfully against a
+        # real query) while still being reported as "Successfully indexed" with
+        # no indication anything went wrong.
+        failed_count = sum(1 for emb in embeddings if not any(v != 0.0 for v in emb))
+        if failed_count:
+            click.secho(
+                f"Warning: embedding generation failed for {failed_count}/{len(chunks)} chunk(s) of "
+                f"{source_name} (embedding server unreachable or returned an error). Those chunks "
+                f"were still indexed but will NOT be findable via similarity search. Check your "
+                f"embedding server connection and re-run this 'kriya learn' command to fix it.",
+                fg="yellow",
+            )
+
         # Clear existing learned chunks matching source_name
         vector_store.remove_learned_knowledge(source_name)
-        
+
         import datetime
         fetch_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for chunk, emb in zip(chunks, embeddings, strict=True):
@@ -1293,6 +1313,17 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
     async def process_sources():
         # 1. Process URL Web Sources
+        #
+        # Deliberately NOT gated by autonomy.egress_policy, unlike LLMClient.complete
+        # (kriya/core/llm.py's is_local_url/EgressViolationError check) - considered
+        # and explicitly decided against extending that check here. egress_policy's
+        # local_only default guards against automatic, potentially-surprising network
+        # calls a pipeline might make on its own (an LLM backend swap, generate's own
+        # web_lookup_enabled-gated live lookup). A user typing a specific URL directly
+        # into `learn -u` is itself the explicit, deliberate authorization - there's
+        # no meaningfully more-consenting action Kriya could ask for. Blocking this
+        # under local_only (Kriya's own default) would silently break `learn`'s own
+        # documented, commonly-used URL-ingestion feature on every fresh install.
         for u in url:
             click.echo(f"Fetching and parsing web URL: {u}")
             try:
@@ -1318,10 +1349,24 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
                 click.secho(f"Failed to index file {fp}: {e}", fg="red")
 
         # 3. Process Direct Text Rules
-        for t_idx, txt in enumerate(text, 1):
+        #
+        # source_name must be a stable identity, not a per-invocation positional
+        # index ("Manual Entry {N}") - index_text_content() always calls
+        # remove_learned_knowledge(source_name) first as an intentional
+        # dedup-on-re-learn mechanism (re-fetching the same URL/file should
+        # replace its old chunks). Confirmed live as a real data-loss bug: a
+        # positional index collides across SEPARATE, unrelated invocations
+        # (today's 1st --text is always "Manual Entry 1", tomorrow's 1st
+        # --text is too, even though they're unrelated facts) - deleting an
+        # earlier taught fact just because a later, different one happened to
+        # land on the same index. A content hash gives distinct texts distinct
+        # identities while still correctly deduping a genuine re-teach of the
+        # exact same text.
+        for txt in text:
             if not txt.strip():
                 continue
-            src_name = f"Manual Entry {t_idx}"
+            content_hash = hashlib.sha256(txt.encode("utf-8")).hexdigest()[:10]
+            src_name = f"Manual Entry ({content_hash})"
             click.echo(f"Indexing inline text: {src_name}")
             try:
                 await index_text_content(src_name, txt)

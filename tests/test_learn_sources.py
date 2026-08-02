@@ -55,7 +55,9 @@ def test_learn_command_multiple_sources(tmp_path):
         assert len(file_doc) == 1
         assert "CacheConfiguration" in file_doc[0][0]
         
-        # Verify text source doc
-        text_doc = [r for r in rows if r[1] == "Manual Entry 1"]
+        # Verify text source doc - provenance is now "Manual Entry (<content hash>)",
+        # not the old per-invocation positional index "Manual Entry 1" (see
+        # test_learn_text_naming_collision.py for why that changed).
+        text_doc = [r for r in rows if r[1].startswith("Manual Entry (")]
         assert len(text_doc) == 1
         assert "Java 11" in text_doc[0][0]
