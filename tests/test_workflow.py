@@ -27,7 +27,7 @@ from kriya.workflow.workflow import (
     _filter_misattributed_extraction,
     _is_near_duplicate_rule,
     _likely_misattributed_sibling,
-    _resolve_missing_file_paths,
+    _resolve_file_paths_from_design,
     _resolve_run_command,
     _scoped_skill_gap_description,
     extract_error_search_terms,
@@ -101,7 +101,7 @@ def test_find_missing_expected_files_excludes_readme_unless_requested():
     assert find_missing_expected_files(expected, written, goal="Build an app") == []
     assert find_missing_expected_files(expected, written, goal="Build an app with documentation") == ["README.md"]
 
-def test_resolve_missing_file_paths_finds_nested_path_in_design_text():
+def test_resolve_file_paths_from_design_finds_nested_path_in_design_text():
     """Regression test for a real bug caught live: find_missing_expected_files only
     ever returns bare basenames, since the Architect's design text isn't parsed for
     directory structure - but the design text itself usually DOES mention the real
@@ -113,7 +113,7 @@ def test_resolve_missing_file_paths_finds_nested_path_in_design_text():
         "- src/main/resources/ignite-qpid-app-context.xml\n"
         "- src/main/java/com/example/IgniteQpidApp.java\n"
     )
-    assert _resolve_missing_file_paths(
+    assert _resolve_file_paths_from_design(
         ["ignite-qpid-app-context.xml", "IgniteQpidApp.java", "pom.xml"], design
     ) == [
         "src/main/resources/ignite-qpid-app-context.xml",
@@ -121,15 +121,15 @@ def test_resolve_missing_file_paths_finds_nested_path_in_design_text():
         "pom.xml",
     ]
 
-def test_resolve_missing_file_paths_ignores_tree_diagram_lines():
+def test_resolve_file_paths_from_design_ignores_tree_diagram_lines():
     # A directory-tree diagram line has no real "/" immediately before the
     # basename (just tree-drawing characters), so it must not match - falling
     # back to the bare basename is correct when no bullet/prose mention exists.
     design = "│       ├── foo.xml\n"
-    assert _resolve_missing_file_paths(["foo.xml"], design) == ["foo.xml"]
+    assert _resolve_file_paths_from_design(["foo.xml"], design) == ["foo.xml"]
 
-def test_resolve_missing_file_paths_falls_back_when_no_path_mentioned():
-    assert _resolve_missing_file_paths(["pom.xml"], "Create pom.xml for the project.") == ["pom.xml"]
+def test_resolve_file_paths_from_design_falls_back_when_no_path_mentioned():
+    assert _resolve_file_paths_from_design(["pom.xml"], "Create pom.xml for the project.") == ["pom.xml"]
 
 def test_is_near_duplicate_rule_catches_real_observed_rephrasings():
     """Regression test using the actual duplicate pairs observed live: qpid/rules.txt
@@ -292,7 +292,9 @@ async def test_workflow_successful_run(tmp_path):
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
         "Design: Write math.py",
-        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        # design's "math.py" mention activates known_target_files on attempt 1,
+        # skipping straight to a plain per-file content completion.
+        "def add(a,b):\n    return a+b",
         "Review: Approved"
     ])
 
@@ -307,6 +309,8 @@ async def test_workflow_successful_run(tmp_path):
     assert "math.py" in res["files"]
     assert os.path.exists(os.path.join(tmp_path, "math.py"))
     assert res["review"] == "Review: Approved"
+    with open(os.path.join(tmp_path, "math.py")) as f:
+        assert "def add(a,b):" in f.read()
 
 @pytest.mark.asyncio
 async def test_workflow_syntax_error_auto_debugging_loop(tmp_path):
@@ -318,13 +322,17 @@ async def test_workflow_syntax_error_auto_debugging_loop(tmp_path):
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
         "Design: Write math.py",
-        '[{"filepath": "math.py", "content": "def add(a,b)\\n    return a+b"}]',
-        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        # design's "math.py" mention activates known_target_files on attempt 1,
+        # skipping straight to a plain per-file content completion (broken: missing colon).
+        "def add(a,b)\n    return a+b",
+        # Syntax error implicates math.py -> targeted retry, also known_target_files,
+        # also a plain per-file content completion (fixed this time).
+        "def add(a,b):\n    return a+b",
         "Review: Approved"
     ])
 
     we = WorkflowEngine(kernel, llm)
-    
+
     res = await we.run_generation_workflow(
         goal="Create math library with auto-debugging",
         workspace_path=str(tmp_path)
@@ -377,7 +385,7 @@ async def test_workflow_missing_file_recovery_lets_model_resolve_nested_path(tmp
     last_missing_files (from find_missing_expected_files) is always bare basenames,
     since the Architect's design text doesn't carry directory paths - "helper.py",
     never "pkg/helper.py". The recovery path resolves this itself now
-    (_resolve_missing_file_paths, searching the design text for a fuller path
+    (_resolve_file_paths_from_design, searching the design text for a fuller path
     mention ending in that basename) rather than trusting either a bare basename
     or the model's own file-list response - the latter was also confirmed live to
     reliably return only ONE of several explicitly-named missing files, silently
@@ -431,9 +439,10 @@ async def test_workflow_fallback_chain(tmp_path):
         elif n == 2:
             return "Design: Write math.py"
         elif n == 3:
-            # Attempt 1 (full-set, primary model): the file-list call already
-            # includes content for math.py, so no extra per-file call follows.
-            return '[{"filepath": "math.py", "content": "def add(a,b)\\n    return a+b"}]'
+            # Attempt 1 (full-set, primary model, retry_count == 0): design's
+            # "math.py" mention activates known_target_files, skipping the
+            # file-list call entirely - a plain per-file text completion.
+            return "def add(a,b)\n    return a+b"
         elif n in (4, 5, 6):
             # 3 targeted retries (also primary model - targeted retries never
             # escalate) - all still broken, to exhaust the targeted budget
@@ -685,7 +694,9 @@ async def test_workflow_full_regression_check_tests_the_applied_change_not_stale
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Fix calc.py",                # Planner
         "Design: Fix add() in calc.py",        # Architect
-        '[{"filepath": "calc.py", "content": "def add(a, b):\\n    return a + b\\n"}]',  # Developer
+        # design's "calc.py" mention activates known_target_files on attempt 1,
+        # skipping straight to a plain per-file content completion.
+        "def add(a, b):\n    return a + b\n",  # Developer
         "Review: Approved"                     # Reviewer
     ])
 
@@ -1535,7 +1546,12 @@ async def test_workflow_normalizes_absolute_filepath_from_developer_agent(tmp_pa
 
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
-        "Design: Write app.py",
+        # Deliberately no literal "app.py" mention here (unlike other tests) - this
+        # test is specifically about the model's own file-list response containing
+        # an absolute path, which only happens on the ask-the-model path. A design
+        # mentioning "app.py" would activate known_target_files on attempt 1 and
+        # fix the filepath deterministically before the model ever gets a say.
+        "Design: a single Python script with one entrypoint",
         file_list_response,
         "Review: Approved"
     ])
@@ -1993,9 +2009,13 @@ async def test_workflow_targeted_retry_fixes_implicated_file_without_escalating(
         elif n == 2:
             return "Design: Write math.py"
         elif n == 3:
-            return '[{"filepath": "math.py", "content": "def add(a,b)\\n    return a+b"}]'
+            # Attempt 1 (retry_count == 0): design's "math.py" mention activates
+            # known_target_files, a plain per-file content completion (broken).
+            return "def add(a,b)\n    return a+b"
         elif n == 4:
-            return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
+            # Targeted retry (implicated file), also known_target_files - plain
+            # per-file content completion (fixed this time).
+            return "def add(a,b):\n    return a+b"
         else:
             return "Review: Approved"
 
@@ -2131,12 +2151,23 @@ def test_build_missing_files_retry_prompt_frames_missing_and_reference_files(tmp
 
 @pytest.mark.asyncio
 async def test_workflow_missing_file_recovery_does_not_escalate_or_consume_fullset_budget(tmp_path):
-    """A completeness-check failure (Developer omitted a design-required file) must
-    trigger a missing-file recovery retry on the very next attempt - primary model
-    only, even with a fallback chain configured - not a full-file-set regeneration
-    and not model escalation, mirroring the existing implicated-file targeted retry's
-    no-escalation budget."""
+    """A completeness-check failure must trigger a missing-file recovery retry on
+    the very next attempt - primary model only, even with a fallback chain
+    configured - not a full-file-set regeneration and not model escalation,
+    mirroring the existing implicated-file targeted retry's no-escalation budget.
+
+    Note on how this is now triggered: since the initial generation call passes
+    the Architect's own deterministic file list as known_target_files whenever
+    one is available, the model can no longer cause this by simply omitting a
+    file from its own file-list response - known_target_files guarantees every
+    expected file gets a write attempt on attempt 1. The remaining, still-real
+    way a file can end up "missing" despite being targeted is a downstream
+    rejection by normalize_written_filepath (e.g. a resolved path that turns out
+    to be unusable) - simulated here for exactly one file's first write, to prove
+    the recovery mechanism itself is still correct now that its only reachable
+    trigger has narrowed."""
     from kriya.config import FallbackModelConfig
+    from kriya.workflow.workflow import normalize_written_filepath as real_normalize_written_filepath
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
@@ -2155,27 +2186,41 @@ async def test_workflow_missing_file_recovery_does_not_escalate_or_consume_fulls
         elif n == 2:
             return "Design: Write math.py and helper.py"
         elif n == 3:
-            # Attempt 1 (full-set): only writes math.py, omitting helper.py.
-            return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
+            # Attempt 1, first of two known_target_files-driven per-file calls
+            # (sorted order: helper.py before math.py).
+            return "def helper():\n    pass"
         elif n == 4:
-            # Attempt 2 (missing-file recovery): writes the omitted file.
-            return '[{"filepath": "helper.py", "content": "def helper():\\n    pass"}]'
+            return "def add(a,b):\n    return a+b"
+        elif n == 5:
+            # Missing-file recovery retry: writes the rejected-then-retried file.
+            return "def helper():\n    pass"
         else:
             return "Review: Approved"
 
     llm.complete = mock_complete
 
+    # Simulate normalize_written_filepath rejecting helper.py's first write only -
+    # real behavior otherwise, so this is a narrow, targeted simulation of the
+    # one remaining real trigger, not a blanket bypass of the actual function.
+    rejected_once = {"done": False}
+    def flaky_normalize(filepath, workspace_path):
+        if filepath == "helper.py" and not rejected_once["done"]:
+            rejected_once["done"] = True
+            return None
+        return real_normalize_written_filepath(filepath, workspace_path)
+
     we = WorkflowEngine(kernel, llm)
-    res = await we.run_generation_workflow(
-        goal="Create math library with a helper module", workspace_path=str(tmp_path)
-    )
+    with patch("kriya.workflow.workflow.normalize_written_filepath", side_effect=flaky_normalize):
+        res = await we.run_generation_workflow(
+            goal="Create math library with a helper module", workspace_path=str(tmp_path)
+        )
 
     assert res["quality_gates_passed"] is True
     assert "helper.py" in res["files"]
-    # Attempt 2 (index 3) must be the missing-file recovery retry: primary model
+    # Attempt 2 (index 4) must be the missing-file recovery retry: primary model
     # (no override, despite a configured fallback chain) and a prompt that names
     # the specific missing file, not a generic full-set regeneration.
-    recovery_prompt, recovery_model_override = prompts_seen[3]
+    recovery_prompt, recovery_model_override = prompts_seen[4]
     assert recovery_model_override is None
     assert "MISSING-FILE recovery attempt" in recovery_prompt
     assert "helper.py" in recovery_prompt

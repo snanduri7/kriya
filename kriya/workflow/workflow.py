@@ -549,10 +549,10 @@ def find_missing_expected_files(expected_files: set, written_files: set, goal: s
     return sorted(missing)
 
 
-def _resolve_missing_file_paths(missing_files: List[str], design: str) -> List[str]:
-    """Resolves each bare basename in missing_files (find_missing_expected_files only
-    ever returns basenames, matched against the design's own basename mentions) to a
-    real directory path by searching the Architect's design text for a fuller path
+def _resolve_file_paths_from_design(basenames: List[str], design: str) -> List[str]:
+    """Resolves each bare basename (extract_expected_files/find_missing_expected_files
+    only ever return basenames, matched against the design's own basename mentions) to
+    a real directory path by searching the Architect's design text for a fuller path
     mention ending in that basename (e.g. a bullet list line literally saying
     "src/main/resources/foo.xml" resolves "foo.xml" -> "src/main/resources/foo.xml").
     Falls back to the bare basename (correct for root-level files like pom.xml) when
@@ -561,16 +561,17 @@ def _resolve_missing_file_paths(missing_files: List[str], design: str) -> List[s
     match, which is fine since a bullet-list or prose mention of the same file
     elsewhere in the design usually does.
 
-    Confirmed live as necessary: the missing-file recovery retry asks the model for
-    its own file list (rather than trusting known_target_files directly, since a bare
-    basename used as-is writes flat at the sandbox root instead of its real nested
-    location - see the missing_files call site) - but that file-list call was
-    observed to reliably return only ONE file even when explicitly told to add
-    several, silently dropping the rest and burning the entire retry budget without
-    ever recovering them. Resolving paths ourselves lets known_target_files be used
-    safely here too, skipping that unreliable call altogether."""
+    Confirmed live as necessary: relying on the model's own file-list call (rather
+    than trusting known_target_files directly, since a bare basename used as-is
+    writes flat at the sandbox root instead of its real nested location) was
+    observed to reliably return only a subset of the intended files even when
+    explicitly told which ones were needed, silently dropping the rest and burning
+    the entire retry budget without ever recovering them. Resolving paths ourselves
+    lets known_target_files be used safely wherever a deterministic file list is
+    already known (missing-file recovery, and the initial generation call - see
+    both call sites), skipping that unreliable call altogether."""
     resolved = []
-    for basename in missing_files:
+    for basename in basenames:
         pattern = re.compile(r'(?<![\w/.-])[\w][\w./-]*/' + re.escape(basename) + r'(?![\w.])')
         matches = pattern.findall(design)
         resolved.append(max(matches, key=len) if matches else basename)
@@ -1996,7 +1997,7 @@ class WorkflowEngine:
                     # which 1-4 files are missing - reliably returns only ONE of them,
                     # silently dropping the rest and burning the whole retry budget
                     # without ever recovering them.
-                    resolved_missing_files = _resolve_missing_file_paths(last_missing_files, design)
+                    resolved_missing_files = _resolve_file_paths_from_design(last_missing_files, design)
 
                     task_desc, active_code_context = _build_missing_files_retry_prompt(
                         goal, plan, design, resolved_missing_files,
@@ -2048,6 +2049,23 @@ class WorkflowEngine:
                     # Track model hops
                     model_hops.append(model_override or self.kernel.config.llm.model)
 
+                    # On the very first attempt only (never a full-set retry, which
+                    # already escalates through the fallback chain above and is
+                    # regenerating in response to a real compile/test/runtime error,
+                    # not a clean slate) - if the Architect's design yielded a
+                    # deterministic file manifest, use it directly instead of asking
+                    # the model to independently re-derive the same list. Confirmed
+                    # live: "INCOMPLETE GENERATION" (the design called for N files,
+                    # fewer were written) was one of the most common first-attempt
+                    # failures observed this session, each one costing a full extra
+                    # missing-file-recovery retry cycle - this prevents that failure
+                    # category outright on attempt 1 instead of only recovering from
+                    # it after the fact. Falls back to today's ask-the-model-for-a-
+                    # list behavior when the design didn't yield a usable list.
+                    known_target_files = None
+                    if retry_count == 0 and _expected_files_upfront:
+                        known_target_files = _resolve_file_paths_from_design(_expected_files_upfront, design)
+
                     # Generate code files
                     dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
                     files = await self.developer.run_generation(
@@ -2057,7 +2075,8 @@ class WorkflowEngine:
                         stream_callback=dev_stream,
                         model_override=model_override,
                         base_url_override=base_url_override,
-                        api_key_override=api_key_override
+                        api_key_override=api_key_override,
+                        known_target_files=known_target_files,
                     )
 
                 # Normalize filepaths before anything downstream uses them - the

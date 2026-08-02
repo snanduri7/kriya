@@ -58,12 +58,15 @@ async def test_autonomy_risk_threshold_escalation(tmp_path):
     llm = LLMClient(cfg)
     
     # Create content exceeding 10 lines
-    content = "\\n".join([f"x = {i}" for i in range(20)])
-    
+    content = "\n".join([f"x = {i}" for i in range(20)])
+
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write large code",
         "Design: write large.py",
-        f'[{{"filepath": "large.py", "content": "{content}"}}]',
+        # design's "large.py" mention is picked up by extract_expected_files, so
+        # the initial attempt uses known_target_files and skips straight to a
+        # plain per-file content completion (no JSON list wrapper).
+        content,
         "Review: Approved"
     ])
 
