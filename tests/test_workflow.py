@@ -1495,6 +1495,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1539,6 +1540,159 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     assert "The magic widget constant is 42." in skill.rules
 
 @pytest.mark.asyncio
+async def test_workflow_web_lookup_never_fires_without_approval(tmp_path):
+    """Regression test: before the pre-send confirmation gate existed, a
+    non-interactive (-y) run fired the outbound live-lookup query and then
+    silently discarded the result under web_lookup_callback's own -y auto-
+    decline - the query had already left the machine with zero human
+    visibility, for zero benefit. Now, with neither web_lookup_auto_approve
+    set nor a web_lookup_query_callback supplied, the search must never fire
+    at all, and must fall through to the human-ask path exactly as if lookup
+    had been tried and found nothing."""
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved",
+    ])
+
+    skill_gap_calls = []
+    def skill_gap_cb(reason, names):
+        skill_gap_calls.append(names)
+        return None
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=skill_gap_cb,
+            # No web_lookup_query_callback passed - must fail closed.
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_not_called()
+    assert skill_gap_calls and "widgetlib" in skill_gap_calls[0]
+
+@pytest.mark.asyncio
+async def test_workflow_web_lookup_query_callback_can_approve(tmp_path):
+    """The real-time callback path (not just the auto_approve config flag) must
+    also be able to authorize a search, and must receive the exact bare terms
+    and base_url about to be sent - never goal/design/code text."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    extraction_response = json.dumps({
+        "rules": ["The magic widget constant is 42."],
+        "examples": {},
+        "conflicts": []
+    })
+    llm.complete = AsyncMock(side_effect=[
+        extraction_response,
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    found_result = [{"term": "widgetlib", "title": "Widgetlib Docs", "url": "https://example.com/widgetlib", "snippet": "..."}]
+    query_calls = []
+    def query_cb(terms, base_url):
+        query_calls.append((terms, base_url))
+        return True
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found_result)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="The magic widget constant is 42.")):
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=lambda reason, names: None,
+            web_lookup_callback=lambda found: True,
+            web_lookup_query_callback=query_cb,
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once()
+    assert query_calls == [(["widgetlib"], "http://fake-search:8080")]
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    assert "The magic widget constant is 42." in se.get_skill("widgetlib").rules
+
+@pytest.mark.asyncio
+async def test_workflow_retry_loop_live_lookup_never_fires_without_approval(tmp_path):
+    """The retry loop's error-triggered live lookup (Stage 2C) must respect the
+    same pre-send gate as the goal/design-stage lookups - it was previously the
+    one path with NO confirmation of any kind, deliberately designed as fully
+    unattended, but that also meant it fired without ever needing authorization."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    repeated_error = (
+        "Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java "
+        "for parameter arguments: Cannot store value into array"
+    )
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
+        mock_compile.side_effect = [
+            {"success": False, "output": repeated_error},
+            {"success": False, "output": repeated_error},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(
+            goal="Create a Java app", workspace_path=str(tmp_path)
+            # No web_lookup_query_callback, no auto_approve - must fail closed
+            # even mid-retry-loop.
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_not_called()
+
+@pytest.mark.asyncio
 async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extraction(tmp_path):
     """A single unhelpful top search result (a landing page with nothing concrete to
     extract - confirmed to happen in real testing) must not sink the whole lookup:
@@ -1556,6 +1710,7 @@ async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extr
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 2
     kernel = Kernel(config=cfg)
@@ -1612,6 +1767,7 @@ async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1661,6 +1817,7 @@ async def test_workflow_web_lookup_accepted_but_empty_falls_back_to_human_ask(tm
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 1
     kernel = Kernel(config=cfg)
@@ -1748,6 +1905,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1800,6 +1958,7 @@ async def test_workflow_web_lookup_design_derived_falls_back_to_human_ask_on_emp
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 1
     kernel = Kernel(config=cfg)
@@ -2261,6 +2420,61 @@ def test_java_toolchain_fact_falls_back_to_java_version_when_mvn_absent():
     assert "JDK 17" in result
 
 @pytest.mark.asyncio
+async def test_approve_web_lookup_true_when_auto_approve_set():
+    cfg = AppConfig()
+    cfg.autonomy.web_lookup_auto_approve = True
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    # No callback needed at all - the config opt-in alone is sufficient.
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", None) is True
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_fails_closed_with_no_callback_and_no_opt_in():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", None) is False
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_invokes_callback_with_exact_terms_and_url():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    received = {}
+
+    def callback(terms, base_url):
+        received["terms"] = terms
+        received["base_url"] = base_url
+        return True
+
+    result = await we._approve_web_lookup(["org.apache.ignite:ignite-core"], "http://fake-search:8080", callback)
+    assert result is True
+    assert received == {"terms": ["org.apache.ignite:ignite-core"], "base_url": "http://fake-search:8080"}
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_respects_declined_callback():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", lambda terms, url: False) is False
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_supports_async_callback():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+    async def callback(terms, base_url):
+        return True
+
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", callback) is True
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_fails_closed_when_callback_raises():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+    def callback(terms, base_url):
+        raise RuntimeError("boom")
+
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", callback) is False
+
+@pytest.mark.asyncio
 async def test_augment_error_with_live_lookup_no_terms_never_searches():
     with patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
         result = await _augment_error_with_live_lookup("some error", [], "http://fake-search:8080", 3)
@@ -2298,6 +2512,7 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)

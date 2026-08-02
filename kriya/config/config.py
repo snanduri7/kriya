@@ -60,6 +60,15 @@ class AutonomyConfig(BaseModel):
     run_verification_enabled: bool = Field(default=True)
     run_verification_timeout_seconds: int = Field(default=90)
     web_lookup_enabled: bool = Field(default=False)
+    # A live-lookup query's CONTENT is already hard-restricted (bare technology-name
+    # strings only, enforced in code, never goal/design/code/error text) - this is a
+    # separate, additional gate on WHEN it's allowed to fire at all. False means every
+    # outbound query needs real-time confirmation (showing the exact terms and target
+    # URL) before it leaves the machine; a non-interactive (-y) run with this still
+    # False simply never sends the query, rather than the pre-existing behavior of
+    # firing it anyway and silently discarding the result. Set True only if you've
+    # accepted unattended outbound search as part of your threat model.
+    web_lookup_auto_approve: bool = Field(default=False)
 
 class SearchConfig(BaseModel):
     # Empty by default - live lookup stays fully inert unless a project explicitly

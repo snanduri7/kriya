@@ -1012,6 +1012,27 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 click.echo(f"    {item['snippet'][:160]}")
         return click.confirm("\nUse these references for this run? (declining discards all of them, none partially)")
 
+    def on_web_lookup_query(terms: List[str], base_url: str) -> bool:
+        # Only ever called when autonomy.web_lookup_auto_approve is False -
+        # WorkflowEngine._approve_web_lookup() short-circuits to True without
+        # reaching this callback at all when that opt-in is set.
+        if yes:
+            click.secho(
+                f"\n[Auto-Skipping Live Lookup] would search for {terms} via {base_url} - skipped under "
+                "-y (set autonomy.web_lookup_auto_approve: true to allow this unattended)",
+                dim=True
+            )
+            return False
+
+        click.secho("\n[Live Lookup] Kriya wants to search for reference material on:", bold=True, fg="yellow")
+        for t in terms:
+            click.echo(f"  - {t}")
+        click.echo(f"via: {base_url}")
+        return click.confirm(
+            "\nSend this search? (only these bare technology-name terms are sent - "
+            "never goal/design/code/error text)"
+        )
+
     async def run_workflow():
         nonlocal goal
         rag_context = ""
@@ -1045,6 +1066,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             skill_gap_callback=on_skill_gap,
             skill_conflict_callback=on_skill_conflict,
             web_lookup_callback=on_web_lookup,
+            web_lookup_query_callback=on_web_lookup_query,
             resume=resume,
             resume_id=resume_id
         )
@@ -1066,6 +1088,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     skill_gap_callback=on_skill_gap,
                     skill_conflict_callback=on_skill_conflict,
                     web_lookup_callback=on_web_lookup,
+                    web_lookup_query_callback=on_web_lookup_query,
                     knowledge_risk_confirmed=True,
                     resume=resume,
                     resume_id=resume_id
@@ -1105,6 +1128,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         skill_gap_callback=on_skill_gap,
                         skill_conflict_callback=on_skill_conflict,
                         web_lookup_callback=on_web_lookup,
+                        web_lookup_query_callback=on_web_lookup_query,
                         knowledge_risk_confirmed=True,
                         resume=resume,
                         resume_id=resume_id

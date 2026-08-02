@@ -1260,6 +1260,34 @@ class WorkflowEngine:
         self.run_verifier = RunVerifierAgent("run_verifier", llm_client, roles.run_verifier.llm, roles.run_verifier.llm_chain)
         self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client, roles.skill_gap.llm, roles.skill_gap.llm_chain)
 
+    async def _approve_web_lookup(
+        self, terms: List[str], base_url: str,
+        web_lookup_query_callback: Optional[Callable[[List[str], str], Any]]
+    ) -> bool:
+        """Gates every outbound live-lookup search behind explicit authorization -
+        either the persistent autonomy.web_lookup_auto_approve opt-in, or a
+        real-time callback shown the exact terms and base_url about to be
+        searched. Fails closed: no callback and no opt-in means the query never
+        fires at all. A query's CONTENT is already hard-restricted elsewhere
+        (bare technology-name strings only, never goal/design/code/error text) -
+        this is a separate, additional gate on WHEN it's allowed to leave the
+        machine at all. Confirmed live during a fresh-install investigation that,
+        before this gate existed, a non-interactive (-y) run already fired the
+        outbound query and then silently discarded the result - the query had
+        already left the machine with zero human visibility, for zero benefit."""
+        if self.kernel.config.autonomy.web_lookup_auto_approve:
+            return True
+        if not web_lookup_query_callback:
+            return False
+        try:
+            approved = web_lookup_query_callback(terms, base_url)
+            if asyncio.iscoroutine(approved):
+                approved = await approved
+            return bool(approved)
+        except Exception as ex:
+            logger.warning(f"web_lookup_query_callback failed, skipping live lookup: {ex}")
+            return False
+
     async def run_generation_workflow(
         self, 
         goal: str, 
@@ -1272,6 +1300,7 @@ class WorkflowEngine:
         skill_gap_callback: Optional[Callable[[str, List[str]], Any]] = None,
         skill_conflict_callback: Optional[Callable[[str, str, str, str, str], Any]] = None,
         web_lookup_callback: Optional[Callable[[List[Dict[str, str]]], Any]] = None,
+        web_lookup_query_callback: Optional[Callable[[List[str], str], Any]] = None,
         resume: bool = False,
         resume_id: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -1284,6 +1313,11 @@ class WorkflowEngine:
         workspace git state, resolved config, or goal/error text since the
         checkpoint was saved invalidates it (strict - falls back to a fresh run
         with a warning, never a partial/best-effort resume).
+
+        web_lookup_query_callback gates every outbound live-lookup search (goal-
+        stage, design-stage, and the retry loop's repeated-failure lookup alike)
+        BEFORE it fires - see _approve_web_lookup(). Separate from web_lookup_callback,
+        which only gates whether already-fetched results get used.
         """
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
@@ -1511,9 +1545,12 @@ class WorkflowEngine:
             auto_resolutions: List[Tuple[Any, Dict[str, Any], str]] = []
             if self.kernel.config.autonomy.web_lookup_enabled and self.kernel.config.search.base_url:
                 lookup_terms = [s.name for s in unverified_relevant] + missing_skill_candidates
-                found = await _resolve_via_web_lookup(
-                    lookup_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
-                )
+                if await self._approve_web_lookup(lookup_terms, self.kernel.config.search.base_url, web_lookup_query_callback):
+                    found = await _resolve_via_web_lookup(
+                        lookup_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
+                    )
+                else:
+                    found = []
                 proceed = bool(found)
                 if found and web_lookup_callback:
                     try:
@@ -1904,9 +1941,17 @@ class WorkflowEngine:
                 logger.debug(f"Failed to scan architect design for design-derived lookup candidates: {ex}")
 
             if new_design_terms:
-                found = await _resolve_via_web_lookup(
-                    new_design_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
-                )
+                if await self._approve_web_lookup(
+                    new_design_terms, self.kernel.config.search.base_url, web_lookup_query_callback
+                ):
+                    found = await _resolve_via_web_lookup(
+                        new_design_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
+                    )
+                else:
+                    # A declined search must still fall through to the human-ask
+                    # fallback below, exactly as if lookup had been tried and come
+                    # up empty - not silently drop this gap-resolution path entirely.
+                    found = []
                 proceed = bool(found)
                 if found and web_lookup_callback:
                     try:
@@ -2810,6 +2855,8 @@ class WorkflowEngine:
                     and fail_type in ("compile", "run_verification")
                     and self.kernel.config.autonomy.web_lookup_enabled
                     and self.kernel.config.search.base_url
+                    and error_terms
+                    and await self._approve_web_lookup(error_terms, self.kernel.config.search.base_url, web_lookup_query_callback)
                 ):
                     error_context = await _augment_error_with_live_lookup(
                         raw_error_context, error_terms,
