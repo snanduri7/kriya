@@ -1148,13 +1148,22 @@ def ask(ctx: click.Context, question: str) -> None:
     repo_model = analyzer.analyze()
     repo_context = repo_model.model_dump_json(indent=2)
     
-    # Extract key file contents (pom.xml, beans.xml, main files, readmes) to provide local content context
+    # Extract key file contents (build manifests, main files, readmes) to provide local content context
+    ENTRYPOINT_MARKERS = {
+        ".java": "public static void main",
+        ".py": "__main__",
+        ".rb": "__FILE__",
+    }
+    KEY_MANIFEST_FILES = {
+        "pom.xml", "beans.xml", "build.gradle", "README.md", "package.json",
+        "requirements.txt", "pyproject.toml", "setup.py", "Gemfile", "Cargo.toml", "go.mod",
+    }
     key_files_context = ""
     for root, dirs, files_list in os.walk(os.getcwd()):
-        dirs[:] = [d for d in dirs if d not in {".git", ".venv", "venv", "node_modules", "target", "build", "__pycache__", ".pytest_cache"}]
+        dirs[:] = [d for d in dirs if d not in {".git", ".venv", "venv", "node_modules", "target", "build", "__pycache__", ".pytest_cache", ".kriya"}]
         for file in files_list:
             _, ext = os.path.splitext(file)
-            if file in {"pom.xml", "beans.xml", "build.gradle", "README.md", "package.json"} or ext.lower() in {".java", ".py", ".rb", ".xml", ".json", ".yaml", ".yml"}:
+            if file in KEY_MANIFEST_FILES or ext.lower() in {".java", ".py", ".rb", ".xml", ".json", ".yaml", ".yml"}:
                 full_path = os.path.join(root, file)
                 try:
                     if os.path.getsize(full_path) > 20480:
@@ -1162,11 +1171,19 @@ def ask(ctx: click.Context, question: str) -> None:
                     rel_path = os.path.relpath(full_path, os.getcwd())
                     with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
                         file_content = fh.read()
-                    
-                    # For java/py/ruby source files, prioritize main entry points or smaller scripts
-                    if ext.lower() in {".java", ".py", ".rb"} and "public static void main" not in file_content and len(file_content) > 3000:
+
+                    # For java/py/ruby source files, prioritize main entry points or
+                    # smaller scripts - skip large non-entry files to leave room for
+                    # more relevant content. The entry-point marker is
+                    # language-specific (Java's "public static void main" can never
+                    # appear in a Python or Ruby file) - confirmed live as a real bug:
+                    # using one marker for all three languages meant EVERY large
+                    # Python/Ruby file got silently excluded regardless of whether it
+                    # was the actual entry point, including Kriya's own cli.py.
+                    marker = ENTRYPOINT_MARKERS.get(ext.lower())
+                    if marker and marker not in file_content and len(file_content) > 3000:
                         continue
-                        
+
                     if len(key_files_context) < 30000:
                         key_files_context += f"\n=== File: {rel_path} ===\n{file_content}\n"
                 except Exception as e:
