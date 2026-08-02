@@ -475,7 +475,20 @@ def _resolve_run_command(command: List[str]) -> List[str]:
     code's actual correctness. sys.executable is guaranteed to exist and be a valid
     interpreter, unlike a guessed command name."""
     if command and command[0] == "python" and shutil.which("python") is None:
-        return [sys.executable] + list(command[1:])
+        command = [sys.executable] + list(command[1:])
+    # Force Maven's -e (full stack traces on failure) onto every runtime-verification
+    # invocation, regardless of what the goal's own "Runnable via" text says. Confirmed
+    # live: a goal-explicit command like "mvn -q compile exec:java ..." (many skills
+    # recommend -q so System.out.println output isn't buried in build noise) makes any
+    # runtime exception surface only as exec-maven-plugin's generic wrapper message
+    # ("An exception occurred while executing the Java class... [Help 1] ... re-run
+    # with -e to see the full stack trace") with the actual cause completely invisible -
+    # -q suppresses it too. Every subsequent retry attempt then has zero diagnostic
+    # signal to work from, and just guesses (observed burning an entire 5-attempt retry
+    # budget re-editing pom.xml because that was the only plausible-looking target).
+    # -e adds no output on a successful run, so this is safe to always apply.
+    if command and os.path.basename(command[0]) == "mvn" and "-e" not in command:
+        command = [command[0], "-e"] + list(command[1:])
     return command
 
 EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")
@@ -534,6 +547,34 @@ def find_missing_expected_files(expected_files: set, written_files: set, goal: s
     if not _goal_requests_tests_or_docs(goal):
         missing = {f for f in missing if not _is_test_or_doc_file(f)}
     return sorted(missing)
+
+
+def _resolve_missing_file_paths(missing_files: List[str], design: str) -> List[str]:
+    """Resolves each bare basename in missing_files (find_missing_expected_files only
+    ever returns basenames, matched against the design's own basename mentions) to a
+    real directory path by searching the Architect's design text for a fuller path
+    mention ending in that basename (e.g. a bullet list line literally saying
+    "src/main/resources/foo.xml" resolves "foo.xml" -> "src/main/resources/foo.xml").
+    Falls back to the bare basename (correct for root-level files like pom.xml) when
+    no path mention is found - e.g. a directory-tree diagram line like
+    "|-- foo.xml" has no real path separator immediately before the name and won't
+    match, which is fine since a bullet-list or prose mention of the same file
+    elsewhere in the design usually does.
+
+    Confirmed live as necessary: the missing-file recovery retry asks the model for
+    its own file list (rather than trusting known_target_files directly, since a bare
+    basename used as-is writes flat at the sandbox root instead of its real nested
+    location - see the missing_files call site) - but that file-list call was
+    observed to reliably return only ONE file even when explicitly told to add
+    several, silently dropping the rest and burning the entire retry budget without
+    ever recovering them. Resolving paths ourselves lets known_target_files be used
+    safely here too, skipping that unreliable call altogether."""
+    resolved = []
+    for basename in missing_files:
+        pattern = re.compile(r'(?<![\w/.-])[\w][\w./-]*/' + re.escape(basename) + r'(?![\w.])')
+        matches = pattern.findall(design)
+        resolved.append(max(matches, key=len) if matches else basename)
+    return resolved
 
 _RULE_DEDUP_STOPWORDS = frozenset({
     "the", "a", "an", "is", "are", "was", "were", "must", "to", "of", "in", "on",
@@ -1922,7 +1963,8 @@ class WorkflowEngine:
                         stream_callback=dev_stream,
                         model_override=model_override,
                         base_url_override=base_url_override,
-                        api_key_override=api_key_override
+                        api_key_override=api_key_override,
+                        known_target_files=last_implicated_files,
                     )
                 elif use_missing_files:
                     # Missing-file recovery: same primary-model-only, non-escalating
@@ -1942,11 +1984,25 @@ class WorkflowEngine:
                     if learned_rag_context:
                         base_code_context += learned_rag_context
 
+                    # last_missing_files (from find_missing_expected_files) is always
+                    # bare basenames - the Architect's design text doesn't carry
+                    # directory paths, so "helper.py", never "pkg/helper.py". Resolve
+                    # each to a real path by searching the design text itself for a
+                    # fuller path mention ending in that basename (falls back to the
+                    # bare basename for root-level files like pom.xml, which is
+                    # already correct). This lets known_target_files be used safely:
+                    # confirmed live (Qpid+Ignite validation) that leaving this to the
+                    # model's own file-list call - even when explicitly told exactly
+                    # which 1-4 files are missing - reliably returns only ONE of them,
+                    # silently dropping the rest and burning the whole retry budget
+                    # without ever recovering them.
+                    resolved_missing_files = _resolve_missing_file_paths(last_missing_files, design)
+
                     task_desc, active_code_context = _build_missing_files_retry_prompt(
-                        goal, plan, design, last_missing_files,
+                        goal, plan, design, resolved_missing_files,
                         all_files_written, worktree_path, base_code_context,
                     )
-                    logger.info(f"Missing-file recovery retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: adding {', '.join(last_missing_files)}.")
+                    logger.info(f"Missing-file recovery retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: adding {', '.join(resolved_missing_files)}.")
 
                     model_hops.append(self.kernel.config.llm.model)
 
@@ -1958,7 +2014,8 @@ class WorkflowEngine:
                         stream_callback=dev_stream,
                         model_override=model_override,
                         base_url_override=base_url_override,
-                        api_key_override=api_key_override
+                        api_key_override=api_key_override,
+                        known_target_files=resolved_missing_files,
                     )
                 else:
                     task_desc = f"Goal: {goal}\nPlan: {plan}"

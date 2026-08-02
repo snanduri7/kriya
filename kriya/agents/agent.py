@@ -296,23 +296,35 @@ class DeveloperAgent(BaseAgent):
 
             file_sys_prompt = (
                 "You are the Kriya Developer Agent.\n"
-                "Your task is to write the complete, production-grade source code for the requested file path. "
-                "Return ONLY the raw file content. Do not include markdown code block wrappers (like ```) or conversational explanation."
+                "Your task is to write the complete, production-grade source code for the requested file path, "
+                "and ONLY that one file. Return ONLY the raw file content for that single file. Do not include "
+                "markdown code block wrappers (like ```), conversational explanation, or the content of any other "
+                "file - even one you're told is also part of this batch. If you believe another file also needs "
+                "a change, that is out of scope for this response and will be handled separately; do not act on it "
+                "here, and do not prepend or append its content."
             )
 
             sibling_paths = [p for p in all_paths if p != filepath]
-            sibling_section = f"=== Other Files In This Batch ===\n{', '.join(sibling_paths)}\n\n" if sibling_paths else ""
+            sibling_section = (
+                f"=== Other Files In This Batch (context only - do NOT output their content here) ===\n"
+                f"{', '.join(sibling_paths)}\n\n"
+            ) if sibling_paths else ""
 
             # Stable, large blocks first (existing code context, then architecture design) so
             # same-model retries can reuse the inference server's KV-cache prefix; the task
             # description grows with each retry's error context, so it - along with the
             # per-file sibling list and instruction, which already vary per call - goes last.
+            # The "only this file" instruction is repeated at the very end, right before
+            # generation starts, not just in the system prompt - confirmed live as necessary:
+            # a reasoning model that had it only once (system prompt) still concatenated a
+            # sibling file's full content into this file's response.
             file_prompt = (
                 f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
                 f"=== Architecture Design ===\n{design_context}\n\n"
                 f"=== Task ===\n{task_description}\n\n"
                 f"{sibling_section}"
-                f"Please generate the complete, correct, and production-grade file content for: '{filepath}'"
+                f"Please generate the complete, correct, and production-grade file content for: '{filepath}'\n"
+                f"Return ONLY the content of '{filepath}' - nothing before it, nothing after it, no other file."
             )
 
             content = await self.llm.complete(
@@ -336,12 +348,31 @@ class DeveloperAgent(BaseAgent):
         stream_callback: Optional[Callable[[str], None]] = None,
         model_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
-        api_key_override: Optional[str] = None
+        api_key_override: Optional[str] = None,
+        known_target_files: Optional[List[str]] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
         back to single-stage generation only if a usable file list can't be determined
-        at all."""
+        at all.
+
+        known_target_files: set by a caller that already knows exactly which files
+        need (re)writing - a targeted retry or missing-file recovery, where
+        extract_implicated_files()/the Architect's own required-files list already
+        determined this deterministically. When set, skips Step 1 entirely (asking
+        the model to independently re-derive a file list) and generates content
+        directly for exactly this set. Without this, the target set only ever
+        reached the model as prose inside task_description, with no enforcement
+        that its own file-list answer actually matched it - confirmed live as the
+        cause of a targeted retry silently dropping the one file that actually
+        needed fixing from its own file-list response, then never revisiting it,
+        burning its entire retry budget without making any progress."""
+        if known_target_files:
+            file_entries = [{"filepath": p, "content": None, "edits": None} for p in known_target_files]
+            return await self._fill_missing_content(
+                file_entries, task_description, design_context, existing_code_context,
+                stream_callback, model_override, base_url_override, api_key_override
+            )
 
         # Step 1: Query the model for the list of files to generate (or full implementation if mocked in tests)
         system_list_prompt = (

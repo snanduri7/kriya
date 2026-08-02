@@ -27,6 +27,7 @@ from kriya.workflow.workflow import (
     _filter_misattributed_extraction,
     _is_near_duplicate_rule,
     _likely_misattributed_sibling,
+    _resolve_missing_file_paths,
     _resolve_run_command,
     _scoped_skill_gap_description,
     extract_error_search_terms,
@@ -99,6 +100,36 @@ def test_find_missing_expected_files_excludes_readme_unless_requested():
     written = {"App.java"}
     assert find_missing_expected_files(expected, written, goal="Build an app") == []
     assert find_missing_expected_files(expected, written, goal="Build an app with documentation") == ["README.md"]
+
+def test_resolve_missing_file_paths_finds_nested_path_in_design_text():
+    """Regression test for a real bug caught live: find_missing_expected_files only
+    ever returns bare basenames, since the Architect's design text isn't parsed for
+    directory structure - but the design text itself usually DOES mention the real
+    path (e.g. a bullet list line), so it can be recovered without depending on the
+    model's own (confirmed unreliable) file-list response."""
+    design = (
+        "Files to create:\n"
+        "- pom.xml\n"
+        "- src/main/resources/ignite-qpid-app-context.xml\n"
+        "- src/main/java/com/example/IgniteQpidApp.java\n"
+    )
+    assert _resolve_missing_file_paths(
+        ["ignite-qpid-app-context.xml", "IgniteQpidApp.java", "pom.xml"], design
+    ) == [
+        "src/main/resources/ignite-qpid-app-context.xml",
+        "src/main/java/com/example/IgniteQpidApp.java",
+        "pom.xml",
+    ]
+
+def test_resolve_missing_file_paths_ignores_tree_diagram_lines():
+    # A directory-tree diagram line has no real "/" immediately before the
+    # basename (just tree-drawing characters), so it must not match - falling
+    # back to the bare basename is correct when no bullet/prose mention exists.
+    design = "│       ├── foo.xml\n"
+    assert _resolve_missing_file_paths(["foo.xml"], design) == ["foo.xml"]
+
+def test_resolve_missing_file_paths_falls_back_when_no_path_mentioned():
+    assert _resolve_missing_file_paths(["pom.xml"], "Create pom.xml for the project.") == ["pom.xml"]
 
 def test_is_near_duplicate_rule_catches_real_observed_rephrasings():
     """Regression test using the actual duplicate pairs observed live: qpid/rules.txt
@@ -200,6 +231,25 @@ def test_resolve_run_command_ignores_non_python_commands():
 
 def test_resolve_run_command_handles_empty_command():
     assert _resolve_run_command([]) == []
+
+def test_resolve_run_command_adds_dash_e_for_maven():
+    """Regression test for a real bug caught live: a goal-explicit command like
+    'mvn -q compile exec:java ...' (many skills recommend -q so
+    System.out.println output isn't buried in build noise) makes Maven suppress
+    the actual cause of a runtime failure - only exec-maven-plugin's generic
+    wrapper message reaches Kriya's retry loop, which then has zero diagnostic
+    signal and just guesses. -e must always be injected so failures carry a
+    full stack trace."""
+    assert _resolve_run_command(
+        ["mvn", "-q", "compile", "exec:java", "-Dexec.mainClass=Foo"]
+    ) == ["mvn", "-e", "-q", "compile", "exec:java", "-Dexec.mainClass=Foo"]
+
+def test_resolve_run_command_does_not_duplicate_dash_e_for_maven():
+    assert _resolve_run_command(["mvn", "-e", "-q", "test"]) == ["mvn", "-e", "-q", "test"]
+
+def test_resolve_run_command_ignores_non_maven_commands_for_dash_e():
+    assert _resolve_run_command(["gradle", "run"]) == ["gradle", "run"]
+    assert _resolve_run_command(["node", "main.js"]) == ["node", "main.js"]
 
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):
@@ -322,6 +372,44 @@ async def test_workflow_incomplete_generation_triggers_retry(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_missing_file_recovery_lets_model_resolve_nested_path(tmp_path):
+    """Regression test for a real bug caught live (qwen3.6 Qpid+Ignite validation):
+    last_missing_files (from find_missing_expected_files) is always bare basenames,
+    since the Architect's design text doesn't carry directory paths - "helper.py",
+    never "pkg/helper.py". The recovery path resolves this itself now
+    (_resolve_missing_file_paths, searching the design text for a fuller path
+    mention ending in that basename) rather than trusting either a bare basename
+    or the model's own file-list response - the latter was also confirmed live to
+    reliably return only ONE of several explicitly-named missing files, silently
+    dropping the rest and burning the whole retry budget without ever recovering
+    them. So this attempt's file-list call never happens at all (known_target_files
+    bypasses it) - only a single per-file content completion for the resolved path."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py and pkg/helper.py",
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        "def helper():\n    pass",
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    res = await we.run_generation_workflow(
+        goal="Create math library with a helper module in a package",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert os.path.exists(os.path.join(tmp_path, "pkg", "helper.py"))
+    assert not os.path.exists(os.path.join(tmp_path, "helper.py"))
+
+
+@pytest.mark.asyncio
 async def test_workflow_fallback_chain(tmp_path):
     from kriya.config import FallbackModelConfig
     cfg = AppConfig()
@@ -342,12 +430,18 @@ async def test_workflow_fallback_chain(tmp_path):
             return "Step 1: Write code"
         elif n == 2:
             return "Design: Write math.py"
-        elif n in (3, 4, 5, 6):
-            # Attempt 1 (full-set, primary model) then 3 targeted retries (also
-            # primary model - targeted retries never escalate) - all still broken,
-            # to exhaust the targeted budget before the fallback chain ever gets
-            # a chance to run.
+        elif n == 3:
+            # Attempt 1 (full-set, primary model): the file-list call already
+            # includes content for math.py, so no extra per-file call follows.
             return '[{"filepath": "math.py", "content": "def add(a,b)\\n    return a+b"}]'
+        elif n in (4, 5, 6):
+            # 3 targeted retries (also primary model - targeted retries never
+            # escalate) - all still broken, to exhaust the targeted budget
+            # before the fallback chain ever gets a chance to run.
+            # known_target_files (extract_implicated_files already knows it's
+            # math.py) skips the file-list call entirely here, so this is a
+            # plain per-file text completion, not a JSON file-list response.
+            return "def add(a,b)\n    return a+b"
         elif n == 7:
             # Targeted budget now exhausted - back to the full-set path, which
             # escalates to fallback-1 as retry_count > 0. Fixed this time.

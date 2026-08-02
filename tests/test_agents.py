@@ -241,6 +241,55 @@ async def test_fill_missing_content_only_calls_for_missing_entries():
     assert "Other Files In This Batch" in file_prompt
     assert "pom.xml" in file_prompt
 
+@pytest.mark.asyncio
+async def test_run_generation_with_known_target_files_skips_file_list_call():
+    """Regression test for a real bug caught live: a targeted retry already knows
+    exactly which files need fixing (extract_implicated_files, deterministic, no
+    LLM call) - but run_generation always re-asked the model "what files do you
+    think need fixing" via a fresh call regardless, with no enforcement that the
+    answer matched what the caller already knew. Confirmed live as the actual
+    cause of a targeted retry: the model's own file-list response silently
+    dropped the one file that actually needed fixing, which then never got
+    revisited, burning the entire retry budget without progress. known_target_files
+    must skip that call entirely and generate directly for exactly the given set."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "package com.example;\npublic class App {}",
+        "<project>fixed</project>",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["src/main/java/com/example/App.java", "pom.xml"],
+    )
+
+    # Exactly one call per target file - no extra "what files need fixing" call.
+    assert llm.complete.call_count == 2
+    files_by_path = {f["filepath"]: f["content"] for f in files}
+    assert files_by_path["src/main/java/com/example/App.java"] == "package com.example;\npublic class App {}"
+    assert files_by_path["pom.xml"] == "<project>fixed</project>"
+
+
+@pytest.mark.asyncio
+async def test_run_generation_without_known_target_files_still_asks_for_file_list():
+    """known_target_files must be strictly opt-in - a normal (non-targeted)
+    generation call, which doesn't know the file set in advance, must be
+    unaffected and keep asking the model for one as before."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps(
+        [{"filepath": "math_lib.py", "content": "def add(a, b): return a + b"}]
+    ))
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation("Goal: Add math lib", "Design specs", "Existing code")
+
+    assert llm.complete.call_count == 1
+    assert files[0]["filepath"] == "math_lib.py"
+
+
 def test_strip_markdown_fences_plain_leading_fence():
     text = "```python\ndef add(a, b):\n    return a + b\n```"
     assert DeveloperAgent._strip_markdown_fences(text) == "def add(a, b):\n    return a + b"
