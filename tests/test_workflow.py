@@ -28,6 +28,7 @@ from kriya.workflow.workflow import (
     _filter_misattributed_extraction,
     _is_near_duplicate_rule,
     _likely_misattributed_sibling,
+    _normalize_error_for_repeat_detection,
     _resolve_file_paths_from_design,
     _resolve_run_command,
     _scoped_skill_gap_description,
@@ -1898,6 +1899,31 @@ def test_extract_error_search_terms_ignores_plain_symbols_and_paths():
         "at /Users/dev/project/src/main/java/com/example/App.java:19"
     )
     assert extract_error_search_terms(error) == []
+
+def test_normalize_error_for_repeat_detection_strips_maven_timing_lines():
+    # Real, byte-for-byte identical underlying failure (Qpid's SystemLauncher
+    # UnsupportedOperationException) as captured across two separate Kriya
+    # retry attempts - only the build-duration and timestamp lines differ.
+    error_a = (
+        "Exception in thread \"main\" java.lang.UnsupportedOperationException: "
+        "getSubject is not supported\n"
+        "\tat javax.security.auth.Subject.getSubject(Subject.java:347)\n"
+        "[INFO] ------------------------------------------------------------------------\n"
+        "[INFO] BUILD FAILURE\n"
+        "[INFO] ------------------------------------------------------------------------\n"
+        "[INFO] Total time:  0.832 s\n"
+        "[INFO] Finished at: 2026-08-02T20:23:47+05:30\n"
+    )
+    error_b = error_a.replace("0.832 s", "1.104 s").replace(
+        "2026-08-02T20:23:47+05:30", "2026-08-02T20:31:12+05:30"
+    )
+    assert error_a != error_b
+    assert _normalize_error_for_repeat_detection(error_a) == _normalize_error_for_repeat_detection(error_b)
+
+def test_normalize_error_for_repeat_detection_preserves_differing_errors():
+    error_a = "Exception in thread \"main\" java.lang.UnsupportedOperationException: getSubject is not supported"
+    error_b = "Exception in thread \"main\" java.lang.NullPointerException: Cannot invoke foo()"
+    assert _normalize_error_for_repeat_detection(error_a) != _normalize_error_for_repeat_detection(error_b)
 
 @pytest.mark.asyncio
 async def test_augment_error_with_live_lookup_no_terms_never_searches():

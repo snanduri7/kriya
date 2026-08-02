@@ -871,6 +871,34 @@ _ERROR_COORDINATE_PATTERN = re.compile(
     r"\b([a-zA-Z][\w]*(?:\.[a-zA-Z][\w-]*)+):([a-zA-Z][\w-]*)(?::[\w.-]+)?\b"
 )
 
+# Maven prints these two lines at the end of EVERY build, success or failure,
+# and their values (build duration, wall-clock timestamp) differ on every
+# single invocation even when the underlying failure is byte-for-byte
+# identical otherwise - confirmed live: a real, repeated exception (Qpid's
+# SystemLauncher.startup() UnsupportedOperationException) never matched
+# itself across 3 consecutive identical failures, because
+# extract_error_search_terms found no Maven groupId:artifactId coordinate in
+# it (it's a plain Java stack trace) and the code fell back to comparing the
+# ENTIRE raw error text - these two always-different lines alone were enough
+# to defeat that comparison every time, permanently blocking the repeated-
+# failure-triggered live lookup for this whole class of error.
+_BUILD_TIMING_NOISE_PATTERNS = (
+    re.compile(r"^\[INFO\] Total time:.*$", re.MULTILINE),
+    re.compile(r"^\[INFO\] Finished at:.*$", re.MULTILINE),
+)
+
+
+def _normalize_error_for_repeat_detection(error_text: str) -> str:
+    """Strips known non-deterministic per-run noise (Maven's own build-timing
+    lines) before error text is used as a repeated-failure signature - see the
+    fallback branch of the current_failure_signature computation below, used
+    only when extract_error_search_terms found no stable coordinate to key
+    on instead."""
+    normalized = error_text
+    for pattern in _BUILD_TIMING_NOISE_PATTERNS:
+        normalized = pattern.sub("", normalized)
+    return normalized
+
 
 def extract_error_search_terms(error_text: str) -> List[str]:
     """Extracts safe search terms from Quality Gate error/output text for
@@ -2644,9 +2672,16 @@ class WorkflowEngine:
                 # groupId:artifactId coordinates found IN the error text - the same
                 # query-safety boundary as the existing goal/design-stage live
                 # lookup: never the raw error/stack-trace text itself, which can
-                # contain project-specific class/variable names.
+                # contain project-specific class/variable names. When no such
+                # coordinate is found (e.g. a plain Java stack trace), the raw text
+                # itself is the fallback signature - normalized first to strip
+                # Maven's own always-different build-timing lines, or two
+                # occurrences of the exact same failure would never compare equal.
                 error_terms = extract_error_search_terms(raw_error_context)
-                current_failure_signature = (fail_type, tuple(sorted(error_terms)) if error_terms else raw_error_context)
+                current_failure_signature = (
+                    fail_type,
+                    tuple(sorted(error_terms)) if error_terms else _normalize_error_for_repeat_detection(raw_error_context),
+                )
                 error_context = raw_error_context
                 if (
                     current_failure_signature == last_failure_signature
