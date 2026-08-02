@@ -236,6 +236,37 @@ def doctor(ctx: click.Context) -> None:
         click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
         errors_found = True
 
+    # 3. Check Java/Maven toolchain resolution (only relevant if either is
+    # installed - not every Kriya project is Java-based, so finding neither is
+    # not an error, just skipped). 'mvn' can silently resolve a different JVM
+    # than plain 'java' does (e.g. a Homebrew mvn install defaulting JAVA_HOME
+    # to its own, possibly newer, openjdk) - a real, silent failure mode
+    # confirmed live during golden-use-case validation: JVM startup flags
+    # correct for the JDK 'java' resolves can be fatal under the JDK 'mvn'
+    # actually builds/runs against, with zero indication why short of manually
+    # comparing `java -version` against `mvn -version`'s own report.
+    from kriya.tools.validate import check_java_toolchain
+    toolchain = check_java_toolchain()
+    if toolchain["java_found"] or toolchain["mvn_found"]:
+        click.echo("\nChecking Java/Maven toolchain:")
+        if toolchain["java_found"]:
+            click.echo(f"  - 'java' resolves to JDK {toolchain['java_version']}")
+        if toolchain["mvn_found"]:
+            click.echo(f"  - 'mvn' will build/run against JDK {toolchain['mvn_java_version']}")
+        if toolchain["mismatch"]:
+            click.secho(
+                f"  - [WARNING] 'java' (JDK {toolchain['java_version']}) and 'mvn' "
+                f"(JDK {toolchain['mvn_java_version']}) resolve to DIFFERENT major "
+                "versions. JVM startup flags tuned for one may be invalid or fatal "
+                "under the other (e.g. -Djava.security.manager=allow is required on "
+                "17.0.10+ but a hard VM-startup error on 24+, which removed the "
+                "Security Manager entirely). Pin JAVA_HOME to the version your "
+                "project targets before running `generate`/`fix` on a Java project.",
+                fg="yellow"
+            )
+        else:
+            click.secho("  - [SUCCESS] No version mismatch detected.", fg="green")
+
     if errors_found:
         click.echo()
         click.secho("One or more checks failed - see [ERROR] lines above.", fg="red", bold=True)
@@ -1115,6 +1146,14 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     f"Files attempted but NOT applied to workspace (quality gates failed): {', '.join(res['files'])}",
                     fg="red"
                 )
+                if res.get("environment_failure"):
+                    click.secho(
+                        f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
+                        "Kriya stopped retrying early rather than burning its retry budget "
+                        "re-generating code that could never fix this - run `kriya doctor` "
+                        "to check your Java/Maven toolchain resolution.",
+                        fg="yellow", bold=True
+                    )
                 if res.get("run_id"):
                     click.secho(
                         f"Checkpoint saved - re-run with the same goal and add "
@@ -1624,6 +1663,14 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:
             click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
+            if res.get("environment_failure"):
+                click.secho(
+                    f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
+                    "Kriya stopped retrying early rather than burning its retry budget "
+                    "re-generating code that could never fix this - run `kriya doctor` "
+                    "to check your Java/Maven toolchain resolution.",
+                    fg="yellow", bold=True
+                )
             if res.get("run_id"):
                 click.secho(
                     f"Checkpoint saved - re-run with the same --error and add "

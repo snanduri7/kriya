@@ -888,6 +888,53 @@ _BUILD_TIMING_NOISE_PATTERNS = (
 )
 
 
+_JVM_STARTUP_FAILURE_MARKERS = (
+    "Error occurred during initialization of VM",
+    "Unrecognized VM option",
+    "Unrecognized option:",
+    "Could not create the Java Virtual Machine",
+)
+
+# Only matches the specific "Failed to invoke/execute ...: [Errno 2] No such
+# file or directory: '<name>'" wrapper PolymorphicValidator itself produces
+# when a subprocess.run() call can't find the launched executable at all
+# (kriya/tools/validate.py's run_compile_check/run_app) - deliberately NOT a
+# bare "No such file or directory" substring match anywhere in captured
+# output, which a generated app's own legitimate (code-fixable)
+# FileNotFoundError could also produce in a traceback.
+_MISSING_EXECUTABLE_PATTERN = re.compile(
+    r"Failed to (?:invoke|execute)[^:]*:\s*\[Errno 2\] No such file or directory: '([^']+)'"
+)
+
+
+def classify_environment_failure(error_text: str) -> Optional[str]:
+    """Returns a short, human-readable description if error_text shows a failure
+    class no amount of code regeneration can ever fix - a JVM crashing during its
+    own startup (before any generated code runs, e.g. a startup flag unsupported
+    by the actually-resolved JDK) or a build/run tool binary missing from PATH
+    entirely (e.g. Maven not installed). Distinguishing these lets the Quality
+    Gates retry loop stop burning its retry budget re-generating code for a
+    problem that was never a code defect - confirmed as a real, wasteful gap
+    during golden-use-case validation: the same JVM-startup crash (a flag correct
+    for JDK 17.0.10 became fatal under JDK 26, which removed the Security Manager
+    entirely) recurred identically across 3 real retry attempts before a human
+    had to intervene, and Kriya had no way to recognize it wasn't a code bug."""
+    for marker in _JVM_STARTUP_FAILURE_MARKERS:
+        if marker in error_text:
+            return (
+                f"JVM failed during its own startup ('{marker}') - not a code "
+                "defect, most likely a JVM flag unsupported by the actually-"
+                "resolved Java version (see `kriya doctor`)."
+            )
+    m = _MISSING_EXECUTABLE_PATTERN.search(error_text)
+    if m:
+        return (
+            f"Required build/run tool '{m.group(1)}' was not found on PATH - "
+            "not a code defect, the toolchain itself is missing or misconfigured."
+        )
+    return None
+
+
 def _normalize_error_for_repeat_detection(error_text: str) -> str:
     """Strips known non-deterministic per-run noise (Maven's own build-timing
     lines) before error text is used as a repeated-failure signature - see the
@@ -1992,6 +2039,11 @@ class WorkflowEngine:
         # targeted attempt after the full-set budget (retry_count >= max_retries)
         # was already exhausted.
         quality_gates_succeeded = False
+        # Set from classify_environment_failure() on the most recent failed
+        # attempt - a non-None value short-circuits the retry loop below (see the
+        # except block), since no amount of code regeneration can ever fix a JVM
+        # crashing during its own startup or a missing build/run tool binary.
+        environment_failure: Optional[str] = None
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -2677,6 +2729,8 @@ class WorkflowEngine:
                 # itself is the fallback signature - normalized first to strip
                 # Maven's own always-different build-timing lines, or two
                 # occurrences of the exact same failure would never compare equal.
+                environment_failure = classify_environment_failure(raw_error_context)
+
                 error_terms = extract_error_search_terms(raw_error_context)
                 current_failure_signature = (
                     fail_type,
@@ -2727,11 +2781,16 @@ class WorkflowEngine:
                         "mode": attempt_mode,
                     })
 
-                budgets_exhausted = retry_count >= max_retries and not (
-                    (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+                budgets_exhausted = environment_failure is not None or (
+                    retry_count >= max_retries and not (
+                        (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+                    )
                 )
                 if budgets_exhausted:
-                    logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
+                    if environment_failure:
+                        logger.error(f"Quality Gates stopped early - {environment_failure}")
+                    else:
+                        logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
                     if worktree_path != workspace_path:
                         for filepath in all_files_written:
                             worktree_file = os.path.join(worktree_path, filepath)
@@ -2741,6 +2800,14 @@ class WorkflowEngine:
                             except Exception as e:
                                 logger.debug(f"Failed to capture final content of '{worktree_file}' before worktree cleanup: {e}")
                         remove_git_worktree(workspace_path, worktree_path)
+                    # An environment/toolchain failure needs an explicit break -
+                    # unlike genuine budget exhaustion (which naturally coincides
+                    # with the `while` loop's own condition going False on its next
+                    # check), this can fire on the very first attempt, well before
+                    # retry_count reaches max_retries, and the loop would otherwise
+                    # continue straight into another pointless Developer retry.
+                    if environment_failure:
+                        break
 
         # 5. Reviewer
         logger.info("Reviewer Agent evaluating results...")
@@ -2809,6 +2876,7 @@ class WorkflowEngine:
             "design": design,
             "files": list(all_files_written),
             "quality_gates_passed": quality_passed,
+            "environment_failure": environment_failure if not quality_passed else None,
             "review": review,
             "run_id": run_id,
         }

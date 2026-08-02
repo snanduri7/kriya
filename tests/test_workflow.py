@@ -32,6 +32,7 @@ from kriya.workflow.workflow import (
     _resolve_file_paths_from_design,
     _resolve_run_command,
     _scoped_skill_gap_description,
+    classify_environment_failure,
     extract_error_search_terms,
     extract_expected_files,
     extract_implicated_files,
@@ -617,6 +618,52 @@ async def test_workflow_cumulative_sandbox_sync(tmp_path):
          # Both files should actually exist in the workspace
          assert os.path.exists(os.path.join(tmp_path, "file1.py"))
          assert os.path.exists(os.path.join(tmp_path, "file2.py"))
+
+
+@pytest.mark.asyncio
+async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_path):
+    """Regression test: a JVM crashing during its own startup (e.g. a startup
+    flag unsupported by the actually-resolved JDK) is not a code defect - no
+    amount of Developer regeneration can ever fix it. Before this fix, Quality
+    Gates treated it exactly like a normal compile failure and burned its full
+    retry budget uselessly re-generating code - confirmed as a real, wasteful
+    gap during golden-use-case validation: the same JVM-startup crash recurred
+    identically across 3 real retry attempts before a human had to intervene."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    # Exactly one Developer generation call is provided - if the retry loop
+    # incorrectly kept going after the environment failure, a second Developer
+    # call would hit StopIteration and fail this test outright.
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    jvm_error = (
+        "Error occurred during initialization of VM\n"
+        "java.lang.Error: A command line option has attempted to allow or "
+        "enable the Security Manager. Enabling a Security Manager is not "
+        "supported."
+    )
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.return_value = {"success": False, "output": jvm_error}
+
+        res = await we.run_generation_workflow(
+            goal="Create app",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is False
+    assert res["environment_failure"] is not None
+    assert "JVM failed during its own startup" in res["environment_failure"]
+    assert mock_compile.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -1924,6 +1971,45 @@ def test_normalize_error_for_repeat_detection_preserves_differing_errors():
     error_a = "Exception in thread \"main\" java.lang.UnsupportedOperationException: getSubject is not supported"
     error_b = "Exception in thread \"main\" java.lang.NullPointerException: Cannot invoke foo()"
     assert _normalize_error_for_repeat_detection(error_a) != _normalize_error_for_repeat_detection(error_b)
+
+def test_classify_environment_failure_detects_jvm_startup_error():
+    # Real, byte-for-byte text captured during golden-use-case validation: a JVM
+    # startup flag correct for JDK 17.0.10 became fatal under JDK 26 (JEP 486
+    # removed the Security Manager entirely).
+    error = (
+        "Error occurred during initialization of VM\n"
+        "java.lang.Error: A command line option has attempted to allow or "
+        "enable the Security Manager. Enabling a Security Manager is not "
+        "supported."
+    )
+    result = classify_environment_failure(error)
+    assert result is not None
+    assert "JVM failed during its own startup" in result
+
+def test_classify_environment_failure_detects_missing_executable():
+    error = "Failed to invoke mvn compile: [Errno 2] No such file or directory: 'mvn'"
+    result = classify_environment_failure(error)
+    assert result is not None
+    assert "'mvn' was not found on PATH" in result
+
+def test_classify_environment_failure_ignores_normal_compile_error():
+    error = "COMPILATION FAILURE:\ncannot find symbol: class IgniteCache\nlocation: class App"
+    assert classify_environment_failure(error) is None
+
+def test_classify_environment_failure_ignores_filenotfound_not_from_the_toolchain_wrapper():
+    # A generated app's own legitimate, code-fixable FileNotFoundError (e.g. it
+    # opened a config file at the wrong path) must NOT be misclassified as a
+    # toolchain problem just because the substring "No such file or directory"
+    # appears somewhere in a traceback - only PolymorphicValidator's own
+    # "Failed to invoke/execute ...: [Errno 2]..." wrapper (produced when the
+    # launched executable itself can't be found) should match.
+    error = (
+        "Traceback (most recent call last):\n"
+        '  File "app.py", line 3, in <module>\n'
+        "    open('config.json')\n"
+        "FileNotFoundError: [Errno 2] No such file or directory: 'config.json'"
+    )
+    assert classify_environment_failure(error) is None
 
 @pytest.mark.asyncio
 async def test_augment_error_with_live_lookup_no_terms_never_searches():

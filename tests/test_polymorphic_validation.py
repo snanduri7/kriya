@@ -199,6 +199,84 @@ def test_java_ruby_compile_invocation(tmp_path):
         res_rb = validator_rb.run_compile_check(["test.rb"])
         assert res_rb["success"] is True
 
+def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path):
+    # Regression test: previously a missing 'mvn' binary was silently logged at
+    # debug level and execution fell through to the raw javac fallback below -
+    # for any project with real Maven dependencies (e.g. Ignite/Qpid), this
+    # produces a misleading "cannot find symbol" error that looks exactly like
+    # a code/import bug, sending the retry loop hunting for something that was
+    # never there. Confirmed the real failure shape via golden-use-case
+    # validation testing.
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "UserService.java").write_text("class UserService {}")
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "java"
+
+    with patch("subprocess.run", side_effect=FileNotFoundError(2, "No such file or directory", "mvn")) as mock_run:
+        res = validator.run_compile_check(["UserService.java"])
+
+    assert res["success"] is False
+    assert "Failed to invoke mvn compile" in res["output"]
+    assert "No such file or directory" in res["output"]
+    # Must not silently fall through to a javac (or gradle) fallback attempt.
+    assert mock_run.call_count == 1
+
+
+def test_check_java_toolchain_detects_mismatch(monkeypatch):
+    from kriya.tools.validate import check_java_toolchain
+
+    def fake_run(cmd, **kwargs):
+        res = MagicMock()
+        if cmd[0] == "java":
+            res.stdout, res.stderr = "", 'openjdk version "17.0.10" 2024-01-16\n'
+        else:
+            res.stdout = "Apache Maven 3.9.16\nJava version: 26.0.1, vendor: Homebrew\n"
+            res.stderr = ""
+        return res
+
+    monkeypatch.setattr("kriya.tools.validate.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("kriya.tools.validate.subprocess.run", fake_run)
+
+    result = check_java_toolchain()
+    assert result == {
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }
+
+
+def test_check_java_toolchain_no_mismatch_when_versions_match(monkeypatch):
+    from kriya.tools.validate import check_java_toolchain
+
+    def fake_run(cmd, **kwargs):
+        res = MagicMock()
+        if cmd[0] == "java":
+            res.stdout, res.stderr = "", 'openjdk version "17.0.10" 2024-01-16\n'
+        else:
+            res.stdout = "Apache Maven 3.9.16\nJava version: 17.0.10, vendor: Eclipse Adoptium\n"
+            res.stderr = ""
+        return res
+
+    monkeypatch.setattr("kriya.tools.validate.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("kriya.tools.validate.subprocess.run", fake_run)
+
+    result = check_java_toolchain()
+    assert result["mismatch"] is False
+
+
+def test_check_java_toolchain_neither_found(monkeypatch):
+    from kriya.tools.validate import check_java_toolchain
+
+    monkeypatch.setattr("kriya.tools.validate.shutil.which", lambda name: None)
+    result = check_java_toolchain()
+    assert result == {
+        "java_found": False, "java_version": None,
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }
+
+
 def test_java_dependency_regression(tmp_path):
     orig_dir = tmp_path / "orig"
     new_dir = tmp_path / "new"

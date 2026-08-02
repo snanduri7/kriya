@@ -106,7 +106,9 @@ Ensure local Ollama models and server links are connected:
 ```bash
 .venv/bin/kriya doctor
 ```
-Exits non-zero if any check reports `[ERROR]` (e.g. LLM/embedding server unreachable), so it's safe to gate scripts on (`kriya doctor && kriya generate ...`). A `[WARNING]` (e.g. configured model not found in the server's list) doesn't affect the exit code.
+Exits non-zero if any check reports `[ERROR]` (e.g. LLM/embedding server unreachable), so it's safe to gate scripts on (`kriya doctor && kriya generate ...`). A `[WARNING]` (e.g. configured model not found in the server's list, or a Java/Maven toolchain version mismatch - see below) doesn't affect the exit code.
+
+If `java` and/or `mvn` are found on PATH, `doctor` also reports which JDK major version each will actually build/run against and warns if they differ - `mvn` can silently resolve a different JDK than plain `java` (e.g. a Homebrew Maven install defaulting `JAVA_HOME` to its own openjdk), which can make a JVM startup flag correct for one JDK a fatal error under the other. Skipped entirely (no warning) if neither tool is found - not every project is Java-based.
 
 ### Inspect Resolved Configuration
 Print the fully-merged config (defaults + your `kriya.yaml`) as JSON - useful for confirming what a relative path or config layer actually resolved to:
