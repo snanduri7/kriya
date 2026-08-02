@@ -11,6 +11,39 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+def get_global_skills_dir() -> str:
+    """Kriya's own shared, global skill library directory (the install's own
+    skills/ folder) - not any project-local skills override."""
+    kriya_install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.join(kriya_install_dir, "skills")
+
+def is_accidental_shared_skills_write(skills_dir: str, workspace_path: str) -> bool:
+    """True when a write to skills_dir is about to land in Kriya's own shared/global
+    install directory for a workspace that ISN'T the Kriya install itself - the
+    signature of a project's own kriya.yaml not overriding paths.skills, silently
+    falling back to the packaged default (which resolves relative paths against the
+    Kriya install directory, not the project's own directory - see
+    config.py::load_config's default-config resolution). Confirmed live, repeatedly
+    (the same incident independently hit at least 4 times across this project's
+    history, including once during this very validation pass, by someone who had
+    the exact warning in memory) - unrelated scratch/test project content silently
+    written into the shared skill library every other real project inherits from.
+    Deliberately conservative: only flags the EXACT shared install path, and only
+    when workspace_path is clearly a different directory (not Kriya's own repo,
+    where writing to its own skills/ is completely normal)."""
+    try:
+        resolved_skills_dir = os.path.abspath(skills_dir)
+        global_skills_dir = get_global_skills_dir()
+        kriya_install_dir = os.path.dirname(global_skills_dir)
+        resolved_workspace = os.path.abspath(workspace_path)
+        return (
+            resolved_skills_dir == global_skills_dir
+            and resolved_workspace != kriya_install_dir
+            and not resolved_workspace.startswith(kriya_install_dir + os.sep)
+        )
+    except Exception:
+        return False
+
 def git_commit_if_tracked(path: str, message: str) -> None:
     """Best-effort commit of a skill-file change, scoped to `path`, if it lives inside a
     git work tree. Gives skill content a structured undo/audit trail (git log/revert)

@@ -1186,6 +1186,16 @@ class WorkflowEngine:
             repo_slug = "root"
             
         skills_dir = self.kernel.config.paths.skills
+        from kriya.skills.skill import is_accidental_shared_skills_write
+        if is_accidental_shared_skills_write(skills_dir, workspace_path):
+            logger.warning(
+                f"This project's config doesn't set paths.skills, so any skill writes this run "
+                f"makes (auto-bootstrapped conventions, skill-gap extraction, staged lesson rules) "
+                f"will land in Kriya's own SHARED install skills directory ({os.path.abspath(skills_dir)}) "
+                f"instead of a project-local one - every other project using Kriya would inherit "
+                f"them. If that's not intended, stop this run and set paths.skills in this "
+                f"project's kriya.yaml, e.g. \"./skills\"."
+            )
         se = SkillEngine(skills_dir)
         se.discover_and_load()
         

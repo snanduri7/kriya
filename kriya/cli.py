@@ -393,6 +393,15 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
 def analyze(ctx: click.Context, path: str, changed: bool, force: bool) -> None:
     """Analyze and index a repository directory."""
     cfg: AppConfig = ctx.obj['config']
+    # click.Path(exists=True) accepts a file too, but analyze() walks path as a
+    # directory (os.walk on a file path silently yields nothing) - confirmed
+    # live: pointing analyze at a single file produced an empty-looking but
+    # "successful" analysis (languages: {}, total_files_indexed: 0) with no
+    # error or indication that a directory was actually required, despite the
+    # command's own docstring saying exactly that.
+    if not os.path.isdir(path):
+        click.secho(f"Error: '{path}' is a file, not a directory - analyze requires a repository directory.", fg="red")
+        sys.exit(1)
     analyzer = RepositoryAnalyzer(path)
     try:
         model = analyzer.analyze()
@@ -531,9 +540,20 @@ def skills_show(ctx: click.Context, skill_name: str) -> None:
 def skills_create(ctx: click.Context, skill_name: str) -> None:
     """Create a default skeleton for a new skill."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    
+
+    from kriya.skills.skill import is_accidental_shared_skills_write
+    if is_accidental_shared_skills_write(cfg.paths.skills, os.getcwd()):
+        click.secho(
+            f"Warning: this project's config doesn't set paths.skills, so '{skill_name}' is about "
+            f"to be created in Kriya's own SHARED install skills directory "
+            f"({os.path.abspath(cfg.paths.skills)}) instead of a project-local one - every other "
+            f"project using Kriya would inherit it. If that's not intended, stop now (Ctrl+C) and "
+            f"set paths.skills in this project's kriya.yaml, e.g. \"./skills\".",
+            fg="red", bold=True,
+        )
+
     os.makedirs(cfg.paths.skills, exist_ok=True)
-    
+
     se = SkillEngine(cfg.paths.skills)
     try:
         path = se.create_skill_skeleton(skill_name)

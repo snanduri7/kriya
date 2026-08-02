@@ -618,19 +618,33 @@ class RepositoryAnalyzer:
             import subprocess
             try:
                 res = subprocess.run(["git", "diff", "--name-only"], cwd=self.root_path, capture_output=True, text=True)
-                git_files = set()
-                if res.returncode == 0:
+                res_untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=self.root_path, capture_output=True, text=True)
+                if res.returncode != 0 or res_untracked.returncode != 0:
+                    # Confirmed live: on a non-git directory, both commands fail
+                    # (returncode != 0, not an exception) - the OLD code silently
+                    # left git_files empty either way, which filtered
+                    # files_to_index down to NOTHING with no indication this
+                    # happened because --changed genuinely couldn't be honored,
+                    # rather than because there really were zero changes. Warn
+                    # clearly and fall back to indexing everything instead of
+                    # silently indexing nothing.
+                    stderr = (res.stderr or res_untracked.stderr or "").strip()
+                    logger.warning(
+                        f"--changed requires a git repository, but git reported an error at "
+                        f"'{self.root_path}'{f': {stderr}' if stderr else ''} - indexing all files "
+                        f"instead of only changed ones."
+                    )
+                else:
+                    git_files = set()
                     for line in res.stdout.splitlines():
                         if line.strip():
                             git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
-                res_untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=self.root_path, capture_output=True, text=True)
-                if res_untracked.returncode == 0:
                     for line in res_untracked.stdout.splitlines():
                         if line.strip():
                             git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
-                files_to_index = [f for f in files_to_index if os.path.abspath(f) in git_files]
+                    files_to_index = [f for f in files_to_index if os.path.abspath(f) in git_files]
             except Exception as e:
-                logger.warning(f"Failed to query git for changes: {e}")
+                logger.warning(f"Failed to query git for changes: {e} - indexing all files instead of only changed ones.")
 
         total_files = len(files_to_index)
         logger.info(f"Discovered {total_files} files for semantic indexing.")
@@ -722,10 +736,21 @@ class RepositoryAnalyzer:
             
         skills_dir = getattr(cfg.paths, "skills", "./skills")
         auto_skill_dir = os.path.join(skills_dir, f"auto-{repo_slug}")
-        
+
         if not os.path.exists(auto_skill_dir):
             import click
             import yaml
+
+            from kriya.skills.skill import is_accidental_shared_skills_write
+            if is_accidental_shared_skills_write(skills_dir, self.root_path):
+                click.secho(
+                    f"\nWarning: this project's config doesn't set paths.skills, so it's about to "
+                    f"write a new auto-generated skill into Kriya's own SHARED install skills "
+                    f"directory ({os.path.abspath(skills_dir)}) instead of a project-local one - "
+                    f"every other project using Kriya would inherit this. If that's not intended, "
+                    f"stop now and set paths.skills in this project's kriya.yaml, e.g. \"./skills\".",
+                    fg="red", bold=True,
+                )
 
             from kriya.agents.extractor import ConventionsExtractorAgent
             from kriya.core.llm import LLMClient
