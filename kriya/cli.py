@@ -52,6 +52,26 @@ def _redact_secrets(data: Any) -> Any:
         return [_redact_secrets(item) for item in data]
     return data
 
+async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dict[str, Optional[Exception]]:
+    """Attempts each discovered plugin's initialize() independently, so one
+    broken plugin can't prevent the others - or their tools - from becoming
+    available. Deliberately not PluginManager.initialize_all(), which raises
+    on the first failure and aborts before later plugins are even attempted;
+    that's the right behavior for the kernel-startup call sites that keep
+    using initialize_all() directly, but every command here needs to keep
+    working around one bad plugin. Returns {plugin_name: None-or-exception}
+    so a caller can report per-plugin status or just log failures and move on."""
+    results: Dict[str, Optional[Exception]] = {}
+    for p in pm.list_plugins():
+        try:
+            await p.initialize()
+            await kernel.events.emit("plugin_initialized", {"plugin_name": p.name, "plugin": p})
+            results[p.name] = None
+        except Exception as e:
+            logger.error(f"Plugin '{p.name}' failed to initialize, its tools will be unavailable: {e}")
+            results[p.name] = e
+    return results
+
 def configure_logging(cfg: AppConfig) -> None:
     """Initializes root logging handlers (console + optional file) from AppConfig.logging."""
     if logging.getLogger().handlers:
@@ -254,32 +274,23 @@ def plugins(ctx: click.Context) -> None:
         # initialize() too, so this status command must actually attempt it as
         # well - otherwise a plugin that discovers fine but fails to initialize
         # would show here as if everything's fine while real usage breaks.
-        # Deliberately does its own per-plugin try/except here rather than
-        # calling PluginManager.initialize_all() (which raises on the first
-        # failure, aborting before later plugins are even attempted) - a status
-        # command should report every plugin's status, not stop at the first
-        # broken one.
-        errors_found = False
-
         async def run_status():
-            nonlocal errors_found
             await kernel.start()
-            click.secho(f"=== Loaded Plugins ({len(loaded)}) ===", bold=True)
-            for p in loaded:
-                try:
-                    await p.initialize()
-                    await kernel.events.emit("plugin_initialized", {"plugin_name": p.name, "plugin": p})
-                    status = click.style("INITIALIZED", fg="green")
-                except Exception as e:
-                    status = click.style(f"FAILED: {e}", fg="red")
-                    errors_found = True
-                click.echo(f"  - {p.name} (v{p.version}) [{status}]")
-            await pm.shutdown_all()
-            await kernel.stop()
+            try:
+                click.secho(f"=== Loaded Plugins ({len(loaded)}) ===", bold=True)
+                results = await _initialize_plugins_tolerant(kernel, pm)
+                for p in loaded:
+                    err = results.get(p.name)
+                    status = click.style("INITIALIZED", fg="green") if err is None else click.style(f"FAILED: {err}", fg="red")
+                    click.echo(f"  - {p.name} (v{p.version}) [{status}]")
+                return results
+            finally:
+                await pm.shutdown_all()
+                await kernel.stop()
 
-        asyncio.run(run_status())
+        results = asyncio.run(run_status())
 
-        if errors_found:
+        if any(err is not None for err in results.values()):
             sys.exit(1)
     except Exception as e:
         click.secho(f"Error loading plugins: {e}", fg="red")
@@ -368,26 +379,41 @@ def tools_list(ctx: click.Context) -> None:
     
     try:
         pm.discover_and_load(enabled_plugins=cfg.plugins.enabled)
-        
+
         async def run_list():
             await kernel.start()
-            await pm.initialize_all()
-            
-            tools = kernel.registry.list_components("tool")
-            if not tools:
-                click.echo("No tools registered.")
-                return
-                
-            click.secho(f"=== Registered Tools ({len(tools)}) ===", bold=True)
-            for tool_name in tools:
-                tool = kernel.registry.get("tool", tool_name)
-                click.secho(f"\n  - {tool.name}", bold=True, fg="cyan")
-                click.echo(f"    Description: {tool.description}")
-                click.echo(f"    Schema: {json.dumps(tool.arguments_schema.model_json_schema(), indent=4)}")
-                
-            await pm.shutdown_all()
-            await kernel.stop()
-            
+            try:
+                # Tolerant, not initialize_all(): a plugin that fails to
+                # initialize must not prevent every OTHER plugin's (or native/
+                # MCP) tools from being listed - confirmed live with a
+                # deliberately broken test plugin that this previously took
+                # down tool listing entirely, not just its own tools.
+                init_results = await _initialize_plugins_tolerant(kernel, pm)
+                failed = [name for name, err in init_results.items() if err is not None]
+                if failed:
+                    click.secho(f"[WARNING] {len(failed)} plugin(s) failed to initialize - their tools are unavailable: {', '.join(failed)}", fg="yellow")
+
+                tools = kernel.registry.list_components("tool")
+                if not tools:
+                    click.echo("No tools registered.")
+                    return
+
+                click.secho(f"=== Registered Tools ({len(tools)}) ===", bold=True)
+                for tool_name in tools:
+                    tool = kernel.registry.get("tool", tool_name)
+                    click.secho(f"\n  - {tool.name}", bold=True, fg="cyan")
+                    click.echo(f"    Description: {tool.description}")
+                    click.echo(f"    Schema: {json.dumps(tool.arguments_schema.model_json_schema(), indent=4)}")
+            finally:
+                # try/finally, not calls at the end of the happy path: the
+                # "No tools registered" early return and any exception raised
+                # while listing tools used to skip this entirely, leaking any
+                # real MCP subprocess servers kernel.start() spawned (they are
+                # not reaped when this process exits - only kernel.stop() ->
+                # MCPManager.shutdown_all() terminates them).
+                await pm.shutdown_all()
+                await kernel.stop()
+
         asyncio.run(run_list())
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
@@ -410,45 +436,47 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
 
         async def run_exec():
             await kernel.start()
-            await pm.initialize_all()
-
             try:
-                tool = kernel.registry.get("tool", tool_name)
-            except Exception as e:
-                logger.debug(f"Failed to resolve tool '{tool_name}': {e}")
-                click.secho(f"Tool '{tool_name}' not found.", fg="red")
+                # Tolerant, not initialize_all(): an unrelated plugin failing
+                # to initialize must not block execution of a specific,
+                # explicitly-named tool that loaded fine.
+                await _initialize_plugins_tolerant(kernel, pm)
+
+                try:
+                    tool = kernel.registry.get("tool", tool_name)
+                except Exception as e:
+                    logger.debug(f"Failed to resolve tool '{tool_name}': {e}")
+                    click.secho(f"Tool '{tool_name}' not found.", fg="red")
+                    sys.exit(1)
+
+                args = json.loads(arguments_json) if arguments_json else {}
+
+                if tool.requires_confirmation and not yes:
+                    click.secho(f"\n[CONFIRMATION REQUIRED] Tool '{tool_name}' requires approval before execution.", fg="yellow")
+                    click.echo(f"Arguments: {json.dumps(args, indent=2)}")
+                    if not sys.stdin.isatty():
+                        click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve.", fg="red")
+                        sys.exit(1)
+                    if not click.confirm("Proceed with execution?"):
+                        click.secho("Execution cancelled.", fg="yellow")
+                        sys.exit(1)
+
+                try:
+                    result = await tool.execute(**args)
+                    if isinstance(result, (dict, list)):
+                        click.echo(json.dumps(result, indent=2))
+                    else:
+                        click.echo(result)
+                except Exception as ex:
+                    click.secho(f"Execution failed: {ex}", fg="red")
+            finally:
+                # try/finally so a bad --yes-less invalid-JSON arguments_json,
+                # or any other exception before reaching the end of the happy
+                # path, still terminates any real MCP subprocess servers
+                # kernel.start() spawned - see the matching note in tools_list.
                 await pm.shutdown_all()
                 await kernel.stop()
-                sys.exit(1)
 
-            args = json.loads(arguments_json) if arguments_json else {}
-
-            if tool.requires_confirmation and not yes:
-                click.secho(f"\n[CONFIRMATION REQUIRED] Tool '{tool_name}' requires approval before execution.", fg="yellow")
-                click.echo(f"Arguments: {json.dumps(args, indent=2)}")
-                if not sys.stdin.isatty():
-                    click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve.", fg="red")
-                    await pm.shutdown_all()
-                    await kernel.stop()
-                    sys.exit(1)
-                if not click.confirm("Proceed with execution?"):
-                    click.secho("Execution cancelled.", fg="yellow")
-                    await pm.shutdown_all()
-                    await kernel.stop()
-                    sys.exit(1)
-
-            try:
-                result = await tool.execute(**args)
-                if isinstance(result, (dict, list)):
-                    click.echo(json.dumps(result, indent=2))
-                else:
-                    click.echo(result)
-            except Exception as ex:
-                click.secho(f"Execution failed: {ex}", fg="red")
-                
-            await pm.shutdown_all()
-            await kernel.stop()
-            
         asyncio.run(run_exec())
     except Exception as e:
         click.secho(f"Execution failed: {e}", fg="red")

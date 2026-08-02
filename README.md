@@ -127,6 +127,7 @@ List all active native and custom MCP tools:
 ```bash
 .venv/bin/kriya tools list
 ```
+Both `tools list` and `tools execute` initialize each discovered plugin independently - a plugin that fails to initialize only makes *its own* tools unavailable (with a `[WARNING]`), it doesn't block tools from other plugins or prevent executing a specific tool you name directly.
 
 ### Analyze & Index Codebase
 Recursively scan and compile the semantic vector index for a directory:
