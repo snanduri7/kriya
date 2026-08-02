@@ -1487,26 +1487,34 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         sys.exit(1)
 
 @main.command(name="traces")
+@click.option("-n", "--limit", type=int, default=20, show_default=True, help="Maximum number of most-recent runs to show. Use --all to show every run.")
+@click.option("--all", "show_all", is_flag=True, help="Show all recorded runs, ignoring --limit.")
 @click.pass_context
-def traces(ctx: click.Context) -> None:
+def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
     """Show persistent run trace logs and metrics of past runs."""
     cfg: AppConfig = ctx.obj['config']
     db_path = os.path.join(cfg.paths.logs, "traces.db")
     if not os.path.exists(db_path):
         click.echo("No run traces recorded yet.")
         return
-        
-    import sqlite3
-    conn = sqlite3.connect(db_path)
+
+    from kriya.core.db import get_connection
+    conn = get_connection(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified FROM runs ORDER BY timestamp DESC")
+    total = cursor.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified FROM runs ORDER BY timestamp DESC"
+    if not show_all:
+        query += " LIMIT ?"
+        cursor.execute(query, (limit,))
+    else:
+        cursor.execute(query)
     rows = cursor.fetchall()
     conn.close()
-    
+
     if not rows:
         click.echo("No run traces recorded yet.")
         return
-        
+
     click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
     click.echo("-" * 100)
     for _r_id, ts, goal, dur, att, status, _files in rows:
@@ -1514,6 +1522,9 @@ def traces(ctx: click.Context) -> None:
         status_color = "green" if status.lower() == "success" else "red"
         status_styled = click.style(f"{status:<10}", fg=status_color)
         click.echo(f"{ts:<20} | {status_styled} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
+
+    if not show_all and total > len(rows):
+        click.echo(f"\nShowing {len(rows)} of {total} recorded runs. Use -n/--limit or --all to see more.")
 
 if __name__ == '__main__':
     main()

@@ -314,6 +314,7 @@ Inspect traces of all past generation and repair runs:
 ```bash
 kriya -c kriya.yaml traces
 ```
+Shows the 20 most recent runs by default (oldest hidden runs are counted in a trailing "Showing N of M" note, not silently dropped). Pass `-n/--limit <count>` to change how many are shown, or `--all` to print every recorded run.
 
 ### 4.6 Live Lookup
 By default, when Kriya lacks verified information for a skill, it stops and asks *you* for a URL, file, or pasted text (Section 4.2 above / Section 3.4). Live lookup lets Kriya try to resolve that gap itself first, by searching a backend you configure - this is the one opt-in exception to Kriya's "zero cloud dependency" default, so it's off unless you explicitly turn it on **for that project**:
