@@ -155,6 +155,49 @@ async def test_run_verifier_judge_escalates_on_unparseable_json():
     assert judgment["should_run"] is True
     assert llm.complete.await_count == 2
 
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_includes_pom_content_when_given():
+    """Regression test for a real bug found via two live golden-use-case runs
+    (Ignite, then Qpid): the system prompt already tells the judge exactly how
+    to read a pom.xml's exec-maven-plugin shape (exec:exec vs exec:java), but
+    judge() never actually included the pom.xml's content in its own prompt -
+    only the Architect's own already-minimized design (often just a bare file
+    list) and file paths, neither of which carry that detail. Confirmed live,
+    twice: an exec:exec-shaped pom (needed for --add-opens JVM flags) was
+    still judged as exec:java both times. The instruction was correct; the
+    data to apply it against was missing."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["mvn", "exec:exec"]],
+        "command_source": "inferred", "success_criteria": "Prints the result",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    pom_content = "<project><build><plugins><plugin><artifactId>exec-maven-plugin</artifactId></plugin></plugins></build></project>"
+    await verifier.judge(goal="Goal", design="## Files to Create\n- pom.xml", files_written=["pom.xml"], build_file_content=pom_content)
+
+    sent_prompt = llm.complete.await_args.args[1]
+    assert pom_content in sent_prompt
+    assert "Actual pom.xml content" in sent_prompt
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_omits_pom_section_when_not_given():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": False, "run_commands": None,
+        "command_source": "inferred", "success_criteria": "",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+
+    sent_prompt = llm.complete.await_args.args[1]
+    assert "Actual pom.xml content" not in sent_prompt
+
 @pytest.mark.asyncio
 async def test_developer_agent_json_parsing():
     cfg = AppConfig()

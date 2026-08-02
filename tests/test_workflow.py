@@ -22,6 +22,7 @@ from kriya.workflow.workflow import (
     IncompleteGenerationError,
     WorkflowEngine,
     _augment_error_with_live_lookup,
+    _build_full_set_retry_prompt,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
     _filter_misattributed_extraction,
@@ -2228,6 +2229,53 @@ def test_build_missing_files_retry_prompt_frames_missing_and_reference_files(tmp
     assert "## Files to Create" in context
     assert "Existing file (already written, reference only" in context
     assert "class BrokerServer { /* written */ }" in context
+
+
+def test_build_full_set_retry_prompt_includes_prior_attempt_content(tmp_path):
+    """Regression test for a real bug found via the golden Ignite+Qpid use
+    case: full-set retries previously never showed the model its own prior
+    attempt's content, only the abstract error text - _build_targeted_retry_
+    prompt's own docstring already named this exact gap. A "Dependency
+    regression: ... you must preserve all existing dependencies" error alone
+    doesn't tell the model WHAT those dependencies actually are, so a
+    full-set regeneration (rewriting the file to match the current goal)
+    kept dropping an existing, goal-irrelevant dependency it had no way to
+    see. Confirmed live before fixing."""
+    (tmp_path / "pom.xml").write_text("<project><artifactId>ignite-indexing</artifactId></project>")
+
+    task_desc, context = _build_full_set_retry_prompt(
+        goal="Add Qpid to the project",
+        plan="Extend pom.xml and add QpidClientApp.java",
+        error_context="Dependency regression: ignite-indexing was removed. You must preserve all existing dependencies.",
+        required_files_prompt_block="\n\nFiles required: pom.xml, QpidClientApp.java",
+        all_files_written=["pom.xml"],
+        worktree_path=str(tmp_path),
+        active_code_context="=== base RAG context ===\n",
+    )
+
+    assert "Dependency regression" in task_desc
+    assert "Files required: pom.xml" in task_desc
+    assert "=== base RAG context ===" in context
+    assert "Your previous attempt's content for pom.xml" in context
+    assert "ignite-indexing" in context
+
+
+def test_build_full_set_retry_prompt_empty_when_nothing_written_yet(tmp_path):
+    # The very first attempt (retry_count == 0) has nothing in all_files_written
+    # yet - must behave exactly like the old unconditional task_desc/context,
+    # not error out or add spurious content.
+    task_desc, context = _build_full_set_retry_prompt(
+        goal="Build the broker",
+        plan="Write BrokerServer.java",
+        error_context="",
+        required_files_prompt_block="",
+        all_files_written=[],
+        worktree_path=str(tmp_path),
+        active_code_context="=== base RAG context ===\n",
+    )
+
+    assert task_desc == "Goal: Build the broker\nPlan: Write BrokerServer.java"
+    assert context == "=== base RAG context ===\n\n\n"
 
 
 @pytest.mark.asyncio

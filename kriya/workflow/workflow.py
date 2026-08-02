@@ -987,6 +987,45 @@ def _build_targeted_retry_prompt(
     return task_desc, targeted_context
 
 
+def _build_full_set_retry_prompt(
+    goal: str, plan: str, error_context: str, required_files_prompt_block: str,
+    all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+) -> Tuple[str, str]:
+    """Full-set retries previously never showed the model its own prior attempt's
+    content at all, only the abstract error text describing what went wrong -
+    the exact gap _build_targeted_retry_prompt's own docstring already names as
+    something targeted retry fixes and full-set doesn't. Confirmed live as a
+    real bug via the golden Ignite+Qpid use case: a "Dependency regression: ...
+    you must preserve all existing dependencies" compile error doesn't tell the
+    model WHAT those dependencies actually are, so a full-set regeneration
+    (which naturally rewrites a file to match the current goal) kept dropping
+    an existing, goal-irrelevant dependency (ignite-indexing, from an earlier
+    milestone) it had no way to see - the instruction was there, the data to
+    act on it wasn't. Mirrors targeted retry's approach exactly: every
+    already-written file's current worktree content is included as reference,
+    so the model can make an informed choice about what to keep vs. change
+    rather than reconstructing everything from a clean slate."""
+    reference_section = ""
+    for filepath in sorted(all_files_written):
+        try:
+            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                current_content = fh.read()
+        except Exception as ex:
+            logger.debug(f"Failed to read '{filepath}' from worktree for full-set retry context: {ex}")
+            continue
+        reference_section += (
+            f"=== Your previous attempt's content for {filepath} (fix/rewrite as needed for the "
+            f"goal and error above, but don't silently drop anything still needed) ===\n{current_content}\n\n"
+        )
+
+    task_desc = f"Goal: {goal}\nPlan: {plan}"
+    if error_context:
+        task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
+    task_desc += required_files_prompt_block
+
+    return task_desc, active_code_context + "\n\n" + reference_section
+
+
 def _build_missing_files_retry_prompt(
     goal: str, plan: str, design: str, missing_files: List[str],
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
@@ -2056,11 +2095,6 @@ class WorkflowEngine:
                         known_target_files=resolved_missing_files,
                     )
                 else:
-                    task_desc = f"Goal: {goal}\nPlan: {plan}"
-                    if error_context:
-                        task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
-                    task_desc += required_files_prompt_block
-
                     # Re-run context budget allocator dynamically for escalated model context window size
                     current_limit = int(self.kernel.config.llm.context_window * 0.75)
                     model_override = None
@@ -2082,6 +2116,11 @@ class WorkflowEngine:
                         active_code_context += current_graph_context
                     if learned_rag_context:
                         active_code_context += learned_rag_context
+
+                    task_desc, active_code_context = _build_full_set_retry_prompt(
+                        goal, plan, error_context, required_files_prompt_block,
+                        all_files_written, worktree_path, active_code_context,
+                    )
 
                     # Track model hops
                     model_hops.append(model_override or self.kernel.config.llm.model)
@@ -2248,10 +2287,17 @@ class WorkflowEngine:
                     # self-terminating runtime behavior worth actually running and checking.
                     autonomy_cfg_rv = self.kernel.config.autonomy
                     if autonomy_cfg_rv.run_verification_enabled and not run_verification_declined:
+                        pom_content_for_judge = None
+                        try:
+                            with open(os.path.join(worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+                                pom_content_for_judge = f.read()
+                        except Exception as e:
+                            logger.debug(f"No pom.xml available for run-verification judgment: {e}")
                         judgment = await self.run_verifier.judge(
                             goal=goal,
                             design=design,
                             files_written=list(all_files_written),
+                            build_file_content=pom_content_for_judge,
                         )
                         if judgment["should_run"]:
                             proceed_with_run = True

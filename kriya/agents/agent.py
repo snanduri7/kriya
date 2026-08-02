@@ -518,11 +518,25 @@ class RunVerifierAgent(BaseAgent):
         goal: str,
         design: str,
         files_written: List[str],
+        build_file_content: Optional[str] = None,
     ) -> Dict[str, Any]:
         prompt = (
             f"=== Architecture Design ===\n{design}\n\n"
             f"=== Files Generated (already compiled and passed any existing tests) ===\n"
             f"{chr(10).join(files_written)}\n\n"
+        )
+        # The system prompt above already tells you precisely how to read a
+        # pom.xml's exec-maven-plugin shape (exec:exec vs exec:java) - this is
+        # the actual data to apply that rule against. Without it you're guessing
+        # blind: design is the Architect's own deliberately minimized output
+        # (often just a bare file list, by convention), so the richer detail a
+        # Planner's plan may have correctly stated ("use exec:exec") frequently
+        # doesn't survive to reach you - confirmed live, twice, as a real bug:
+        # an exec:exec-shaped pom (bare <classpath/> in <arguments>, needed for
+        # --add-opens JVM flags) was still judged as exec:java both times.
+        if build_file_content:
+            prompt += f"=== Actual pom.xml content (ground truth for how to invoke this app) ===\n{build_file_content}\n\n"
+        prompt += (
             f"=== Goal ===\n{goal}\n\n"
             "Decide whether this goal warrants runtime verification, per the rules above."
         )
