@@ -147,11 +147,15 @@ class ArchitectAgent(BaseAgent):
             "file the Developer Agent must remember to actually create, and unnecessary splitting directly causes "
             "incomplete-generation failures downstream.\n"
             "\n"
-            "REQUIRED FILES LIST: Always begin your design with a section titled exactly '## Files to Create' "
+            "REQUIRED FILES LIST: Always begin your design with a section titled exactly '## Files to Create or Modify' "
             "followed by one bullet per file you are designing, each bullet containing that file's exact relative "
-            "path (e.g. '- src/main/java/com/example/BrokerServer.java'). This list is the authoritative, complete "
-            "set of files the Developer Agent must produce - do not mention any additional file path later in the "
-            "design that is not already in this list, and do not list a file here that you don't actually design."
+            "path (e.g. '- src/main/java/com/example/BrokerServer.java'). When extending an existing project, this "
+            "list MUST also include already-existing files that need real changes, not just brand-new ones - e.g. "
+            "adding a new dependency to an already-existing pom.xml/build.gradle, or adding a bean to an "
+            "already-existing Spring XML context. Check the Workspace Context above for what already exists before "
+            "assuming a file only needs to be created. This list is the authoritative, complete set of files the "
+            "Developer Agent must produce - do not mention any additional file path later in the design that is not "
+            "already in this list, and do not list a file here that you don't actually design."
         )
 
 

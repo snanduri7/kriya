@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kriya.agents.agent import (
+    ArchitectAgent,
     DeveloperAgent,
     PlannerAgent,
     RunVerifierAgent,
@@ -718,3 +719,20 @@ async def test_check_skill_conflicts_skips_llm_call_when_either_skill_has_no_rul
 
     assert result == []
     llm.complete.assert_not_called()
+
+
+def test_architect_prompt_requires_listing_files_that_need_modification_too():
+    """Regression test for a real bug found via a live golden-use-case run
+    (M2, Qpid-extends-Ignite): the Architect's prompt only ever said
+    "## Files to Create", and DeveloperAgent's own prompt treats that list
+    as exhaustive ("implement ALL files... do not omit any"). When extending
+    an existing project, a file that needs a real change but already exists
+    (e.g. adding a new dependency to the existing pom.xml) was never listed,
+    so the Developer never touched it - confirmed live: a new class
+    referencing Qpid/JMS classes compiled against a pom.xml that still only
+    had Ignite dependencies, since pom.xml was never in the Architect's
+    "Files to Create" list. The prompt must explicitly cover modifying
+    existing files, not just creating new ones."""
+    prompt = ArchitectAgent("architect", None).system_prompt
+    assert "Files to Create or Modify" in prompt
+    assert "already-existing" in prompt.lower() or "existing files" in prompt.lower()

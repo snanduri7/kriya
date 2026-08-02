@@ -63,15 +63,24 @@ def enrich_java_compiler_errors(output: str) -> str:
         if res:
             suggestions.append((cls, res))
 
-    # 3. Match cannot find symbol: class X
-    missing_symbols = re.findall(r"cannot find symbol\s+symbol:\s+class\s+([a-zA-Z0-9_]+)", output, re.IGNORECASE)
-    for sym in missing_symbols:
-        # Exclude common built-in java types to avoid redundant queries
-        if sym in ("String", "Integer", "List", "Map", "Set", "Exception"):
-            continue
-        res = resolve_maven_class(sym, "c")
-        if res:
-            suggestions.append((sym, res))
+    # 3. "cannot find symbol: class X" (a bare, unqualified class name) is
+    # deliberately NOT queried against Maven Central. A bare simple name has
+    # no qualifying context at all - millions of unrelated classes across
+    # Maven Central share common names - and Solr's c:"..." field search
+    # returns its single top hit with no relevance/consensus filtering.
+    # Confirmed live, twice, as actively harmful rather than just unhelpful:
+    # a real "cannot find symbol: class IgniteCache" (whose real cause was a
+    # wrong import path, not a missing dependency) matched an unrelated tiny
+    # library (cc.mashroom:mashroom-plugin) that then got auto-accrued into
+    # a permanent, git-committed skill polluting a later, unrelated goal;
+    # separately, 5/5 bare-class-name matches in the same run
+    # (SystemLauncher, ConnectionFactory, MessageProducer, MessageConsumer,
+    # TextMessage) were unrelated garbage (dataspacetck, ldk-sql-api,
+    # tracee-examples-jms-api, dapeng-message-api, dingtalk) in the SAME
+    # compiler output where the package-based search below correctly and
+    # usefully resolved javax.jms -> javax.jms:jms:1.1. Package/FQCN context
+    # (patterns 1, 2, 4) is meaningfully more specific and hasn't shown this
+    # failure mode - only the fully-unqualified bare-name case is removed.
 
     # 4. Match package X does not exist
     missing_packages = re.findall(r"package\s+([a-zA-Z0-9_\.]+)\s+does not exist", output, re.IGNORECASE)

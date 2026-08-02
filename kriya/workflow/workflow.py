@@ -2447,8 +2447,24 @@ class WorkflowEngine:
                 if worktree_path != workspace_path:
                     remove_git_worktree(workspace_path, worktree_path)
 
-                # Phase 3: Auto-generate skill templates for solved dependencies
+                # Phase 3: Auto-generate skill templates for solved dependencies. A
+                # coordinate merely appearing in a resolver.py suggestion during some
+                # retry attempt is not evidence it was ever actually used - confirmed
+                # live as a real bug: a wrong Maven-Central match for a generic
+                # missing-symbol name (the real problem was a bare wrong import path,
+                # not a genuinely missing dependency) got auto-accrued into a
+                # permanent, git-committed skill scaffold that then polluted an
+                # unrelated later goal's skill-gap detection. Only accrue a
+                # coordinate that actually appears in the FINAL applied file content -
+                # real evidence it was used, not just suggested at some point.
                 if retry_count > 0:
+                    final_contents_combined = ""
+                    for filepath in all_files_written:
+                        try:
+                            with open(os.path.join(workspace_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                                final_contents_combined += fh.read()
+                        except Exception as e:
+                            logger.debug(f"Failed to read '{filepath}' for auto-accrual verification: {e}")
                     for outcome in gate_outcomes:
                         output_str = outcome.get("output", "")
                         if output_str and "=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===" in output_str:
@@ -2457,8 +2473,15 @@ class WorkflowEngine:
                                 output_str
                             )
                             for g, a, v in deps:
+                                artifact_id = a.strip()
+                                if artifact_id not in final_contents_combined:
+                                    logger.debug(
+                                        f"Skipping auto-accrual for {g.strip()}:{artifact_id} - not found in the "
+                                        "final applied files, likely an irrelevant suggestion never actually used."
+                                    )
+                                    continue
                                 try:
-                                    coord = f"{g.strip()}:{a.strip()}"
+                                    coord = f"{g.strip()}:{artifact_id}"
                                     ver = v.strip()
                                     logger.info(f"Auto-accrual: Automatically scaffolding verified skill for resolved dependency {coord}:{ver}")
                                     guard.generate_skill_template(coord, ver)
