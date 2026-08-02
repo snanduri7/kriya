@@ -304,7 +304,8 @@ def prompt_group() -> None:
 @prompt_group.command(name="render")
 @click.argument('template_name')
 @click.option('--var', '-v', multiple=True, help="Variables to pass to template in key=value format.")
-def prompt_render(template_name: str, var: tuple) -> None:
+@click.option('--template-dir', '-t', type=click.Path(exists=True, file_okay=False, dir_okay=True), help="Directory containing custom '<name>.jinja' templates, checked before the 4 built-in defaults (system_instructions, code_review, refactor, generate_code).")
+def prompt_render(template_name: str, var: tuple, template_dir: Optional[str]) -> None:
     """Render a prompt template with variables."""
     vars_dict = {}
     for variable in var:
@@ -314,8 +315,16 @@ def prompt_render(template_name: str, var: tuple) -> None:
         else:
             click.secho(f"Invalid variable format '{variable}'. Expected 'key=value'.", fg="red")
             sys.exit(1)
-            
-    pe = PromptEngine()
+
+    # PromptEngine has always supported a template_dir constructor arg for
+    # custom '<name>.jinja' files (checked before the 4 built-in defaults),
+    # but this was the only call site in the whole codebase and it never
+    # passed one - confirmed via grep, and live: a real custom .jinja file on
+    # disk was unreachable no matter what, with zero indication why. --var
+    # already exists as a per-invocation option for this same command, so a
+    # matching --template-dir option is the minimal fix that actually exposes
+    # the existing capability, rather than a new persistent config field.
+    pe = PromptEngine(template_dir=template_dir)
     try:
         rendered = pe.render(template_name, vars_dict)
         click.echo(rendered)

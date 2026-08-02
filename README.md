@@ -136,6 +136,17 @@ Recursively scan and compile the semantic vector index for a directory:
 ```
 *Note: Subsequent runs on the same folder will check `mtimes` and index incrementally (completing instantly).*
 
+### Render & Generate Prompt Templates
+Render one of the 4 built-in templates (`system_instructions`, `code_review`, `refactor`, `generate_code`), or your own custom `<name>.jinja` files via `-t/--template-dir` (checked first, before falling back to the built-ins):
+```bash
+.venv/bin/kriya prompt render refactor -v filepath=main.py -v code_content="..." -v guidelines="..."
+.venv/bin/kriya prompt render my_template -t ./my_prompts -v foo=bar
+```
+Or ask a local model to draft a well-structured prompt from a one-line description, useful as a starting point for a real `kriya generate` goal:
+```bash
+.venv/bin/kriya prompt generate "a REST API for managing a todo list"
+```
+
 ### Run Code Review
 Analyze files or directories for bugs, style consistency, and architectural quality:
 ```bash
