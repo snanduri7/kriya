@@ -6,7 +6,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 
@@ -29,6 +29,28 @@ def _get_global_skills_dir() -> str:
     risk writing test data into the real shared skills on disk."""
     kriya_install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     return os.path.join(kriya_install_dir, "skills")
+
+def _redact_secrets(data: Any) -> Any:
+    """Recursively redacts credential-carrying values before a config dump is
+    ever displayed. Covers every api_key field regardless of where it's nested
+    (top-level llm, llm_chain entries, each agent_llms role's own llm/llm_chain)
+    without needing to enumerate each location by shape - and every value inside
+    an MCP server's env dict, since those commonly carry real tokens passed to
+    the MCP subprocess (key names are kept so the user can still see which env
+    vars are configured, just not their values)."""
+    if isinstance(data, dict):
+        redacted = {}
+        for key, value in data.items():
+            if key == "api_key" and isinstance(value, str) and value:
+                redacted[key] = "***REDACTED***"
+            elif key == "env" and isinstance(value, dict):
+                redacted[key] = {k: ("***REDACTED***" if v else v) for k, v in value.items()}
+            else:
+                redacted[key] = _redact_secrets(value)
+        return redacted
+    if isinstance(data, list):
+        return [_redact_secrets(item) for item in data]
+    return data
 
 def configure_logging(cfg: AppConfig) -> None:
     """Initializes root logging handlers (console + optional file) from AppConfig.logging."""
@@ -95,7 +117,7 @@ def version() -> None:
 def config(ctx: click.Context) -> None:
     """Display current Kriya configuration."""
     cfg: AppConfig = ctx.obj['config']
-    click.echo(cfg.model_dump_json(indent=2))
+    click.echo(json.dumps(_redact_secrets(cfg.model_dump(mode="json")), indent=2))
 
 @main.command()
 @click.pass_context

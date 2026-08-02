@@ -108,6 +108,13 @@ Ensure local Ollama models and server links are connected:
 ```
 Exits non-zero if any check reports `[ERROR]` (e.g. LLM/embedding server unreachable), so it's safe to gate scripts on (`kriya doctor && kriya generate ...`). A `[WARNING]` (e.g. configured model not found in the server's list) doesn't affect the exit code.
 
+### Inspect Resolved Configuration
+Print the fully-merged config (defaults + your `kriya.yaml`) as JSON - useful for confirming what a relative path or config layer actually resolved to:
+```bash
+.venv/bin/kriya -c kriya.yaml config
+```
+Every `api_key` field and every MCP server's `env` values are redacted (`***REDACTED***`) before printing - safe to paste into a bug report or share on a call.
+
 ### Discover Active Tools
 List all active native and custom MCP tools:
 ```bash
