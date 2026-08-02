@@ -1,5 +1,6 @@
+import json
 import logging
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -25,6 +26,42 @@ def test_analyze_rejects_single_file_with_clear_error(tmp_path):
 
     assert res.exit_code != 0
     assert "directory" in res.output.lower()
+
+
+def test_analyze_stdout_is_clean_json_with_no_progress_chrome(tmp_path):
+    """Regression test for a real bug found while auditing other commands for
+    the same stdout-pollution shape as `prompt generate`: the JSON payload
+    (model.model_dump_json()) was printed FIRST, then "Building semantic
+    repository index...", a progress bar, and "Success: ..." were printed
+    AFTER it on the same stdout stream via plain click.secho - so `kriya
+    analyze . | jq .` (or any downstream JSON consumer) would choke on
+    trailing garbage after the JSON's closing brace. Verified live before
+    fixing. Chrome now goes to stderr (err=True / progressbar file=stderr);
+    stdout must parse as valid JSON on its own."""
+    (tmp_path / "main.py").write_text("x = 1\n")
+
+    runner = CliRunner()
+    with patch("httpx.AsyncClient.post") as mock_post, \
+         patch("kriya.cli.load_config") as mock_load_config, \
+         patch("kriya.core.llm.LLMClient.complete", new=AsyncMock(return_value="{}")):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": [{"embedding": [0.1] * 384}]}
+        mock_post.return_value = mock_response
+
+        cfg = AppConfig()
+        cfg.paths.memory = str(tmp_path / "memory")
+        cfg.paths.skills = str(tmp_path / "skills")
+        mock_load_config.return_value = cfg
+
+        res = runner.invoke(main, ["analyze", str(tmp_path)])
+
+    assert res.exit_code == 0, res.output
+    parsed = json.loads(res.stdout)  # raises if any chrome leaked into stdout
+    assert "languages" in parsed
+    assert "Building semantic repository index" not in res.stdout
+    assert "Success" not in res.stdout
+    assert "Building semantic repository index" in res.stderr
 
 
 @pytest.mark.asyncio

@@ -43,12 +43,16 @@ embedding:
 
 # Natural-language command routing inside `kriya repl` (type a request instead of
 # an explicit command, e.g. "why is this test flaky" instead of `ask "..."`).
-# Off by default - flip enabled to true to turn it on. embed_model is separate
-# from embedding.model on purpose (see spikes/version_b_routing/README.md);
-# requires `ollama pull embeddinggemma` (or whatever embed_model you set) in
-# addition to whatever model embedding.model already uses.
+# On by default - explicit commands are unaffected either way, routing only
+# activates when the typed line doesn't already start with a real command name.
+# Set enabled: false to turn it off. embed_model is separate from embedding.model
+# on purpose (see spikes/version_b_routing/README.md); requires `ollama pull
+# embeddinggemma` (or whatever embed_model you set) in addition to whatever
+# model embedding.model already uses - if it isn't pulled, routing fails loudly
+# with the exact pull command needed and disables itself for the rest of the
+# session rather than silently misbehaving.
 routing:
-  enabled: false
+  enabled: true
   embed_model: "embeddinggemma:latest"
   reject_threshold: 0.3
   ask_margin: 0.05

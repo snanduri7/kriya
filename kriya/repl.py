@@ -38,6 +38,10 @@ Type any normal Kriya command without the leading "kriya" - e.g.:
   analyze .
   skills list
 
+Not sure how to phrase a goal? Draft one first, review it, then build it:
+  prompt generate "a REST API for managing a todo list"
+  generate --file .kriya/last_prompt.md -y
+
 Type "/" to see every command Kriya supports, live, as you type.
 
 Your --config (if you started the session with one) is applied automatically
@@ -76,13 +80,18 @@ _STYLE = Style.from_dict({"prompt-border": "#5f87d7 bold"})
 _EXIT_COMMANDS = {"/exit", "/quit"}
 
 
-def _print_banner(config_path: Optional[str]) -> None:
+def _print_banner(config_path: Optional[str], routing_enabled: bool) -> None:
     from kriya import __version__
 
     title = f"Kriya {__version__} interactive session"
     body_lines = [
         f"config: {config_path or '(default resolution)'}",
         "Type /help for session commands, /exit to quit.",
+        (
+            "Type your request in plain English, or an exact command."
+            if routing_enabled else
+            'Wrap a full request in quotes, e.g. generate "..." -y.'
+        ),
     ]
     # Top/bottom border length is derived from whichever line is longest -
     # title or body - so the box stays a clean rectangle regardless of
@@ -219,6 +228,22 @@ def _dispatch(cli_main: click.Group, tokens: list) -> None:
         cli_main.main(args=tokens, prog_name="kriya", standalone_mode=False)
     except click.exceptions.Exit:
         pass
+    except click.exceptions.UsageError as e:
+        # Covers "No such command" (first word isn't a real command) and
+        # "unexpected extra argument(s)"/"missing argument" (first word IS a
+        # real command, like "generate", but the rest reads as a plain-English
+        # sentence rather than that command's actual arguments) - the latter
+        # bypasses natural-language routing entirely even when it's enabled,
+        # since _route_line only routes lines whose first word ISN'T already a
+        # real command name. Click's own specific error is still shown first;
+        # this is an addendum, not a replacement, so a genuine typo on an
+        # already-valid command (e.g. a bad flag) still shows its real reason.
+        e.show()
+        click.secho(
+            "(Tip: Kriya commands need exact syntax - wrap a full request in "
+            'quotes, e.g. generate "..." -y, so it\'s passed as one argument.)',
+            fg="yellow", dim=True, err=True,
+        )
     except click.ClickException as e:
         e.show()
     except (EOFError, KeyboardInterrupt):
@@ -234,7 +259,7 @@ def run_repl(config_path: Optional[str]) -> None:
     cfg = load_config(config_path)
     router: Optional[Router] = Router(cfg) if cfg.routing.enabled else None
 
-    _print_banner(config_path)
+    _print_banner(config_path, router is not None)
     session = PromptSession(
         history=InMemoryHistory(),
         completer=_SlashCommandCompleter(cli_main),

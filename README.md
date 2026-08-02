@@ -40,7 +40,7 @@ Kriya runs entirely on **local infrastructure** — local LLMs, local tools, loc
     - **Known limitation**: this reduces blast radius (secret-leak-via-env-var, runaway/destructive execution) but does **not** provide full sandboxing — executed code still has real filesystem and network access as your OS user. It can still read credential files directly off disk (e.g. `~/.ssh`, `~/.aws/credentials`) or reach the network. Full isolation would require containerization, which is not implemented.
 - **MCP Tool Server**: Integrates native tool sets into workspace workflows as a standardized MCP server (via the `mcp` SDK's `MCPServer`).
 - **Interactive Session** (`kriya repl`, or just bare `kriya`/`kriya -c kriya.yaml` on a real terminal): a persistent process for issuing several commands in a row instead of restarting the CLI each time — a boxed, multi-line-capable prompt (via `prompt_toolkit`), with `--config` applied automatically to every command. Bare invocation only starts the session on an actual interactive terminal (checked via `sys.stdin.isatty()`) — piped/non-TTY input (scripts, CI) falls back to today's help text instead, so nothing hangs waiting on stdin by accident. Deliberately thin: each typed line dispatches straight into the exact same command group the regular one-shot CLI uses, so there's no separate parser or duplicated logic to drift out of sync. Type `/` to see every command Kriya supports, filtered live as you keep typing.
-  - **Natural-language routing** (`routing.enabled: true`, off by default): type plain English instead of an explicit command inside the session — Kriya routes it to the right command (`generate`/`ask`/`fix`/`review`/`analyze`/`skills`) via an embeddings classifier plus a narrow LLM in-scope gate, asking which you meant if it's not confident rather than guessing, and saying so plainly if it's not something Kriya does (installing packages, deploying, git operations, and similar stay explicitly out of scope). Needs `ollama pull embeddinggemma` — a separate, dedicated embedding model from whatever `embedding.model` you use for code search, since it measurably outperformed the packaged default at this specific short-phrase classification task. See `spikes/version_b_routing/README.md` for the feasibility investigation this was validated against.
+  - **Natural-language routing** (`routing.enabled`, on by default): type plain English instead of an explicit command inside the session — Kriya routes it to the right command (`generate`/`ask`/`fix`/`review`/`analyze`/`skills`) via an embeddings classifier plus a narrow LLM in-scope gate, asking which you meant if it's not confident rather than guessing, and saying so plainly if it's not something Kriya does (installing packages, deploying, git operations, and similar stay explicitly out of scope). Explicit commands are unaffected either way - routing only activates when a typed line's first word isn't already a real command name. Needs `ollama pull embeddinggemma` — a separate, dedicated embedding model from whatever `embedding.model` you use for code search, since it measurably outperformed the packaged default at this specific short-phrase classification task; if it isn't pulled, routing fails loudly with the exact pull command needed and disables itself for the rest of the session (or set `routing.enabled: false` to opt out entirely). See `spikes/version_b_routing/README.md` for the feasibility investigation this was validated against.
 
 ---
 
@@ -106,12 +106,28 @@ Ensure local Ollama models and server links are connected:
 ```bash
 .venv/bin/kriya doctor
 ```
+Exits non-zero if any check reports `[ERROR]` (e.g. LLM/embedding server unreachable), so it's safe to gate scripts on (`kriya doctor && kriya generate ...`). A `[WARNING]` (e.g. configured model not found in the server's list) doesn't affect the exit code.
+
+### Inspect Resolved Configuration
+Print the fully-merged config (defaults + your `kriya.yaml`) as JSON - useful for confirming what a relative path or config layer actually resolved to:
+```bash
+.venv/bin/kriya -c kriya.yaml config
+```
+Every `api_key` field and every MCP server's `env` values are redacted (`***REDACTED***`) before printing - safe to paste into a bug report or share on a call.
+
+### Check Plugin Health
+List every discovered plugin under `plugins.directory` and whether it actually initialized successfully (not just whether its class loaded):
+```bash
+.venv/bin/kriya plugins
+```
+Exits non-zero if any plugin's `initialize()` failed - each plugin is attempted independently, so one broken plugin doesn't hide the status of the others.
 
 ### Discover Active Tools
 List all active native and custom MCP tools:
 ```bash
 .venv/bin/kriya tools list
 ```
+Both `tools list` and `tools execute` initialize each discovered plugin independently - a plugin that fails to initialize only makes *its own* tools unavailable (with a `[WARNING]`), it doesn't block tools from other plugins or prevent executing a specific tool you name directly.
 
 ### Analyze & Index Codebase
 Recursively scan and compile the semantic vector index for a directory:
@@ -119,6 +135,27 @@ Recursively scan and compile the semantic vector index for a directory:
 .venv/bin/kriya analyze kriya/core
 ```
 *Note: Subsequent runs on the same folder will check `mtimes` and index incrementally (completing instantly).*
+Only the repository model JSON lands on stdout - progress/status output (including auto-generated-skill narration) goes to stderr, so `kriya analyze . | jq .` works cleanly.
+
+### Render & Generate Prompt Templates
+Render one of the 4 built-in templates (`system_instructions`, `code_review`, `refactor`, `generate_code`), or your own custom `<name>.jinja` files via `-t/--template-dir` (checked first, before falling back to the built-ins):
+```bash
+.venv/bin/kriya prompt render refactor -v filepath=main.py -v code_content="..." -v guidelines="..."
+.venv/bin/kriya prompt render my_template -t ./my_prompts -v foo=bar
+```
+Or ask a local model to draft a well-structured prompt from a one-line description, useful as a starting point for a real `kriya generate` goal:
+```bash
+.venv/bin/kriya prompt generate "a REST API for managing a todo list"
+```
+Prints the generated prompt to stdout (safe to pipe: `kriya prompt generate "..." | kriya generate -y`) and auto-saves it to `.kriya/last_prompt.md`, printing the exact follow-up command to run - the easy path inside `kriya repl`, where there's no shell pipe between two typed lines:
+```
+╭─ kriya
+╰─> prompt generate "a REST API for managing a todo list"
+...
+Saved to .kriya/last_prompt.md - run: generate --file .kriya/last_prompt.md -y
+╭─ kriya
+╰─> generate --file .kriya/last_prompt.md -y
+```
 
 ### Run Code Review
 Analyze files or directories for bugs, style consistency, and architectural quality:
@@ -129,6 +166,7 @@ Analyze files or directories for bugs, style consistency, and architectural qual
 # Review all modified files in a directory (via Git)
 .venv/bin/kriya review kriya/core
 ```
+Only the review text itself lands on stdout - scanning/progress narration goes to stderr, so the output is safe to redirect straight to a file.
 
 ### Autonomous Generation Workflow
 Generate or refactor code autonomously based on a goal:

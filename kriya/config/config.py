@@ -108,12 +108,21 @@ class AgentRolesConfig(BaseModel):
     skill_gap: AgentModelConfig = Field(default_factory=AgentModelConfig)
 
 class RoutingConfig(BaseModel):
-    # Off by default - kriya repl's natural-language routing (Version B) depends on
-    # local model/embedding quality that varies a lot by what's actually pulled, and
-    # an explicit opt-in avoids surprising an existing user with new behavior on
-    # upgrade. See spikes/version_b_routing/README.md for the feasibility validation
-    # this config directly reflects.
-    enabled: bool = Field(default=False)
+    # On by default (since 2026-08-02) - a first-time kriya repl user typing a
+    # plain-English request instead of an exact command was the single biggest
+    # first-contact UX gap found in this platform's validation pass, and this
+    # feature's own real-world validation (95.6% effective accuracy on a
+    # 136-case held-out test set, ask-when-uncertain fallback for anything
+    # genuinely ambiguous) was already strong enough to trust as a default.
+    # Explicit commands are completely unaffected either way - routing only
+    # ever activates when the typed line's first word doesn't already match a
+    # real command name (kriya/repl.py::_route_line). The one real cost of
+    # this default is a new hard dependency on routing.embed_model being
+    # pulled; RoutingModelUnavailable fails loudly with the exact `ollama
+    # pull ...` command needed (or `routing.enabled: false` to opt back out)
+    # rather than silently degrading. See spikes/version_b_routing/README.md
+    # for the full feasibility validation this config reflects.
+    enabled: bool = Field(default=True)
     # Deliberately separate from embedding.model, which stays tuned for the RAG
     # code/doc index - a different task (long-form retrieval vs. short natural-
     # language intent phrases). Validated head-to-head on a 136-case held-out test

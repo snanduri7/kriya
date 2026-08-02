@@ -6,7 +6,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 
@@ -29,6 +29,48 @@ def _get_global_skills_dir() -> str:
     risk writing test data into the real shared skills on disk."""
     kriya_install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     return os.path.join(kriya_install_dir, "skills")
+
+def _redact_secrets(data: Any) -> Any:
+    """Recursively redacts credential-carrying values before a config dump is
+    ever displayed. Covers every api_key field regardless of where it's nested
+    (top-level llm, llm_chain entries, each agent_llms role's own llm/llm_chain)
+    without needing to enumerate each location by shape - and every value inside
+    an MCP server's env dict, since those commonly carry real tokens passed to
+    the MCP subprocess (key names are kept so the user can still see which env
+    vars are configured, just not their values)."""
+    if isinstance(data, dict):
+        redacted = {}
+        for key, value in data.items():
+            if key == "api_key" and isinstance(value, str) and value:
+                redacted[key] = "***REDACTED***"
+            elif key == "env" and isinstance(value, dict):
+                redacted[key] = {k: ("***REDACTED***" if v else v) for k, v in value.items()}
+            else:
+                redacted[key] = _redact_secrets(value)
+        return redacted
+    if isinstance(data, list):
+        return [_redact_secrets(item) for item in data]
+    return data
+
+async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dict[str, Optional[Exception]]:
+    """Attempts each discovered plugin's initialize() independently, so one
+    broken plugin can't prevent the others - or their tools - from becoming
+    available. Deliberately not PluginManager.initialize_all(), which raises
+    on the first failure and aborts before later plugins are even attempted;
+    that's the right behavior for the kernel-startup call sites that keep
+    using initialize_all() directly, but every command here needs to keep
+    working around one bad plugin. Returns {plugin_name: None-or-exception}
+    so a caller can report per-plugin status or just log failures and move on."""
+    results: Dict[str, Optional[Exception]] = {}
+    for p in pm.list_plugins():
+        try:
+            await p.initialize()
+            await kernel.events.emit("plugin_initialized", {"plugin_name": p.name, "plugin": p})
+            results[p.name] = None
+        except Exception as e:
+            logger.error(f"Plugin '{p.name}' failed to initialize, its tools will be unavailable: {e}")
+            results[p.name] = e
+    return results
 
 def configure_logging(cfg: AppConfig) -> None:
     """Initializes root logging handlers (console + optional file) from AppConfig.logging."""
@@ -95,7 +137,7 @@ def version() -> None:
 def config(ctx: click.Context) -> None:
     """Display current Kriya configuration."""
     cfg: AppConfig = ctx.obj['config']
-    click.echo(cfg.model_dump_json(indent=2))
+    click.echo(json.dumps(_redact_secrets(cfg.model_dump(mode="json")), indent=2))
 
 @main.command()
 @click.pass_context
@@ -118,7 +160,17 @@ def doctor(ctx: click.Context) -> None:
         status = click.style("EXISTS", fg="green") if exists else click.style("MISSING (will be created on run)", fg="yellow")
         click.echo(f"  - {name}: {resolved} [{status}]")
         
+    errors_found = False
+
     # 2. Check local LLM connection
+    # NOTE: LLMClient (kriya/core/llm.py) always talks to base_url via the
+    # OpenAI-compatible wire protocol regardless of what llm.provider is set
+    # to - that field is documentation-only ("OpenAI-compatible client; works
+    # against Ollama, LM Studio, etc.", see user_guide.md). This check must
+    # always run, not be gated on provider == "openai": a user who reasonably
+    # sets provider to their actual backend's name (e.g. "ollama") would
+    # otherwise get the platform's core connectivity check silently skipped
+    # with no indication it never ran.
     click.echo("\nChecking LLM provider connectivity:")
     provider = cfg.llm.provider
     base_url = cfg.llm.base_url
@@ -126,41 +178,41 @@ def doctor(ctx: click.Context) -> None:
     click.echo(f"  - Provider: {provider}")
     click.echo(f"  - Base URL: {base_url}")
     click.echo(f"  - Model: {model}")
-    
-    if provider == "openai":
-        click.echo("  - Testing connection...")
-        try:
-            url = f"{base_url.rstrip('/')}/models"
-            req = urllib.request.Request(
-                url=url,
-                headers={"Authorization": f"Bearer {cfg.llm.api_key}"}
-            )
-            with urllib.request.urlopen(req, timeout=3.0) as response:
-                status_code = response.getcode()
-                content = response.read().decode('utf-8')
-                data = json.loads(content)
-                
-            if status_code == 200:
-                available_models = []
-                if isinstance(data, dict) and "data" in data:
-                    available_models = [m.get("id") for m in data["data"] if isinstance(m, dict)]
-                
-                click.secho("  - [SUCCESS] Connected to local LLM server. Status code: 200", fg="green")
-                if available_models:
-                    click.echo(f"  - Available models: {', '.join(available_models)}")
-                    if model in available_models:
-                        click.secho(f"  - [SUCCESS] Model '{model}' is available on the server.", fg="green")
-                    else:
-                        click.secho(f"  - [WARNING] Model '{model}' was not found in the list of available models: {available_models}", fg="yellow")
+    click.echo("  - Testing connection...")
+    try:
+        url = f"{base_url.rstrip('/')}/models"
+        req = urllib.request.Request(
+            url=url,
+            headers={"Authorization": f"Bearer {cfg.llm.api_key}"}
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as response:
+            status_code = response.getcode()
+            content = response.read().decode('utf-8')
+            data = json.loads(content)
+
+        if status_code == 200:
+            available_models = []
+            if isinstance(data, dict) and "data" in data:
+                available_models = [m.get("id") for m in data["data"] if isinstance(m, dict)]
+
+            click.secho("  - [SUCCESS] Connected to local LLM server. Status code: 200", fg="green")
+            if available_models:
+                click.echo(f"  - Available models: {', '.join(available_models)}")
+                if model in available_models:
+                    click.secho(f"  - [SUCCESS] Model '{model}' is available on the server.", fg="green")
                 else:
-                    click.echo("  - Connected successfully, but list of models was empty or couldn't be parsed.")
+                    click.secho(f"  - [WARNING] Model '{model}' was not found in the list of available models: {available_models}", fg="yellow")
             else:
-                click.secho(f"  - [WARNING] Connected to local server, but got status code {status_code}.", fg="yellow")
-        except urllib.error.URLError as e:
-            click.secho(f"  - [ERROR] Could not connect to local LLM server at {base_url}: {e.reason}", fg="red")
-            click.echo("    Ensure your local LLM server (e.g. Ollama, LM Studio) is running and accessible.")
-        except Exception as e:
-            click.secho(f"  - [ERROR] Connectivity test encountered an error: {e}", fg="red")
+                click.echo("  - Connected successfully, but list of models was empty or couldn't be parsed.")
+        else:
+            click.secho(f"  - [WARNING] Connected to local server, but got status code {status_code}.", fg="yellow")
+    except urllib.error.URLError as e:
+        click.secho(f"  - [ERROR] Could not connect to local LLM server at {base_url}: {e.reason}", fg="red")
+        click.echo("    Ensure your local LLM server (e.g. Ollama, LM Studio) is running and accessible.")
+        errors_found = True
+    except Exception as e:
+        click.secho(f"  - [ERROR] Connectivity test encountered an error: {e}", fg="red")
+        errors_found = True
 
     # 2.5. Check local Embedding connection
     click.echo("\nChecking Embedding provider connectivity:")
@@ -169,7 +221,7 @@ def doctor(ctx: click.Context) -> None:
     click.echo(f"  - Base URL: {embed_url}")
     click.echo(f"  - Model: {embed_model}")
     click.echo("  - Testing connection...")
-    
+
     try:
         from kriya.memory.vector import OllamaEmbeddingClient
         client = OllamaEmbeddingClient(base_url=embed_url, model=embed_model)
@@ -182,6 +234,12 @@ def doctor(ctx: click.Context) -> None:
     except Exception as e:
         click.secho(f"  - [ERROR] Could not connect or failed to generate test embedding: {e}", fg="red")
         click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
+        errors_found = True
+
+    if errors_found:
+        click.echo()
+        click.secho("One or more checks failed - see [ERROR] lines above.", fg="red", bold=True)
+        sys.exit(1)
 
 @main.command()
 @click.pass_context
@@ -198,20 +256,42 @@ def repl(ctx: click.Context) -> None:
 def plugins(ctx: click.Context) -> None:
     """List loaded plugins and their lifecycle status."""
     cfg: AppConfig = ctx.obj['config']
-    
+
     kernel = Kernel(config=cfg)
     pm = PluginManager(kernel=kernel, plugin_dir=cfg.plugins.directory)
-    
+
     try:
         pm.discover_and_load(enabled_plugins=cfg.plugins.enabled)
         loaded = pm.list_plugins()
         if not loaded:
             click.echo("No plugins loaded.")
             return
-            
-        click.secho(f"=== Loaded Plugins ({len(loaded)}) ===", bold=True)
-        for p in loaded:
-            click.echo(f"  - {p.name} (v{p.version})")
+
+        # Discovery (a successful __init__) only proves the plugin class exists
+        # and constructs cleanly - it does NOT prove initialize() (where a plugin
+        # actually registers its tools/listeners) succeeds. Every real call site
+        # that uses plugins for real (tools list/execute, generate) calls
+        # initialize() too, so this status command must actually attempt it as
+        # well - otherwise a plugin that discovers fine but fails to initialize
+        # would show here as if everything's fine while real usage breaks.
+        async def run_status():
+            await kernel.start()
+            try:
+                click.secho(f"=== Loaded Plugins ({len(loaded)}) ===", bold=True)
+                results = await _initialize_plugins_tolerant(kernel, pm)
+                for p in loaded:
+                    err = results.get(p.name)
+                    status = click.style("INITIALIZED", fg="green") if err is None else click.style(f"FAILED: {err}", fg="red")
+                    click.echo(f"  - {p.name} (v{p.version}) [{status}]")
+                return results
+            finally:
+                await pm.shutdown_all()
+                await kernel.stop()
+
+        results = asyncio.run(run_status())
+
+        if any(err is not None for err in results.values()):
+            sys.exit(1)
     except Exception as e:
         click.secho(f"Error loading plugins: {e}", fg="red")
         sys.exit(1)
@@ -224,7 +304,8 @@ def prompt_group() -> None:
 @prompt_group.command(name="render")
 @click.argument('template_name')
 @click.option('--var', '-v', multiple=True, help="Variables to pass to template in key=value format.")
-def prompt_render(template_name: str, var: tuple) -> None:
+@click.option('--template-dir', '-t', type=click.Path(exists=True, file_okay=False, dir_okay=True), help="Directory containing custom '<name>.jinja' templates, checked before the 4 built-in defaults (system_instructions, code_review, refactor, generate_code).")
+def prompt_render(template_name: str, var: tuple, template_dir: Optional[str]) -> None:
     """Render a prompt template with variables."""
     vars_dict = {}
     for variable in var:
@@ -234,8 +315,16 @@ def prompt_render(template_name: str, var: tuple) -> None:
         else:
             click.secho(f"Invalid variable format '{variable}'. Expected 'key=value'.", fg="red")
             sys.exit(1)
-            
-    pe = PromptEngine()
+
+    # PromptEngine has always supported a template_dir constructor arg for
+    # custom '<name>.jinja' files (checked before the 4 built-in defaults),
+    # but this was the only call site in the whole codebase and it never
+    # passed one - confirmed via grep, and live: a real custom .jinja file on
+    # disk was unreachable no matter what, with zero indication why. --var
+    # already exists as a per-invocation option for this same command, so a
+    # matching --template-dir option is the minimal fix that actually exposes
+    # the existing capability, rather than a new persistent config field.
+    pe = PromptEngine(template_dir=template_dir)
     try:
         rendered = pe.render(template_name, vars_dict)
         click.echo(rendered)
@@ -247,7 +336,15 @@ def prompt_render(template_name: str, var: tuple) -> None:
 @click.argument('description')
 @click.pass_context
 def prompt_generate(ctx: click.Context, description: str) -> None:
-    """Generate an optimized code-generation prompt based on a high-level description."""
+    """Generate an optimized code-generation prompt based on a high-level description.
+
+    Prints the prompt to stdout and auto-saves it to .kriya/last_prompt.md,
+    so you can review it before actually building anything:
+
+    \b
+      kriya prompt generate "a REST API for managing a todo list"
+      kriya generate --file .kriya/last_prompt.md -y
+    """
     cfg: AppConfig = ctx.obj['config']
     
     import asyncio
@@ -269,16 +366,45 @@ def prompt_generate(ctx: click.Context, description: str) -> None:
     )
     
     async def run_gen():
-        click.secho("Generating optimized prompt...", fg="cyan")
+        click.secho("Generating optimized prompt...", fg="cyan", err=True)
         return await llm.complete(
             system_prompt=system_prompt,
             user_prompt=f"Create a developer prompt for: {description}"
         )
-        
+
     try:
         res = asyncio.run(run_gen())
-        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green")
+        # Status/header chrome goes to stderr, err=True - stdout carries ONLY
+        # the generated prompt text, so `kriya prompt generate "x" | kriya
+        # generate -y` (real shell piping, standalone CLI use) gets a clean
+        # goal rather than the two lines above mixed into it. Verified live
+        # before this fix: both lines appeared in stdout, which would have
+        # been fed to `generate` as if they were part of the actual goal.
+        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green", err=True)
         click.echo(res)
+
+        # Inside `kriya repl` there's no shell pipe between two typed lines -
+        # each dispatches independently and control returns to the prompt
+        # afterward - so the stdout/stderr split above doesn't help a REPL
+        # user chain this into a follow-up `generate` call. Auto-save to a
+        # fixed, predictable path and reuse generate's EXISTING --file flag
+        # (no new mechanism) rather than inventing REPL-specific reference
+        # syntax for what is, deliberately, a single concrete use case.
+        try:
+            kriya_dir = os.path.join(os.getcwd(), ".kriya")
+            os.makedirs(kriya_dir, exist_ok=True)
+            saved_path = os.path.join(kriya_dir, "last_prompt.md")
+            with open(saved_path, "w", encoding="utf-8") as f:
+                f.write(res)
+            click.secho(
+                f"\nSaved to {os.path.relpath(saved_path)} - run: generate --file {os.path.relpath(saved_path)} -y",
+                fg="blue", dim=True, err=True,
+            )
+        except Exception as e:
+            # Don't claim a save that didn't happen - warn instead of silently
+            # printing nothing, so the user isn't left wondering why the hint
+            # they expected never showed up.
+            click.secho(f"\n[WARNING] Could not auto-save the generated prompt to .kriya/last_prompt.md: {e}", fg="yellow", err=True)
     except Exception as e:
         click.secho(f"Failed to generate prompt: {e}", fg="red")
         sys.exit(1)
@@ -299,26 +425,41 @@ def tools_list(ctx: click.Context) -> None:
     
     try:
         pm.discover_and_load(enabled_plugins=cfg.plugins.enabled)
-        
+
         async def run_list():
             await kernel.start()
-            await pm.initialize_all()
-            
-            tools = kernel.registry.list_components("tool")
-            if not tools:
-                click.echo("No tools registered.")
-                return
-                
-            click.secho(f"=== Registered Tools ({len(tools)}) ===", bold=True)
-            for tool_name in tools:
-                tool = kernel.registry.get("tool", tool_name)
-                click.secho(f"\n  - {tool.name}", bold=True, fg="cyan")
-                click.echo(f"    Description: {tool.description}")
-                click.echo(f"    Schema: {json.dumps(tool.arguments_schema.model_json_schema(), indent=4)}")
-                
-            await pm.shutdown_all()
-            await kernel.stop()
-            
+            try:
+                # Tolerant, not initialize_all(): a plugin that fails to
+                # initialize must not prevent every OTHER plugin's (or native/
+                # MCP) tools from being listed - confirmed live with a
+                # deliberately broken test plugin that this previously took
+                # down tool listing entirely, not just its own tools.
+                init_results = await _initialize_plugins_tolerant(kernel, pm)
+                failed = [name for name, err in init_results.items() if err is not None]
+                if failed:
+                    click.secho(f"[WARNING] {len(failed)} plugin(s) failed to initialize - their tools are unavailable: {', '.join(failed)}", fg="yellow")
+
+                tools = kernel.registry.list_components("tool")
+                if not tools:
+                    click.echo("No tools registered.")
+                    return
+
+                click.secho(f"=== Registered Tools ({len(tools)}) ===", bold=True)
+                for tool_name in tools:
+                    tool = kernel.registry.get("tool", tool_name)
+                    click.secho(f"\n  - {tool.name}", bold=True, fg="cyan")
+                    click.echo(f"    Description: {tool.description}")
+                    click.echo(f"    Schema: {json.dumps(tool.arguments_schema.model_json_schema(), indent=4)}")
+            finally:
+                # try/finally, not calls at the end of the happy path: the
+                # "No tools registered" early return and any exception raised
+                # while listing tools used to skip this entirely, leaking any
+                # real MCP subprocess servers kernel.start() spawned (they are
+                # not reaped when this process exits - only kernel.stop() ->
+                # MCPManager.shutdown_all() terminates them).
+                await pm.shutdown_all()
+                await kernel.stop()
+
         asyncio.run(run_list())
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
@@ -341,45 +482,47 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
 
         async def run_exec():
             await kernel.start()
-            await pm.initialize_all()
-
             try:
-                tool = kernel.registry.get("tool", tool_name)
-            except Exception as e:
-                logger.debug(f"Failed to resolve tool '{tool_name}': {e}")
-                click.secho(f"Tool '{tool_name}' not found.", fg="red")
+                # Tolerant, not initialize_all(): an unrelated plugin failing
+                # to initialize must not block execution of a specific,
+                # explicitly-named tool that loaded fine.
+                await _initialize_plugins_tolerant(kernel, pm)
+
+                try:
+                    tool = kernel.registry.get("tool", tool_name)
+                except Exception as e:
+                    logger.debug(f"Failed to resolve tool '{tool_name}': {e}")
+                    click.secho(f"Tool '{tool_name}' not found.", fg="red")
+                    sys.exit(1)
+
+                args = json.loads(arguments_json) if arguments_json else {}
+
+                if tool.requires_confirmation and not yes:
+                    click.secho(f"\n[CONFIRMATION REQUIRED] Tool '{tool_name}' requires approval before execution.", fg="yellow")
+                    click.echo(f"Arguments: {json.dumps(args, indent=2)}")
+                    if not sys.stdin.isatty():
+                        click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve.", fg="red")
+                        sys.exit(1)
+                    if not click.confirm("Proceed with execution?"):
+                        click.secho("Execution cancelled.", fg="yellow")
+                        sys.exit(1)
+
+                try:
+                    result = await tool.execute(**args)
+                    if isinstance(result, (dict, list)):
+                        click.echo(json.dumps(result, indent=2))
+                    else:
+                        click.echo(result)
+                except Exception as ex:
+                    click.secho(f"Execution failed: {ex}", fg="red")
+            finally:
+                # try/finally so a bad --yes-less invalid-JSON arguments_json,
+                # or any other exception before reaching the end of the happy
+                # path, still terminates any real MCP subprocess servers
+                # kernel.start() spawned - see the matching note in tools_list.
                 await pm.shutdown_all()
                 await kernel.stop()
-                sys.exit(1)
 
-            args = json.loads(arguments_json) if arguments_json else {}
-
-            if tool.requires_confirmation and not yes:
-                click.secho(f"\n[CONFIRMATION REQUIRED] Tool '{tool_name}' requires approval before execution.", fg="yellow")
-                click.echo(f"Arguments: {json.dumps(args, indent=2)}")
-                if not sys.stdin.isatty():
-                    click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve.", fg="red")
-                    await pm.shutdown_all()
-                    await kernel.stop()
-                    sys.exit(1)
-                if not click.confirm("Proceed with execution?"):
-                    click.secho("Execution cancelled.", fg="yellow")
-                    await pm.shutdown_all()
-                    await kernel.stop()
-                    sys.exit(1)
-
-            try:
-                result = await tool.execute(**args)
-                if isinstance(result, (dict, list)):
-                    click.echo(json.dumps(result, indent=2))
-                else:
-                    click.echo(result)
-            except Exception as ex:
-                click.secho(f"Execution failed: {ex}", fg="red")
-                
-            await pm.shutdown_all()
-            await kernel.stop()
-            
         asyncio.run(run_exec())
     except Exception as e:
         click.secho(f"Execution failed: {e}", fg="red")
@@ -400,41 +543,48 @@ def analyze(ctx: click.Context, path: str, changed: bool, force: bool) -> None:
     # error or indication that a directory was actually required, despite the
     # command's own docstring saying exactly that.
     if not os.path.isdir(path):
-        click.secho(f"Error: '{path}' is a file, not a directory - analyze requires a repository directory.", fg="red")
+        click.secho(f"Error: '{path}' is a file, not a directory - analyze requires a repository directory.", fg="red", err=True)
         sys.exit(1)
     analyzer = RepositoryAnalyzer(path)
     try:
         model = analyzer.analyze()
+        # The JSON payload is the only thing that belongs on stdout - everything
+        # from here down is progress/status narration and goes to stderr
+        # (err=True / file=sys.stderr), so `kriya analyze . | jq .` (or any
+        # other downstream JSON consumer) doesn't choke on trailing chrome
+        # printed after the closing brace. Confirmed live before this fix: the
+        # index-building messages and progress bar were plain stdout output,
+        # appended right after the JSON on the same stream.
         click.echo(model.model_dump_json(indent=2))
-        
+
         if os.path.isdir(path):
-            click.secho("\nBuilding semantic repository index...", bold=True, fg="cyan")
-            
+            click.secho("\nBuilding semantic repository index...", bold=True, fg="cyan", err=True)
+
             progress_bar = None
-            
+
             def progress_callback(filepath: str, idx: int, total: int):
                 nonlocal progress_bar
                 if progress_bar is None:
-                    progress_bar = click.progressbar(length=total, label="Indexing repository files")
-                
+                    progress_bar = click.progressbar(length=total, label="Indexing repository files", file=sys.stderr)
+
                 # Check if it is a skip or compile
                 if "[Up-to-date]" in filepath:
                     label_text = f"Skipping: {filepath[:30]}"
                 else:
                     label_text = f"Indexing: {filepath[:30]}"
-                
+
                 progress_bar.label = label_text.ljust(45)
                 progress_bar.update(1)
-                
+
             async def run_indexing():
                 await analyzer.index_repository(cfg, changed=changed, force=force, progress_callback=progress_callback)
-                
+
             asyncio.run(run_indexing())
             if progress_bar:
                 progress_bar.render_finish()
-            click.secho("Success: Semantic index compiled and cached to disk.", fg="green")
+            click.secho("Success: Semantic index compiled and cached to disk.", fg="green", err=True)
     except Exception as e:
-        click.secho(f"Analysis failed: {e}", fg="red")
+        click.secho(f"Analysis failed: {e}", fg="red", err=True)
         sys.exit(1)
 
 @main.group(name="skills")
@@ -1005,8 +1155,15 @@ def review(ctx: click.Context, file_path: str) -> None:
         files_to_review = []
         truncated = False
 
+        # Every click.secho below this point is progress/status narration, not
+        # the review itself - kept on stderr (err=True) so only the reviewer's
+        # actual streamed output lands on stdout, the same convention applied
+        # to `prompt generate`/`analyze` for the identical reason: a real
+        # shell pipe consuming this command's stdout (or a REPL-side "save
+        # this review" redirect) shouldn't have to filter out narration mixed
+        # into the same stream as the real content.
         if os.path.isdir(file_path):
-            click.secho(f"Scanning directory: {file_path}", fg="cyan")
+            click.secho(f"Scanning directory: {file_path}", fg="cyan", err=True)
             # Try git status first. -z gives NUL-separated, unquoted paths - the
             # default porcelain format quotes paths containing spaces/special
             # characters (e.g. `M "path with spaces/file.py"`), which a naive
@@ -1063,16 +1220,16 @@ def review(ctx: click.Context, file_path: str) -> None:
                     click.secho(
                         "Note: more than 10 reviewable files found - only the first 10 (by directory "
                         "scan order) are being reviewed. Re-run against a subdirectory for full coverage.",
-                        fg="yellow",
+                        fg="yellow", err=True,
                     )
         else:
             files_to_review.append((os.path.basename(file_path), os.path.abspath(file_path)))
 
         if not files_to_review:
-            click.secho("No Python, Java, or XML source files found to review.", fg="yellow")
+            click.secho("No Python, Java, or XML source files found to review.", fg="yellow", err=True)
             return
 
-        click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan")
+        click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan", err=True)
         from kriya.analyzer.analyzer import chunk_file_syntactically
         from kriya.workflow.workflow import estimate_tokens
 
@@ -1107,7 +1264,7 @@ def review(ctx: click.Context, file_path: str) -> None:
                     click.secho(
                         f"Warning: '{rel}' is too large to review in full within the "
                         f"configured context window - reviewing only the portion that fits.",
-                        fg="yellow",
+                        fg="yellow", err=True,
                     )
                     kept = ""
                     for c_idx, chunk_data in enumerate(chunks, 1):
@@ -1120,7 +1277,7 @@ def review(ctx: click.Context, file_path: str) -> None:
 
                 file_blobs.append((rel, blob, estimate_tokens(blob)))
             except Exception as e:
-                click.secho(f"Failed to read file {rel}: {e}", fg="yellow")
+                click.secho(f"Failed to read file {rel}: {e}", fg="yellow", err=True)
 
         # Greedily group files into batches that each fit the budget - the
         # common case (a handful of small/medium files) still produces exactly
@@ -1148,13 +1305,13 @@ def review(ctx: click.Context, file_path: str) -> None:
         async def run_review():
             for i, batch_prompt in enumerate(batches, 1):
                 label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
-                click.secho(f"\n{label}", bold=True, fg="cyan")
+                click.secho(f"\n{label}", bold=True, fg="cyan", err=True)
                 await reviewer.run(batch_prompt, stream_callback=on_stream)
                 click.echo()
 
         asyncio.run(run_review())
     except Exception as e:
-        click.secho(f"Review failed: {e}", fg="red")
+        click.secho(f"Review failed: {e}", fg="red", err=True)
         sys.exit(1)
 
 @main.command(name="ask")
