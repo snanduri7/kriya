@@ -106,6 +106,7 @@ Ensure local Ollama models and server links are connected:
 ```bash
 .venv/bin/kriya doctor
 ```
+Exits non-zero if any check reports `[ERROR]` (e.g. LLM/embedding server unreachable), so it's safe to gate scripts on (`kriya doctor && kriya generate ...`). A `[WARNING]` (e.g. configured model not found in the server's list) doesn't affect the exit code.
 
 ### Discover Active Tools
 List all active native and custom MCP tools:

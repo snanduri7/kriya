@@ -118,7 +118,17 @@ def doctor(ctx: click.Context) -> None:
         status = click.style("EXISTS", fg="green") if exists else click.style("MISSING (will be created on run)", fg="yellow")
         click.echo(f"  - {name}: {resolved} [{status}]")
         
+    errors_found = False
+
     # 2. Check local LLM connection
+    # NOTE: LLMClient (kriya/core/llm.py) always talks to base_url via the
+    # OpenAI-compatible wire protocol regardless of what llm.provider is set
+    # to - that field is documentation-only ("OpenAI-compatible client; works
+    # against Ollama, LM Studio, etc.", see user_guide.md). This check must
+    # always run, not be gated on provider == "openai": a user who reasonably
+    # sets provider to their actual backend's name (e.g. "ollama") would
+    # otherwise get the platform's core connectivity check silently skipped
+    # with no indication it never ran.
     click.echo("\nChecking LLM provider connectivity:")
     provider = cfg.llm.provider
     base_url = cfg.llm.base_url
@@ -126,41 +136,41 @@ def doctor(ctx: click.Context) -> None:
     click.echo(f"  - Provider: {provider}")
     click.echo(f"  - Base URL: {base_url}")
     click.echo(f"  - Model: {model}")
-    
-    if provider == "openai":
-        click.echo("  - Testing connection...")
-        try:
-            url = f"{base_url.rstrip('/')}/models"
-            req = urllib.request.Request(
-                url=url,
-                headers={"Authorization": f"Bearer {cfg.llm.api_key}"}
-            )
-            with urllib.request.urlopen(req, timeout=3.0) as response:
-                status_code = response.getcode()
-                content = response.read().decode('utf-8')
-                data = json.loads(content)
-                
-            if status_code == 200:
-                available_models = []
-                if isinstance(data, dict) and "data" in data:
-                    available_models = [m.get("id") for m in data["data"] if isinstance(m, dict)]
-                
-                click.secho("  - [SUCCESS] Connected to local LLM server. Status code: 200", fg="green")
-                if available_models:
-                    click.echo(f"  - Available models: {', '.join(available_models)}")
-                    if model in available_models:
-                        click.secho(f"  - [SUCCESS] Model '{model}' is available on the server.", fg="green")
-                    else:
-                        click.secho(f"  - [WARNING] Model '{model}' was not found in the list of available models: {available_models}", fg="yellow")
+    click.echo("  - Testing connection...")
+    try:
+        url = f"{base_url.rstrip('/')}/models"
+        req = urllib.request.Request(
+            url=url,
+            headers={"Authorization": f"Bearer {cfg.llm.api_key}"}
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as response:
+            status_code = response.getcode()
+            content = response.read().decode('utf-8')
+            data = json.loads(content)
+
+        if status_code == 200:
+            available_models = []
+            if isinstance(data, dict) and "data" in data:
+                available_models = [m.get("id") for m in data["data"] if isinstance(m, dict)]
+
+            click.secho("  - [SUCCESS] Connected to local LLM server. Status code: 200", fg="green")
+            if available_models:
+                click.echo(f"  - Available models: {', '.join(available_models)}")
+                if model in available_models:
+                    click.secho(f"  - [SUCCESS] Model '{model}' is available on the server.", fg="green")
                 else:
-                    click.echo("  - Connected successfully, but list of models was empty or couldn't be parsed.")
+                    click.secho(f"  - [WARNING] Model '{model}' was not found in the list of available models: {available_models}", fg="yellow")
             else:
-                click.secho(f"  - [WARNING] Connected to local server, but got status code {status_code}.", fg="yellow")
-        except urllib.error.URLError as e:
-            click.secho(f"  - [ERROR] Could not connect to local LLM server at {base_url}: {e.reason}", fg="red")
-            click.echo("    Ensure your local LLM server (e.g. Ollama, LM Studio) is running and accessible.")
-        except Exception as e:
-            click.secho(f"  - [ERROR] Connectivity test encountered an error: {e}", fg="red")
+                click.echo("  - Connected successfully, but list of models was empty or couldn't be parsed.")
+        else:
+            click.secho(f"  - [WARNING] Connected to local server, but got status code {status_code}.", fg="yellow")
+    except urllib.error.URLError as e:
+        click.secho(f"  - [ERROR] Could not connect to local LLM server at {base_url}: {e.reason}", fg="red")
+        click.echo("    Ensure your local LLM server (e.g. Ollama, LM Studio) is running and accessible.")
+        errors_found = True
+    except Exception as e:
+        click.secho(f"  - [ERROR] Connectivity test encountered an error: {e}", fg="red")
+        errors_found = True
 
     # 2.5. Check local Embedding connection
     click.echo("\nChecking Embedding provider connectivity:")
@@ -169,7 +179,7 @@ def doctor(ctx: click.Context) -> None:
     click.echo(f"  - Base URL: {embed_url}")
     click.echo(f"  - Model: {embed_model}")
     click.echo("  - Testing connection...")
-    
+
     try:
         from kriya.memory.vector import OllamaEmbeddingClient
         client = OllamaEmbeddingClient(base_url=embed_url, model=embed_model)
@@ -182,6 +192,12 @@ def doctor(ctx: click.Context) -> None:
     except Exception as e:
         click.secho(f"  - [ERROR] Could not connect or failed to generate test embedding: {e}", fg="red")
         click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
+        errors_found = True
+
+    if errors_found:
+        click.echo()
+        click.secho("One or more checks failed - see [ERROR] lines above.", fg="red", bold=True)
+        sys.exit(1)
 
 @main.command()
 @click.pass_context
