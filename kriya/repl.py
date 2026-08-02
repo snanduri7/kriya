@@ -38,6 +38,10 @@ Type any normal Kriya command without the leading "kriya" - e.g.:
   analyze .
   skills list
 
+Not sure how to phrase a goal? Draft one first, review it, then build it:
+  prompt generate "a REST API for managing a todo list"
+  generate --file .kriya/last_prompt.md -y
+
 Type "/" to see every command Kriya supports, live, as you type.
 
 Your --config (if you started the session with one) is applied automatically

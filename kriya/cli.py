@@ -336,7 +336,15 @@ def prompt_render(template_name: str, var: tuple, template_dir: Optional[str]) -
 @click.argument('description')
 @click.pass_context
 def prompt_generate(ctx: click.Context, description: str) -> None:
-    """Generate an optimized code-generation prompt based on a high-level description."""
+    """Generate an optimized code-generation prompt based on a high-level description.
+
+    Prints the prompt to stdout and auto-saves it to .kriya/last_prompt.md,
+    so you can review it before actually building anything:
+
+    \b
+      kriya prompt generate "a REST API for managing a todo list"
+      kriya generate --file .kriya/last_prompt.md -y
+    """
     cfg: AppConfig = ctx.obj['config']
     
     import asyncio

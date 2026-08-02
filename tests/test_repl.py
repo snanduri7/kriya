@@ -4,7 +4,15 @@ from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
 from kriya.cli import main as cli_main
-from kriya.repl import _dispatch, _inject_config, _print_banner, _resolve_clarify, _route_line, _SlashCommandCompleter
+from kriya.repl import (
+    _dispatch,
+    _help_text,
+    _inject_config,
+    _print_banner,
+    _resolve_clarify,
+    _route_line,
+    _SlashCommandCompleter,
+)
 from kriya.routing import CLARIFY, UNROUTABLE, RoutingModelUnavailable, RoutingResult
 
 
@@ -258,3 +266,13 @@ def test_resolve_clarify_cancels_on_invalid_choice(capsys):
     session.prompt = MagicMock(return_value="banana")
     assert _resolve_clarify(session, ["fix", "ask"]) is None
     assert "Not a valid choice" in capsys.readouterr().out
+
+
+def test_help_text_includes_a_worked_prompt_generate_to_generate_example():
+    """A concrete example beats abstract instructions - /help now shows the
+    exact two-line workflow for drafting a goal with `prompt generate` and
+    then building it with `generate --file`, the one use case surfaced by a
+    real user question about how to chain the two inside a REPL session."""
+    text = _help_text(False)
+    assert 'prompt generate "a REST API for managing a todo list"' in text
+    assert "generate --file .kriya/last_prompt.md -y" in text
