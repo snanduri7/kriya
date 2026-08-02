@@ -1,0 +1,56 @@
+FROM /Users/sriramnanduri/OllamaModels/blobs/sha256-1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a
+
+TEMPLATE """{{- if .Tools }}<|im_start|>system
+{{- if .System }}
+{{ .System }}
+{{- end }}
+
+# Tools
+
+You have access to the following functions. When you need to call one, respond with EXACTLY this format and nothing else:
+<tool_call>
+<function=example_function_name>
+<parameter=example_parameter_1>
+value_1
+</parameter>
+</function>
+</tool_call>
+
+<tools>
+{{ .Tools }}
+</tools>
+<|im_end|>
+{{- else if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{- end }}
+{{- range .Messages }}
+{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{- else if eq .Role "assistant" }}<|im_start|>assistant
+{{- if .Content }}
+{{ .Content }}
+{{- end }}
+{{- if .ToolCalls }}
+{{- range .ToolCalls }}
+<tool_call>
+<function={{ .Function.Name }}>
+{{ .Function.Arguments }}
+</function>
+</tool_call>
+{{- end }}
+{{- end }}<|im_end|>
+{{- else if eq .Role "tool" }}<|im_start|>user
+<tool_response>
+{{ .Content }}
+</tool_response><|im_end|>
+{{- end }}
+{{- end }}<|im_start|>assistant
+"""
+
+PARAMETER temperature 0.7
+PARAMETER top_k 20
+PARAMETER top_p 0.8
+PARAMETER repeat_penalty 1.05
+PARAMETER stop <|im_start|>
+PARAMETER stop <|im_end|>
+PARAMETER stop <|endoftext|>
