@@ -86,6 +86,32 @@ def test_on_web_lookup_query_interactive_shows_terms_and_confirms(tmp_path):
     assert result is True
     mock_confirm.assert_called_once()
 
+def test_generate_prints_failure_category(tmp_path):
+    runner = CliRunner()
+    mock_run = AsyncMock(return_value={
+        "files": ["app.py"], "quality_gates_passed": False,
+        "failure_category": "quality_gates_exhausted",
+    })
+
+    with patch("os.getcwd", return_value=str(tmp_path)), \
+         patch("kriya.workflow.workflow.WorkflowEngine.run_generation_workflow", new=mock_run):
+        res = runner.invoke(main, ["generate", "-f", str(_write_goal(tmp_path)), "-y"])
+
+    assert "Failure category: quality_gates_exhausted" in res.output
+
+def test_fix_prints_failure_category(tmp_path):
+    runner = CliRunner()
+    mock_run = AsyncMock(return_value={
+        "files": ["app.py"], "quality_gates_passed": False,
+        "failure_category": "quality_gates_exhausted",
+    })
+
+    with patch("os.getcwd", return_value=str(tmp_path)), \
+         patch("kriya.workflow.workflow.WorkflowEngine.run_generation_workflow", new=mock_run):
+        res = runner.invoke(main, ["fix", "-e", "some compile error", "-y"])
+
+    assert "Failure category: quality_gates_exhausted" in res.output
+
 def _write_goal(tmp_path):
     goal_file = tmp_path / "goal.txt"
     goal_file.write_text("Build a Spring XML Application with Apache Ignite 2.18")

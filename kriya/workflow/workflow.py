@@ -2177,6 +2177,19 @@ class WorkflowEngine:
         # generation run rather than on every retry attempt.
         run_verification_confirmed = False
         run_verification_declined = False
+        # Caches RunVerifierAgent.judge()'s result across retry attempts within
+        # this run - previously re-invoked (a real LLM round-trip) on every
+        # single attempt that reached this stage, even though the goal/design
+        # driving "should we run this, and how" don't change between retries.
+        # Confirmed live during golden-use-case validation that once the
+        # judgment was correct (grounded by the real pom.xml content), it
+        # stayed correct and identical across repeated attempts - the only
+        # thing repeating the call bought was wasted latency, not a different
+        # or better answer. _resolve_run_command()'s deterministic pom.xml-
+        # shape correction still runs on every attempt regardless (cheap,
+        # stateless, and the worktree's pom.xml can legitimately change shape
+        # between attempts even when the cached judgment doesn't).
+        cached_run_verification_judgment: Optional[Dict[str, Any]] = None
         # Tracks (fail_type, signature) of the previous attempt's failure so a
         # REPEATED failure (the model isn't self-correcting) can be distinguished
         # from a normal first-time failure - only a repeat is eligible for
@@ -2528,18 +2541,22 @@ class WorkflowEngine:
                     # self-terminating runtime behavior worth actually running and checking.
                     autonomy_cfg_rv = self.kernel.config.autonomy
                     if autonomy_cfg_rv.run_verification_enabled and not run_verification_declined:
-                        pom_content_for_judge = None
-                        try:
-                            with open(os.path.join(worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
-                                pom_content_for_judge = f.read()
-                        except Exception as e:
-                            logger.debug(f"No pom.xml available for run-verification judgment: {e}")
-                        judgment = await self.run_verifier.judge(
-                            goal=goal,
-                            design=design,
-                            files_written=list(all_files_written),
-                            build_file_content=pom_content_for_judge,
-                        )
+                        if cached_run_verification_judgment is None:
+                            pom_content_for_judge = None
+                            try:
+                                with open(os.path.join(worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+                                    pom_content_for_judge = f.read()
+                            except Exception as e:
+                                logger.debug(f"No pom.xml available for run-verification judgment: {e}")
+                            cached_run_verification_judgment = await self.run_verifier.judge(
+                                goal=goal,
+                                design=design,
+                                files_written=list(all_files_written),
+                                build_file_content=pom_content_for_judge,
+                            )
+                        else:
+                            logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
+                        judgment = cached_run_verification_judgment
                         if judgment["should_run"]:
                             proceed_with_run = True
                             if judgment["command_source"] == "inferred" and not run_verification_confirmed:
@@ -3008,7 +3025,22 @@ class WorkflowEngine:
             step_callback("Review", review)
 
         quality_passed = quality_gates_succeeded
-        
+        # A stable, short string identifying WHY this run failed, so a caller
+        # (human or script) can always ask "why did this fail" the same way
+        # rather than having to know which of several differently-shaped
+        # fields to check. Deliberately scoped to the failure modes reachable
+        # from THIS retry loop only (None on success, "environment_failure",
+        # or "quality_gates_exhausted" for an ordinary exhausted-retry-budget
+        # code failure) - knowledge-gap (its own early-return dict, handled
+        # entirely before this loop even starts) and human-rejected-approval
+        # (raises a catchable exception, not a return value) are genuinely
+        # different control-flow shapes that would need their own redesign to
+        # fold in, not just a field addition - left out of scope deliberately
+        # rather than silently.
+        failure_category: Optional[str] = None
+        if not quality_passed:
+            failure_category = "environment_failure" if environment_failure else "quality_gates_exhausted"
+
         # Write persistent trace log
         try:
             from kriya.core.trace import TraceLogger
@@ -3047,6 +3079,7 @@ class WorkflowEngine:
             "files": list(all_files_written),
             "quality_gates_passed": quality_passed,
             "environment_failure": environment_failure if not quality_passed else None,
+            "failure_category": failure_category,
             "toolchain_warning": toolchain_warning,
             "review": review,
             "run_id": run_id,

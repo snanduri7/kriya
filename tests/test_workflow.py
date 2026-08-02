@@ -719,7 +719,46 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
     assert res["environment_failure"] is not None
     assert "JVM failed during its own startup" in res["environment_failure"]
     assert mock_compile.call_count == 1
+    assert res["failure_category"] == "environment_failure"
 
+
+@pytest.mark.asyncio
+async def test_workflow_failure_category_none_on_success(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    assert res["failure_category"] is None
+
+@pytest.mark.asyncio
+async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
+    """An ordinary code failure that exhausts the retry budget - not an
+    environment/toolchain failure - must be categorized distinctly, so a
+    caller can always ask 'why did this fail' the same way regardless of
+    which specific failure mode it was."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=(
+        ["Step 1: Write code", "Design: Write app.py"]
+        + ["print('unterminated string"] * 15
+        + ["Review: Approved"]
+    ))
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is False
+    assert res["environment_failure"] is None
+    assert res["failure_category"] == "quality_gates_exhausted"
 
 @pytest.mark.asyncio
 async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
@@ -950,6 +989,57 @@ async def test_workflow_run_verification_goal_explicit_passes_without_confirmati
 
     assert res["quality_gates_passed"] is True
     assert "app.py" in res["files"]
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_judgment_cached_across_retry_attempts(tmp_path):
+    """RunVerifierAgent.judge() was previously re-invoked (a real LLM round-trip)
+    on every single attempt that reached runtime verification, even though the
+    goal/design driving 'should we run this, and how' don't change between
+    retries - confirmed live that once correct, the judgment stayed identical
+    and correct across repeated attempts, so repeating the call only wasted
+    latency. Must be called exactly once across two attempts that both reach
+    this stage; grade() (evaluates THIS attempt's actual output) must still be
+    called fresh each time. Asserts directly on call counts of the real
+    RunVerifierAgent methods (not inferred from llm.complete side_effect-list
+    exhaustion), since a first draft of this test using the indirect approach
+    turned out to pass even without the fix - a stray judge() call fed
+    grade()'s JSON shape, which judge() parses leniently (defaults should_run
+    to False rather than raising) rather than crashing, silently skipping
+    verification on attempt 2 instead of correctly re-running it."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    file_content_response = "print('[SUCCESS] it worked')\n"
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        file_content_response,    # Developer attempt 1
+        file_content_response,    # Developer attempt 2 (full-set retry)
+        "Review: Approved",       # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(side_effect=[
+        {"passed": False, "reasoning": "Missing expected marker."},
+        {"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."},
+    ])
+
+    res = await we.run_generation_workflow(
+        goal="Run with python app.py; it should print [SUCCESS]",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    we.run_verifier.judge.assert_called_once()
+    assert we.run_verifier.grade.call_count == 2
 
 @pytest.mark.asyncio
 async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_path):

@@ -1175,6 +1175,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     f"Files attempted but NOT applied to workspace (quality gates failed): {', '.join(res['files'])}",
                     fg="red"
                 )
+                if res.get("failure_category"):
+                    click.echo(f"Failure category: {res['failure_category']}")
                 if res.get("environment_failure"):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
@@ -1694,6 +1696,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:
             click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
+            if res.get("failure_category"):
+                click.echo(f"Failure category: {res['failure_category']}")
             if res.get("environment_failure"):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
