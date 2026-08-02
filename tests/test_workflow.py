@@ -623,6 +623,59 @@ async def test_workflow_cumulative_sandbox_sync(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_full_set_prompt_includes_existing_dependencies_checklist(tmp_path):
+    """The full-set retry prompt (used for attempt 1 too) must include an
+    explicit 'preserve these existing dependencies' checklist when extending
+    a project that already has a pom.xml - showing the model passive
+    reference content alone was confirmed live NOT sufficient to stop
+    dependency drops recurring across the golden-use-case validation."""
+    (tmp_path / "pom.xml").write_text("""<?xml version="1.0" encoding="UTF-8"?>
+<project>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-core</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-indexing</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+    </dependencies>
+</project>""")
+
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        '[{"filepath": "pom.xml", "content": "<project></project>"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
+        mock_compile.return_value = {"success": True, "output": "Maven compilation succeeded."}
+
+        res = await we.run_generation_workflow(
+            goal="Add Qpid to the project",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    developer_prompt = llm.complete.call_args_list[2].args[1]
+    assert "Existing Maven dependencies" in developer_prompt
+    assert "org.apache.ignite:ignite-indexing" in developer_prompt
+    assert "org.apache.ignite:ignite-core" in developer_prompt
+
+
+@pytest.mark.asyncio
 async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_path):
     """Regression test: a JVM crashing during its own startup (e.g. a startup
     flag unsupported by the actually-resolved JDK) is not a code defect - no
@@ -2834,6 +2887,30 @@ def test_build_full_set_retry_prompt_includes_prior_attempt_content(tmp_path):
     assert "=== base RAG context ===" in context
     assert "Your previous attempt's content for pom.xml" in context
     assert "ignite-indexing" in context
+
+
+def test_build_full_set_retry_prompt_includes_required_dependencies_checklist(tmp_path):
+    """Regression test: showing the model its own prior attempt's pom.xml
+    content as passive reference material (the test above) was confirmed live
+    NOT sufficient on its own to stop dependency drops from recurring across
+    repeated full-set retries - an explicit "preserve these" checklist is
+    needed, mirroring required_files_prompt_block's already-proven pattern."""
+    task_desc, _ = _build_full_set_retry_prompt(
+        goal="Add Qpid to the project",
+        plan="Extend pom.xml and add QpidClientApp.java",
+        error_context="Dependency regression: ignite-indexing was removed.",
+        required_files_prompt_block="",
+        all_files_written=["pom.xml"],
+        worktree_path=str(tmp_path),
+        active_code_context="=== base RAG context ===\n",
+        required_dependencies_prompt_block=(
+            "\n\nExisting Maven dependencies: preserve these:\n"
+            "- org.apache.ignite:ignite-core\n"
+            "- org.apache.ignite:ignite-indexing"
+        ),
+    )
+    assert "Existing Maven dependencies: preserve these:" in task_desc
+    assert "org.apache.ignite:ignite-indexing" in task_desc
 
 
 def test_build_full_set_retry_prompt_empty_when_nothing_written_yet(tmp_path):

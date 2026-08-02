@@ -2,7 +2,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 from kriya.config import AppConfig
-from kriya.tools.validate import PolymorphicValidator
+from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies
 
 
 def test_polymorphic_stack_detection(tmp_path):
@@ -276,6 +276,27 @@ def test_check_java_toolchain_neither_found(monkeypatch):
         "mismatch": False,
     }
 
+
+def test_get_pom_dependencies_is_module_level_and_reusable(tmp_path):
+    """Promoted from a PolymorphicValidator method to a module-level function so
+    callers that need it without constructing a validator (the Developer retry
+    loop's pre-generation dependency checklist) can reuse the exact same
+    parsing logic, not a re-implementation."""
+    pom = tmp_path / "pom.xml"
+    pom.write_text("""<?xml version="1.0" encoding="UTF-8"?>
+<project>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-core</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+    </dependencies>
+</project>""")
+    assert get_pom_dependencies(str(pom)) == ["org.apache.ignite:ignite-core"]
+
+def test_get_pom_dependencies_missing_file_returns_empty():
+    assert get_pom_dependencies("/nonexistent/pom.xml") == []
 
 def test_java_dependency_regression(tmp_path):
     orig_dir = tmp_path / "orig"

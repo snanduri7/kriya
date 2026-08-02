@@ -1129,6 +1129,7 @@ def _build_targeted_retry_prompt(
 def _build_full_set_retry_prompt(
     goal: str, plan: str, error_context: str, required_files_prompt_block: str,
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+    required_dependencies_prompt_block: str = "",
 ) -> Tuple[str, str]:
     """Full-set retries previously never showed the model its own prior attempt's
     content at all, only the abstract error text describing what went wrong -
@@ -1143,7 +1144,15 @@ def _build_full_set_retry_prompt(
     act on it wasn't. Mirrors targeted retry's approach exactly: every
     already-written file's current worktree content is included as reference,
     so the model can make an informed choice about what to keep vs. change
-    rather than reconstructing everything from a clean slate."""
+    rather than reconstructing everything from a clean slate.
+
+    required_dependencies_prompt_block (a later addition): showing the prior
+    attempt's content as passive reference material, on its own, was confirmed
+    live NOT sufficient to stop the same dependency-drop from recurring across
+    repeated full-set retries (the golden-use-case validation's own tug-of-war
+    got worse, not better, across attempts) - an explicit, structured "preserve
+    these" checklist mirrors the required_files_prompt_block pattern that
+    already proved effective for the analogous missing-file problem."""
     reference_section = ""
     for filepath in sorted(all_files_written):
         try:
@@ -1161,6 +1170,7 @@ def _build_full_set_retry_prompt(
     if error_context:
         task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
     task_desc += required_files_prompt_block
+    task_desc += required_dependencies_prompt_block
 
     return task_desc, active_code_context + "\n\n" + reference_section
 
@@ -2122,6 +2132,32 @@ class WorkflowEngine:
                 "not a subset; do not omit any or defer them to a future step):\n"
                 + "\n".join(f"- {f}" for f in _expected_files_upfront)
             )
+        # Same prevention-over-punishment pattern as required_files_prompt_block
+        # above, for a different completeness failure: a full-set regeneration of
+        # pom.xml naturally rewrites it to match the current goal, and can
+        # silently drop an existing, goal-irrelevant dependency from an earlier
+        # milestone in the process. The reactive "Dependency regression" compile
+        # check (PolymorphicValidator.run_compile_check) already catches this
+        # after the fact, and _build_full_set_retry_prompt already shows the
+        # model its own prior attempt's file content as reference - confirmed
+        # live that neither of those was sufficient on their own: the tug-of-war
+        # recurred and even worsened across repeated full-set retries in the
+        # golden Ignite+Qpid validation (M2 attempts 2 and 4). Computed once from
+        # workspace_path's pom.xml (the same stable "original" reference the
+        # regression check itself compares against, via original_workspace_path)
+        # rather than the worktree's possibly-already-regressed prior attempt.
+        required_dependencies_prompt_block = ""
+        _original_pom_path = os.path.join(workspace_path, "pom.xml")
+        if os.path.exists(_original_pom_path):
+            from kriya.tools.validate import get_pom_dependencies
+            _existing_dependencies = get_pom_dependencies(_original_pom_path)
+            if _existing_dependencies:
+                required_dependencies_prompt_block = (
+                    "\n\nExisting Maven dependencies (already present in pom.xml before this goal - "
+                    "you must preserve ALL of these even if the current goal doesn't need them; "
+                    "do not silently drop any while editing pom.xml):\n"
+                    + "\n".join(f"- {d}" for d in _existing_dependencies)
+                )
         # Unified attempt counter for gate_outcomes/logging only - retry_count and
         # targeted_retry_count are the actual budget counters, but a single
         # chronological attempt number reads far more sensibly in the trace than
@@ -2318,6 +2354,7 @@ class WorkflowEngine:
                     task_desc, active_code_context = _build_full_set_retry_prompt(
                         goal, plan, error_context, required_files_prompt_block,
                         all_files_written, worktree_path, active_code_context,
+                        required_dependencies_prompt_block,
                     )
 
                     # Track model hops

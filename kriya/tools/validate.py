@@ -12,6 +12,34 @@ from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_pree
 
 logger = logging.getLogger(__name__)
 
+
+def get_pom_dependencies(pom_path: str) -> List[str]:
+    """Parses a pom.xml's <dependency> entries into 'groupId:artifactId' strings.
+    Module-level (not a PolymorphicValidator method) so callers that need this
+    before/without constructing a validator - e.g. the Developer retry loop
+    priming a "preserve these existing dependencies" prompt checklist before
+    any generation happens, not just the reactive post-hoc regression check
+    below - can reuse the exact same parsing logic."""
+    if not os.path.exists(pom_path):
+        return []
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ns = ""
+        if root.tag.startswith("{"):
+            ns = root.tag.split("}")[0] + "}"
+        deps = []
+        for dep in root.findall(f".//{ns}dependency"):
+            groupId_elem = dep.find(f"{ns}groupId")
+            artifactId_elem = dep.find(f"{ns}artifactId")
+            if groupId_elem is not None and artifactId_elem is not None:
+                deps.append(f"{groupId_elem.text.strip()}:{artifactId_elem.text.strip()}")
+        return deps
+    except Exception as e:
+        logger.warning(f"Failed to parse POM dependencies at {pom_path}: {e}")
+        return []
+
+
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
@@ -27,24 +55,7 @@ class PolymorphicValidator:
         self.stack = self._detect_stack()
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
-        if not os.path.exists(pom_path):
-            return []
-        try:
-            tree = ET.parse(pom_path)
-            root = tree.getroot()
-            ns = ""
-            if root.tag.startswith("{"):
-                ns = root.tag.split("}")[0] + "}"
-            deps = []
-            for dep in root.findall(f".//{ns}dependency"):
-                groupId_elem = dep.find(f"{ns}groupId")
-                artifactId_elem = dep.find(f"{ns}artifactId")
-                if groupId_elem is not None and artifactId_elem is not None:
-                    deps.append(f"{groupId_elem.text.strip()}:{artifactId_elem.text.strip()}")
-            return deps
-        except Exception as e:
-            logger.warning(f"Failed to parse POM dependencies at {pom_path}: {e}")
-            return []
+        return get_pom_dependencies(pom_path)
 
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby."""
