@@ -907,6 +907,28 @@ _MISSING_EXECUTABLE_PATTERN = re.compile(
 )
 
 
+def _check_java_toolchain_mismatch(stack: str) -> Optional[str]:
+    """Toolchain preflight: the first time a generation run's detected stack is
+    known to be 'java', checks whether 'java' and 'mvn' resolve to different JDK
+    major versions - a mismatch a human would otherwise only discover after a
+    wasted retry budget (see classify_environment_failure/the Quality Gates
+    circuit breaker), or not at all if this particular goal never happens to
+    exercise the version-sensitive flag. Returns None for any non-java stack (a
+    Python/Ruby goal never pays for this) or when no mismatch is found."""
+    if stack != "java":
+        return None
+    from kriya.tools.validate import check_java_toolchain
+    toolchain = check_java_toolchain()
+    if not toolchain["mismatch"]:
+        return None
+    return (
+        f"'java' resolves to JDK {toolchain['java_version']} but 'mvn' will "
+        f"build/run against JDK {toolchain['mvn_java_version']} - a JVM startup "
+        "flag correct for one may be invalid or fatal under the other. Run "
+        "`kriya doctor` for details."
+    )
+
+
 def classify_environment_failure(error_text: str) -> Optional[str]:
     """Returns a short, human-readable description if error_text shows a failure
     class no amount of code regeneration can ever fix - a JVM crashing during its
@@ -2044,6 +2066,12 @@ class WorkflowEngine:
         # except block), since no amount of code regeneration can ever fix a JVM
         # crashing during its own startup or a missing build/run tool binary.
         environment_failure: Optional[str] = None
+        # Toolchain preflight (_check_java_toolchain_mismatch) runs at most once
+        # per generation run, the first time a PolymorphicValidator confirms the
+        # stack is 'java' - toolchain_checked gates that, toolchain_warning
+        # persists into the final result regardless of pass/fail.
+        toolchain_checked = False
+        toolchain_warning: Optional[str] = None
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -2323,7 +2351,13 @@ class WorkflowEngine:
                         worktree_path, original_workspace_path=workspace_path,
                         autonomy_cfg=self.kernel.config.autonomy,
                     )
-                
+
+                    if not toolchain_checked:
+                        toolchain_checked = True
+                        toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+                        if toolchain_warning:
+                            logger.warning(f"Toolchain preflight: {toolchain_warning}")
+
                     compile_res = validator.run_compile_check(list(all_files_written))
                     gate_outcomes.append({
                         "attempt": attempt_number,
@@ -2681,6 +2715,13 @@ class WorkflowEngine:
                     workspace_path, original_workspace_path=workspace_path,
                     autonomy_cfg=self.kernel.config.autonomy,
                 )
+
+                if not toolchain_checked:
+                    toolchain_checked = True
+                    toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+                    if toolchain_warning:
+                        logger.warning(f"Toolchain preflight: {toolchain_warning}")
+
                 full_test_res = validator.run_tests()
                 gate_outcomes.append({
                     "attempt": attempt_number,
@@ -2877,6 +2918,7 @@ class WorkflowEngine:
             "files": list(all_files_written),
             "quality_gates_passed": quality_passed,
             "environment_failure": environment_failure if not quality_passed else None,
+            "toolchain_warning": toolchain_warning,
             "review": review,
             "run_id": run_id,
         }

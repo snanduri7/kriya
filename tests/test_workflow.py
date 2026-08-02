@@ -25,6 +25,7 @@ from kriya.workflow.workflow import (
     _build_full_set_retry_prompt,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
+    _check_java_toolchain_mismatch,
     _filter_misattributed_extraction,
     _is_near_duplicate_rule,
     _likely_misattributed_sibling,
@@ -664,6 +665,116 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
     assert res["environment_failure"] is not None
     assert "JVM failed during its own startup" in res["environment_failure"]
     assert mock_compile.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
+    """Toolchain preflight: a java/mvn JDK version mismatch is a real, silent
+    risk even on a run that happens to succeed anyway (a different goal, or a
+    different machine, could still hit the same crash later) - so it must be
+    surfaced regardless of the run's own pass/fail outcome, not folded only
+    into the environment_failure circuit breaker's failure-only reporting."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        '[{"filepath": "pom.xml", "content": "<project></project>"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.check_java_toolchain", return_value={
+             "java_found": True, "java_version": "17",
+             "mvn_found": True, "mvn_java_version": "26",
+             "mismatch": True,
+         }) as mock_toolchain:
+        mock_compile.return_value = {"success": True, "output": "Maven compilation succeeded."}
+
+        res = await we.run_generation_workflow(
+            goal="Create pom",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert res["toolchain_warning"] is not None
+    assert "JDK 17" in res["toolchain_warning"] and "JDK 26" in res["toolchain_warning"]
+    mock_toolchain.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
+    """The toolchain preflight check runs a real local subprocess pair
+    (java -version, mvn -version) - must not repeat it on every retry attempt,
+    only once per generation run, regardless of which of the two
+    PolymorphicValidator construction sites reaches it first."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        '[{"filepath": "pom.xml", "content": "<project><bad></project>"}]',
+        '[{"filepath": "pom.xml", "content": "<project></project>"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.check_java_toolchain", return_value={
+             "java_found": True, "java_version": "17",
+             "mvn_found": True, "mvn_java_version": "17",
+             "mismatch": False,
+         }) as mock_toolchain:
+        mock_compile.side_effect = [
+            {"success": False, "output": "COMPILATION FAILURE:\nsome generic xml error"},
+            {"success": True, "output": "Maven compilation succeeded."},
+        ]
+
+        res = await we.run_generation_workflow(
+            goal="Create pom",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_toolchain.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_workflow_skips_toolchain_check_for_non_java_stack(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.check_java_toolchain") as mock_toolchain:
+        res = await we.run_generation_workflow(
+            goal="Create app",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert res["toolchain_warning"] is None
+    mock_toolchain.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2010,6 +2121,30 @@ def test_classify_environment_failure_ignores_filenotfound_not_from_the_toolchai
         "FileNotFoundError: [Errno 2] No such file or directory: 'config.json'"
     )
     assert classify_environment_failure(error) is None
+
+def test_check_java_toolchain_mismatch_skips_non_java_stack():
+    # A Python/Ruby goal must never pay for (or trigger) this check at all.
+    with patch("kriya.tools.validate.check_java_toolchain") as mock_check:
+        assert _check_java_toolchain_mismatch("python") is None
+        mock_check.assert_not_called()
+
+def test_check_java_toolchain_mismatch_returns_none_when_versions_match():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "17",
+        "mismatch": False,
+    }):
+        assert _check_java_toolchain_mismatch("java") is None
+
+def test_check_java_toolchain_mismatch_returns_message_on_mismatch():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        result = _check_java_toolchain_mismatch("java")
+    assert result is not None
+    assert "JDK 17" in result and "JDK 26" in result
 
 @pytest.mark.asyncio
 async def test_augment_error_with_live_lookup_no_terms_never_searches():

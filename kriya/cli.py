@@ -1135,6 +1135,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         await kernel.stop()
         
         click.secho("\n=== Generation Workflow Completed ===", bold=True)
+        if res.get("toolchain_warning"):
+            # Shown regardless of pass/fail - a version mismatch that didn't bite
+            # THIS goal may still bite on a different machine or a later,
+            # JVM-flag-sensitive one.
+            click.secho(f"[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
         if res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
@@ -1659,6 +1664,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             resume=resume,
             resume_id=resume_id
         )
+        if res.get("toolchain_warning"):
+            click.secho(f"\n[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:
