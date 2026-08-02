@@ -141,7 +141,7 @@ async def test_run_verifier_judge_escalates_on_unparseable_json():
     cfg = AppConfig()
     llm = LLMClient(cfg)
     good_response = json.dumps({
-        "should_run": True, "run_command": ["python", "app.py"],
+        "should_run": True, "run_commands": [["python", "app.py"]],
         "command_source": "goal_explicit", "success_criteria": "Prints done",
     })
     llm.complete = AsyncMock(side_effect=["not json at all", good_response])
@@ -410,7 +410,7 @@ async def test_run_verifier_judge_goal_explicit_command():
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({
         "should_run": True,
-        "run_command": ["python", "app.py"],
+        "run_commands": [["python", "app.py"]],
         "command_source": "goal_explicit",
         "success_criteria": "Output contains 'Hello, world!'"
     }))
@@ -419,9 +419,53 @@ async def test_run_verifier_judge_goal_explicit_command():
     judgment = await verifier.judge(goal="Run with python app.py and print Hello, world!", design="", files_written=["app.py"])
 
     assert judgment["should_run"] is True
-    assert judgment["run_command"] == ["python", "app.py"]
+    assert judgment["run_commands"] == [["python", "app.py"]]
     assert judgment["command_source"] == "goal_explicit"
     assert "Hello, world!" in judgment["success_criteria"]
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_multi_step_sequence():
+    """A goal whose correctness can only be observed across multiple invocations
+    (add-then-list) must be returned as an ordered list of multiple commands, not
+    collapsed into one. Regression test for a real bug caught live: judge() only
+    ever inferred ONE no-argument command for exactly this kind of goal, which
+    could only ever show a help/usage message - never demonstrating the described
+    behavior - and got misread as a code bug across an entire retry budget when
+    the generated code was actually correct the whole time."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "run_commands": [["python", "cli.py", "add", "Task 1"], ["python", "cli.py", "list"]],
+        "command_source": "inferred",
+        "success_criteria": "Lists 'Task 1' after adding it"
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Add a task then list tasks", design="", files_written=["cli.py"])
+
+    assert judgment["should_run"] is True
+    assert judgment["run_commands"] == [["python", "cli.py", "add", "Task 1"], ["python", "cli.py", "list"]]
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_tolerates_old_single_command_shape():
+    # Backward compatibility: a model returning the old flat ["executable", "arg"]
+    # shape (instead of a list of commands) must be wrapped into a single-element
+    # run_commands list rather than rejected outright.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "run_commands": ["python", "app.py"],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints done"
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+
+    assert judgment["should_run"] is True
+    assert judgment["run_commands"] == [["python", "app.py"]]
 
 @pytest.mark.asyncio
 async def test_run_verifier_judge_no_runnable_entrypoint():
@@ -429,7 +473,7 @@ async def test_run_verifier_judge_no_runnable_entrypoint():
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({
         "should_run": False,
-        "run_command": None,
+        "run_commands": None,
         "command_source": "inferred",
         "success_criteria": ""
     }))
@@ -438,17 +482,17 @@ async def test_run_verifier_judge_no_runnable_entrypoint():
     judgment = await verifier.judge(goal="Add a utility library", design="", files_written=["utils.py"])
 
     assert judgment["should_run"] is False
-    assert judgment["run_command"] is None
+    assert judgment["run_commands"] is None
 
 @pytest.mark.asyncio
-async def test_run_verifier_judge_missing_run_command_forces_should_run_false():
-    # A model that says should_run=true but omits a usable run_command must not be
+async def test_run_verifier_judge_missing_run_commands_forces_should_run_false():
+    # A model that says should_run=true but omits usable run_commands must not be
     # trusted - there's nothing to actually execute.
     cfg = AppConfig()
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({
         "should_run": True,
-        "run_command": None,
+        "run_commands": None,
         "command_source": "inferred",
         "success_criteria": "Something"
     }))
@@ -468,7 +512,7 @@ async def test_run_verifier_judge_unparseable_response_defaults_to_no_run():
     judgment = await verifier.judge(goal="Goal", design="", files_written=[])
 
     assert judgment["should_run"] is False
-    assert judgment["run_command"] is None
+    assert judgment["run_commands"] is None
 
 @pytest.mark.asyncio
 async def test_run_verifier_grade_passed():

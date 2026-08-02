@@ -2220,12 +2220,15 @@ class WorkflowEngine:
                             proceed_with_run = True
                             if judgment["command_source"] == "inferred" and not run_verification_confirmed:
                                 if autonomy_cfg_rv.mode == "human-in-the-loop":
+                                    commands_desc = "\n".join(
+                                        f"    {i}. {' '.join(cmd)}" for i, cmd in enumerate(judgment["run_commands"], 1)
+                                    )
                                     confirm_reason = (
                                         "Kriya judged that this goal describes runtime behavior compile/test "
                                         "checks can't verify, and wants to actually run the generated app:\n"
-                                        f"  Command: {' '.join(judgment['run_command'])}\n"
+                                        f"  Command(s):\n{commands_desc}\n"
                                         f"  Looking for: {judgment['success_criteria']}\n"
-                                        "Allow Kriya to execute this command inside the sandboxed worktree?"
+                                        "Allow Kriya to execute these command(s) inside the sandboxed worktree?"
                                     )
                                     if approval_callback:
                                         approved = approval_callback([], confirm_reason)
@@ -2238,21 +2241,28 @@ class WorkflowEngine:
                                     run_verification_declined = True
                             if proceed_with_run:
                                 run_verification_confirmed = True
-                                resolved_run_command = _resolve_run_command(judgment["run_command"])
-                                if resolved_run_command != judgment["run_command"]:
+                                resolved_run_commands = [_resolve_run_command(cmd) for cmd in judgment["run_commands"]]
+                                if resolved_run_commands != judgment["run_commands"]:
                                     logger.info(
-                                        f"Inferred run command '{judgment['run_command'][0]}' isn't on PATH here - "
-                                        f"using Kriya's own interpreter instead: {resolved_run_command[0]}"
+                                        "One or more inferred run commands aren't resolvable as given here - "
+                                        "substituted Kriya's own interpreter/PATH-resolved equivalents."
                                     )
-                                logger.info(f"Quality Gates: Running runtime verification: {' '.join(resolved_run_command)}")
-                                run_res = validator.run_app(
-                                    resolved_run_command,
+                                logger.info(
+                                    "Quality Gates: Running runtime verification: "
+                                    + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
+                                )
+                                run_res = validator.run_app_sequence(
+                                    resolved_run_commands,
                                     timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
                                 )
                                 if run_res["timed_out"]:
                                     grade = {"passed": False, "reasoning": f"Run timed out after {autonomy_cfg_rv.run_verification_timeout_seconds}s."}
-                                elif run_res["returncode"] != 0:
-                                    grade = {"passed": False, "reasoning": f"Process exited with code {run_res['returncode']}."}
+                                elif not run_res["success"]:
+                                    # A non-final step failing can still leave the LAST step's
+                                    # returncode at 0 (every command runs regardless of an
+                                    # earlier step's exit code) - success reflects the whole
+                                    # sequence, not just the last command, so check that instead.
+                                    grade = {"passed": False, "reasoning": f"One or more steps failed (final step exit code {run_res['returncode']})."}
                                 else:
                                     grade = await self.run_verifier.grade(
                                         goal=goal,

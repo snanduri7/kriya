@@ -547,10 +547,12 @@ async def test_workflow_run_verification_goal_explicit_passes_without_confirmati
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
-    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('[SUCCESS] it worked')\n"}])
+    # design's "app.py" mention activates known_target_files on attempt 1, skipping
+    # straight to a plain per-file content completion.
+    file_content_response = "print('[SUCCESS] it worked')\n"
     judge_response = json.dumps({
         "should_run": True,
-        "run_command": [sys.executable, "app.py"],
+        "run_commands": [[sys.executable, "app.py"]],
         "command_source": "goal_explicit",
         "success_criteria": "Output contains [SUCCESS]"
     })
@@ -559,7 +561,7 @@ async def test_workflow_run_verification_goal_explicit_passes_without_confirmati
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",     # Planner
         "Design: Write app.py",   # Architect
-        file_list_response,       # Developer
+        file_content_response,    # Developer
         judge_response,           # RunVerifier.judge
         grade_response,           # RunVerifier.grade
         "Review: Approved"        # Reviewer
@@ -587,17 +589,17 @@ async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_pat
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
-    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('[SUCCESS] it worked')\n"}])
+    file_content_response = "print('[SUCCESS] it worked')\n"
     judge_response = json.dumps({
         "should_run": True,
-        "run_command": ["python", "app.py"],  # the real observed inference - not sys.executable
+        "run_commands": [["python", "app.py"]],  # the real observed inference - not sys.executable
         "command_source": "goal_explicit",
         "success_criteria": "Output contains [SUCCESS]"
     })
     grade_response = json.dumps({"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."})
 
     llm.complete = AsyncMock(side_effect=[
-        "Step 1: Write code", "Design: Write app.py", file_list_response,
+        "Step 1: Write code", "Design: Write app.py", file_content_response,
         judge_response, grade_response, "Review: Approved"
     ])
 
@@ -626,10 +628,10 @@ async def test_workflow_run_verification_declined_still_passes_on_compile_alone(
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
-    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('hello')\n"}])
+    file_content_response = "print('hello')\n"
     judge_response = json.dumps({
         "should_run": True,
-        "run_command": [sys.executable, "app.py"],
+        "run_commands": [[sys.executable, "app.py"]],
         "command_source": "inferred",
         "success_criteria": "Output contains hello"
     })
@@ -637,7 +639,7 @@ async def test_workflow_run_verification_declined_still_passes_on_compile_alone(
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",     # Planner
         "Design: Write app.py",   # Architect
-        file_list_response,       # Developer
+        file_content_response,    # Developer
         judge_response,           # RunVerifier.judge (grade must NOT be called after this)
         "Review: Approved"        # Reviewer
     ])
@@ -731,10 +733,10 @@ async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
-    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('[SUCCESS] WIDGET')\n"}])
+    file_content_response = "print('[SUCCESS] WIDGET')\n"
     judge_response = json.dumps({
         "should_run": True,
-        "run_command": [sys.executable, "app.py"],
+        "run_commands": [[sys.executable, "app.py"]],
         "command_source": "goal_explicit",
         "success_criteria": "Output contains [SUCCESS]"
     })
@@ -743,7 +745,7 @@ async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",     # Planner
         "Design: Write app.py",   # Architect
-        file_list_response,       # Developer
+        file_content_response,    # Developer
         judge_response,           # RunVerifier.judge
         grade_response,           # RunVerifier.grade
         "Review: Approved"        # Reviewer
@@ -788,10 +790,10 @@ async def test_workflow_extracted_rule_unverified_then_promoted_by_passing_run(t
     extraction_response = json.dumps({
         "rules": ["The magic widget constant is 42."], "examples": {}, "conflicts": []
     })
-    file_list_response = json.dumps([{"filepath": "app.py", "content": "print('[SUCCESS] WIDGET')\n"}])
+    file_content_response = "print('[SUCCESS] WIDGET')\n"
     judge_response = json.dumps({
         "should_run": True,
-        "run_command": [sys.executable, "app.py"],
+        "run_commands": [[sys.executable, "app.py"]],
         "command_source": "goal_explicit",
         "success_criteria": "Output contains [SUCCESS]"
     })
@@ -801,7 +803,7 @@ async def test_workflow_extracted_rule_unverified_then_promoted_by_passing_run(t
         extraction_response,   # SkillGapAgent.extract_skill_update for the human-supplied text
         "Step 1: Write code",  # Planner
         "Design: Write app.py",  # Architect
-        file_list_response,    # Developer
+        file_content_response, # Developer
         judge_response,         # RunVerifier.judge
         grade_response,         # RunVerifier.grade
         "Review: Approved"      # Reviewer

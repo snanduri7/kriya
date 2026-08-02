@@ -278,3 +278,52 @@ class PolymorphicValidator:
             "returncode": res["returncode"],
             "output": res["stdout"] + "\n" + res["stderr"],
         }
+
+    def run_app_sequence(self, commands: List[List[str]], timeout: int = 90) -> Dict[str, Any]:
+        """Runs an ORDERED sequence of already-resolved commands, one after another, in the
+        same workspace directory - so state one command creates (a written file, a database)
+        persists for the next. Some goals can only be verified this way: a goal like "add an
+        item, then list items" is unobservable from a single invocation, since a CLI's
+        no-argument entrypoint can only ever print help/usage - confirmed live as a real,
+        previously-unnoticed Runtime Verification Gate failure mode: judge() inferring a
+        single no-argument command for a goal that actually needed two sequential invocations
+        made every attempt fail with "only shows the help message", which then got
+        misread as a code bug (wasting the entire retry budget) when the generated code was
+        actually correct the whole time.
+
+        Every command in the sequence runs regardless of an earlier step's exit code, so a
+        later step's output is still available as evidence for the grader even if an earlier
+        one failed for an unrelated reason - except a timeout, which stops the sequence
+        immediately (a hung process means continuing serves no purpose). Each command gets
+        its own timeout budget, not a shared one."""
+        if not commands:
+            return {"success": False, "timed_out": False, "returncode": None, "output": "No run commands provided."}
+
+        output_parts = []
+        overall_success = True
+        any_timed_out = False
+        last_returncode = None
+        for i, command in enumerate(commands, 1):
+            step_label = f"=== Step {i}/{len(commands)}: {' '.join(command)} ==="
+            try:
+                res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
+            except Exception as e:
+                output_parts.append(f"{step_label}\nFailed to execute: {e}")
+                overall_success = False
+                last_returncode = None
+                break
+            output_parts.append(f"{step_label}\n{res['stdout']}\n{res['stderr']}")
+            last_returncode = res["returncode"]
+            if res["timeout"]:
+                any_timed_out = True
+                overall_success = False
+                break
+            if res["returncode"] != 0:
+                overall_success = False
+
+        return {
+            "success": overall_success and not any_timed_out,
+            "timed_out": any_timed_out,
+            "returncode": last_returncode,
+            "output": "\n\n".join(output_parts),
+        }

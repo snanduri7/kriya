@@ -72,6 +72,77 @@ def test_run_app_no_command():
     res = validator.run_app([])
     assert res["success"] is False
 
+def test_run_app_sequence_multi_step_success(tmp_path):
+    """Regression test for a real bug caught live: a goal like "add an item, then
+    list items" needs TWO sequential invocations to demonstrate correctness - a
+    single no-argument invocation can only ever show a help/usage message. Confirms
+    state (a written file) persists between steps, since they share workspace_path."""
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "app.py").write_text(
+        "import sys, json\n"
+        "path = 'state.json'\n"
+        "if sys.argv[1] == 'add':\n"
+        "    data = json.load(open(path)) if __import__('os').path.exists(path) else []\n"
+        "    data.append(sys.argv[2])\n"
+        "    json.dump(data, open(path, 'w'))\n"
+        "    print(f'Added {sys.argv[2]}')\n"
+        "elif sys.argv[1] == 'list':\n"
+        "    data = json.load(open(path)) if __import__('os').path.exists(path) else []\n"
+        "    for item in data:\n"
+        "        print(item)\n"
+    )
+
+    res = validator.run_app_sequence(
+        [[sys.executable, "app.py", "add", "Task 1"], [sys.executable, "app.py", "list"]],
+        timeout=10,
+    )
+
+    assert res["success"] is True
+    assert res["timed_out"] is False
+    assert "Added Task 1" in res["output"]
+    assert "Task 1" in res["output"]
+    assert "Step 1/2" in res["output"]
+    assert "Step 2/2" in res["output"]
+
+def test_run_app_sequence_continues_after_step_failure_and_reports_it(tmp_path):
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "app.py").write_text(
+        "import sys\n"
+        "if sys.argv[1] == 'fail':\n"
+        "    sys.exit(1)\n"
+        "print('second step ran')\n"
+    )
+
+    res = validator.run_app_sequence(
+        [[sys.executable, "app.py", "fail"], [sys.executable, "app.py", "ok"]],
+        timeout=10,
+    )
+
+    # Overall failure (an earlier step failed), but both steps still ran and both
+    # are visible in the output as evidence for the grader.
+    assert res["success"] is False
+    assert "second step ran" in res["output"]
+    assert res["returncode"] == 0  # the LAST step's exit code
+
+def test_run_app_sequence_stops_on_timeout(tmp_path):
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "app.py").write_text("import time\ntime.sleep(10)\n")
+    (tmp_path / "never_reached.txt").write_text("")
+
+    res = validator.run_app_sequence(
+        [[sys.executable, "app.py"], [sys.executable, "-c", "print('should not run')"]],
+        timeout=1,
+    )
+
+    assert res["success"] is False
+    assert res["timed_out"] is True
+    assert "should not run" not in res["output"]
+
+def test_run_app_sequence_no_commands():
+    validator = PolymorphicValidator(".")
+    res = validator.run_app_sequence([])
+    assert res["success"] is False
+
 def test_python_run_tests_resolves_src_layout_imports(tmp_path):
     # Reproduces a real generation failure: a src/ layout project where the
     # generated test imports the module either bare ("from calculator import x",

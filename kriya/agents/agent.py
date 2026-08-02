@@ -466,14 +466,32 @@ class RunVerifierAgent(BaseAgent):
             "these fields:\n"
             "{\n"
             '  "should_run": true or false,\n'
-            '  "run_command": ["executable", "arg1", "arg2"] or null,\n'
+            '  "run_commands": [["executable", "arg1", "arg2"], ...] or null,\n'
             '  "command_source": "goal_explicit" or "inferred",\n'
             '  "success_criteria": "one or two sentences describing what observable output would prove success"\n'
             "}\n"
+            "run_commands is an ORDERED LIST of commands to run in sequence, in the same working "
+            "directory (so files/state one command creates persist for the next). Most goals need "
+            "only ONE command - return a single-element list. But if the goal's correctness can "
+            "only be observed across MULTIPLE invocations (e.g. \"add an item, then list items\" - "
+            "a single no-argument invocation can only ever show a help/usage message, never "
+            "demonstrate the add-then-list behavior; \"write a value, then read it back\"; "
+            "\"start a server, then curl an endpoint\" only if the server itself exits after "
+            "handling one request), return each invocation as its own element, in the order they "
+            "must run. For example, if the entrypoint file listed under \"Files Generated\" below is "
+            "at path src/main/python/cli.py, and the goal needs an add then a list, return exactly "
+            "[[\"python\", \"src/main/python/cli.py\", \"add\", \"Task 1\"], [\"python\", "
+            "\"src/main/python/cli.py\", \"list\"]] - ALWAYS the entrypoint's real path exactly as it "
+            "appears under \"Files Generated\", never a bare filename guessed from habit, even if an "
+            "example here or elsewhere used a bare filename; a multi-word argument value (like "
+            "\"Task 1\") is still ONE argv element, never split across two. Never invoke a CLI's own "
+            "entrypoint with zero arguments as your only command just because the goal didn't spell "
+            "out exact CLI flags - infer the concrete arguments needed to actually exercise the "
+            "described behavior from the design/goal.\n"
             "If the goal explicitly states how to run the app (e.g. names a specific command "
             "like \"mvn exec:exec\" or \"run with python app.py\"), extract that exact command "
             "and set command_source to \"goal_explicit\". Otherwise, if you can reasonably infer "
-            "a run command from the generated files, set command_source to \"inferred\": match "
+            "run command(s) from the generated files, set command_source to \"inferred\": match "
             "whichever exec:GOAL the pom.xml's exec-maven-plugin configuration is actually shaped "
             "for, don't guess - a configuration with an <executable> element and an <arguments> "
             "list (with a -classpath argument and a bare <classpath/> placeholder) implies "
@@ -487,7 +505,7 @@ class RunVerifierAgent(BaseAgent):
             "the exec:exec shape than the simpler exec:java one. A Python file with a __main__ "
             "guard implies [\"python\", \"that_file.py\"]. If there is no runnable, self-terminating "
             "entrypoint at all (a library, a config file, a long-running service, or the goal doesn't "
-            "describe observable behavior), set should_run to false, run_command to null, and "
+            "describe observable behavior), set should_run to false, run_commands to null, and "
             "success_criteria to an empty string."
         )
 
@@ -512,18 +530,28 @@ class RunVerifierAgent(BaseAgent):
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
             logger.warning(f"Run Verifier judge() returned unparseable JSON, skipping run verification: {e}")
-            return {"should_run": False, "run_command": None, "command_source": "inferred", "success_criteria": ""}
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": ""}
 
         if not isinstance(parsed, dict):
-            return {"should_run": False, "run_command": None, "command_source": "inferred", "success_criteria": ""}
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": ""}
 
-        run_command = parsed.get("run_command")
-        if not isinstance(run_command, list) or not all(isinstance(x, str) for x in run_command):
-            run_command = None
+        raw_commands = parsed.get("run_commands")
+        # Tolerate a model still returning the old single-command shape
+        # (["executable", "arg1"]) instead of a list of commands.
+        if isinstance(raw_commands, list) and raw_commands and all(isinstance(x, str) for x in raw_commands):
+            raw_commands = [raw_commands]
+        run_commands = None
+        if isinstance(raw_commands, list) and raw_commands:
+            candidate = [
+                cmd for cmd in raw_commands
+                if isinstance(cmd, list) and cmd and all(isinstance(x, str) for x in cmd)
+            ]
+            if len(candidate) == len(raw_commands):
+                run_commands = candidate
 
         return {
-            "should_run": bool(parsed.get("should_run")) and run_command is not None,
-            "run_command": run_command,
+            "should_run": bool(parsed.get("should_run")) and run_commands is not None,
+            "run_commands": run_commands,
             "command_source": parsed.get("command_source") if parsed.get("command_source") in ("goal_explicit", "inferred") else "inferred",
             "success_criteria": parsed.get("success_criteria") or "",
         }
