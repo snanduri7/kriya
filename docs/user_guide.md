@@ -205,17 +205,18 @@ Type `/` to see every command Kriya supports, filtered live as you keep typing (
 
 This is deliberately a thin wrapper, not a new command language: every line dispatches into the exact same command group the regular one-shot CLI uses, so there's nothing REPL-specific to learn beyond what's documented in this guide already, and no risk of the session's behavior drifting from `kriya <command>` run standalone.
 
-#### 3.6.1 Natural-Language Routing (optional, off by default)
+#### 3.6.1 Natural-Language Routing (on by default)
 
-Instead of typing an explicit command, you can type what you want in plain English and Kriya will figure out which command to run. Off by default - turn it on in your config:
+Instead of typing an explicit command, you can type what you want in plain English and Kriya will figure out which command to run - on by default since 2026-08-02 (was off; see below for why). Explicit commands are completely unaffected either way: routing only ever activates when the typed line's first word doesn't already match a real command name, so `generate "..."`, `ask "..."`, etc. dispatch exactly as before regardless of this setting. Turn it off in your config if you'd rather every line be an exact command:
 ```yaml
 routing:
-  enabled: true
+  enabled: false
 ```
-This needs its own embedding model pulled (separate from whatever `embedding.model` you use for code search - short natural-language phrases and long-form code retrieval are different jobs, and the packaged default embedding model scored meaningfully worse at this specific task in testing):
+Routing needs its own embedding model pulled (separate from whatever `embedding.model` you use for code search - short natural-language phrases and long-form code retrieval are different jobs, and the packaged default embedding model scored meaningfully worse at this specific task in testing):
 ```bash
 ollama pull embeddinggemma
 ```
+If it isn't pulled, routing fails loudly with the exact `ollama pull ...` command needed and disables itself for the rest of the session (falls back to requiring exact commands) rather than silently misbehaving - it does not affect the embedding model used for the code/RAG index either way.
 Once enabled:
 ```
 ╭─ kriya
@@ -245,6 +246,16 @@ and manage skills, but I don't run commands, install packages, or touch
 live infrastructure. Type /help to see what I can do.
 ```
 An explicit command you type always takes priority over routing - `generate "..."` still dispatches directly, with zero LLM/embedding overhead, exactly as if routing were off.
+
+**One sharp edge, regardless of whether routing is on**: since an explicit command always wins, a line that happens to *start* with a real command word - e.g. typing `generate a REST API for todos` without quoting the whole request - dispatches directly as `generate` with `"a"` as the goal and everything after it rejected as unexpected extra arguments, rather than being routed at all. Kriya shows a short tip in this situation:
+```
+╭─ kriya
+╰─> generate a REST API for todos
+Usage: kriya generate [OPTIONS] [GOAL]
+Error: Got unexpected extra arguments (REST API for todos)
+(Tip: Kriya commands need exact syntax - wrap a full request in quotes, e.g. generate "..." -y, so it's passed as one argument.)
+```
+Wrapping the whole request in quotes (`generate "a REST API for todos"`) works either way - explicitly, or picked up by routing if the first word isn't a command name at all.
 
 ---
 

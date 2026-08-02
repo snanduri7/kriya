@@ -26,6 +26,15 @@ def test_load_default_config():
             
     assert isinstance(cfg.llm.model, str) and len(cfg.llm.model) > 0
 
+def test_routing_enabled_by_default():
+    """Locks in the deliberate 2026-08-02 default flip: routing.enabled is now
+    True out of the box (was False). Explicit commands are unaffected either
+    way - routing only activates when a typed REPL line's first word doesn't
+    already match a real command name (kriya/repl.py::_route_line)."""
+    assert AppConfig().routing.enabled is True
+    assert load_config().routing.enabled is True
+
+
 def test_load_custom_config(tmp_path):
     custom_yaml = {
         "llm": {

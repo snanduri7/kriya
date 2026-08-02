@@ -4,7 +4,7 @@ from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
 from kriya.cli import main as cli_main
-from kriya.repl import _dispatch, _inject_config, _resolve_clarify, _route_line, _SlashCommandCompleter
+from kriya.repl import _dispatch, _inject_config, _print_banner, _resolve_clarify, _route_line, _SlashCommandCompleter
 from kriya.routing import CLARIFY, UNROUTABLE, RoutingModelUnavailable, RoutingResult
 
 
@@ -56,6 +56,60 @@ def test_dispatch_reports_missing_required_argument_without_raising(capsys):
     _dispatch(cli_main, ["ask"])
     captured = capsys.readouterr()
     assert "Missing argument" in captured.err  # reported, not a silent swallow
+
+
+def test_dispatch_adds_a_friendly_tip_when_first_word_is_not_a_real_command(capsys):
+    """Regression test for the REPL first-contact UX gap: a brand-new user
+    typing plain English that doesn't start with a real command word (e.g.
+    "Can you build me a todo app?") used to just get Click's raw "No such
+    command" error with no guidance. _dispatch now appends a short, friendly
+    tip after Click's own message whenever the exception is UsageError-shaped
+    (covers both this case and the "real command word but extra text" case
+    below) - Click's own specific error is still shown first, this is an
+    addendum not a replacement."""
+    _dispatch(cli_main, ["Can", "you", "build", "me", "a", "todo", "app"])
+    captured = capsys.readouterr()
+    assert "No such command" in captured.err
+    assert "wrap a full request in quotes" in captured.err.lower()
+
+
+def test_dispatch_adds_a_friendly_tip_when_a_real_command_word_is_followed_by_prose(capsys):
+    """Same UX gap, sharper case: "generate a REST API for todos" (unquoted)
+    starts with a REAL command name, so it bypasses natural-language routing
+    entirely even when routing is enabled - _route_line only routes lines
+    whose first word ISN'T already a known command
+    (kriya/repl.py::_route_line). This is the scenario a new user is most
+    likely to actually hit, since starting a sentence with "generate" is the
+    natural thing to do. Click raises "unexpected extra arguments" here, a
+    UsageError subtype, so the same friendly tip must still fire."""
+    _dispatch(cli_main, ["generate", "a", "REST", "API", "for", "todos"])
+    captured = capsys.readouterr()
+    assert "unexpected extra argument" in captured.err.lower()
+    assert "wrap a full request in quotes" in captured.err.lower()
+
+
+def test_dispatch_tip_and_click_error_both_land_on_stderr(capsys):
+    """The tip must go to the same stream as Click's own error (stderr) - not
+    stdout - so anything consuming only stdout (a script, a pipe) doesn't see
+    stray tip text mixed into real output, and anything filtering stderr for
+    error context sees the full picture together."""
+    _dispatch(cli_main, ["not-a-real-command"])
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "No such command" in captured.err
+    assert "Tip:" in captured.err
+
+
+def test_print_banner_hints_plain_english_when_routing_enabled(capsys):
+    _print_banner(None, True)
+    captured = capsys.readouterr()
+    assert "plain english" in captured.out.lower()
+
+
+def test_print_banner_hints_quoting_when_routing_disabled(capsys):
+    _print_banner(None, False)
+    captured = capsys.readouterr()
+    assert "wrap a full request in quotes" in captured.out.lower()
 
 
 def test_slash_alone_lists_every_real_command_and_meta_command():
