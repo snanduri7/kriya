@@ -1176,7 +1176,15 @@ async def _get_or_start_jdtls_client(existing_client: Any, project_root: str) ->
         await client.start()
         return client
     except Exception as ex:
-        logger.debug(f"Failed to start jdtls, proceeding without LSP grounding: {ex}")
+        # WARNING, not debug: jdtls being found on PATH but failing to start is
+        # a real, actionable gap in LSP grounding for this run - a silent debug-
+        # level swallow here (confirmed live, 2026-08-03: a real "cannot find
+        # symbol" compile error went completely uncaught by LSP grounding, and
+        # this exact log line was the only place that could have explained why,
+        # but was invisible at the default log level) leaves no way to tell
+        # "not installed" (expected, silent) apart from "installed but broken"
+        # (a real problem worth knowing about) from the run's own output.
+        logger.warning(f"jdtls found but failed to start, proceeding without LSP grounding: {ex}")
         return None
 
 
@@ -1207,7 +1215,12 @@ async def _build_lsp_diagnostics_context(client: Any, worktree_path: str, filepa
             if formatted:
                 context[filepath] = formatted
         except Exception as ex:
-            logger.debug(f"LSP check failed for '{filepath}': {ex}")
+            # WARNING, not debug - same visibility reasoning as
+            # _get_or_start_jdtls_client's own start() failure above: a per-file
+            # check failing here is exactly the kind of thing worth knowing
+            # about when a compile error that should have been LSP-grounded
+            # wasn't.
+            logger.warning(f"LSP check failed for '{filepath}': {ex}")
     return context
 
 
@@ -2339,6 +2352,13 @@ class WorkflowEngine:
         # directly into last_error_source_context below, never gating.
         jdtls_client = None
         jdtls_unavailable = False
+        # Set once, the first time jdtls is found on PATH but fails to start -
+        # distinct from jdtls simply not being installed (expected, silent).
+        # Surfaced in the final result and printed by generate/fix regardless
+        # of pass/fail, same treatment as toolchain_warning below - a run that
+        # silently got no LSP grounding when it should have is worth knowing
+        # about even if the run otherwise succeeded some other way.
+        lsp_warning: Optional[str] = None
         # Rendered once (design does not change across retries) and appended to the
         # full-set task description on every attempt, so the Developer sees an
         # explicit, unambiguous checklist of what the design requires BEFORE
@@ -3234,6 +3254,14 @@ class WorkflowEngine:
                     jdtls_client = await _get_or_start_jdtls_client(jdtls_client, worktree_path)
                     if jdtls_client is None:
                         jdtls_unavailable = True
+                        if lsp_warning is None:
+                            from kriya.tools.lsp import find_jdtls as _find_jdtls_for_warning
+                            if _find_jdtls_for_warning():
+                                lsp_warning = (
+                                    "jdtls was found on PATH but failed to start - LSP grounding was "
+                                    "unavailable for the rest of this run (see logs for the startup error)."
+                                )
+                                logger.warning(f"LSP preflight: {lsp_warning}")
                     else:
                         lsp_context = await _build_lsp_diagnostics_context(
                             jdtls_client, worktree_path,
@@ -3377,6 +3405,7 @@ class WorkflowEngine:
             "environment_failure": environment_failure if not quality_passed else None,
             "failure_category": failure_category,
             "toolchain_warning": toolchain_warning,
+            "lsp_warning": lsp_warning,
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
             "review": review,
             "run_id": run_id,

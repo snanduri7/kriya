@@ -1186,6 +1186,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             # THIS goal may still bite on a different machine or a later,
             # JVM-flag-sensitive one.
             click.secho(f"[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
+        if res.get("lsp_warning"):
+            # Same reasoning as toolchain_warning above - a run that silently
+            # got no LSP grounding when it should have is worth knowing about
+            # regardless of whether the run otherwise passed.
+            click.secho(f"[LSP WARNING] {res['lsp_warning']}", fg="yellow")
         if res.get("unresolved_skill_gaps"):
             # Shown regardless of pass/fail - a shaky success is exactly the case
             # this matters most for: nothing else would ever tell you the result
@@ -1724,6 +1729,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         )
         if res.get("toolchain_warning"):
             click.secho(f"\n[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
+        if res.get("lsp_warning"):
+            click.secho(f"\n[LSP WARNING] {res['lsp_warning']}", fg="yellow")
         if res.get("unresolved_skill_gaps"):
             click.secho(
                 "\n[UNVERIFIED KNOWLEDGE] Generation proceeded without verified information for: "

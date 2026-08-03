@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -2671,6 +2672,22 @@ async def test_get_or_start_jdtls_client_degrades_cleanly_if_start_fails():
     assert result is None
 
 @pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_logs_start_failure_at_warning_not_debug(caplog):
+    """Regression test for a real gap found live (2026-08-03): a real
+    'cannot find symbol' compile error went completely uncaught by LSP
+    grounding during an actual generation run, and the only line that could
+    have explained why was logged at DEBUG - invisible at the default log
+    level, making the whole feature silently undebuggable from the field.
+    'jdtls found but failed to start' must be visible at WARNING."""
+    mock_client = AsyncMock()
+    mock_client.start.side_effect = RuntimeError("jdtls crashed on launch")
+    with caplog.at_level(logging.WARNING, logger="kriya.workflow.workflow"), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
+        await _get_or_start_jdtls_client(None, "/fake/project")
+    assert any("jdtls" in r.message.lower() and "failed to start" in r.message.lower() for r in caplog.records)
+
+@pytest.mark.asyncio
 async def test_build_lsp_diagnostics_context_only_checks_java_files(tmp_path):
     (tmp_path / "App.java").write_text("class App {}")
     (tmp_path / "pom.xml").write_text("<project></project>")
@@ -2754,6 +2771,47 @@ async def test_workflow_merges_lsp_diagnostics_into_retry_prompt_for_java_projec
     assert "App.java" in error_source_context
     assert "ground truth" in error_source_context["App.java"].lower()
     assert "IgniteCache cannot be resolved" in error_source_context["App.java"]
+
+@pytest.mark.asyncio
+async def test_workflow_surfaces_lsp_warning_when_jdtls_found_but_fails_to_start(tmp_path):
+    """jdtls being found on PATH but failing to start is a real, actionable
+    problem (unlike simply not being installed) - must be surfaced in the
+    final result dict and printed by generate/fix regardless of pass/fail,
+    same treatment as toolchain_warning."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient") as mock_jdtls_cls:
+        mock_jdtls_cls.return_value.start = AsyncMock(side_effect=RuntimeError("jdtls crashed on launch"))
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[5,1] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                [{"filepath": "App.java", "content": "class App {}"}],
+                [{"filepath": "App.java", "content": "class App {}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert res["lsp_warning"] is not None
+    assert "jdtls" in res["lsp_warning"].lower() and "failed to start" in res["lsp_warning"].lower()
 
 @pytest.mark.asyncio
 async def test_workflow_skips_lsp_gracefully_when_jdtls_not_found(tmp_path):
