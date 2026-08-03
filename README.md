@@ -75,6 +75,7 @@ graph TD
   ollama pull qwen2.5-coder:32b
   ollama pull nomic-embed-text:latest
   ```
+- Optional, Java projects only: [`jdtls`](https://github.com/eclipse-jdtls/eclipse.jdt.ls) (`brew install jdtls` on macOS) for LSP grounding on Developer retries — not a Python package, so it isn't in `requirements.txt`/`pyproject.toml`; Kriya talks to it directly over the Language Server Protocol (see `kriya/tools/lsp.py`), no client library needed. Entirely optional: not found on PATH, and `generate`/`fix` proceed exactly as before. `jdtls` itself needs **JDK 21+ to run** (separate from whatever JDK your project targets) — `kriya doctor` reports whether it was found and reminds you of this.
 
 ### Installation
 Clone the repository and install it in editable mode inside a virtual environment:
