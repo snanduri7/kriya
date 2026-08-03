@@ -2442,6 +2442,29 @@ def test_extract_error_search_terms_ignores_plain_symbols_and_paths():
     )
     assert extract_error_search_terms(error) == []
 
+def test_extract_error_search_terms_excludes_projects_own_coordinate():
+    # Regression test for a real bug found live during golden-use-case
+    # validation: Maven's own build banner prints the PROJECT'S OWN
+    # groupId:artifactId on every single build, success or failure
+    # ("[INFO] ----------------< com.example:ignite-qpid-integration
+    # >-----------------") - the exact same coordinate shape this function
+    # looks for. Without exclusion, a repeated-failure live-lookup recovery
+    # attempt wastes its one shot searching for the project's own made-up
+    # artifact ID instead of anything related to the actual failure.
+    error = (
+        "[INFO] ----------------< com.example:ignite-qpid-integration >-----------------\n"
+        "[INFO] Building ignite-qpid-integration 1.0-SNAPSHOT\n"
+        "[ERROR] Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java "
+        "for parameter arguments: Cannot store value into array"
+    )
+    result = extract_error_search_terms(error, exclude_coordinates=["com.example:ignite-qpid-integration"])
+    assert result == ["org.codehaus.mojo:exec-maven-plugin"]
+    assert "com.example:ignite-qpid-integration" not in result
+
+def test_extract_error_search_terms_no_exclusion_when_none_given():
+    error = "[INFO] ----------------< com.example:ignite-qpid-integration >-----------------"
+    assert extract_error_search_terms(error) == ["com.example:ignite-qpid-integration"]
+
 def test_normalize_error_for_repeat_detection_strips_maven_timing_lines():
     # Real, byte-for-byte identical underlying failure (Qpid's SystemLauncher
     # UnsupportedOperationException) as captured across two separate Kriya
@@ -2680,6 +2703,58 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
          patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)) as mock_search, \
          patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="Remove the <arguments> block - exec:java doesn't need it.")):
+        mock_compile.side_effect = [
+            {"success": False, "output": repeated_error},
+            {"success": False, "output": repeated_error},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once_with(
+        "org.codehaus.mojo:exec-maven-plugin example", "http://fake-search:8080", top_k=3
+    )
+
+@pytest.mark.asyncio
+async def test_workflow_repeated_failure_live_lookup_excludes_own_project_coordinate(tmp_path):
+    """Regression test for a real bug found live during golden-use-case
+    validation: Maven's own build banner prints the PROJECT'S OWN
+    groupId:artifactId on every single build - a repeated-failure live-lookup
+    recovery attempt must not waste its shot searching for the project's own
+    made-up artifact ID instead of a genuine external coordinate also present
+    in the same error text."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    repeated_error = (
+        "[INFO] ----------------< com.example:ignite-qpid-integration >-----------------\n"
+        "[INFO] Building ignite-qpid-integration 1.0-SNAPSHOT\n"
+        "[ERROR] Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java "
+        "for parameter arguments: Cannot store value into array"
+    )
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Review: Approved",
+    ])
+
+    found = [{"term": "org.codehaus.mojo:exec-maven-plugin", "url": "https://example.com/exec-plugin", "snippet": "..."}]
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="Remove the <arguments> block.")), \
+         patch("kriya.tools.validate.get_pom_own_coordinate", return_value="com.example:ignite-qpid-integration"):
         mock_compile.side_effect = [
             {"success": False, "output": repeated_error},
             {"success": False, "output": repeated_error},

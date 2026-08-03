@@ -2,7 +2,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 from kriya.config import AppConfig
-from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies
+from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies, get_pom_own_coordinate
 
 
 def test_polymorphic_stack_detection(tmp_path):
@@ -297,6 +297,30 @@ def test_get_pom_dependencies_is_module_level_and_reusable(tmp_path):
 
 def test_get_pom_dependencies_missing_file_returns_empty():
     assert get_pom_dependencies("/nonexistent/pom.xml") == []
+
+def test_get_pom_own_coordinate_reads_top_level_groupid_artifactid(tmp_path):
+    """Must read the PROJECT'S OWN top-level <groupId>/<artifactId> (direct
+    children of <project>), not a <dependency>'s - confirmed distinct via a pom
+    that has both, to catch a regression that accidentally matched the wrong
+    element."""
+    pom = tmp_path / "pom.xml"
+    pom.write_text("""<?xml version="1.0" encoding="UTF-8"?>
+<project>
+    <groupId>com.example</groupId>
+    <artifactId>ignite-qpid-integration</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-core</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+    </dependencies>
+</project>""")
+    assert get_pom_own_coordinate(str(pom)) == "com.example:ignite-qpid-integration"
+
+def test_get_pom_own_coordinate_missing_file_returns_none():
+    assert get_pom_own_coordinate("/nonexistent/pom.xml") is None
 
 def test_java_dependency_regression(tmp_path):
     orig_dir = tmp_path / "orig"

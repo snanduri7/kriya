@@ -40,6 +40,34 @@ def get_pom_dependencies(pom_path: str) -> List[str]:
         return []
 
 
+def get_pom_own_coordinate(pom_path: str) -> Optional[str]:
+    """Reads a pom.xml's own top-level <groupId>/<artifactId> (direct children of
+    <project>, not nested inside any <dependency>) as a single 'groupId:artifactId'
+    string. Confirmed live as a real, previously-unnoticed gap: Maven's own build
+    banner (`[INFO] ----------------< groupId:artifactId >-----------------`,
+    printed at the start of every build) matches the exact same coordinate shape
+    extract_error_search_terms() looks for - without this, a project's own
+    made-up artifact ID gets treated as a genuine third-party library worth an
+    outbound search, wasting a real repeated-failure live-lookup recovery
+    attempt on a term that can never find anything useful."""
+    if not os.path.exists(pom_path):
+        return None
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ns = ""
+        if root.tag.startswith("{"):
+            ns = root.tag.split("}")[0] + "}"
+        group_elem = root.find(f"{ns}groupId")
+        artifact_elem = root.find(f"{ns}artifactId")
+        if group_elem is not None and artifact_elem is not None and group_elem.text and artifact_elem.text:
+            return f"{group_elem.text.strip()}:{artifact_elem.text.strip()}"
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to parse POM's own coordinate at {pom_path}: {e}")
+        return None
+
+
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 

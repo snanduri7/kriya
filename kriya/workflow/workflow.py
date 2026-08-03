@@ -1011,7 +1011,7 @@ def _normalize_error_for_repeat_detection(error_text: str) -> str:
     return normalized
 
 
-def extract_error_search_terms(error_text: str) -> List[str]:
+def extract_error_search_terms(error_text: str, exclude_coordinates: Optional[Iterable[str]] = None) -> List[str]:
     """Extracts safe search terms from Quality Gate error/output text for
     error-triggered live lookup (kriya/workflow/workflow.py's Developer retry
     loop) - restricted to well-known, publicly-referenceable Maven/Gradle-style
@@ -1023,12 +1023,23 @@ def extract_error_search_terms(error_text: str) -> List[str]:
     goal/design-stage live lookup. A failure with no such coordinate in it (e.g.
     a plain "cannot find symbol" compile error naming only a class, not an
     artifact) simply yields no terms and is never searched - most such failures
-    are code-coherence issues a search wouldn't help with anyway."""
+    are code-coherence issues a search wouldn't help with anyway.
+
+    exclude_coordinates filters out matches that are technically present but
+    useless as a search target - confirmed live as a real bug: Maven's own build
+    banner (`[INFO] ----------------< groupId:artifactId >-----------------`,
+    printed at the start of every single build, success or failure) matches this
+    exact coordinate shape, so without exclusion a project's own made-up
+    artifact ID gets treated as a genuine third-party library worth searching
+    for, wasting a real repeated-failure live-lookup recovery attempt on a term
+    that can never find anything useful. Callers pass the workspace's own
+    pom.xml coordinate (get_pom_own_coordinate()) here."""
     seen = set()
     terms = []
+    exclude = set(exclude_coordinates) if exclude_coordinates else set()
     for m in _ERROR_COORDINATE_PATTERN.finditer(error_text):
         term = f"{m.group(1)}:{m.group(2)}"
-        if term not in seen:
+        if term not in seen and term not in exclude:
             seen.add(term)
             terms.append(term)
     return terms
@@ -2916,7 +2927,23 @@ class WorkflowEngine:
                 # occurrences of the exact same failure would never compare equal.
                 environment_failure = classify_environment_failure(raw_error_context)
 
-                error_terms = extract_error_search_terms(raw_error_context)
+                # Read fresh from the worktree's CURRENT pom.xml each attempt,
+                # not cached once before the loop - the project's own
+                # groupId:artifactId can legitimately change mid-run (e.g. the
+                # Developer renaming the artifact while extending the project),
+                # and a stale cached value would fail to exclude Maven's own
+                # build banner for whatever the CURRENT attempt actually named
+                # the project.
+                own_project_coordinate = None
+                try:
+                    from kriya.tools.validate import get_pom_own_coordinate
+                    own_project_coordinate = get_pom_own_coordinate(os.path.join(worktree_path, "pom.xml"))
+                except Exception as ex:
+                    logger.debug(f"Failed to resolve project's own pom.xml coordinate: {ex}")
+                error_terms = extract_error_search_terms(
+                    raw_error_context,
+                    exclude_coordinates=[own_project_coordinate] if own_project_coordinate else None,
+                )
                 current_failure_signature = (
                     fail_type,
                     tuple(sorted(error_terms)) if error_terms else _normalize_error_for_repeat_detection(raw_error_context),
