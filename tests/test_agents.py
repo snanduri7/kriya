@@ -316,6 +316,78 @@ async def test_run_generation_with_known_target_files_skips_file_list_call():
     assert files_by_path["pom.xml"] == "<project>fixed</project>"
 
 
+def test_split_fix_analysis_extracts_marker_and_strips_content():
+    text = (
+        "FIX ANALYSIS: The cache is used as a raw type so .get() returns Object; "
+        "adding explicit generics fixes it.\n"
+        "FILE CONTENT:\n"
+        "public class App {}"
+    )
+    analysis, content = DeveloperAgent._split_fix_analysis(text)
+    assert analysis == "The cache is used as a raw type so .get() returns Object; adding explicit generics fixes it."
+    assert content == "public class App {}"
+
+def test_split_fix_analysis_is_case_insensitive():
+    text = "fix analysis: short reason\nfile content:\nclass X {}"
+    analysis, content = DeveloperAgent._split_fix_analysis(text)
+    assert analysis == "short reason"
+    assert content == "class X {}"
+
+def test_split_fix_analysis_falls_back_when_marker_missing():
+    # A non-compliant response (no marker at all) must degrade to the plain
+    # pre-existing behavior - the whole text treated as content, not corrupted
+    # or silently dropped.
+    text = "public class App {}"
+    analysis, content = DeveloperAgent._split_fix_analysis(text)
+    assert analysis is None
+    assert content == text
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_adds_fix_analysis_instruction_only_with_prior_error():
+    """Regression test for a real, generalizable bug found live during golden-
+    use-case validation: single-shot, non-reasoning completion regenerated
+    byte-for-byte identical broken code across 7 straight retry attempts of a
+    real failing run, despite the exact compile error being present in every
+    prompt - the model was never actually forced to engage with the stated
+    error before writing code. The mandatory FIX ANALYSIS step must only be
+    requested (and only stripped from saved content) when there's a real
+    prior error to analyze - never on a clean first attempt."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value="FIX ANALYSIS: raw type bug\nFILE CONTENT:\npublic class App {}"
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["src/main/java/com/example/App.java"],
+        prior_error_context="incompatible types: java.lang.Object cannot be converted to java.lang.String",
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "FIX ANALYSIS" in file_prompt
+    assert "RETRY" in file_prompt
+    # The analysis preamble must be stripped out of the saved file content.
+    assert files[0]["content"] == "public class App {}"
+    assert "FIX ANALYSIS" not in files[0]["content"]
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_fix_analysis_instruction_without_prior_error():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["src/main/java/com/example/App.java"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "FIX ANALYSIS" not in file_prompt
+    assert files[0]["content"] == "public class App {}"
+
 @pytest.mark.asyncio
 async def test_run_generation_without_known_target_files_still_asks_for_file_list():
     """known_target_files must be strictly opt-in - a normal (non-targeted)

@@ -2343,6 +2343,7 @@ class WorkflowEngine:
                         base_url_override=base_url_override,
                         api_key_override=api_key_override,
                         known_target_files=last_implicated_files,
+                        prior_error_context=error_context or None,
                     )
                 elif use_missing_files:
                     # Missing-file recovery: same primary-model-only, non-escalating
@@ -2455,6 +2456,7 @@ class WorkflowEngine:
                         base_url_override=base_url_override,
                         api_key_override=api_key_override,
                         known_target_files=known_target_files,
+                        prior_error_context=error_context or None,
                     )
 
                 # Normalize filepaths before anything downstream uses them - the
