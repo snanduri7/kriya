@@ -38,6 +38,10 @@ llm:
   temperature: 0.3
   max_tokens: 4096
   context_window: 32768                    # Native model input context window limit
+  retry_temperature: 0.1                   # Optional, unset by default. Overrides temperature ONLY for a
+                                            # Developer completion that's fixing a real prior error (see §4.7) -
+                                            # a cited study found code-gen success rate drops as temperature
+                                            # rises even at the low end, so lower (not higher) helps a retry.
 
 # Ordered fallback/escalation chain - tried in order after a quality-gate failure
 llm_chain:
@@ -379,6 +383,8 @@ Any retry (targeted or full-set) that's responding to a real prior failure also 
 In a full-set retry (regenerating every file in the batch, not just one), this "FIX ANALYSIS" instruction and a snippet of the exact broken source line only apply to the file(s) the compile error actually names - not every file being regenerated. Found live: without this scoping, an unrelated file in the same batch got asked to "explain the fix" for an error it had nothing to do with, producing a wrong, confused analysis instead of the correct one being concentrated where it mattered. The broken-line snippet itself is extracted generically from the compiler's own `File.java:[line,col]` locator, which every compile error carries regardless of its message - not tied to any specific error type.
 
 If a failure doesn't clearly point at one of your files (a bare exit code, a build-tool configuration error with no source file involved), Kriya falls back to a normal full-file-set retry - targeting is a bonus when it can confidently narrow the fix, never a guess.
+
+Java compile checks always pass `-Xlint:rawtypes,unchecked` to javac now, so a raw-type mistake (e.g. using a cache/collection without generics, a real and recurring cause of "incompatible types" failures) shows up as a precisely-located warning right next to the resulting error, rather than javac's default one-line notice with no file/line at all - one more concrete thing the fix-analysis step above has to work with.
 
 ### 4.8 Completeness Prevention & Missing-File Recovery
 No configuration needed - this is always on. Before the Developer generates anything, Kriya scans the Architect's design for the files it calls for and hands the Developer an explicit "Required files" checklist as part of the task description - not just a check applied after the fact. If a required file is still missing once generation finishes, the next retry asks specifically for that missing file (with the rest of your codebase shown as reference), instead of either silently accepting an incomplete result or regenerating everything from scratch. This shares Targeted Single-File Retry's budget (3 attempts) and never escalates models, for the same reasons.
