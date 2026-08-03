@@ -78,11 +78,22 @@ class JdtlsClient:
 
     async def start(self) -> None:
         self._data_dir = tempfile.mkdtemp(prefix="kriya-jdtls-data-")
+        # Confirmed live, not theoretical: jdtls's own launcher REFUSES to start
+        # ("Exception: jdtls requires at least Java 21") if a JAVA_HOME inherited
+        # from the parent process resolves to anything older - and Kriya's own
+        # Maven-oriented workflows routinely export a JAVA_HOME pinned to an
+        # older JDK for the TARGET project's own reasons (e.g. Java 17 for the
+        # Qpid Security Manager requirement, see _java_toolchain_fact()) that has
+        # nothing to do with what jdtls itself needs to run. Launching without
+        # inheriting JAVA_HOME lets jdtls's own wrapper script fall back to its
+        # sensible built-in default, confirmed live to work.
+        jdtls_env = {k: v for k, v in os.environ.items() if k != "JAVA_HOME"}
         self.process = await asyncio.create_subprocess_exec(
             self.jdtls_path, "-data", self._data_dir,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=jdtls_env,
         )
         self._reader_task = asyncio.create_task(self._read_loop())
         root_uri = "file://" + self.project_root

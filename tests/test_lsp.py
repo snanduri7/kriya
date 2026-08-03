@@ -171,6 +171,29 @@ async def test_start_and_check_file_end_to_end_via_fake_process():
 
     assert result == diagnostics_payload
 
+@pytest.mark.asyncio
+async def test_start_does_not_inherit_java_home_from_parent_process():
+    """Regression test for a real bug found live, not theoretical: jdtls's own
+    launcher refuses to start ("Exception: jdtls requires at least Java 21")
+    if a JAVA_HOME inherited from the parent process resolves to anything
+    older - and Kriya's own Maven-oriented workflows routinely export a
+    JAVA_HOME pinned to an older JDK for the TARGET project's own reasons
+    (e.g. Java 17 for the Qpid Security Manager requirement), unrelated to
+    what jdtls itself needs to run. Confirmed live: with JAVA_HOME set to a
+    real Temurin 17 install, `jdtls -data ...` crashed immediately with that
+    exact exception; with JAVA_HOME unset, it started and ran normally.
+    Exercises the real start() method, not a hand-copied duplicate of it."""
+    init_response = {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}
+    client = _make_client([init_response])
+    with patch.dict("os.environ", {"JAVA_HOME": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home", "PATH": "/usr/bin"}), \
+         patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=client.process)) as mock_exec, \
+         patch("tempfile.mkdtemp", return_value="/tmp/fake-jdtls-data"):
+        await client.start()
+
+    launch_kwargs = mock_exec.call_args.kwargs
+    assert "JAVA_HOME" not in launch_kwargs["env"]
+    assert launch_kwargs["env"]["PATH"] == "/usr/bin"  # everything else still passed through
+
 def test_format_diagnostics_for_prompt_filters_to_errors_only():
     diagnostics = [
         {"severity": 1, "range": {"start": {"line": 4}}, "message": "cannot resolve import"},
