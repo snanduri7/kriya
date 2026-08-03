@@ -1,4 +1,5 @@
 import sys
+import time
 from unittest.mock import MagicMock, patch
 
 from kriya.config import AppConfig
@@ -98,6 +99,42 @@ def test_run_app_timeout(tmp_path):
 
     assert res["success"] is False
     assert res["timed_out"] is True
+
+def test_run_app_timeout_kills_child_processes_too(tmp_path):
+    """Regression test for a real, live-found bug (2026-08-03): the previous
+    subprocess.run()-based timeout handling only killed the DIRECT child
+    process - if that process itself forks its own child (exactly what
+    `mvn exec:exec` does, launching a separate `java` process to actually
+    run the app), the grandchild survived the parent's death entirely.
+    Confirmed live: an embedded Qpid broker process leaked this way, stayed
+    alive for over an hour after its own run timed out, and broke an
+    entirely separate, later validation run that happened to need the same
+    port. Spawns a real child process that continuously proves it's alive
+    (a heartbeat file) and confirms it actually stops - not just gets
+    orphaned and keeps running - once the timed-out parent is killed."""
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "parent.py").write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, 'child.py'])\n"
+        "time.sleep(10)\n"
+    )
+    (tmp_path / "child.py").write_text(
+        "import time\n"
+        "for _ in range(100):\n"
+        "    with open('heartbeat.txt', 'a') as f:\n"
+        "        f.write('x')\n"
+        "    time.sleep(0.1)\n"
+    )
+
+    res = validator.run_app([sys.executable, "parent.py"], timeout=1)
+    assert res["timed_out"] is True
+
+    heartbeat = tmp_path / "heartbeat.txt"
+    time.sleep(0.3)
+    size_after_kill = heartbeat.stat().st_size if heartbeat.exists() else 0
+    time.sleep(1.0)
+    size_later = heartbeat.stat().st_size if heartbeat.exists() else 0
+    assert size_after_kill == size_later, "child process kept running after the timed-out parent was killed"
 
 def test_run_app_no_command():
     validator = PolymorphicValidator(".")
@@ -211,13 +248,14 @@ def test_java_ruby_compile_invocation(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
     
-    with patch("subprocess.run") as mock_run:
-        mock_res = MagicMock()
-        mock_res.returncode = 0
-        mock_run.return_value = mock_res
-        
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
+
         res = validator.run_compile_check(["UserService.java"])
-        assert mock_run.called
+        assert mock_popen.called
         assert res["success"] is True
         
         # Test Ruby compile invocation mocks
@@ -246,12 +284,13 @@ def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    mock_result = MagicMock(returncode=0, stdout="BUILD SUCCESS", stderr="")
-    with patch("subprocess.run", return_value=mock_result) as mock_run:
+    mock_process = MagicMock(returncode=0)
+    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
+    with patch("subprocess.Popen", return_value=mock_process) as mock_popen:
         res = validator.run_compile_check(["App.java"])
 
     assert res["success"] is True
-    invoked_cmd = mock_run.call_args.args[0]
+    invoked_cmd = mock_popen.call_args.args[0]
     assert "-Dmaven.compiler.showWarnings=true" in invoked_cmd
     assert "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked" in invoked_cmd
 
@@ -269,14 +308,14 @@ def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path)
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
 
-    with patch("subprocess.run", side_effect=FileNotFoundError(2, "No such file or directory", "mvn")) as mock_run:
+    with patch("subprocess.Popen", side_effect=FileNotFoundError(2, "No such file or directory", "mvn")) as mock_popen:
         res = validator.run_compile_check(["UserService.java"])
 
     assert res["success"] is False
     assert "Failed to invoke mvn compile" in res["output"]
     assert "No such file or directory" in res["output"]
     # Must not silently fall through to a javac (or gradle) fallback attempt.
-    assert mock_run.call_count == 1
+    assert mock_popen.call_count == 1
 
 
 def test_check_java_toolchain_detects_mismatch(monkeypatch):
@@ -442,10 +481,11 @@ def test_java_dependency_regression(tmp_path):
 </project>"""
     (new_dir / "pom.xml").write_text(new_pom_preserved)
 
-    with patch("subprocess.run") as mock_run:
-        mock_res = MagicMock()
-        mock_res.returncode = 0
-        mock_run.return_value = mock_res
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
         res_ok = validator.run_compile_check(["pom.xml"])
         assert res_ok["success"] is True
 
@@ -456,14 +496,15 @@ def test_sandbox_execution_restricts_subprocess_env_by_default(tmp_path, monkeyp
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.run") as mock_run:
-        mock_res = MagicMock()
-        mock_res.returncode = 0
-        mock_run.return_value = mock_res
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
         validator.run_compile_check(["UserService.java"])
 
-        assert mock_run.called
-        _, kwargs = mock_run.call_args
+        assert mock_popen.called
+        _, kwargs = mock_popen.call_args
         assert "KRIYA_TEST_SECRET" not in kwargs["env"]
         assert kwargs["preexec_fn"] is not None
 
@@ -476,13 +517,14 @@ def test_sandbox_execution_disabled_uses_full_env(tmp_path, monkeypatch):
     cfg.autonomy.sandbox_execution = False
     validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=cfg.autonomy)
 
-    with patch("subprocess.run") as mock_run:
-        mock_res = MagicMock()
-        mock_res.returncode = 0
-        mock_run.return_value = mock_res
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
         validator.run_compile_check(["UserService.java"])
 
-        _, kwargs = mock_run.call_args
+        _, kwargs = mock_popen.call_args
         assert kwargs["env"] is None
         assert kwargs["preexec_fn"] is None
 

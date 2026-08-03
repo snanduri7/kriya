@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -137,20 +138,36 @@ class PolymorphicValidator:
             preexec_fn = posix_resource_limits_preexec_fn(
                 self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
             )
+        # start_new_session=True (POSIX setsid) puts the child in its own
+        # process group - required for the timeout-kill below to actually
+        # work for a command like `mvn exec:exec`, which forks its own
+        # separate `java` child process to run the app (that's the entire
+        # point of exec:exec over exec:java). Confirmed live, 2026-08-03:
+        # subprocess.run()'s own built-in timeout handling only kills the
+        # DIRECT child (mvn) - the grandchild java process it forked
+        # survived the kill, kept an embedded Qpid broker bound to its port
+        # for over an hour, and silently broke a LATER, completely
+        # unrelated validation run that happened to need the same port.
+        # Killing the whole process group on timeout is the only way to
+        # actually terminate what a command like this really started.
+        process = subprocess.Popen(
+            cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=env, preexec_fn=preexec_fn, start_new_session=True,
+        )
         try:
-            res = subprocess.run(
-                cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
-                env=env, preexec_fn=preexec_fn,
-            )
-            return {"returncode": res.returncode, "stdout": res.stdout, "stderr": res.stderr, "timeout": False}
-        except subprocess.TimeoutExpired as te:
-            stdout = te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else (te.stdout or "")
-            stderr = te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else (te.stderr or "")
+            stdout, stderr = process.communicate(timeout=timeout)
+            return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr, "timeout": False}
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # already exited between the timeout firing and this kill
+            stdout, stderr = process.communicate()  # reap the process, collect whatever output exists
             return {
-                "returncode": -1, 
-                "stdout": stdout, 
-                "stderr": stderr + f"\n[TIMEOUT] Command timed out after {timeout} seconds.", 
-                "timeout": True
+                "returncode": -1,
+                "stdout": stdout,
+                "stderr": stderr + f"\n[TIMEOUT] Command timed out after {timeout} seconds.",
+                "timeout": True,
             }
 
     def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
