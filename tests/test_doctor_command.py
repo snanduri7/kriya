@@ -100,3 +100,62 @@ def test_doctor_exits_nonzero_when_embedding_connection_fails(tmp_path):
 
     assert "[ERROR]" in res.output
     assert res.exit_code != 0
+
+
+def test_doctor_warns_on_java_mvn_version_mismatch_without_failing(tmp_path):
+    """Regression test: 'mvn' can silently resolve a different JDK than plain
+    'java' (e.g. a Homebrew mvn install defaulting JAVA_HOME to its own,
+    possibly newer, openjdk) - confirmed as a real, silent failure mode during
+    golden-use-case validation (a JVM startup flag correct for the JDK 'java'
+    resolved was fatal under the JDK 'mvn' actually built/ran against). This
+    must surface as a [WARNING] (not silently ignored), but must NOT fail
+    `doctor`'s own exit code - same severity convention as the existing
+    configured-model-not-on-server warning."""
+    cfg = _cfg(tmp_path)
+
+    mock_response = MagicMock()
+    mock_response.getcode.return_value = 200
+    mock_response.read.return_value = b'{"data": [{"id": "qwen3-coder:30b"}]}'
+    mock_response.__enter__.return_value = mock_response
+    mock_response.__exit__.return_value = False
+
+    runner = CliRunner()
+    with patch("kriya.cli.load_config", return_value=cfg), \
+         patch("urllib.request.urlopen", return_value=mock_response), \
+         patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", return_value=[0.1] * 384), \
+         patch("kriya.tools.validate.check_java_toolchain", return_value={
+             "java_found": True, "java_version": "17",
+             "mvn_found": True, "mvn_java_version": "26",
+             "mismatch": True,
+         }):
+        res = runner.invoke(main, ["doctor"])
+
+    assert "[WARNING]" in res.output
+    assert "DIFFERENT major" in res.output
+    assert res.exit_code == 0
+
+
+def test_doctor_skips_toolchain_section_cleanly_when_neither_found(tmp_path):
+    """Not every Kriya project is Java-based - finding neither 'java' nor 'mvn'
+    on PATH must be a silent skip, not a warning or error."""
+    cfg = _cfg(tmp_path)
+
+    mock_response = MagicMock()
+    mock_response.getcode.return_value = 200
+    mock_response.read.return_value = b'{"data": [{"id": "qwen3-coder:30b"}]}'
+    mock_response.__enter__.return_value = mock_response
+    mock_response.__exit__.return_value = False
+
+    runner = CliRunner()
+    with patch("kriya.cli.load_config", return_value=cfg), \
+         patch("urllib.request.urlopen", return_value=mock_response), \
+         patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", return_value=[0.1] * 384), \
+         patch("kriya.tools.validate.check_java_toolchain", return_value={
+             "java_found": False, "java_version": None,
+             "mvn_found": False, "mvn_java_version": None,
+             "mismatch": False,
+         }):
+        res = runner.invoke(main, ["doctor"])
+
+    assert "Checking Java/Maven toolchain" not in res.output
+    assert res.exit_code == 0

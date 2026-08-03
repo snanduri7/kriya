@@ -122,3 +122,61 @@ on), but it would need to be built on top of a defensive dual-path parser from
 day one, not assumed to be free - and that parser needs to keep working even
 as the model's own raw-output format drifts, which this session's testing
 shows it genuinely does.
+
+## Re-test (2026-08-03): large tool-call arguments specifically
+
+Motivated by a real retry-loop bug found live (see `docs/design.md` §2.3.4a's
+"dilution bug" and follow-on entries) that raised the bigger question again:
+is a tool-using agent loop the actual complete fix for this whole class of
+retry-loop problem, worth real investment instead of more point-fixes? The
+one gap this original spike never tested: the SPECIFIC failure mode
+`ollama/ollama#14570` flagged as most relevant (a tool call's arguments
+getting large) - the original spike's task was a tiny Stack class, nothing
+like Kriya's real ~5-8KB Java file outputs.
+
+`run_spike_large_args.py` re-runs the original small-task comparison
+(like-for-like check against Ollama version drift - 0.32.5 as of this run)
+AND a new large task (a multi-hundred-line Java file matching Kriya's real
+Developer output shape), against three models: `qwen3-coder:30b`,
+`qwen3.6:35b`, `devstral-small-2:24b`.
+
+**Result: every model that was reliable on the small tool-call argument
+failed completely on the large one.**
+
+| Model | Small task, tool_call | Large task, tool_call |
+|---|---|---|
+| `qwen3-coder:30b` | fell back to content-parse (not proper `tool_calls`) | proper `tool_calls`, worked (1 sample - see caveat below) |
+| `qwen3.6:35b` | proper `tool_calls` (matches original 3/3) | **FAILED** - no tool call, no fallback match, plain prose+markdown after 164s |
+| `devstral-small-2:24b` | proper `tool_calls` (matches original 3/3) | **FAILED** - returned *nothing at all* (0 chars) after 94s |
+
+`json_mode` (Kriya's actual current mechanism) succeeded in all 6 runs,
+every model, every task size.
+
+Only `qwen3-coder` succeeded on the large task, and this is the model with
+the *worst* overall tool-calling reliability record from the original spike
+- one sample, could easily be luck rather than a trend (same caveat the
+original spike raised about `qwen3.6`'s clean 3/3 small-task result). Not
+re-run multiple times to get a real rate - the qualitative result (large
+arguments break tool-calling for the models that were otherwise reliable)
+was decisive enough on its own to not need more samples for this decision.
+
+**External corroboration, same day**: Qwen's own officially-recommended
+serving stack (vLLM with `--tool-call-parser qwen3_coder`, not Ollama) has
+open GitHub issues in the same class - tool calls "not correctly parsed,
+remain in plain content" (vllm-project/vllm#22975), "large number of
+errors" on recent releases (#26561) - so this is not something Kriya could
+route around by switching inference backends. Aider (a real, shipping
+agentic coding tool) independently arrived at the same conclusion for the
+same underlying reason: it deliberately uses a text-based SEARCH/REPLACE
+diff format instead of native tool-calling for edits - functionally the
+same idea as Kriya's own pre-existing `apply_anchored_edits()`.
+
+**Updated bottom line**: the tool-use agent loop is not viable today with
+local models, for Kriya's actual workload shape (writing/editing real-sized
+files) - confirmed fresh, not just inherited from the original spike, and
+not fixable by picking a different model or a different inference backend.
+This is a genuine, current, externally-corroborated infrastructure
+constraint. Closing structural gaps in the existing json_mode-based
+architecture (see `docs/design.md` §2.3.4a) is the actual highest-leverage
+work available given that constraint, not a consolation prize for avoiding
+the harder problem.

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kriya.agents.agent import (
+    ArchitectAgent,
     DeveloperAgent,
     PlannerAgent,
     RunVerifierAgent,
@@ -154,6 +155,49 @@ async def test_run_verifier_judge_escalates_on_unparseable_json():
     assert judgment["should_run"] is True
     assert llm.complete.await_count == 2
 
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_includes_pom_content_when_given():
+    """Regression test for a real bug found via two live golden-use-case runs
+    (Ignite, then Qpid): the system prompt already tells the judge exactly how
+    to read a pom.xml's exec-maven-plugin shape (exec:exec vs exec:java), but
+    judge() never actually included the pom.xml's content in its own prompt -
+    only the Architect's own already-minimized design (often just a bare file
+    list) and file paths, neither of which carry that detail. Confirmed live,
+    twice: an exec:exec-shaped pom (needed for --add-opens JVM flags) was
+    still judged as exec:java both times. The instruction was correct; the
+    data to apply it against was missing."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["mvn", "exec:exec"]],
+        "command_source": "inferred", "success_criteria": "Prints the result",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    pom_content = "<project><build><plugins><plugin><artifactId>exec-maven-plugin</artifactId></plugin></plugins></build></project>"
+    await verifier.judge(goal="Goal", design="## Files to Create\n- pom.xml", files_written=["pom.xml"], build_file_content=pom_content)
+
+    sent_prompt = llm.complete.await_args.args[1]
+    assert pom_content in sent_prompt
+    assert "Actual pom.xml content" in sent_prompt
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_omits_pom_section_when_not_given():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": False, "run_commands": None,
+        "command_source": "inferred", "success_criteria": "",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+
+    sent_prompt = llm.complete.await_args.args[1]
+    assert "Actual pom.xml content" not in sent_prompt
+
 @pytest.mark.asyncio
 async def test_developer_agent_json_parsing():
     cfg = AppConfig()
@@ -271,6 +315,146 @@ async def test_run_generation_with_known_target_files_skips_file_list_call():
     assert files_by_path["src/main/java/com/example/App.java"] == "package com.example;\npublic class App {}"
     assert files_by_path["pom.xml"] == "<project>fixed</project>"
 
+
+def test_split_fix_analysis_extracts_marker_and_strips_content():
+    text = (
+        "FIX ANALYSIS: The cache is used as a raw type so .get() returns Object; "
+        "adding explicit generics fixes it.\n"
+        "FILE CONTENT:\n"
+        "public class App {}"
+    )
+    analysis, content = DeveloperAgent._split_fix_analysis(text)
+    assert analysis == "The cache is used as a raw type so .get() returns Object; adding explicit generics fixes it."
+    assert content == "public class App {}"
+
+def test_split_fix_analysis_is_case_insensitive():
+    text = "fix analysis: short reason\nfile content:\nclass X {}"
+    analysis, content = DeveloperAgent._split_fix_analysis(text)
+    assert analysis == "short reason"
+    assert content == "class X {}"
+
+def test_split_fix_analysis_falls_back_when_marker_missing():
+    # A non-compliant response (no marker at all) must degrade to the plain
+    # pre-existing behavior - the whole text treated as content, not corrupted
+    # or silently dropped.
+    text = "public class App {}"
+    analysis, content = DeveloperAgent._split_fix_analysis(text)
+    assert analysis is None
+    assert content == text
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_adds_fix_analysis_instruction_only_with_prior_error():
+    """Regression test for a real, generalizable bug found live during golden-
+    use-case validation: single-shot, non-reasoning completion regenerated
+    byte-for-byte identical broken code across 7 straight retry attempts of a
+    real failing run, despite the exact compile error being present in every
+    prompt - the model was never actually forced to engage with the stated
+    error before writing code. The mandatory FIX ANALYSIS step must only be
+    requested (and only stripped from saved content) when there's a real
+    prior error to analyze - never on a clean first attempt."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value="FIX ANALYSIS: raw type bug\nFILE CONTENT:\npublic class App {}"
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["src/main/java/com/example/App.java"],
+        prior_error_context="incompatible types: java.lang.Object cannot be converted to java.lang.String",
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "FIX ANALYSIS" in file_prompt
+    assert "RETRY" in file_prompt
+    # The analysis preamble must be stripped out of the saved file content.
+    assert files[0]["content"] == "public class App {}"
+    assert "FIX ANALYSIS" not in files[0]["content"]
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_fix_analysis_instruction_without_prior_error():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["src/main/java/com/example/App.java"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "FIX ANALYSIS" not in file_prompt
+    assert files[0]["content"] == "public class App {}"
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_scopes_fix_analysis_to_implicated_files_only():
+    """Regression test for a real bug found live during golden-use-case
+    validation: a full-set retry regenerates every file in the batch, and
+    without scoping, EVERY file's per-file prompt got the same "explain the
+    fix" instruction even though the compile error only ever implicated ONE
+    of them - producing confused/wrong analyses for unrelated files (a real
+    run blamed a perfectly fine Person.java for a bug that was actually a
+    raw-type cache access mistake in a completely different file) and
+    diluting the one analysis call that actually mattered. Only the
+    implicated file's prompt should carry the fix-analysis instruction and
+    error_source_context; an unrelated file in the same batch must be asked
+    to regenerate normally, as if it were a clean attempt."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    file_list_response = json.dumps([
+        {"filepath": "Broken.java"},
+        {"filepath": "Unrelated.java"},
+    ])
+    llm.complete = AsyncMock(side_effect=[
+        file_list_response,
+        "FIX ANALYSIS: fixed it\nFILE CONTENT:\nclass Broken {}",
+        "class Unrelated {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        prior_error_context="incompatible types at Broken.java:[10,5]",
+        implicated_files=["Broken.java"],
+        error_source_context={"Broken.java": "\n>> 10: bad line\n"},
+    )
+
+    broken_prompt = llm.complete.call_args_list[1][0][1]
+    unrelated_prompt = llm.complete.call_args_list[2][0][1]
+
+    assert "FIX ANALYSIS" in broken_prompt
+    assert "bad line" in broken_prompt
+    assert "FIX ANALYSIS" not in unrelated_prompt
+    assert "bad line" not in unrelated_prompt
+
+    files_by_path = {f["filepath"]: f["content"] for f in files}
+    assert files_by_path["Broken.java"] == "class Broken {}"
+    assert files_by_path["Unrelated.java"] == "class Unrelated {}"
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_implicated_files_none_applies_to_all():
+    """implicated_files=None (the default, and what a targeted retry passes,
+    where every file in the batch already IS implicated by construction) must
+    preserve the pre-existing behavior: apply the fix-analysis instruction to
+    every file needing content, not just a subset."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "FIX ANALYSIS: fixed a\nFILE CONTENT:\nclass A {}",
+        "FIX ANALYSIS: fixed b\nFILE CONTENT:\nclass B {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["A.java", "B.java"],
+        prior_error_context="some error",
+    )
+
+    for call in llm.complete.call_args_list:
+        assert "FIX ANALYSIS" in call[0][1]
 
 @pytest.mark.asyncio
 async def test_run_generation_without_known_target_files_still_asks_for_file_list():
@@ -718,3 +902,20 @@ async def test_check_skill_conflicts_skips_llm_call_when_either_skill_has_no_rul
 
     assert result == []
     llm.complete.assert_not_called()
+
+
+def test_architect_prompt_requires_listing_files_that_need_modification_too():
+    """Regression test for a real bug found via a live golden-use-case run
+    (M2, Qpid-extends-Ignite): the Architect's prompt only ever said
+    "## Files to Create", and DeveloperAgent's own prompt treats that list
+    as exhaustive ("implement ALL files... do not omit any"). When extending
+    an existing project, a file that needs a real change but already exists
+    (e.g. adding a new dependency to the existing pom.xml) was never listed,
+    so the Developer never touched it - confirmed live: a new class
+    referencing Qpid/JMS classes compiled against a pom.xml that still only
+    had Ignite dependencies, since pom.xml was never in the Architect's
+    "Files to Create" list. The prompt must explicitly cover modifying
+    existing files, not just creating new ones."""
+    prompt = ArchitectAgent("architect", None).system_prompt
+    assert "Files to Create or Modify" in prompt
+    assert "already-existing" in prompt.lower() or "existing files" in prompt.lower()

@@ -236,6 +236,37 @@ def doctor(ctx: click.Context) -> None:
         click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
         errors_found = True
 
+    # 3. Check Java/Maven toolchain resolution (only relevant if either is
+    # installed - not every Kriya project is Java-based, so finding neither is
+    # not an error, just skipped). 'mvn' can silently resolve a different JVM
+    # than plain 'java' does (e.g. a Homebrew mvn install defaulting JAVA_HOME
+    # to its own, possibly newer, openjdk) - a real, silent failure mode
+    # confirmed live during golden-use-case validation: JVM startup flags
+    # correct for the JDK 'java' resolves can be fatal under the JDK 'mvn'
+    # actually builds/runs against, with zero indication why short of manually
+    # comparing `java -version` against `mvn -version`'s own report.
+    from kriya.tools.validate import check_java_toolchain
+    toolchain = check_java_toolchain()
+    if toolchain["java_found"] or toolchain["mvn_found"]:
+        click.echo("\nChecking Java/Maven toolchain:")
+        if toolchain["java_found"]:
+            click.echo(f"  - 'java' resolves to JDK {toolchain['java_version']}")
+        if toolchain["mvn_found"]:
+            click.echo(f"  - 'mvn' will build/run against JDK {toolchain['mvn_java_version']}")
+        if toolchain["mismatch"]:
+            click.secho(
+                f"  - [WARNING] 'java' (JDK {toolchain['java_version']}) and 'mvn' "
+                f"(JDK {toolchain['mvn_java_version']}) resolve to DIFFERENT major "
+                "versions. JVM startup flags tuned for one may be invalid or fatal "
+                "under the other (e.g. -Djava.security.manager=allow is required on "
+                "17.0.10+ but a hard VM-startup error on 24+, which removed the "
+                "Security Manager entirely). Pin JAVA_HOME to the version your "
+                "project targets before running `generate`/`fix` on a Java project.",
+                fg="yellow"
+            )
+        else:
+            click.secho("  - [SUCCESS] No version mismatch detected.", fg="green")
+
     if errors_found:
         click.echo()
         click.secho("One or more checks failed - see [ERROR] lines above.", fg="red", bold=True)
@@ -981,6 +1012,27 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 click.echo(f"    {item['snippet'][:160]}")
         return click.confirm("\nUse these references for this run? (declining discards all of them, none partially)")
 
+    def on_web_lookup_query(terms: List[str], base_url: str) -> bool:
+        # Only ever called when autonomy.web_lookup_auto_approve is False -
+        # WorkflowEngine._approve_web_lookup() short-circuits to True without
+        # reaching this callback at all when that opt-in is set.
+        if yes:
+            click.secho(
+                f"\n[Auto-Skipping Live Lookup] would search for {terms} via {base_url} - skipped under "
+                "-y (set autonomy.web_lookup_auto_approve: true to allow this unattended)",
+                dim=True
+            )
+            return False
+
+        click.secho("\n[Live Lookup] Kriya wants to search for reference material on:", bold=True, fg="yellow")
+        for t in terms:
+            click.echo(f"  - {t}")
+        click.echo(f"via: {base_url}")
+        return click.confirm(
+            "\nSend this search? (only these bare technology-name terms are sent - "
+            "never goal/design/code/error text)"
+        )
+
     async def run_workflow():
         nonlocal goal
         rag_context = ""
@@ -1014,6 +1066,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             skill_gap_callback=on_skill_gap,
             skill_conflict_callback=on_skill_conflict,
             web_lookup_callback=on_web_lookup,
+            web_lookup_query_callback=on_web_lookup_query,
             resume=resume,
             resume_id=resume_id
         )
@@ -1035,6 +1088,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     skill_gap_callback=on_skill_gap,
                     skill_conflict_callback=on_skill_conflict,
                     web_lookup_callback=on_web_lookup,
+                    web_lookup_query_callback=on_web_lookup_query,
                     knowledge_risk_confirmed=True,
                     resume=resume,
                     resume_id=resume_id
@@ -1074,6 +1128,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         skill_gap_callback=on_skill_gap,
                         skill_conflict_callback=on_skill_conflict,
                         web_lookup_callback=on_web_lookup,
+                        web_lookup_query_callback=on_web_lookup_query,
                         knowledge_risk_confirmed=True,
                         resume=resume,
                         resume_id=resume_id
@@ -1104,6 +1159,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         await kernel.stop()
         
         click.secho("\n=== Generation Workflow Completed ===", bold=True)
+        if res.get("toolchain_warning"):
+            # Shown regardless of pass/fail - a version mismatch that didn't bite
+            # THIS goal may still bite on a different machine or a later,
+            # JVM-flag-sensitive one.
+            click.secho(f"[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
         if res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
@@ -1115,6 +1175,16 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     f"Files attempted but NOT applied to workspace (quality gates failed): {', '.join(res['files'])}",
                     fg="red"
                 )
+                if res.get("failure_category"):
+                    click.echo(f"Failure category: {res['failure_category']}")
+                if res.get("environment_failure"):
+                    click.secho(
+                        f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
+                        "Kriya stopped retrying early rather than burning its retry budget "
+                        "re-generating code that could never fix this - run `kriya doctor` "
+                        "to check your Java/Maven toolchain resolution.",
+                        fg="yellow", bold=True
+                    )
                 if res.get("run_id"):
                     click.secho(
                         f"Checkpoint saved - re-run with the same goal and add "
@@ -1620,10 +1690,22 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             resume=resume,
             resume_id=resume_id
         )
+        if res.get("toolchain_warning"):
+            click.secho(f"\n[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:
             click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
+            if res.get("failure_category"):
+                click.echo(f"Failure category: {res['failure_category']}")
+            if res.get("environment_failure"):
+                click.secho(
+                    f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
+                    "Kriya stopped retrying early rather than burning its retry budget "
+                    "re-generating code that could never fix this - run `kriya doctor` "
+                    "to check your Java/Maven toolchain resolution.",
+                    fg="yellow", bold=True
+                )
             if res.get("run_id"):
                 click.secho(
                     f"Checkpoint saved - re-run with the same --error and add "

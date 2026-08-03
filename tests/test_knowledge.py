@@ -273,7 +273,11 @@ def test_workflow_auto_accrual(tmp_path):
     # - Attempt 2 compiles successfully
     we.planner.run = AsyncMock(return_value="Drafting plan")
     we.architect.run = AsyncMock(return_value="Designing structure")
-    we.developer.run_generation = AsyncMock(return_value=[{"filepath": "pom.xml", "content": "<project></project>"}])
+    # Content must actually include the suggested artifact - auto-accrual now
+    # requires real evidence the suggestion was used, not just that it was
+    # offered at some point during a retry (see the dedicated "not accrued
+    # when unused" test below for the case this guards against).
+    we.developer.run_generation = AsyncMock(return_value=[{"filepath": "pom.xml", "content": "<project><artifactId>artemis-server</artifactId></project>"}])
     we.reviewer.run = AsyncMock(return_value="Passed Review")
     we.llm.complete = AsyncMock(return_value="Valid Lesson")
 
@@ -317,6 +321,84 @@ def test_workflow_auto_accrual(tmp_path):
         expected_skill_path = tmp_path / "skills" / "org.apache.activemq-artemis-server-2.31.2"
         assert os.path.exists(expected_skill_path)
         assert os.path.exists(expected_skill_path / "skill.yaml")
+
+
+def test_workflow_auto_accrual_skipped_when_suggestion_never_actually_used(tmp_path):
+    """Regression test for a real bug found via a live golden-use-case run
+    (M1, Ignite): the resolver.py Maven-Central-search dependency-suggestion
+    feature matched a completely unrelated library (cc.mashroom:mashroom-
+    plugin) for a generic missing-symbol name during a transient compile
+    failure whose real cause was a wrong import path, not a missing
+    dependency - the model never actually added that dependency anywhere,
+    but auto-accrual still permanently scaffolded a skill for it (git-
+    committed), which then polluted a completely unrelated LATER goal's
+    skill-gap detection ("unverified skill(s) relevant to this goal:
+    cc.mashroom-mashroom-plugin"). A suggestion merely appearing in a
+    compile-error's enrichment block during some retry is not evidence it
+    was ever used - only the coordinate genuinely appearing in the final
+    applied file content should trigger accrual."""
+    from unittest.mock import AsyncMock
+
+    from kriya.config.config import AppConfig
+    from kriya.core.kernel import Kernel
+    from kriya.core.llm import LLMClient
+    from kriya.workflow.workflow import WorkflowEngine
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.memory = str(tmp_path / "memory")
+    os.makedirs(cfg.paths.skills)
+    os.makedirs(cfg.paths.memory)
+
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    we.planner.run = AsyncMock(return_value="Drafting plan")
+    we.architect.run = AsyncMock(return_value="Designing structure")
+    # The suggested artifact ("mashroom-plugin") never actually appears here -
+    # the real fix that made attempt 2 pass was unrelated to the suggestion.
+    we.developer.run_generation = AsyncMock(return_value=[{"filepath": "pom.xml", "content": "<project></project>"}])
+    we.reviewer.run = AsyncMock(return_value="Passed Review")
+    we.llm.complete = AsyncMock(return_value="Valid Lesson")
+
+    mock_run_compile = MagicMock()
+    mock_run_compile.side_effect = [
+        {
+            "success": False,
+            "output": "Maven compilation failed:\n=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===\n[KRIYA SUGGESTION] Missing item was matched to Maven dependency:\n<dependency>\n    <groupId>cc.mashroom</groupId>\n    <artifactId>mashroom-plugin</artifactId>\n    <version>None</version>\n</dependency>\n=============================================\n"
+        },
+        {"success": True, "output": "Maven compilation succeeded."}
+    ]
+
+    with patch("kriya.workflow.workflow.RepositoryAnalyzer") as MockAnalyzer, \
+         patch("kriya.tools.validate.PolymorphicValidator") as MockValidator:
+
+        mock_analyzer = MockAnalyzer.return_value
+        mock_analyzer.analyze.return_value.dependencies = []
+        mock_analyzer.analyze.return_value.frameworks = []
+        mock_analyzer.analyze.return_value.model_dump_json.return_value = "{}"
+
+        mock_validator = MockValidator.return_value
+        mock_validator.run_compile_check = mock_run_compile
+        mock_validator.run_tests.return_value = {"success": True, "output": "Tests passed"}
+        mock_validator.stack = "java"
+
+        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.risk_threshold_lines = 1000
+
+        import asyncio
+        res = asyncio.run(we.run_generation_workflow(
+            goal="Build a standard application",
+            workspace_path=str(tmp_path),
+            knowledge_risk_confirmed=True
+        ))
+
+        assert res["quality_gates_passed"] is True
+
+        # Must NOT have been accrued - the suggestion was never actually used.
+        unexpected_skill_path = tmp_path / "skills" / "cc.mashroom-mashroom-plugin-None"
+        assert not os.path.exists(unexpected_skill_path)
 
 
 def test_knowledge_guard_bare_mention_gap_without_skill(tmp_path):

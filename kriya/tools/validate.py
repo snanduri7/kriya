@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -9,6 +11,62 @@ from kriya.config.config import AutonomyConfig
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 
 logger = logging.getLogger(__name__)
+
+
+def get_pom_dependencies(pom_path: str) -> List[str]:
+    """Parses a pom.xml's <dependency> entries into 'groupId:artifactId' strings.
+    Module-level (not a PolymorphicValidator method) so callers that need this
+    before/without constructing a validator - e.g. the Developer retry loop
+    priming a "preserve these existing dependencies" prompt checklist before
+    any generation happens, not just the reactive post-hoc regression check
+    below - can reuse the exact same parsing logic."""
+    if not os.path.exists(pom_path):
+        return []
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ns = ""
+        if root.tag.startswith("{"):
+            ns = root.tag.split("}")[0] + "}"
+        deps = []
+        for dep in root.findall(f".//{ns}dependency"):
+            groupId_elem = dep.find(f"{ns}groupId")
+            artifactId_elem = dep.find(f"{ns}artifactId")
+            if groupId_elem is not None and artifactId_elem is not None:
+                deps.append(f"{groupId_elem.text.strip()}:{artifactId_elem.text.strip()}")
+        return deps
+    except Exception as e:
+        logger.warning(f"Failed to parse POM dependencies at {pom_path}: {e}")
+        return []
+
+
+def get_pom_own_coordinate(pom_path: str) -> Optional[str]:
+    """Reads a pom.xml's own top-level <groupId>/<artifactId> (direct children of
+    <project>, not nested inside any <dependency>) as a single 'groupId:artifactId'
+    string. Confirmed live as a real, previously-unnoticed gap: Maven's own build
+    banner (`[INFO] ----------------< groupId:artifactId >-----------------`,
+    printed at the start of every build) matches the exact same coordinate shape
+    extract_error_search_terms() looks for - without this, a project's own
+    made-up artifact ID gets treated as a genuine third-party library worth an
+    outbound search, wasting a real repeated-failure live-lookup recovery
+    attempt on a term that can never find anything useful."""
+    if not os.path.exists(pom_path):
+        return None
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ns = ""
+        if root.tag.startswith("{"):
+            ns = root.tag.split("}")[0] + "}"
+        group_elem = root.find(f"{ns}groupId")
+        artifact_elem = root.find(f"{ns}artifactId")
+        if group_elem is not None and artifact_elem is not None and group_elem.text and artifact_elem.text:
+            return f"{group_elem.text.strip()}:{artifact_elem.text.strip()}"
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to parse POM's own coordinate at {pom_path}: {e}")
+        return None
+
 
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
@@ -25,24 +83,7 @@ class PolymorphicValidator:
         self.stack = self._detect_stack()
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
-        if not os.path.exists(pom_path):
-            return []
-        try:
-            tree = ET.parse(pom_path)
-            root = tree.getroot()
-            ns = ""
-            if root.tag.startswith("{"):
-                ns = root.tag.split("}")[0] + "}"
-            deps = []
-            for dep in root.findall(f".//{ns}dependency"):
-                groupId_elem = dep.find(f"{ns}groupId")
-                artifactId_elem = dep.find(f"{ns}artifactId")
-                if groupId_elem is not None and artifactId_elem is not None:
-                    deps.append(f"{groupId_elem.text.strip()}:{artifactId_elem.text.strip()}")
-            return deps
-        except Exception as e:
-            logger.warning(f"Failed to parse POM dependencies at {pom_path}: {e}")
-            return []
+        return get_pom_dependencies(pom_path)
 
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby."""
@@ -134,9 +175,19 @@ class PolymorphicValidator:
                     except Exception as ree:
                         logger.warning(f"Resolver failed to run: {ree}")
                     return {"success": False, "output": error_output}
+                except FileNotFoundError as e:
+                    # 'mvn' itself isn't on PATH - a toolchain problem, not a code
+                    # defect. Must be returned, not just logged: previously this
+                    # was silently swallowed to a debug-level warning and fell
+                    # through to the raw javac fallback below, which - for any
+                    # project with real Maven dependencies (e.g. Ignite/Qpid) -
+                    # produces a misleading "cannot find symbol" error that looks
+                    # exactly like a code/import bug, sending the retry loop
+                    # hunting for something that was never there.
+                    return {"success": False, "output": f"Failed to invoke mvn compile: {e}"}
                 except Exception as e:
                     logger.warning(f"Failed to invoke mvn compile: {e}")
-                    
+
             # 2. Run Gradle compile if build.gradle exists
             if os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                 try:
@@ -145,6 +196,10 @@ class PolymorphicValidator:
                     if res["returncode"] == 0:
                         return {"success": True, "output": "Gradle compilation succeeded."}
                     return {"success": False, "output": f"Gradle compilation failed:\n{res['stdout']}\n{res['stderr']}"}
+                except FileNotFoundError as e:
+                    # Same reasoning as the mvn case above - don't silently fall
+                    # through to the misleading raw javac fallback.
+                    return {"success": False, "output": f"Failed to invoke {gradle_cmd} compileJava: {e}"}
                 except Exception as e:
                     logger.warning(f"Failed to invoke gradle compileJava: {e}")
             
@@ -327,3 +382,53 @@ class PolymorphicValidator:
             "returncode": last_returncode,
             "output": "\n\n".join(output_parts),
         }
+
+
+_JAVA_VERSION_PATTERN = re.compile(r'version\s+"?(\d+)(?:\.\d+)*"?')
+_MVN_JAVA_VERSION_PATTERN = re.compile(r"Java version:\s*(\d+)(?:\.\d+)*")
+
+
+def check_java_toolchain() -> Dict[str, Any]:
+    """Resolves the actual JDK major version 'java' and 'mvn' will each invoke -
+    not always the same JVM. Some Maven installs (e.g. Homebrew's) set their own
+    JAVA_HOME independently of whatever 'java' on PATH resolves to, so a machine
+    can have a working, version-appropriate 'java' while 'mvn' silently builds
+    and runs against a completely different major version. Confirmed live as a
+    real, silent failure mode during golden-use-case validation: a JVM flag
+    correct for the JDK a manual 'java -version' check found (Temurin 17.0.10)
+    was a fatal VM-startup error under the JDK 'mvn' itself actually resolved
+    (Homebrew's, silently upgraded to 26 - JDK 24+ removed the Security Manager
+    entirely, so a flag that used to just be advisory became fatal). Returns
+    found/version for each tool (None if not on PATH or unparseable) plus
+    'mismatch' when both are found and their major versions differ."""
+    result: Dict[str, Any] = {
+        "java_found": False,
+        "java_version": None,
+        "mvn_found": False,
+        "mvn_java_version": None,
+        "mismatch": False,
+    }
+    if shutil.which("java"):
+        try:
+            proc = subprocess.run(["java", "-version"], capture_output=True, text=True, timeout=5)
+            m = _JAVA_VERSION_PATTERN.search(proc.stdout + proc.stderr)
+            if m:
+                result["java_found"] = True
+                result["java_version"] = m.group(1)
+        except Exception as e:
+            logger.debug(f"Failed to resolve 'java -version': {e}")
+
+    if shutil.which("mvn"):
+        try:
+            proc = subprocess.run(["mvn", "-version"], capture_output=True, text=True, timeout=10)
+            m = _MVN_JAVA_VERSION_PATTERN.search(proc.stdout + proc.stderr)
+            if m:
+                result["mvn_found"] = True
+                result["mvn_java_version"] = m.group(1)
+        except Exception as e:
+            logger.debug(f"Failed to resolve 'mvn -version': {e}")
+
+    if result["java_version"] and result["mvn_java_version"] and result["java_version"] != result["mvn_java_version"]:
+        result["mismatch"] = True
+
+    return result

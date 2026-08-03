@@ -22,15 +22,22 @@ from kriya.workflow.workflow import (
     IncompleteGenerationError,
     WorkflowEngine,
     _augment_error_with_live_lookup,
+    _build_error_source_context,
+    _build_full_set_retry_prompt,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
+    _check_java_toolchain_mismatch,
     _filter_misattributed_extraction,
     _is_near_duplicate_rule,
+    _java_toolchain_fact,
     _likely_misattributed_sibling,
+    _normalize_error_for_repeat_detection,
     _resolve_file_paths_from_design,
     _resolve_run_command,
     _scoped_skill_gap_description,
+    classify_environment_failure,
     extract_error_search_terms,
+    extract_error_source_locations,
     extract_expected_files,
     extract_implicated_files,
     find_missing_expected_files,
@@ -250,6 +257,85 @@ def test_resolve_run_command_does_not_duplicate_dash_e_for_maven():
 def test_resolve_run_command_ignores_non_maven_commands_for_dash_e():
     assert _resolve_run_command(["gradle", "run"]) == ["gradle", "run"]
     assert _resolve_run_command(["node", "main.js"]) == ["node", "main.js"]
+
+_EXEC_EXEC_SHAPED_POM = """<project>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <configuration>
+          <executable>java</executable>
+          <arguments>
+            <argument>--add-opens=java.base/java.nio=ALL-UNNAMED</argument>
+            <argument>-classpath</argument>
+            <classpath/>
+            <argument>${exec.mainClass}</argument>
+          </arguments>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+
+_EXEC_JAVA_SHAPED_POM = """<project>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>${exec.mainClass}</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+
+def test_resolve_run_command_corrects_exec_java_to_exec_exec_when_pom_needs_it(tmp_path):
+    """Regression test for a real bug found via a live golden-use-case run
+    (Ignite Spring XML app): RunVerifierAgent.judge() only ever sees the
+    Architect's own already-minimized design text (confirmed live: just a
+    bare file list, not the richer Planner plan that correctly said
+    "exec:exec") - never the matched skill's rules or the actual pom.xml
+    written - so it inferred `mvn -e exec:java` against a pom.xml written in
+    the exec:exec-only <arguments>/<classpath/> shape (correctly, per the
+    ignite-java17 skill's own --add-opens guidance). exec:java's "arguments"
+    parameter is a plain String[] and cannot parse the bare <classpath/>
+    placeholder at all - it crashed identically on every retry ("Cannot
+    store value into array: ... cannot cast ... to ... String"), burning the
+    entire retry budget on a problem that was never in the generated code.
+    The real pom.xml is ground truth for which goal will work - checking it
+    directly doesn't depend on skill/plan/design guidance surviving intact
+    through the pipeline."""
+    (tmp_path / "pom.xml").write_text(_EXEC_EXEC_SHAPED_POM)
+    assert _resolve_run_command(
+        ["mvn", "-e", "exec:java"], str(tmp_path)
+    ) == ["mvn", "-e", "exec:exec"]
+
+def test_resolve_run_command_leaves_exec_java_alone_when_pom_does_not_need_exec_exec(tmp_path):
+    (tmp_path / "pom.xml").write_text(_EXEC_JAVA_SHAPED_POM)
+    assert _resolve_run_command(
+        ["mvn", "-e", "exec:java"], str(tmp_path)
+    ) == ["mvn", "-e", "exec:java"]
+
+def test_resolve_run_command_skips_exec_goal_correction_without_workspace_path(tmp_path):
+    # Same exec:exec-shaped pom as the fix-triggering test above, but no
+    # workspace_path given - must not attempt the check at all (also proves
+    # every pre-existing single-arg call site/test keeps working unchanged).
+    (tmp_path / "pom.xml").write_text(_EXEC_EXEC_SHAPED_POM)
+    assert _resolve_run_command(["mvn", "-e", "exec:java"]) == ["mvn", "-e", "exec:java"]
+
+def test_resolve_run_command_handles_missing_pom_gracefully(tmp_path):
+    assert _resolve_run_command(
+        ["mvn", "-e", "exec:java"], str(tmp_path)
+    ) == ["mvn", "-e", "exec:java"]
+
+def test_resolve_run_command_exec_goal_correction_ignores_non_maven_commands(tmp_path):
+    (tmp_path / "pom.xml").write_text(_EXEC_EXEC_SHAPED_POM)
+    assert _resolve_run_command(["gradle", "exec:java"], str(tmp_path)) == ["gradle", "exec:java"]
 
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):
@@ -539,6 +625,344 @@ async def test_workflow_cumulative_sandbox_sync(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_full_set_prompt_includes_existing_dependencies_checklist(tmp_path):
+    """The full-set retry prompt (used for attempt 1 too) must include an
+    explicit 'preserve these existing dependencies' checklist when extending
+    a project that already has a pom.xml - showing the model passive
+    reference content alone was confirmed live NOT sufficient to stop
+    dependency drops recurring across the golden-use-case validation."""
+    (tmp_path / "pom.xml").write_text("""<?xml version="1.0" encoding="UTF-8"?>
+<project>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-core</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ignite</groupId>
+            <artifactId>ignite-indexing</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+    </dependencies>
+</project>""")
+
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        '[{"filepath": "pom.xml", "content": "<project></project>"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
+        mock_compile.return_value = {"success": True, "output": "Maven compilation succeeded."}
+
+        res = await we.run_generation_workflow(
+            goal="Add Qpid to the project",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    developer_prompt = llm.complete.call_args_list[2].args[1]
+    assert "Existing Maven dependencies" in developer_prompt
+    assert "org.apache.ignite:ignite-indexing" in developer_prompt
+    assert "org.apache.ignite:ignite-core" in developer_prompt
+    # Regression test for a real bug found live during golden-use-case
+    # validation: the preservation checklist only ever protected against
+    # DROPPING an existing dependency - nothing stopped the model from ADDING
+    # a new, redundant (and in the real case, nonexistent) dependency for a
+    # package that was already resolvable via an existing one. A retry added
+    # javax.jms:jms:1.1 (removed from Maven Central) for a javax.jms.* import
+    # that was already compiling fine via the existing qpid-jms-client
+    # dependency alone - both wrong and unnecessary.
+    assert "you must NOT add a new, separate dependency" in developer_prompt
+
+
+@pytest.mark.asyncio
+async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_path):
+    """Regression test: a JVM crashing during its own startup (e.g. a startup
+    flag unsupported by the actually-resolved JDK) is not a code defect - no
+    amount of Developer regeneration can ever fix it. Before this fix, Quality
+    Gates treated it exactly like a normal compile failure and burned its full
+    retry budget uselessly re-generating code - confirmed as a real, wasteful
+    gap during golden-use-case validation: the same JVM-startup crash recurred
+    identically across 3 real retry attempts before a human had to intervene."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    # Exactly one Developer generation call is provided - if the retry loop
+    # incorrectly kept going after the environment failure, a second Developer
+    # call would hit StopIteration and fail this test outright.
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    jvm_error = (
+        "Error occurred during initialization of VM\n"
+        "java.lang.Error: A command line option has attempted to allow or "
+        "enable the Security Manager. Enabling a Security Manager is not "
+        "supported."
+    )
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.return_value = {"success": False, "output": jvm_error}
+
+        res = await we.run_generation_workflow(
+            goal="Create app",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is False
+    assert res["environment_failure"] is not None
+    assert "JVM failed during its own startup" in res["environment_failure"]
+    assert mock_compile.call_count == 1
+    assert res["failure_category"] == "environment_failure"
+
+
+@pytest.mark.asyncio
+async def test_workflow_failure_category_none_on_success(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    assert res["failure_category"] is None
+
+@pytest.mark.asyncio
+async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
+    """An ordinary code failure that exhausts the retry budget - not an
+    environment/toolchain failure - must be categorized distinctly, so a
+    caller can always ask 'why did this fail' the same way regardless of
+    which specific failure mode it was."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=(
+        ["Step 1: Write code", "Design: Write app.py"]
+        + ["print('unterminated string"] * 15
+        + ["Review: Approved"]
+    ))
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is False
+    assert res["environment_failure"] is None
+    assert res["failure_category"] == "quality_gates_exhausted"
+
+@pytest.mark.asyncio
+async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
+    """Toolchain preflight: a java/mvn JDK version mismatch is a real, silent
+    risk even on a run that happens to succeed anyway (a different goal, or a
+    different machine, could still hit the same crash later) - so it must be
+    surfaced regardless of the run's own pass/fail outcome, not folded only
+    into the environment_failure circuit breaker's failure-only reporting."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        '[{"filepath": "pom.xml", "content": "<project></project>"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.check_java_toolchain", return_value={
+             "java_found": True, "java_version": "17",
+             "mvn_found": True, "mvn_java_version": "26",
+             "mismatch": True,
+         }) as mock_toolchain:
+        mock_compile.return_value = {"success": True, "output": "Maven compilation succeeded."}
+
+        res = await we.run_generation_workflow(
+            goal="Create pom",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert res["toolchain_warning"] is not None
+    assert "JDK 17" in res["toolchain_warning"] and "JDK 26" in res["toolchain_warning"]
+    # Called twice total: once early/unconditionally for the "Target JVM" fact
+    # (before stack is even known), once more from the retry loop's own
+    # mismatch check once stack resolves to java - not once per retry attempt.
+    assert mock_toolchain.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
+    """The toolchain preflight check runs a real local subprocess pair
+    (java -version, mvn -version) - must not repeat it on every retry attempt,
+    only once per generation run, regardless of which of the two
+    PolymorphicValidator construction sites reaches it first."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        '[{"filepath": "pom.xml", "content": "<project><bad></project>"}]',
+        '[{"filepath": "pom.xml", "content": "<project></project>"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.check_java_toolchain", return_value={
+             "java_found": True, "java_version": "17",
+             "mvn_found": True, "mvn_java_version": "17",
+             "mismatch": False,
+         }) as mock_toolchain:
+        mock_compile.side_effect = [
+            {"success": False, "output": "COMPILATION FAILURE:\nsome generic xml error"},
+            {"success": True, "output": "Maven compilation succeeded."},
+        ]
+
+        res = await we.run_generation_workflow(
+            goal="Create pom",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    # Called twice total (fact + mismatch-check), not once per retry attempt -
+    # the "only once across retries" property this test is really guarding.
+    assert mock_toolchain.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_workflow_skips_toolchain_check_for_non_java_stack(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    # check_java_toolchain() IS called once, early and unconditionally, to
+    # surface the "Target JVM" fact (see test_java_toolchain_fact_* and
+    # test_workflow_injects_target_jvm_fact_into_planner_prompt) - stack isn't
+    # knowable that early. What must NOT happen is a second call once the
+    # retry loop confirms this run's actual stack is python, not java.
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": False, "java_version": None,
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }) as mock_toolchain:
+        res = await we.run_generation_workflow(
+            goal="Create app",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert res["toolchain_warning"] is None
+    assert mock_toolchain.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
+    """A JDK-version-conditional skill rule (e.g. a JVM startup flag required on
+    one JDK range, fatal on another) is unverifiable at generation time unless
+    the model has a concrete resolved JDK number to reason against - the fact
+    must reach the Planner prompt itself, not just be logged."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        res = await we.run_generation_workflow(
+            goal="Create app",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    planner_prompt = llm.complete.call_args_list[0].args[1]
+    assert "Target JVM" in planner_prompt
+    assert "JDK 26" in planner_prompt
+
+
+@pytest.mark.asyncio
+async def test_workflow_omits_target_jvm_fact_when_no_java_toolchain(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": False, "java_version": None,
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }):
+        res = await we.run_generation_workflow(
+            goal="Create app",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    planner_prompt = llm.complete.call_args_list[0].args[1]
+    assert "Target JVM" not in planner_prompt
+
+
+@pytest.mark.asyncio
 async def test_workflow_run_verification_goal_explicit_passes_without_confirmation(tmp_path):
     """A goal-text-explicit run command is pre-authorized by the user and must proceed
     without needing the human-in-the-loop confirmation gate, even though that's the
@@ -576,6 +1000,57 @@ async def test_workflow_run_verification_goal_explicit_passes_without_confirmati
 
     assert res["quality_gates_passed"] is True
     assert "app.py" in res["files"]
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_judgment_cached_across_retry_attempts(tmp_path):
+    """RunVerifierAgent.judge() was previously re-invoked (a real LLM round-trip)
+    on every single attempt that reached runtime verification, even though the
+    goal/design driving 'should we run this, and how' don't change between
+    retries - confirmed live that once correct, the judgment stayed identical
+    and correct across repeated attempts, so repeating the call only wasted
+    latency. Must be called exactly once across two attempts that both reach
+    this stage; grade() (evaluates THIS attempt's actual output) must still be
+    called fresh each time. Asserts directly on call counts of the real
+    RunVerifierAgent methods (not inferred from llm.complete side_effect-list
+    exhaustion), since a first draft of this test using the indirect approach
+    turned out to pass even without the fix - a stray judge() call fed
+    grade()'s JSON shape, which judge() parses leniently (defaults should_run
+    to False rather than raising) rather than crashing, silently skipping
+    verification on attempt 2 instead of correctly re-running it."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    file_content_response = "print('[SUCCESS] it worked')\n"
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        file_content_response,    # Developer attempt 1
+        file_content_response,    # Developer attempt 2 (full-set retry)
+        "Review: Approved",       # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(side_effect=[
+        {"passed": False, "reasoning": "Missing expected marker."},
+        {"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."},
+    ])
+
+    res = await we.run_generation_workflow(
+        goal="Run with python app.py; it should print [SUCCESS]",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    we.run_verifier.judge.assert_called_once()
+    assert we.run_verifier.grade.call_count == 2
 
 @pytest.mark.asyncio
 async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_path):
@@ -1174,6 +1649,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1208,7 +1684,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
         )
 
     assert res["quality_gates_passed"] is True
-    mock_search.assert_called_once_with("widgetlib documentation", "http://fake-search:8080", top_k=3)
+    mock_search.assert_called_once_with("widgetlib example", "http://fake-search:8080", top_k=3)
     mock_fetch.assert_called_once_with("https://example.com/widgetlib")
     assert skill_gap_calls == []  # human-ask path never fired - live lookup resolved it first
 
@@ -1216,6 +1692,159 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     se.discover_and_load()
     skill = se.get_skill("widgetlib")
     assert "The magic widget constant is 42." in skill.rules
+
+@pytest.mark.asyncio
+async def test_workflow_web_lookup_never_fires_without_approval(tmp_path):
+    """Regression test: before the pre-send confirmation gate existed, a
+    non-interactive (-y) run fired the outbound live-lookup query and then
+    silently discarded the result under web_lookup_callback's own -y auto-
+    decline - the query had already left the machine with zero human
+    visibility, for zero benefit. Now, with neither web_lookup_auto_approve
+    set nor a web_lookup_query_callback supplied, the search must never fire
+    at all, and must fall through to the human-ask path exactly as if lookup
+    had been tried and found nothing."""
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved",
+    ])
+
+    skill_gap_calls = []
+    def skill_gap_cb(reason, names):
+        skill_gap_calls.append(names)
+        return None
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=skill_gap_cb,
+            # No web_lookup_query_callback passed - must fail closed.
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_not_called()
+    assert skill_gap_calls and "widgetlib" in skill_gap_calls[0]
+
+@pytest.mark.asyncio
+async def test_workflow_web_lookup_query_callback_can_approve(tmp_path):
+    """The real-time callback path (not just the auto_approve config flag) must
+    also be able to authorize a search, and must receive the exact bare terms
+    and base_url about to be sent - never goal/design/code text."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    extraction_response = json.dumps({
+        "rules": ["The magic widget constant is 42."],
+        "examples": {},
+        "conflicts": []
+    })
+    llm.complete = AsyncMock(side_effect=[
+        extraction_response,
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    found_result = [{"term": "widgetlib", "title": "Widgetlib Docs", "url": "https://example.com/widgetlib", "snippet": "..."}]
+    query_calls = []
+    def query_cb(terms, base_url):
+        query_calls.append((terms, base_url))
+        return True
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found_result)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="The magic widget constant is 42.")):
+        res = await we.run_generation_workflow(
+            goal="Build something with the widgetlib skill",
+            workspace_path=str(tmp_path),
+            skill_gap_callback=lambda reason, names: None,
+            web_lookup_callback=lambda found: True,
+            web_lookup_query_callback=query_cb,
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once()
+    assert query_calls == [(["widgetlib"], "http://fake-search:8080")]
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    assert "The magic widget constant is 42." in se.get_skill("widgetlib").rules
+
+@pytest.mark.asyncio
+async def test_workflow_retry_loop_live_lookup_never_fires_without_approval(tmp_path):
+    """The retry loop's error-triggered live lookup (Stage 2C) must respect the
+    same pre-send gate as the goal/design-stage lookups - it was previously the
+    one path with NO confirmation of any kind, deliberately designed as fully
+    unattended, but that also meant it fired without ever needing authorization."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    repeated_error = (
+        "Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java "
+        "for parameter arguments: Cannot store value into array"
+    )
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
+        mock_compile.side_effect = [
+            {"success": False, "output": repeated_error},
+            {"success": False, "output": repeated_error},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(
+            goal="Create a Java app", workspace_path=str(tmp_path)
+            # No web_lookup_query_callback, no auto_approve - must fail closed
+            # even mid-retry-loop.
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extraction(tmp_path):
@@ -1235,6 +1864,7 @@ async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extr
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 2
     kernel = Kernel(config=cfg)
@@ -1291,6 +1921,7 @@ async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1340,6 +1971,7 @@ async def test_workflow_web_lookup_accepted_but_empty_falls_back_to_human_ask(tm
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 1
     kernel = Kernel(config=cfg)
@@ -1427,6 +2059,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1456,7 +2089,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
         )
 
     assert res["quality_gates_passed"] is True
-    mock_search.assert_called_once_with("gizmolib documentation", "http://fake-search:8080", top_k=3)
+    mock_search.assert_called_once_with("gizmolib example", "http://fake-search:8080", top_k=3)
     mock_fetch.assert_called_once_with("https://example.com/gizmolib")
 
     se = SkillEngine(str(skills_dir), load_global=False)
@@ -1479,6 +2112,7 @@ async def test_workflow_web_lookup_design_derived_falls_back_to_human_ask_on_emp
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 1
     kernel = Kernel(config=cfg)
@@ -1819,6 +2453,292 @@ def test_extract_error_search_terms_ignores_plain_symbols_and_paths():
     )
     assert extract_error_search_terms(error) == []
 
+def test_extract_error_search_terms_excludes_projects_own_coordinate():
+    # Regression test for a real bug found live during golden-use-case
+    # validation: Maven's own build banner prints the PROJECT'S OWN
+    # groupId:artifactId on every single build, success or failure
+    # ("[INFO] ----------------< com.example:ignite-qpid-integration
+    # >-----------------") - the exact same coordinate shape this function
+    # looks for. Without exclusion, a repeated-failure live-lookup recovery
+    # attempt wastes its one shot searching for the project's own made-up
+    # artifact ID instead of anything related to the actual failure.
+    error = (
+        "[INFO] ----------------< com.example:ignite-qpid-integration >-----------------\n"
+        "[INFO] Building ignite-qpid-integration 1.0-SNAPSHOT\n"
+        "[ERROR] Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java "
+        "for parameter arguments: Cannot store value into array"
+    )
+    result = extract_error_search_terms(error, exclude_coordinates=["com.example:ignite-qpid-integration"])
+    assert result == ["org.codehaus.mojo:exec-maven-plugin"]
+    assert "com.example:ignite-qpid-integration" not in result
+
+def test_extract_error_search_terms_no_exclusion_when_none_given():
+    error = "[INFO] ----------------< com.example:ignite-qpid-integration >-----------------"
+    assert extract_error_search_terms(error) == ["com.example:ignite-qpid-integration"]
+
+def test_extract_error_search_terms_finds_unresolved_import_matching_dependency():
+    # Regression test for a real bug found live during M3 golden-use-case
+    # validation: a wrong-import-path compile failure (e.g. writing
+    # `import org.apache.ignite.cache.IgniteCache;` when the class actually
+    # lives at the top-level org.apache.ignite package) has NO groupId:
+    # artifactId coordinate anywhere in it - just "symbol: class X" /
+    # "location: package Y" - so it previously yielded zero search terms no
+    # matter how many times it recurred identically. This is safety-bounded:
+    # only becomes a term because "org.apache.ignite.cache" shares a dot-
+    # prefix with a coordinate the caller says is a REAL project dependency.
+    error = (
+        "[ERROR] .../IntegrationApp.java:[5,31] cannot find symbol\n"
+        "[ERROR]   symbol:   class IgniteCache\n"
+        "[ERROR]   location: package org.apache.ignite.cache\n"
+    )
+    result = extract_error_search_terms(
+        error, dependency_coordinates=["org.apache.ignite:ignite-core"]
+    )
+    assert result == ["org.apache.ignite:ignite-core IgniteCache"]
+
+def test_extract_error_search_terms_ignores_unresolved_import_with_no_matching_dependency():
+    # Same wrong-import shape, but no supplied dependency's groupId matches
+    # the erroneous package - must NOT become a search term, since that
+    # would mean sending an arbitrary/unverified symbol name outbound.
+    error = (
+        "[ERROR] .../IntegrationApp.java:[5,31] cannot find symbol\n"
+        "[ERROR]   symbol:   class IgniteCache\n"
+        "[ERROR]   location: package org.apache.ignite.cache\n"
+    )
+    result = extract_error_search_terms(
+        error, dependency_coordinates=["org.apache.qpid:qpid-broker-core"]
+    )
+    assert result == []
+
+def test_extract_error_search_terms_ignores_location_class_shape_even_with_dependencies():
+    # "location: class X" (javac's shape for a symbol never imported at all,
+    # not a wrong-import-path mistake) must never match, even when
+    # dependency_coordinates are supplied - only "location: package Y" is
+    # the targeted, safety-bounded shape.
+    error = (
+        "cannot find symbol: class JmsConnectionFactory\n"
+        "location: class com.example.CacheAndMessagingClient\n"
+    )
+    result = extract_error_search_terms(
+        error, dependency_coordinates=["org.apache.qpid:qpid-jms-client"]
+    )
+    assert result == []
+
+def test_extract_error_source_locations_finds_absolute_worktree_path():
+    error = (
+        "[ERROR] /Users/dev/proj/.kriya/worktree/src/main/java/com/example/"
+        "IntegrationApp.java:[91,79] incompatible types: java.lang.Object cannot be converted to com.example.Person"
+    )
+    assert extract_error_source_locations(error) == [("IntegrationApp.java", 91)]
+
+def test_extract_error_source_locations_dedups_and_finds_multiple():
+    error = (
+        "[ERROR] .../IntegrationApp.java:[91,79] incompatible types\n"
+        "[ERROR] .../IntegrationApp.java:[91,79] incompatible types\n"
+        "[ERROR] .../Other.java:[5,1] cannot find symbol"
+    )
+    assert extract_error_source_locations(error) == [("IntegrationApp.java", 91), ("Other.java", 5)]
+
+def test_extract_error_source_locations_no_match_returns_empty():
+    assert extract_error_source_locations("Process exited with code 1.") == []
+
+def test_build_error_source_context_extracts_real_source_window(tmp_path):
+    (tmp_path / "IntegrationApp.java").write_text(
+        "\n".join(f"line {i}" for i in range(1, 20))
+    )
+    error = "[ERROR] .../IntegrationApp.java:[10,5] incompatible types"
+    result = _build_error_source_context(str(tmp_path), error, known_files=["IntegrationApp.java"])
+    assert "IntegrationApp.java" in result
+    snippet = result["IntegrationApp.java"]
+    assert ">> 10: line 10" in snippet
+    assert "9: line 9" in snippet
+    assert "11: line 11" in snippet
+    assert "line 1\n" not in snippet  # far-away lines excluded from the window
+
+def test_build_error_source_context_skips_unknown_file(tmp_path):
+    error = "[ERROR] .../NotWritten.java:[10,5] incompatible types"
+    result = _build_error_source_context(str(tmp_path), error, known_files=["IntegrationApp.java"])
+    assert result == {}
+
+def test_build_error_source_context_no_locations_returns_empty(tmp_path):
+    result = _build_error_source_context(str(tmp_path), "Process exited with code 1.", known_files=["App.java"])
+    assert result == {}
+
+def test_normalize_error_for_repeat_detection_strips_maven_timing_lines():
+    # Real, byte-for-byte identical underlying failure (Qpid's SystemLauncher
+    # UnsupportedOperationException) as captured across two separate Kriya
+    # retry attempts - only the build-duration and timestamp lines differ.
+    error_a = (
+        "Exception in thread \"main\" java.lang.UnsupportedOperationException: "
+        "getSubject is not supported\n"
+        "\tat javax.security.auth.Subject.getSubject(Subject.java:347)\n"
+        "[INFO] ------------------------------------------------------------------------\n"
+        "[INFO] BUILD FAILURE\n"
+        "[INFO] ------------------------------------------------------------------------\n"
+        "[INFO] Total time:  0.832 s\n"
+        "[INFO] Finished at: 2026-08-02T20:23:47+05:30\n"
+    )
+    error_b = error_a.replace("0.832 s", "1.104 s").replace(
+        "2026-08-02T20:23:47+05:30", "2026-08-02T20:31:12+05:30"
+    )
+    assert error_a != error_b
+    assert _normalize_error_for_repeat_detection(error_a) == _normalize_error_for_repeat_detection(error_b)
+
+def test_normalize_error_for_repeat_detection_preserves_differing_errors():
+    error_a = "Exception in thread \"main\" java.lang.UnsupportedOperationException: getSubject is not supported"
+    error_b = "Exception in thread \"main\" java.lang.NullPointerException: Cannot invoke foo()"
+    assert _normalize_error_for_repeat_detection(error_a) != _normalize_error_for_repeat_detection(error_b)
+
+def test_classify_environment_failure_detects_jvm_startup_error():
+    # Real, byte-for-byte text captured during golden-use-case validation: a JVM
+    # startup flag correct for JDK 17.0.10 became fatal under JDK 26 (JEP 486
+    # removed the Security Manager entirely).
+    error = (
+        "Error occurred during initialization of VM\n"
+        "java.lang.Error: A command line option has attempted to allow or "
+        "enable the Security Manager. Enabling a Security Manager is not "
+        "supported."
+    )
+    result = classify_environment_failure(error)
+    assert result is not None
+    assert "JVM failed during its own startup" in result
+
+def test_classify_environment_failure_detects_missing_executable():
+    error = "Failed to invoke mvn compile: [Errno 2] No such file or directory: 'mvn'"
+    result = classify_environment_failure(error)
+    assert result is not None
+    assert "'mvn' was not found on PATH" in result
+
+def test_classify_environment_failure_ignores_normal_compile_error():
+    error = "COMPILATION FAILURE:\ncannot find symbol: class IgniteCache\nlocation: class App"
+    assert classify_environment_failure(error) is None
+
+def test_classify_environment_failure_ignores_filenotfound_not_from_the_toolchain_wrapper():
+    # A generated app's own legitimate, code-fixable FileNotFoundError (e.g. it
+    # opened a config file at the wrong path) must NOT be misclassified as a
+    # toolchain problem just because the substring "No such file or directory"
+    # appears somewhere in a traceback - only PolymorphicValidator's own
+    # "Failed to invoke/execute ...: [Errno 2]..." wrapper (produced when the
+    # launched executable itself can't be found) should match.
+    error = (
+        "Traceback (most recent call last):\n"
+        '  File "app.py", line 3, in <module>\n'
+        "    open('config.json')\n"
+        "FileNotFoundError: [Errno 2] No such file or directory: 'config.json'"
+    )
+    assert classify_environment_failure(error) is None
+
+def test_check_java_toolchain_mismatch_skips_non_java_stack():
+    # A Python/Ruby goal must never pay for (or trigger) this check at all.
+    with patch("kriya.tools.validate.check_java_toolchain") as mock_check:
+        assert _check_java_toolchain_mismatch("python") is None
+        mock_check.assert_not_called()
+
+def test_check_java_toolchain_mismatch_returns_none_when_versions_match():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "17",
+        "mismatch": False,
+    }):
+        assert _check_java_toolchain_mismatch("java") is None
+
+def test_check_java_toolchain_mismatch_returns_message_on_mismatch():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        result = _check_java_toolchain_mismatch("java")
+    assert result is not None
+    assert "JDK 17" in result and "JDK 26" in result
+
+def test_java_toolchain_fact_none_when_neither_tool_found():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": False, "java_version": None,
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }):
+        assert _java_toolchain_fact() is None
+
+def test_java_toolchain_fact_prefers_mvn_version_over_java():
+    # mvn is what a generated app's exec:java/exec:exec invocation actually
+    # executes under - that's the number a JDK-version-conditional skill rule
+    # needs, even if it differs from plain 'java'.
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        result = _java_toolchain_fact()
+    assert result is not None
+    assert "JDK 26" in result
+    assert "JDK 17" not in result
+
+def test_java_toolchain_fact_falls_back_to_java_version_when_mvn_absent():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": False, "mvn_java_version": None,
+        "mismatch": False,
+    }):
+        result = _java_toolchain_fact()
+    assert result is not None
+    assert "JDK 17" in result
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_true_when_auto_approve_set():
+    cfg = AppConfig()
+    cfg.autonomy.web_lookup_auto_approve = True
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    # No callback needed at all - the config opt-in alone is sufficient.
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", None) is True
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_fails_closed_with_no_callback_and_no_opt_in():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", None) is False
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_invokes_callback_with_exact_terms_and_url():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    received = {}
+
+    def callback(terms, base_url):
+        received["terms"] = terms
+        received["base_url"] = base_url
+        return True
+
+    result = await we._approve_web_lookup(["org.apache.ignite:ignite-core"], "http://fake-search:8080", callback)
+    assert result is True
+    assert received == {"terms": ["org.apache.ignite:ignite-core"], "base_url": "http://fake-search:8080"}
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_respects_declined_callback():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", lambda terms, url: False) is False
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_supports_async_callback():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+    async def callback(terms, base_url):
+        return True
+
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", callback) is True
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_fails_closed_when_callback_raises():
+    cfg = AppConfig()
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+    def callback(terms, base_url):
+        raise RuntimeError("boom")
+
+    assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", callback) is False
+
 @pytest.mark.asyncio
 async def test_augment_error_with_live_lookup_no_terms_never_searches():
     with patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
@@ -1857,6 +2777,7 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1890,7 +2811,117 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
 
     assert res["quality_gates_passed"] is True
     mock_search.assert_called_once_with(
-        "org.codehaus.mojo:exec-maven-plugin documentation", "http://fake-search:8080", top_k=3
+        "org.codehaus.mojo:exec-maven-plugin example", "http://fake-search:8080", top_k=3
+    )
+
+@pytest.mark.asyncio
+async def test_workflow_repeated_failure_live_lookup_resolves_wrong_import_via_dependency_match(tmp_path):
+    """Regression test for a real bug found live during M3 golden-use-case
+    validation: a wrong-import-path compile failure (e.g. IgniteCache
+    imported from org.apache.ignite.cache instead of the real top-level
+    org.apache.ignite package) has no groupId:artifactId coordinate in it at
+    all, so the repeated-failure live-lookup trigger previously had nothing
+    to search for no matter how many times the SAME failure recurred - this
+    was confirmed live, not just reasoned about (the exact same IgniteCache
+    mistake recurred across all 7 retry attempts of a real M3 run with live
+    lookup enabled, and it never once engaged). Proves the fix end-to-end:
+    once the erroneous package is cross-checked against the project's real
+    declared dependencies, a search DOES fire, scoped to that dependency's
+    coordinate plus the symbol name."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    repeated_error = (
+        "[ERROR] .../IntegrationApp.java:[5,31] cannot find symbol\n"
+        "[ERROR]   symbol:   class IgniteCache\n"
+        "[ERROR]   location: package org.apache.ignite.cache\n"
+    )
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Review: Approved",
+    ])
+
+    found = [{"term": "org.apache.ignite:ignite-core IgniteCache", "url": "https://example.com/ignite-quickstart", "snippet": "..."}]
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="import org.apache.ignite.IgniteCache;")), \
+         patch("kriya.tools.validate.get_pom_own_coordinate", return_value=None), \
+         patch("kriya.tools.validate.get_pom_dependencies", return_value=["org.apache.ignite:ignite-core"]):
+        mock_compile.side_effect = [
+            {"success": False, "output": repeated_error},
+            {"success": False, "output": repeated_error},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once_with(
+        "org.apache.ignite:ignite-core IgniteCache example", "http://fake-search:8080", top_k=3
+    )
+
+@pytest.mark.asyncio
+async def test_workflow_repeated_failure_live_lookup_excludes_own_project_coordinate(tmp_path):
+    """Regression test for a real bug found live during golden-use-case
+    validation: Maven's own build banner prints the PROJECT'S OWN
+    groupId:artifactId on every single build - a repeated-failure live-lookup
+    recovery attempt must not waste its shot searching for the project's own
+    made-up artifact ID instead of a genuine external coordinate also present
+    in the same error text."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    repeated_error = (
+        "[INFO] ----------------< com.example:ignite-qpid-integration >-----------------\n"
+        "[INFO] Building ignite-qpid-integration 1.0-SNAPSHOT\n"
+        "[ERROR] Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:java "
+        "for parameter arguments: Cannot store value into array"
+    )
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Review: Approved",
+    ])
+
+    found = [{"term": "org.codehaus.mojo:exec-maven-plugin", "url": "https://example.com/exec-plugin", "snippet": "..."}]
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="Remove the <arguments> block.")), \
+         patch("kriya.tools.validate.get_pom_own_coordinate", return_value="com.example:ignite-qpid-integration"):
+        mock_compile.side_effect = [
+            {"success": False, "output": repeated_error},
+            {"success": False, "output": repeated_error},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once_with(
+        "org.codehaus.mojo:exec-maven-plugin example", "http://fake-search:8080", top_k=3
     )
 
     third_attempt_prompt = llm.complete.await_args_list[4].args[1]
@@ -2120,6 +3151,99 @@ async def test_workflow_success_via_targeted_attempt_after_full_set_budget_exhau
 
     assert res["quality_gates_passed"] is True
 
+@pytest.mark.asyncio
+async def test_workflow_passes_prior_error_context_to_developer_only_on_retries(tmp_path):
+    """Regression test for a real, generalizable bug found live during golden-
+    use-case validation: the Developer agent's single-shot, non-reasoning
+    completion regenerated byte-for-byte identical broken code across 7
+    straight retry attempts of a real failing run, despite the exact compile
+    error being present in every prompt - nothing forced it to actually engage
+    with the stated error before writing code. The retry loop must pass the
+    real prior error text through to DeveloperAgent.run_generation on every
+    retry (targeted and full-set), and explicitly None on the clean first
+    attempt, so the fix-analysis step (see test_agents.py) only ever applies
+    when there's a real error to analyze."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    same_error = "Failed to build math.py"
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": same_error},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            return_value=[{"filepath": "math.py", "content": "def add(a,b): return a+b"}]
+        )
+        res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert first_call_kwargs["prior_error_context"] is None
+    assert same_error in second_call_kwargs["prior_error_context"]
+    # implicated_files must also be None on the clean first attempt, and
+    # correctly scoped to math.py (the only file the error text names) on
+    # the retry - not left unset/always-None, which would silently defeat
+    # the DeveloperAgent-side scoping fix even though prior_error_context
+    # itself was passed correctly.
+    assert first_call_kwargs["implicated_files"] is None
+    assert second_call_kwargs["implicated_files"] == ["math.py"]
+
+@pytest.mark.asyncio
+async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tmp_path):
+    """Regression test for a real bug found live during golden-use-case
+    validation: without this, a full-set retry's per-file fix-analysis
+    instruction (and the source-line context meant to accompany it) got
+    broadcast to every file in the batch, not just the one the compile error
+    actually named. Confirms the retry loop reads the real broken line from
+    the worktree and threads it through scoped to exactly the implicated
+    file."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    error_with_location = (
+        "[ERROR] .../App.java:[3,5] incompatible types: java.lang.Object cannot be converted to java.lang.String"
+    )
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": error_with_location},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                [{"filepath": "App.java", "content": "class App {\n  Object x;\n  String s = x;\n}"}],
+                [{"filepath": "App.java", "content": "class App {\n  Object x;\n  String s = (String) x;\n}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    source_context = second_call_kwargs["error_source_context"]
+    assert source_context is not None
+    assert "App.java" in source_context
+    assert ">> 3:" in source_context["App.java"]
 
 
 def test_incomplete_generation_error_carries_missing_files():
@@ -2149,6 +3273,77 @@ def test_build_missing_files_retry_prompt_frames_missing_and_reference_files(tmp
     assert "## Files to Create" in context
     assert "Existing file (already written, reference only" in context
     assert "class BrokerServer { /* written */ }" in context
+
+
+def test_build_full_set_retry_prompt_includes_prior_attempt_content(tmp_path):
+    """Regression test for a real bug found via the golden Ignite+Qpid use
+    case: full-set retries previously never showed the model its own prior
+    attempt's content, only the abstract error text - _build_targeted_retry_
+    prompt's own docstring already named this exact gap. A "Dependency
+    regression: ... you must preserve all existing dependencies" error alone
+    doesn't tell the model WHAT those dependencies actually are, so a
+    full-set regeneration (rewriting the file to match the current goal)
+    kept dropping an existing, goal-irrelevant dependency it had no way to
+    see. Confirmed live before fixing."""
+    (tmp_path / "pom.xml").write_text("<project><artifactId>ignite-indexing</artifactId></project>")
+
+    task_desc, context = _build_full_set_retry_prompt(
+        goal="Add Qpid to the project",
+        plan="Extend pom.xml and add QpidClientApp.java",
+        error_context="Dependency regression: ignite-indexing was removed. You must preserve all existing dependencies.",
+        required_files_prompt_block="\n\nFiles required: pom.xml, QpidClientApp.java",
+        all_files_written=["pom.xml"],
+        worktree_path=str(tmp_path),
+        active_code_context="=== base RAG context ===\n",
+    )
+
+    assert "Dependency regression" in task_desc
+    assert "Files required: pom.xml" in task_desc
+    assert "=== base RAG context ===" in context
+    assert "Your previous attempt's content for pom.xml" in context
+    assert "ignite-indexing" in context
+
+
+def test_build_full_set_retry_prompt_includes_required_dependencies_checklist(tmp_path):
+    """Regression test: showing the model its own prior attempt's pom.xml
+    content as passive reference material (the test above) was confirmed live
+    NOT sufficient on its own to stop dependency drops from recurring across
+    repeated full-set retries - an explicit "preserve these" checklist is
+    needed, mirroring required_files_prompt_block's already-proven pattern."""
+    task_desc, _ = _build_full_set_retry_prompt(
+        goal="Add Qpid to the project",
+        plan="Extend pom.xml and add QpidClientApp.java",
+        error_context="Dependency regression: ignite-indexing was removed.",
+        required_files_prompt_block="",
+        all_files_written=["pom.xml"],
+        worktree_path=str(tmp_path),
+        active_code_context="=== base RAG context ===\n",
+        required_dependencies_prompt_block=(
+            "\n\nExisting Maven dependencies: preserve these:\n"
+            "- org.apache.ignite:ignite-core\n"
+            "- org.apache.ignite:ignite-indexing"
+        ),
+    )
+    assert "Existing Maven dependencies: preserve these:" in task_desc
+    assert "org.apache.ignite:ignite-indexing" in task_desc
+
+
+def test_build_full_set_retry_prompt_empty_when_nothing_written_yet(tmp_path):
+    # The very first attempt (retry_count == 0) has nothing in all_files_written
+    # yet - must behave exactly like the old unconditional task_desc/context,
+    # not error out or add spurious content.
+    task_desc, context = _build_full_set_retry_prompt(
+        goal="Build the broker",
+        plan="Write BrokerServer.java",
+        error_context="",
+        required_files_prompt_block="",
+        all_files_written=[],
+        worktree_path=str(tmp_path),
+        active_code_context="=== base RAG context ===\n",
+    )
+
+    assert task_desc == "Goal: Build the broker\nPlan: Write BrokerServer.java"
+    assert context == "=== base RAG context ===\n\n\n"
 
 
 @pytest.mark.asyncio

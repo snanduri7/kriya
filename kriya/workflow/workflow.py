@@ -463,7 +463,7 @@ def normalize_written_filepath(filepath: str, workspace_path: str) -> Optional[s
     return filepath
 
 
-def _resolve_run_command(command: List[str]) -> List[str]:
+def _resolve_run_command(command: List[str], workspace_path: Optional[str] = None) -> List[str]:
     """Substitutes Kriya's own interpreter for a bare 'python' the Runtime
     Verification judge inferred, if 'python' isn't actually resolvable on PATH - a
     real, reproducible failure observed live: many systems (Homebrew installs,
@@ -489,6 +489,33 @@ def _resolve_run_command(command: List[str]) -> List[str]:
     # -e adds no output on a successful run, so this is safe to always apply.
     if command and os.path.basename(command[0]) == "mvn" and "-e" not in command:
         command = [command[0], "-e"] + list(command[1:])
+    # Correct an exec:java/exec:exec goal mismatch against the actual pom.xml on
+    # disk, when workspace_path is given. RunVerifierAgent.judge() only ever sees
+    # the Architect's own already-minimized design text (just a file list by
+    # convention - see extract_expected_files above), never the matched skill's
+    # rules or the file actually written, so a goal needing exec:exec (JVM
+    # startup flags, which exec:java can never apply - it runs inside Maven's
+    # own already-started JVM) can get judged as exec:java anyway. A bare,
+    # self-closing <classpath/> element inside exec-maven-plugin's <arguments>
+    # list is exec:exec's own recognized placeholder for the resolved project
+    # classpath - exec:java's "arguments" parameter is a plain String[] and
+    # cannot parse that element at all, crashing immediately and identically on
+    # every retry regardless of the generated code's correctness ("Cannot store
+    # value into array: ... cannot cast ... to ... String", confirmed live).
+    # The pom.xml itself is ground truth for which goal will actually work,
+    # more reliable than hoping skill guidance survives intact through the
+    # pipeline to judge(). Deliberately one-directional - only the confirmed,
+    # observed failure (exec:java chosen against an exec:exec-shaped pom) is
+    # corrected, not a speculative, unobserved reverse case.
+    if workspace_path and command and os.path.basename(command[0]) == "mvn" and "exec:java" in command:
+        pom_path = os.path.join(workspace_path, "pom.xml")
+        try:
+            with open(pom_path, "r", encoding="utf-8") as f:
+                pom_content = f.read()
+        except Exception:
+            pom_content = ""
+        if re.search(r"<classpath\s*/>", pom_content):
+            command = [tok if tok != "exec:java" else "exec:exec" for tok in command]
     return command
 
 EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")
@@ -807,14 +834,32 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
     something extractable - a single unhelpful top result (a marketing/landing page,
     confirmed to happen in real testing) shouldn't sink the whole lookup. `url`/
     `snippet` at the top level mirror the best candidate, for a simple human-facing
-    confirmation summary that doesn't need to enumerate every candidate."""
+    confirmation summary that doesn't need to enumerate every candidate.
+
+    Query suffix is "example", not "documentation" - confirmed live against a real
+    search backend (both a self-hosted SearXNG instance and, separately, Claude's
+    own web search, using the exact Maven-coordinate term shape this function
+    actually sends): "{term} documentation" consistently surfaces a project's
+    landing/index page (qpid.apache.org/documentation.html, qpid.apache.org/) with
+    nothing concrete to extract - "the landing-page problem" already documented
+    below. "{term} example" instead surfaced genuinely extractable content for
+    both Ignite and Qpid in the same live test - a GitHub example config file, an
+    official quick-start code sample with the correct top-level IgniteCache import
+    (the exact fact a real skill rule this session had to be hand-written for,
+    after a JAR was manually unzipped to find it), and a wiki how-to page with a
+    real Maven dependency block, confirmed independently to extract cleanly via
+    this project's own fetch_url_text(). Deliberately kept as a single query, not
+    a multi-variant fallback chain - a real self-hosted SearXNG instance got
+    rate-limited/CAPTCHA'd by its own upstream engines during this same live
+    testing after a modest handful of requests, so multiplying query volume
+    per term is a real reliability risk, not just a latency cost."""
     from kriya.tools.search import search_web
     from kriya.tools.web import fetch_url_text
 
     resolved = []
     for term in terms:
         try:
-            results = await search_web(f"{term} documentation", search_base_url, top_k=top_k)
+            results = await search_web(f"{term} example", search_base_url, top_k=top_k)
         except Exception as ex:
             logger.debug(f"Live lookup search failed for '{term}': {ex}")
             continue
@@ -844,8 +889,144 @@ _ERROR_COORDINATE_PATTERN = re.compile(
     r"\b([a-zA-Z][\w]*(?:\.[a-zA-Z][\w-]*)+):([a-zA-Z][\w-]*)(?::[\w.-]+)?\b"
 )
 
+# javac's "cannot find symbol" shape specifically for a failed import
+# resolution: "symbol:   class X" followed by "location: package Y" (as
+# opposed to "location: class Y", which is javac's shape for a symbol used
+# but never imported at all - not an import-path mistake, nothing to
+# usefully search for). [X,Y] is a bounded gap so this only matches the two
+# lines actually adjacent in real javac output, never spans unrelated error
+# blocks.
+_ERROR_UNRESOLVED_IMPORT_PATTERN = re.compile(
+    r"symbol:\s*class\s+(\w+)[\s\S]{0,80}?location:\s*package\s+([\w.]+)"
+)
 
-def extract_error_search_terms(error_text: str) -> List[str]:
+# Maven prints these two lines at the end of EVERY build, success or failure,
+# and their values (build duration, wall-clock timestamp) differ on every
+# single invocation even when the underlying failure is byte-for-byte
+# identical otherwise - confirmed live: a real, repeated exception (Qpid's
+# SystemLauncher.startup() UnsupportedOperationException) never matched
+# itself across 3 consecutive identical failures, because
+# extract_error_search_terms found no Maven groupId:artifactId coordinate in
+# it (it's a plain Java stack trace) and the code fell back to comparing the
+# ENTIRE raw error text - these two always-different lines alone were enough
+# to defeat that comparison every time, permanently blocking the repeated-
+# failure-triggered live lookup for this whole class of error.
+_BUILD_TIMING_NOISE_PATTERNS = (
+    re.compile(r"^\[INFO\] Total time:.*$", re.MULTILINE),
+    re.compile(r"^\[INFO\] Finished at:.*$", re.MULTILINE),
+)
+
+
+_JVM_STARTUP_FAILURE_MARKERS = (
+    "Error occurred during initialization of VM",
+    "Unrecognized VM option",
+    "Unrecognized option:",
+    "Could not create the Java Virtual Machine",
+)
+
+# Only matches the specific "Failed to invoke/execute ...: [Errno 2] No such
+# file or directory: '<name>'" wrapper PolymorphicValidator itself produces
+# when a subprocess.run() call can't find the launched executable at all
+# (kriya/tools/validate.py's run_compile_check/run_app) - deliberately NOT a
+# bare "No such file or directory" substring match anywhere in captured
+# output, which a generated app's own legitimate (code-fixable)
+# FileNotFoundError could also produce in a traceback.
+_MISSING_EXECUTABLE_PATTERN = re.compile(
+    r"Failed to (?:invoke|execute)[^:]*:\s*\[Errno 2\] No such file or directory: '([^']+)'"
+)
+
+
+def _check_java_toolchain_mismatch(stack: str) -> Optional[str]:
+    """Toolchain preflight: the first time a generation run's detected stack is
+    known to be 'java', checks whether 'java' and 'mvn' resolve to different JDK
+    major versions - a mismatch a human would otherwise only discover after a
+    wasted retry budget (see classify_environment_failure/the Quality Gates
+    circuit breaker), or not at all if this particular goal never happens to
+    exercise the version-sensitive flag. Returns None for any non-java stack (a
+    Python/Ruby goal never pays for this) or when no mismatch is found."""
+    if stack != "java":
+        return None
+    from kriya.tools.validate import check_java_toolchain
+    toolchain = check_java_toolchain()
+    if not toolchain["mismatch"]:
+        return None
+    return (
+        f"'java' resolves to JDK {toolchain['java_version']} but 'mvn' will "
+        f"build/run against JDK {toolchain['mvn_java_version']} - a JVM startup "
+        "flag correct for one may be invalid or fatal under the other. Run "
+        "`kriya doctor` for details."
+    )
+
+
+def _java_toolchain_fact() -> Optional[str]:
+    """Surfaces the actual, resolved target JVM as a concrete fact for the
+    Planner/Architect/Developer prompts - not a warning like
+    _check_java_toolchain_mismatch(), just ground truth. Skill rules that are
+    genuinely JDK-version-conditional (e.g. a startup flag required on one JDK
+    range and fatal on another) are otherwise unverifiable at generation time:
+    the model has no way to reason about "is my applicable range satisfied"
+    without knowing the actual number. Confirmed as a real gap during
+    golden-use-case validation - a skill rule correct for JDK 17.0.10-23
+    (-Djava.security.manager=allow) was silently wrong on JDK 24+ (JEP 486
+    removed the Security Manager entirely), and nothing in the prompt ever told
+    the model what JDK it was actually generating for. Prefers the JDK 'mvn'
+    itself will build/run against (what a generated app's exec:java/exec:exec
+    invocation actually executes under) over plain 'java', falling back to
+    'java' if mvn isn't present. Returns None if neither tool is found - a
+    non-Java project never pays for or sees this."""
+    from kriya.tools.validate import check_java_toolchain
+    toolchain = check_java_toolchain()
+    version = toolchain["mvn_java_version"] or toolchain["java_version"]
+    if not version:
+        return None
+    return f"Target JVM (resolved on this machine via 'mvn'/'java'): JDK {version}."
+
+
+def classify_environment_failure(error_text: str) -> Optional[str]:
+    """Returns a short, human-readable description if error_text shows a failure
+    class no amount of code regeneration can ever fix - a JVM crashing during its
+    own startup (before any generated code runs, e.g. a startup flag unsupported
+    by the actually-resolved JDK) or a build/run tool binary missing from PATH
+    entirely (e.g. Maven not installed). Distinguishing these lets the Quality
+    Gates retry loop stop burning its retry budget re-generating code for a
+    problem that was never a code defect - confirmed as a real, wasteful gap
+    during golden-use-case validation: the same JVM-startup crash (a flag correct
+    for JDK 17.0.10 became fatal under JDK 26, which removed the Security Manager
+    entirely) recurred identically across 3 real retry attempts before a human
+    had to intervene, and Kriya had no way to recognize it wasn't a code bug."""
+    for marker in _JVM_STARTUP_FAILURE_MARKERS:
+        if marker in error_text:
+            return (
+                f"JVM failed during its own startup ('{marker}') - not a code "
+                "defect, most likely a JVM flag unsupported by the actually-"
+                "resolved Java version (see `kriya doctor`)."
+            )
+    m = _MISSING_EXECUTABLE_PATTERN.search(error_text)
+    if m:
+        return (
+            f"Required build/run tool '{m.group(1)}' was not found on PATH - "
+            "not a code defect, the toolchain itself is missing or misconfigured."
+        )
+    return None
+
+
+def _normalize_error_for_repeat_detection(error_text: str) -> str:
+    """Strips known non-deterministic per-run noise (Maven's own build-timing
+    lines) before error text is used as a repeated-failure signature - see the
+    fallback branch of the current_failure_signature computation below, used
+    only when extract_error_search_terms found no stable coordinate to key
+    on instead."""
+    normalized = error_text
+    for pattern in _BUILD_TIMING_NOISE_PATTERNS:
+        normalized = pattern.sub("", normalized)
+    return normalized
+
+
+def extract_error_search_terms(
+    error_text: str,
+    exclude_coordinates: Optional[Iterable[str]] = None,
+    dependency_coordinates: Optional[Iterable[str]] = None,
+) -> List[str]:
     """Extracts safe search terms from Quality Gate error/output text for
     error-triggered live lookup (kriya/workflow/workflow.py's Developer retry
     loop) - restricted to well-known, publicly-referenceable Maven/Gradle-style
@@ -854,18 +1035,125 @@ def extract_error_search_terms(error_text: str) -> List[str]:
     a prompt instruction: never the raw error/stack-trace text itself (which can
     contain project-specific class/variable/file names), never goal/design/code
     text - the same principle as the existing extract_library_versions()-based
-    goal/design-stage live lookup. A failure with no such coordinate in it (e.g.
-    a plain "cannot find symbol" compile error naming only a class, not an
-    artifact) simply yields no terms and is never searched - most such failures
-    are code-coherence issues a search wouldn't help with anyway."""
+    goal/design-stage live lookup.
+
+    exclude_coordinates filters out matches that are technically present but
+    useless as a search target - confirmed live as a real bug: Maven's own build
+    banner (`[INFO] ----------------< groupId:artifactId >-----------------`,
+    printed at the start of every single build, success or failure) matches this
+    exact coordinate shape, so without exclusion a project's own made-up
+    artifact ID gets treated as a genuine third-party library worth searching
+    for, wasting a real repeated-failure live-lookup recovery attempt on a term
+    that can never find anything useful. Callers pass the workspace's own
+    pom.xml coordinate (get_pom_own_coordinate()) here.
+
+    dependency_coordinates covers a DIFFERENT, previously-unhandled failure
+    shape - confirmed live during golden-use-case validation as a real,
+    generalizable gap, not library-specific: "wrong import path within a
+    library the project already, legitimately depends on" (e.g. writing
+    `import org.apache.ignite.cache.IgniteCache;` when the class actually
+    lives at the top-level `org.apache.ignite` package). Unlike a missing-
+    dependency error, javac's diagnostic for this has no groupId:artifactId
+    coordinate anywhere in it - just "symbol: class X" / "location: package
+    Y" - so without this, such a failure yields zero terms and the repeated-
+    failure trigger has nothing to search for, no matter how many times it
+    recurs identically. Matched safely, same trust boundary as the rest of
+    this function: Y (the WRONG package javac tried and failed to resolve)
+    only becomes a search term if its dot-prefix matches the groupId of one
+    of the caller-supplied dependency_coordinates - i.e. only for a class
+    that demonstrably belongs to a library already declared as a real
+    project dependency, never an arbitrary/private symbol name. Pass
+    get_pom_dependencies() here. Renders as "{matched coordinate} {symbol}",
+    e.g. "org.apache.ignite:ignite-core IgniteCache", which _resolve_via_web_
+    lookup() then suffixes with " example" like every other term."""
     seen = set()
     terms = []
+    exclude = set(exclude_coordinates) if exclude_coordinates else set()
     for m in _ERROR_COORDINATE_PATTERN.finditer(error_text):
         term = f"{m.group(1)}:{m.group(2)}"
-        if term not in seen:
+        if term not in seen and term not in exclude:
             seen.add(term)
             terms.append(term)
+
+    if dependency_coordinates:
+        for symbol, wrong_package in _ERROR_UNRESOLVED_IMPORT_PATTERN.findall(error_text):
+            for coord in dependency_coordinates:
+                group_id = coord.split(":", 1)[0]
+                if wrong_package == group_id or wrong_package.startswith(group_id + "."):
+                    term = f"{coord} {symbol}"
+                    if term not in seen and term not in exclude:
+                        seen.add(term)
+                        terms.append(term)
+                    break
     return terms
+
+
+_ERROR_LOCATION_PATTERN = re.compile(r"([\w./\\-]+\.java):\[(\d+),\d+\]")
+
+
+def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
+    """Extracts (filename, line_number) pairs from compiler error text via
+    javac's own universal locator shape (`File.java:[line,col]`) - deliberately
+    generic, not tied to any specific error MESSAGE (unlike
+    extract_error_search_terms()'s coordinate/wrong-import patterns, which each
+    needed their own new regex the first time that error shape was actually
+    hit live). Every javac diagnostic - incompatible types, cannot find symbol,
+    missing return, wrong argument count, all of them - carries this same
+    locator, so this one mechanism covers the whole family without needing to
+    anticipate each message shape in advance. Returns the bare basename
+    referenced in the error text (which may be an absolute worktree path,
+    e.g. '.../worktree/src/main/java/com/example/Foo.java:[91,79]') - callers
+    resolve it against the known written-files list."""
+    seen = set()
+    locations: List[Tuple[str, int]] = []
+    for m in _ERROR_LOCATION_PATTERN.finditer(error_text):
+        key = (os.path.basename(m.group(1)), int(m.group(2)))
+        if key not in seen:
+            seen.add(key)
+            locations.append(key)
+    return locations
+
+
+def _build_error_source_context(
+    worktree_path: str, error_text: str, known_files: Iterable[str]
+) -> Dict[str, str]:
+    """For each (file, line) the error text locates, reads a small window of
+    the REAL current source around that line from the worktree and formats it
+    for direct inclusion in that file's own retry prompt - the exact broken
+    line(s), not a prose description buried inside a noisy multi-line Maven
+    build banner. Generic across any compile error shape (see
+    extract_error_source_locations). Returns {filepath: formatted_snippet},
+    keyed by the real relative filepath (matched against known_files by
+    basename, since the error text's own path may be absolute/worktree-
+    rooted) - a location naming a file Kriya doesn't know about (already
+    deleted, or a dependency's own source) is silently skipped, not an error."""
+    locations = extract_error_source_locations(error_text)
+    if not locations:
+        return {}
+    by_basename = {os.path.basename(f): f for f in known_files}
+    context_by_file: Dict[str, str] = {}
+    for filename, line_no in locations:
+        filepath = by_basename.get(filename)
+        if not filepath:
+            continue
+        try:
+            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()
+        except Exception as ex:
+            logger.debug(f"Failed to read source context for {filepath}:{line_no}: {ex}")
+            continue
+        if not (1 <= line_no <= len(lines)):
+            continue
+        start, end = max(0, line_no - 4), min(len(lines), line_no + 3)
+        snippet = "\n".join(
+            f"{'>>' if (i + 1) == line_no else '  '} {i + 1}: {lines[i].rstrip()}"
+            for i in range(start, end)
+        )
+        context_by_file[filepath] = (
+            context_by_file.get(filepath, "")
+            + f"\n=== Source context at the reported error location (line {line_no}) ===\n{snippet}\n"
+        )
+    return context_by_file
 
 
 async def _augment_error_with_live_lookup(
@@ -958,6 +1246,55 @@ def _build_targeted_retry_prompt(
     )
     targeted_context = active_code_context + "\n\n" + reference_section + target_section
     return task_desc, targeted_context
+
+
+def _build_full_set_retry_prompt(
+    goal: str, plan: str, error_context: str, required_files_prompt_block: str,
+    all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+    required_dependencies_prompt_block: str = "",
+) -> Tuple[str, str]:
+    """Full-set retries previously never showed the model its own prior attempt's
+    content at all, only the abstract error text describing what went wrong -
+    the exact gap _build_targeted_retry_prompt's own docstring already names as
+    something targeted retry fixes and full-set doesn't. Confirmed live as a
+    real bug via the golden Ignite+Qpid use case: a "Dependency regression: ...
+    you must preserve all existing dependencies" compile error doesn't tell the
+    model WHAT those dependencies actually are, so a full-set regeneration
+    (which naturally rewrites a file to match the current goal) kept dropping
+    an existing, goal-irrelevant dependency (ignite-indexing, from an earlier
+    milestone) it had no way to see - the instruction was there, the data to
+    act on it wasn't. Mirrors targeted retry's approach exactly: every
+    already-written file's current worktree content is included as reference,
+    so the model can make an informed choice about what to keep vs. change
+    rather than reconstructing everything from a clean slate.
+
+    required_dependencies_prompt_block (a later addition): showing the prior
+    attempt's content as passive reference material, on its own, was confirmed
+    live NOT sufficient to stop the same dependency-drop from recurring across
+    repeated full-set retries (the golden-use-case validation's own tug-of-war
+    got worse, not better, across attempts) - an explicit, structured "preserve
+    these" checklist mirrors the required_files_prompt_block pattern that
+    already proved effective for the analogous missing-file problem."""
+    reference_section = ""
+    for filepath in sorted(all_files_written):
+        try:
+            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                current_content = fh.read()
+        except Exception as ex:
+            logger.debug(f"Failed to read '{filepath}' from worktree for full-set retry context: {ex}")
+            continue
+        reference_section += (
+            f"=== Your previous attempt's content for {filepath} (fix/rewrite as needed for the "
+            f"goal and error above, but don't silently drop anything still needed) ===\n{current_content}\n\n"
+        )
+
+    task_desc = f"Goal: {goal}\nPlan: {plan}"
+    if error_context:
+        task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
+    task_desc += required_files_prompt_block
+    task_desc += required_dependencies_prompt_block
+
+    return task_desc, active_code_context + "\n\n" + reference_section
 
 
 def _build_missing_files_retry_prompt(
@@ -1073,6 +1410,34 @@ class WorkflowEngine:
         self.run_verifier = RunVerifierAgent("run_verifier", llm_client, roles.run_verifier.llm, roles.run_verifier.llm_chain)
         self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client, roles.skill_gap.llm, roles.skill_gap.llm_chain)
 
+    async def _approve_web_lookup(
+        self, terms: List[str], base_url: str,
+        web_lookup_query_callback: Optional[Callable[[List[str], str], Any]]
+    ) -> bool:
+        """Gates every outbound live-lookup search behind explicit authorization -
+        either the persistent autonomy.web_lookup_auto_approve opt-in, or a
+        real-time callback shown the exact terms and base_url about to be
+        searched. Fails closed: no callback and no opt-in means the query never
+        fires at all. A query's CONTENT is already hard-restricted elsewhere
+        (bare technology-name strings only, never goal/design/code/error text) -
+        this is a separate, additional gate on WHEN it's allowed to leave the
+        machine at all. Confirmed live during a fresh-install investigation that,
+        before this gate existed, a non-interactive (-y) run already fired the
+        outbound query and then silently discarded the result - the query had
+        already left the machine with zero human visibility, for zero benefit."""
+        if self.kernel.config.autonomy.web_lookup_auto_approve:
+            return True
+        if not web_lookup_query_callback:
+            return False
+        try:
+            approved = web_lookup_query_callback(terms, base_url)
+            if asyncio.iscoroutine(approved):
+                approved = await approved
+            return bool(approved)
+        except Exception as ex:
+            logger.warning(f"web_lookup_query_callback failed, skipping live lookup: {ex}")
+            return False
+
     async def run_generation_workflow(
         self, 
         goal: str, 
@@ -1085,6 +1450,7 @@ class WorkflowEngine:
         skill_gap_callback: Optional[Callable[[str, List[str]], Any]] = None,
         skill_conflict_callback: Optional[Callable[[str, str, str, str, str], Any]] = None,
         web_lookup_callback: Optional[Callable[[List[Dict[str, str]]], Any]] = None,
+        web_lookup_query_callback: Optional[Callable[[List[str], str], Any]] = None,
         resume: bool = False,
         resume_id: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -1097,6 +1463,11 @@ class WorkflowEngine:
         workspace git state, resolved config, or goal/error text since the
         checkpoint was saved invalidates it (strict - falls back to a fresh run
         with a warning, never a partial/best-effort resume).
+
+        web_lookup_query_callback gates every outbound live-lookup search (goal-
+        stage, design-stage, and the retry loop's repeated-failure lookup alike)
+        BEFORE it fires - see _approve_web_lookup(). Separate from web_lookup_callback,
+        which only gates whether already-fetched results get used.
         """
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
@@ -1200,6 +1571,9 @@ class WorkflowEngine:
         se.discover_and_load()
         
         convention_prompt = ""
+        java_toolchain_fact = _java_toolchain_fact()
+        if java_toolchain_fact:
+            convention_prompt += f"\n\n=== Environment Fact ===\n{java_toolchain_fact}\n"
         if gap_report.has_gaps:
             convention_prompt += "\n\n=== KNOWLEDGE GUARD SAFETY CONSTRAINTS ===\n"
             for g in gap_report.gaps:
@@ -1321,9 +1695,12 @@ class WorkflowEngine:
             auto_resolutions: List[Tuple[Any, Dict[str, Any], str]] = []
             if self.kernel.config.autonomy.web_lookup_enabled and self.kernel.config.search.base_url:
                 lookup_terms = [s.name for s in unverified_relevant] + missing_skill_candidates
-                found = await _resolve_via_web_lookup(
-                    lookup_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
-                )
+                if await self._approve_web_lookup(lookup_terms, self.kernel.config.search.base_url, web_lookup_query_callback):
+                    found = await _resolve_via_web_lookup(
+                        lookup_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
+                    )
+                else:
+                    found = []
                 proceed = bool(found)
                 if found and web_lookup_callback:
                     try:
@@ -1714,9 +2091,17 @@ class WorkflowEngine:
                 logger.debug(f"Failed to scan architect design for design-derived lookup candidates: {ex}")
 
             if new_design_terms:
-                found = await _resolve_via_web_lookup(
-                    new_design_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
-                )
+                if await self._approve_web_lookup(
+                    new_design_terms, self.kernel.config.search.base_url, web_lookup_query_callback
+                ):
+                    found = await _resolve_via_web_lookup(
+                        new_design_terms, self.kernel.config.search.base_url, self.kernel.config.search.top_k
+                    )
+                else:
+                    # A declined search must still fall through to the human-ask
+                    # fallback below, exactly as if lookup had been tried and come
+                    # up empty - not silently drop this gap-resolution path entirely.
+                    found = []
                 proceed = bool(found)
                 if found and web_lookup_callback:
                     try:
@@ -1855,6 +2240,11 @@ class WorkflowEngine:
         # the same class of problem (the model didn't finish the job), not a new
         # kind of retry that deserves its own budget.
         last_missing_files: Optional[List[str]] = None
+        # {filepath: source-line snippet} for the MOST RECENT failure's error
+        # location(s) (see _build_error_source_context) - None/empty whenever
+        # the last failure's error text named no javac-style file:[line,col]
+        # locator, or before any failure has happened yet.
+        last_error_source_context: Dict[str, str] = {}
         # Rendered once (design does not change across retries) and appended to the
         # full-set task description on every attempt, so the Developer sees an
         # explicit, unambiguous checklist of what the design requires BEFORE
@@ -1869,6 +2259,40 @@ class WorkflowEngine:
                 "not a subset; do not omit any or defer them to a future step):\n"
                 + "\n".join(f"- {f}" for f in _expected_files_upfront)
             )
+        # Same prevention-over-punishment pattern as required_files_prompt_block
+        # above, for a different completeness failure: a full-set regeneration of
+        # pom.xml naturally rewrites it to match the current goal, and can
+        # silently drop an existing, goal-irrelevant dependency from an earlier
+        # milestone in the process. The reactive "Dependency regression" compile
+        # check (PolymorphicValidator.run_compile_check) already catches this
+        # after the fact, and _build_full_set_retry_prompt already shows the
+        # model its own prior attempt's file content as reference - confirmed
+        # live that neither of those was sufficient on their own: the tug-of-war
+        # recurred and even worsened across repeated full-set retries in the
+        # golden Ignite+Qpid validation (M2 attempts 2 and 4). Computed once from
+        # workspace_path's pom.xml (the same stable "original" reference the
+        # regression check itself compares against, via original_workspace_path)
+        # rather than the worktree's possibly-already-regressed prior attempt.
+        required_dependencies_prompt_block = ""
+        _original_pom_path = os.path.join(workspace_path, "pom.xml")
+        if os.path.exists(_original_pom_path):
+            from kriya.tools.validate import get_pom_dependencies
+            _existing_dependencies = get_pom_dependencies(_original_pom_path)
+            if _existing_dependencies:
+                required_dependencies_prompt_block = (
+                    "\n\nExisting Maven dependencies (already present in pom.xml before this goal - "
+                    "you must preserve ALL of these even if the current goal doesn't need them; "
+                    "do not silently drop any while editing pom.xml):\n"
+                    + "\n".join(f"- {d}" for d in _existing_dependencies)
+                    + "\n\nBefore adding ANY new dependency, check whether the package/class you need "
+                    "is already used successfully in the Existing Code Base Context shown below - if an "
+                    "import already appears there and that code is known-working, it is ALREADY resolvable "
+                    "through one of the dependencies listed above (often transitively) and you must NOT add "
+                    "a new, separate dependency for it. Confirmed live as a real bug: a retry added an "
+                    "explicit javax.jms:jms:1.1 dependency (which doesn't exist on Maven Central) for a "
+                    "'javax.jms.*' import that was already compiling successfully via the existing "
+                    "qpid-jms-client dependency alone - the addition was both wrong and unnecessary."
+                )
         # Unified attempt counter for gate_outcomes/logging only - retry_count and
         # targeted_retry_count are the actual budget counters, but a single
         # chronological attempt number reads far more sensibly in the trace than
@@ -1888,6 +2312,19 @@ class WorkflowEngine:
         # generation run rather than on every retry attempt.
         run_verification_confirmed = False
         run_verification_declined = False
+        # Caches RunVerifierAgent.judge()'s result across retry attempts within
+        # this run - previously re-invoked (a real LLM round-trip) on every
+        # single attempt that reached this stage, even though the goal/design
+        # driving "should we run this, and how" don't change between retries.
+        # Confirmed live during golden-use-case validation that once the
+        # judgment was correct (grounded by the real pom.xml content), it
+        # stayed correct and identical across repeated attempts - the only
+        # thing repeating the call bought was wasted latency, not a different
+        # or better answer. _resolve_run_command()'s deterministic pom.xml-
+        # shape correction still runs on every attempt regardless (cheap,
+        # stateless, and the worktree's pom.xml can legitimately change shape
+        # between attempts even when the cached judgment doesn't).
+        cached_run_verification_judgment: Optional[Dict[str, Any]] = None
         # Tracks (fail_type, signature) of the previous attempt's failure so a
         # REPEATED failure (the model isn't self-correcting) can be distinguished
         # from a normal first-time failure - only a repeat is eligible for
@@ -1898,6 +2335,17 @@ class WorkflowEngine:
         # targeted attempt after the full-set budget (retry_count >= max_retries)
         # was already exhausted.
         quality_gates_succeeded = False
+        # Set from classify_environment_failure() on the most recent failed
+        # attempt - a non-None value short-circuits the retry loop below (see the
+        # except block), since no amount of code regeneration can ever fix a JVM
+        # crashing during its own startup or a missing build/run tool binary.
+        environment_failure: Optional[str] = None
+        # Toolchain preflight (_check_java_toolchain_mismatch) runs at most once
+        # per generation run, the first time a PolymorphicValidator confirms the
+        # stack is 'java' - toolchain_checked gates that, toolchain_warning
+        # persists into the final result regardless of pass/fail.
+        toolchain_checked = False
+        toolchain_warning: Optional[str] = None
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -1976,6 +2424,9 @@ class WorkflowEngine:
                         base_url_override=base_url_override,
                         api_key_override=api_key_override,
                         known_target_files=last_implicated_files,
+                        prior_error_context=error_context or None,
+                        implicated_files=last_implicated_files,
+                        error_source_context=last_error_source_context or None,
                     )
                 elif use_missing_files:
                     # Missing-file recovery: same primary-model-only, non-escalating
@@ -2029,11 +2480,6 @@ class WorkflowEngine:
                         known_target_files=resolved_missing_files,
                     )
                 else:
-                    task_desc = f"Goal: {goal}\nPlan: {plan}"
-                    if error_context:
-                        task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
-                    task_desc += required_files_prompt_block
-
                     # Re-run context budget allocator dynamically for escalated model context window size
                     current_limit = int(self.kernel.config.llm.context_window * 0.75)
                     model_override = None
@@ -2055,6 +2501,12 @@ class WorkflowEngine:
                         active_code_context += current_graph_context
                     if learned_rag_context:
                         active_code_context += learned_rag_context
+
+                    task_desc, active_code_context = _build_full_set_retry_prompt(
+                        goal, plan, error_context, required_files_prompt_block,
+                        all_files_written, worktree_path, active_code_context,
+                        required_dependencies_prompt_block,
+                    )
 
                     # Track model hops
                     model_hops.append(model_override or self.kernel.config.llm.model)
@@ -2087,6 +2539,9 @@ class WorkflowEngine:
                         base_url_override=base_url_override,
                         api_key_override=api_key_override,
                         known_target_files=known_target_files,
+                        prior_error_context=error_context or None,
+                        implicated_files=last_implicated_files,
+                        error_source_context=last_error_source_context or None,
                     )
 
                 # Normalize filepaths before anything downstream uses them - the
@@ -2177,7 +2632,13 @@ class WorkflowEngine:
                         worktree_path, original_workspace_path=workspace_path,
                         autonomy_cfg=self.kernel.config.autonomy,
                     )
-                
+
+                    if not toolchain_checked:
+                        toolchain_checked = True
+                        toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+                        if toolchain_warning:
+                            logger.warning(f"Toolchain preflight: {toolchain_warning}")
+
                     compile_res = validator.run_compile_check(list(all_files_written))
                     gate_outcomes.append({
                         "attempt": attempt_number,
@@ -2221,11 +2682,22 @@ class WorkflowEngine:
                     # self-terminating runtime behavior worth actually running and checking.
                     autonomy_cfg_rv = self.kernel.config.autonomy
                     if autonomy_cfg_rv.run_verification_enabled and not run_verification_declined:
-                        judgment = await self.run_verifier.judge(
-                            goal=goal,
-                            design=design,
-                            files_written=list(all_files_written),
-                        )
+                        if cached_run_verification_judgment is None:
+                            pom_content_for_judge = None
+                            try:
+                                with open(os.path.join(worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+                                    pom_content_for_judge = f.read()
+                            except Exception as e:
+                                logger.debug(f"No pom.xml available for run-verification judgment: {e}")
+                            cached_run_verification_judgment = await self.run_verifier.judge(
+                                goal=goal,
+                                design=design,
+                                files_written=list(all_files_written),
+                                build_file_content=pom_content_for_judge,
+                            )
+                        else:
+                            logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
+                        judgment = cached_run_verification_judgment
                         if judgment["should_run"]:
                             proceed_with_run = True
                             if judgment["command_source"] == "inferred" and not run_verification_confirmed:
@@ -2251,7 +2723,7 @@ class WorkflowEngine:
                                     run_verification_declined = True
                             if proceed_with_run:
                                 run_verification_confirmed = True
-                                resolved_run_commands = [_resolve_run_command(cmd) for cmd in judgment["run_commands"]]
+                                resolved_run_commands = [_resolve_run_command(cmd, worktree_path) for cmd in judgment["run_commands"]]
                                 if resolved_run_commands != judgment["run_commands"]:
                                     logger.info(
                                         "One or more inferred run commands aren't resolvable as given here - "
@@ -2420,8 +2892,24 @@ class WorkflowEngine:
                 if worktree_path != workspace_path:
                     remove_git_worktree(workspace_path, worktree_path)
 
-                # Phase 3: Auto-generate skill templates for solved dependencies
+                # Phase 3: Auto-generate skill templates for solved dependencies. A
+                # coordinate merely appearing in a resolver.py suggestion during some
+                # retry attempt is not evidence it was ever actually used - confirmed
+                # live as a real bug: a wrong Maven-Central match for a generic
+                # missing-symbol name (the real problem was a bare wrong import path,
+                # not a genuinely missing dependency) got auto-accrued into a
+                # permanent, git-committed skill scaffold that then polluted an
+                # unrelated later goal's skill-gap detection. Only accrue a
+                # coordinate that actually appears in the FINAL applied file content -
+                # real evidence it was used, not just suggested at some point.
                 if retry_count > 0:
+                    final_contents_combined = ""
+                    for filepath in all_files_written:
+                        try:
+                            with open(os.path.join(workspace_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                                final_contents_combined += fh.read()
+                        except Exception as e:
+                            logger.debug(f"Failed to read '{filepath}' for auto-accrual verification: {e}")
                     for outcome in gate_outcomes:
                         output_str = outcome.get("output", "")
                         if output_str and "=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===" in output_str:
@@ -2430,8 +2918,15 @@ class WorkflowEngine:
                                 output_str
                             )
                             for g, a, v in deps:
+                                artifact_id = a.strip()
+                                if artifact_id not in final_contents_combined:
+                                    logger.debug(
+                                        f"Skipping auto-accrual for {g.strip()}:{artifact_id} - not found in the "
+                                        "final applied files, likely an irrelevant suggestion never actually used."
+                                    )
+                                    continue
                                 try:
-                                    coord = f"{g.strip()}:{a.strip()}"
+                                    coord = f"{g.strip()}:{artifact_id}"
                                     ver = v.strip()
                                     logger.info(f"Auto-accrual: Automatically scaffolding verified skill for resolved dependency {coord}:{ver}")
                                     guard.generate_skill_template(coord, ver)
@@ -2505,6 +3000,13 @@ class WorkflowEngine:
                     workspace_path, original_workspace_path=workspace_path,
                     autonomy_cfg=self.kernel.config.autonomy,
                 )
+
+                if not toolchain_checked:
+                    toolchain_checked = True
+                    toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+                    if toolchain_warning:
+                        logger.warning(f"Toolchain preflight: {toolchain_warning}")
+
                 full_test_res = validator.run_tests()
                 gate_outcomes.append({
                     "attempt": attempt_number,
@@ -2545,18 +3047,51 @@ class WorkflowEngine:
                 # resolve (a test-assertion failure is usually application-logic-
                 # specific, not something external docs fix). Terms are extracted
                 # via a hard, code-enforced regex restricted to Maven/Gradle-style
-                # groupId:artifactId coordinates found IN the error text - the same
+                # groupId:artifactId coordinates found IN the error text, plus
+                # (separately, safety-bounded via the worktree's own declared
+                # dependencies below) a wrong-import-path shape - the same
                 # query-safety boundary as the existing goal/design-stage live
                 # lookup: never the raw error/stack-trace text itself, which can
-                # contain project-specific class/variable names.
-                error_terms = extract_error_search_terms(raw_error_context)
-                current_failure_signature = (fail_type, tuple(sorted(error_terms)) if error_terms else raw_error_context)
+                # contain project-specific class/variable names. When neither
+                # matches (e.g. a plain Java stack trace), the raw text itself
+                # is the fallback signature - normalized first to strip Maven's
+                # own always-different build-timing lines, or two occurrences
+                # of the exact same failure would never compare equal.
+                environment_failure = classify_environment_failure(raw_error_context)
+
+                # Read fresh from the worktree's CURRENT pom.xml each attempt,
+                # not cached once before the loop - the project's own
+                # groupId:artifactId can legitimately change mid-run (e.g. the
+                # Developer renaming the artifact while extending the project),
+                # and a stale cached value would fail to exclude Maven's own
+                # build banner for whatever the CURRENT attempt actually named
+                # the project.
+                own_project_coordinate = None
+                worktree_dependency_coordinates = None
+                try:
+                    from kriya.tools.validate import get_pom_dependencies, get_pom_own_coordinate
+                    worktree_pom_path = os.path.join(worktree_path, "pom.xml")
+                    own_project_coordinate = get_pom_own_coordinate(worktree_pom_path)
+                    worktree_dependency_coordinates = get_pom_dependencies(worktree_pom_path) or None
+                except Exception as ex:
+                    logger.debug(f"Failed to resolve project's own pom.xml coordinate/dependencies: {ex}")
+                error_terms = extract_error_search_terms(
+                    raw_error_context,
+                    exclude_coordinates=[own_project_coordinate] if own_project_coordinate else None,
+                    dependency_coordinates=worktree_dependency_coordinates,
+                )
+                current_failure_signature = (
+                    fail_type,
+                    tuple(sorted(error_terms)) if error_terms else _normalize_error_for_repeat_detection(raw_error_context),
+                )
                 error_context = raw_error_context
                 if (
                     current_failure_signature == last_failure_signature
                     and fail_type in ("compile", "run_verification")
                     and self.kernel.config.autonomy.web_lookup_enabled
                     and self.kernel.config.search.base_url
+                    and error_terms
+                    and await self._approve_web_lookup(error_terms, self.kernel.config.search.base_url, web_lookup_query_callback)
                 ):
                     error_context = await _augment_error_with_live_lookup(
                         raw_error_context, error_terms,
@@ -2582,6 +3117,17 @@ class WorkflowEngine:
                     last_implicated_files = implicated if implicated else None
                     last_missing_files = None
 
+                # Generic across ANY compile error shape (see
+                # extract_error_source_locations) - the exact broken source
+                # line(s), read fresh from the worktree, keyed by file so the
+                # next retry's per-file prompt shows this only to the file(s)
+                # actually implicated, not broadcast to every file in a
+                # full-set batch (same scoping fix as prior_error_context
+                # below).
+                last_error_source_context = _build_error_source_context(
+                    worktree_path, raw_error_context, all_files_written
+                )
+
                 if use_targeted or use_missing_files:
                     targeted_retry_count += 1
                 else:
@@ -2596,11 +3142,16 @@ class WorkflowEngine:
                         "mode": attempt_mode,
                     })
 
-                budgets_exhausted = retry_count >= max_retries and not (
-                    (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+                budgets_exhausted = environment_failure is not None or (
+                    retry_count >= max_retries and not (
+                        (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+                    )
                 )
                 if budgets_exhausted:
-                    logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
+                    if environment_failure:
+                        logger.error(f"Quality Gates stopped early - {environment_failure}")
+                    else:
+                        logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
                     if worktree_path != workspace_path:
                         for filepath in all_files_written:
                             worktree_file = os.path.join(worktree_path, filepath)
@@ -2610,6 +3161,14 @@ class WorkflowEngine:
                             except Exception as e:
                                 logger.debug(f"Failed to capture final content of '{worktree_file}' before worktree cleanup: {e}")
                         remove_git_worktree(workspace_path, worktree_path)
+                    # An environment/toolchain failure needs an explicit break -
+                    # unlike genuine budget exhaustion (which naturally coincides
+                    # with the `while` loop's own condition going False on its next
+                    # check), this can fire on the very first attempt, well before
+                    # retry_count reaches max_retries, and the loop would otherwise
+                    # continue straight into another pointless Developer retry.
+                    if environment_failure:
+                        break
 
         # 5. Reviewer
         logger.info("Reviewer Agent evaluating results...")
@@ -2640,7 +3199,22 @@ class WorkflowEngine:
             step_callback("Review", review)
 
         quality_passed = quality_gates_succeeded
-        
+        # A stable, short string identifying WHY this run failed, so a caller
+        # (human or script) can always ask "why did this fail" the same way
+        # rather than having to know which of several differently-shaped
+        # fields to check. Deliberately scoped to the failure modes reachable
+        # from THIS retry loop only (None on success, "environment_failure",
+        # or "quality_gates_exhausted" for an ordinary exhausted-retry-budget
+        # code failure) - knowledge-gap (its own early-return dict, handled
+        # entirely before this loop even starts) and human-rejected-approval
+        # (raises a catchable exception, not a return value) are genuinely
+        # different control-flow shapes that would need their own redesign to
+        # fold in, not just a field addition - left out of scope deliberately
+        # rather than silently.
+        failure_category: Optional[str] = None
+        if not quality_passed:
+            failure_category = "environment_failure" if environment_failure else "quality_gates_exhausted"
+
         # Write persistent trace log
         try:
             from kriya.core.trace import TraceLogger
@@ -2678,6 +3252,9 @@ class WorkflowEngine:
             "design": design,
             "files": list(all_files_written),
             "quality_gates_passed": quality_passed,
+            "environment_failure": environment_failure if not quality_passed else None,
+            "failure_category": failure_category,
+            "toolchain_warning": toolchain_warning,
             "review": review,
             "run_id": run_id,
         }

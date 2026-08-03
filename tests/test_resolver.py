@@ -129,3 +129,48 @@ def test_enrich_none_output():
     """Should gracefully handle None output."""
     result = enrich_java_compiler_errors(None)
     assert result is None
+
+
+def test_enrich_does_not_query_bare_simple_class_names():
+    """Regression test for a real bug found via two live golden-use-case runs
+    (Ignite, Qpid): "cannot find symbol: class X" (a bare, unqualified class
+    name with no package/FQCN context) used to be queried against Maven
+    Central's simple-class-name search (c:"X"), which has no
+    relevance/consensus filtering and just takes the single top hit.
+    Confirmed live as actively harmful, not just unhelpful: a real "cannot
+    find symbol: class IgniteCache" (whose actual cause was a wrong import
+    path, not a missing dependency) matched an unrelated tiny library
+    (cc.mashroom:mashroom-plugin) that got auto-accrued into a permanent
+    skill polluting a later, unrelated goal; separately, in the same run,
+    5/5 bare-class-name matches (SystemLauncher, ConnectionFactory,
+    MessageProducer, MessageConsumer, TextMessage) were unrelated garbage
+    (dataspacetck, ldk-sql-api, tracee-examples-jms-api, dapeng-message-api,
+    dingtalk) while the package-based search correctly resolved javax.jms in
+    the SAME compiler output - the bare-name pattern is categorically less
+    reliable than the others and is now never queried at all."""
+    compiler_output = (
+        "[ERROR] cannot find symbol\n"
+        "  symbol:   class ConnectionFactory\n"
+        "  location: class com.example.QpidClientApp"
+    )
+
+    with patch("kriya.tools.resolver.resolve_maven_class") as mock_resolve:
+        enriched = enrich_java_compiler_errors(compiler_output)
+        mock_resolve.assert_not_called()
+
+    assert enriched == compiler_output
+    assert "KRIYA SUGGESTION" not in enriched
+
+
+def test_enrich_still_queries_missing_package():
+    """Patterns 1/2/4 (FQCN, Spring bean FQCN, missing package) are unchanged
+    and still fire - only the bare-simple-class-name pattern was removed."""
+    compiler_output = "[ERROR] package javax.jms does not exist"
+
+    with patch("kriya.tools.resolver.resolve_maven_class") as mock_resolve:
+        mock_resolve.return_value = {"groupId": "javax.jms", "artifactId": "jms", "version": "1.1"}
+        enriched = enrich_java_compiler_errors(compiler_output)
+
+    mock_resolve.assert_called_once_with("javax.jms", "g")
+    assert "<groupId>javax.jms</groupId>" in enriched
+    assert "<artifactId>jms</artifactId>" in enriched
