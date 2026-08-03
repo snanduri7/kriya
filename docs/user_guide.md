@@ -386,6 +386,8 @@ If a failure doesn't clearly point at one of your files (a bare exit code, a bui
 
 When a retry knows the exact broken source line, it now prefers asking for a small, anchored patch (a targeted before/after code block) over regenerating the whole file - found live that a full regeneration can correctly state the right fix in its own analysis and then still lose it while rewriting everything else around it. Falls back to full-file content automatically if the fix genuinely needs broader changes.
 
+When `jdtls` is installed (`brew install jdtls`, no config needed) and a retry is fixing a Java file, Kriya also checks it against the project's real, resolved classpath and folds any confirmed error into the same retry prompt - deterministic ground truth for import/symbol mistakes, distinct from (and complementary to) the compile error itself. Optional and automatic: not found, or fails to start, and nothing changes. `kriya doctor` reports whether it was detected.
+
 Java compile checks always pass `-Xlint:rawtypes,unchecked` to javac now, so a raw-type mistake (e.g. using a cache/collection without generics, a real and recurring cause of "incompatible types" failures) shows up as a precisely-located warning right next to the resulting error, rather than javac's default one-line notice with no file/line at all - one more concrete thing the fix-analysis step above has to work with.
 
 ### 4.8 Completeness Prevention & Missing-File Recovery
