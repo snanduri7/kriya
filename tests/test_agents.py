@@ -433,6 +433,94 @@ async def test_fill_missing_content_scopes_fix_analysis_to_implicated_files_only
     assert files_by_path["Broken.java"] == "class Broken {}"
     assert files_by_path["Unrelated.java"] == "class Unrelated {}"
 
+def test_split_fix_analysis_edit_extracts_search_replace():
+    text = (
+        "FIX ANALYSIS: Person needs to implement Serializable for ObjectMessage.\n"
+        "SEARCH:\n"
+        "public class Person {\n"
+        "REPLACE:\n"
+        "public class Person implements java.io.Serializable {"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert analysis == "Person needs to implement Serializable for ObjectMessage."
+    assert edits == [{
+        "search": "public class Person {",
+        "replace": "public class Person implements java.io.Serializable {",
+    }]
+    assert content is None
+
+def test_split_fix_analysis_edit_falls_back_to_file_content_when_no_markers():
+    text = "FIX ANALYSIS: broader change needed.\nFILE CONTENT:\npublic class App {}"
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert analysis == "broader change needed."
+    assert edits is None
+    assert content == "public class App {}"
+
+def test_split_fix_analysis_edit_falls_back_when_no_markers_at_all():
+    text = "public class App {}"
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert analysis is None
+    assert edits is None
+    assert content == text
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_prefers_anchored_edit_when_source_context_known():
+    """A precise source location (error_source_context has a real snippet for
+    this file) should make the prompt prefer a small SEARCH:/REPLACE: patch
+    over full-file regeneration, and a compliant response should come back as
+    edits, not content. Motivated by a real, distinct failure mode: a full
+    regeneration correctly self-diagnosed a one-line fix (Person needing
+    `implements Serializable`) in its own FIX ANALYSIS text, then still
+    emitted the class without it - the stated intention got lost somewhere
+    across rewriting the whole file. A small anchored edit has no unrelated
+    content for that to happen inside."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value=(
+            "FIX ANALYSIS: Person needs Serializable.\n"
+            "SEARCH:\npublic class Person {\nREPLACE:\npublic class Person implements java.io.Serializable {"
+        )
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["Person.java"],
+        prior_error_context="incompatible types at Person.java:[5,1]",
+        error_source_context={"Person.java": "\n>> 5: public class Person {\n"},
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "SEARCH:" in file_prompt
+    assert "REPLACE:" in file_prompt
+    assert files[0]["content"] is None
+    assert files[0]["edits"] == [{
+        "search": "public class Person {",
+        "replace": "public class Person implements java.io.Serializable {",
+    }]
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_anchored_edit_preference_without_source_context():
+    """Without a known source location (error_source_context has no entry for
+    this file), the prompt must stay on the plain FILE CONTENT: instruction -
+    an anchored edit isn't well-grounded without knowing where to anchor it."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nFILE CONTENT:\nclass App {}")
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="some error with no location",
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "SEARCH:" not in file_prompt
+    assert "FILE CONTENT:" in file_prompt
+    assert files[0]["content"] == "class App {}"
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_applies_retry_temperature_only_to_implicated_file():
     """retry_temperature (LLMConfig.retry_temperature) must only override the

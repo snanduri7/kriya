@@ -272,6 +272,38 @@ class DeveloperAgent(BaseAgent):
         return (analysis or None), content
 
     @staticmethod
+    def _split_fix_analysis_edit(text: str) -> Tuple[Optional[str], Optional[List[Dict[str, str]]], Optional[str]]:
+        """Splits a per-file retry completion into (fix_analysis, edits, full_content)
+        when the model was asked to prefer a small, anchored SEARCH:/REPLACE: patch
+        over regenerating the whole file (see _fill_missing_content) - returns
+        (analysis, [{"search":..., "replace":...}], None) if both markers are found
+        in order, else falls back to _split_fix_analysis's plain FILE CONTENT: parsing
+        (analysis, None, content).
+
+        Motivated by a real, distinct failure mode found live: a full-file
+        regeneration correctly self-diagnosed a one-line fix in its own FIX ANALYSIS
+        text (a class needing `implements Serializable` added) and then still
+        emitted the class WITHOUT it - the intention was stated correctly and lost
+        somewhere across regenerating the entire surrounding file from scratch. A
+        small, localized edit has nowhere for that to happen: there's no unrelated
+        content for a one-line fix to get lost inside. A failed/ambiguous anchor
+        match (0 or >1 occurrences) raises inside apply_anchored_edits() and is
+        caught by the same retry-loop exception handling as any other Quality Gate
+        failure - not a new failure mode, just becomes the next attempt's error
+        text, same as a compile failure would."""
+        search_match = re.search(r"search:", text, re.IGNORECASE)
+        replace_match = re.search(r"replace:", text, re.IGNORECASE)
+        if search_match and replace_match and replace_match.start() > search_match.start():
+            analysis = text[:search_match.start()].strip()
+            analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
+            search_block = text[search_match.end():replace_match.start()].strip()
+            replace_block = text[replace_match.end():].strip()
+            if search_block:
+                return (analysis or None), [{"search": search_block, "replace": replace_block}], None
+        analysis, content = DeveloperAgent._split_fix_analysis(text)
+        return analysis, None, content
+
+    @staticmethod
     def _normalize_file_entries(parsed: Any) -> Optional[List[Dict[str, Any]]]:
         """Normalizes whatever shape the file-list completion parsed into - a list of
         path strings, a list of dicts with filepath/path (+ optional content/edits), or
@@ -391,14 +423,6 @@ class DeveloperAgent(BaseAgent):
             # _split_fix_analysis for the full live-testing rationale.
             file_is_implicated = implicated_files is None or filepath in implicated_files
             apply_fix_analysis = bool(prior_error_context) and file_is_implicated
-            fix_analysis_instruction = (
-                "\nThis is a RETRY: the previous attempt at this file failed the error described "
-                "in the Task section above. Before writing any code, you MUST first write a line "
-                "\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of that "
-                "error and exactly what you are changing to address it. Only after that analysis, "
-                "write the line \"FILE CONTENT:\" on its own line, followed by the complete file "
-                "content and nothing else after it.\n"
-            ) if apply_fix_analysis else ""
 
             # The exact broken source line(s), read fresh from the worktree by
             # extract_error_source_locations()/_build_error_source_context()
@@ -409,6 +433,45 @@ class DeveloperAgent(BaseAgent):
             source_context_block = (
                 (error_source_context or {}).get(filepath, "") if apply_fix_analysis else ""
             )
+
+            # A precise source location means a small, anchored SEARCH:/REPLACE:
+            # patch is well-grounded - prefer requesting one over a full-file
+            # regeneration. Found live as a real, distinct failure mode: a full
+            # regeneration correctly self-diagnosed a one-line fix in its own FIX
+            # ANALYSIS text, then still emitted the file without it - the stated
+            # intention got lost somewhere across rewriting the whole surrounding
+            # file from scratch. A small edit has no unrelated content for that to
+            # happen inside. Kept as a preference, not a hard requirement (real
+            # fixes sometimes genuinely need broader changes) - falls back to full
+            # FILE CONTENT: parsing if the model doesn't use the markers, and an
+            # anchor that fails to match exactly once raises inside
+            # apply_anchored_edits(), caught by the same retry-loop exception
+            # handling as any other Quality Gate failure.
+            prefer_anchored_edit = apply_fix_analysis and bool(source_context_block)
+            if prefer_anchored_edit:
+                fix_analysis_instruction = (
+                    "\nThis is a RETRY: the previous attempt at this file failed the error described "
+                    "in the Task section above. Before writing any code, you MUST first write a line "
+                    "\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of that "
+                    "error and exactly what you are changing to address it. Then, PREFER a small, "
+                    "localized fix: write the line \"SEARCH:\" followed by the exact original code "
+                    "(copied verbatim from the source context above) that needs to change, then the line "
+                    "\"REPLACE:\" followed by the corrected code - include only the lines that actually "
+                    "need to change plus the minimum surrounding context needed to uniquely identify them, "
+                    "not the whole file. Only if the fix genuinely requires broader restructuring beyond a "
+                    "small patch, instead write \"FILE CONTENT:\" followed by the complete corrected file.\n"
+                )
+            elif apply_fix_analysis:
+                fix_analysis_instruction = (
+                    "\nThis is a RETRY: the previous attempt at this file failed the error described "
+                    "in the Task section above. Before writing any code, you MUST first write a line "
+                    "\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of that "
+                    "error and exactly what you are changing to address it. Only after that analysis, "
+                    "write the line \"FILE CONTENT:\" on its own line, followed by the complete file "
+                    "content and nothing else after it.\n"
+                )
+            else:
+                fix_analysis_instruction = ""
 
             # Stable, large blocks first (existing code context, then architecture design) so
             # same-model retries can reuse the inference server's KV-cache prefix; the task
@@ -440,12 +503,22 @@ class DeveloperAgent(BaseAgent):
                 temperature_override=retry_temperature if apply_fix_analysis else None,
             )
 
-            if apply_fix_analysis:
+            edits = None
+            if prefer_anchored_edit:
+                analysis, edits, content = self._split_fix_analysis_edit(content)
+                if analysis:
+                    logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
+                if edits:
+                    logger.info(f"Developer returned an anchored edit for '{filepath}' instead of full content.")
+            elif apply_fix_analysis:
                 analysis, content = self._split_fix_analysis(content)
                 if analysis:
                     logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
 
-            files_out.append({"filepath": filepath, "content": self._strip_markdown_fences(content)})
+            if edits:
+                files_out.append({"filepath": filepath, "content": None, "edits": edits})
+            else:
+                files_out.append({"filepath": filepath, "content": self._strip_markdown_fences(content)})
         return files_out
 
     async def run_generation(
