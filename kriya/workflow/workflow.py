@@ -2284,6 +2284,14 @@ class WorkflowEngine:
                     "you must preserve ALL of these even if the current goal doesn't need them; "
                     "do not silently drop any while editing pom.xml):\n"
                     + "\n".join(f"- {d}" for d in _existing_dependencies)
+                    + "\n\nBefore adding ANY new dependency, check whether the package/class you need "
+                    "is already used successfully in the Existing Code Base Context shown below - if an "
+                    "import already appears there and that code is known-working, it is ALREADY resolvable "
+                    "through one of the dependencies listed above (often transitively) and you must NOT add "
+                    "a new, separate dependency for it. Confirmed live as a real bug: a retry added an "
+                    "explicit javax.jms:jms:1.1 dependency (which doesn't exist on Maven Central) for a "
+                    "'javax.jms.*' import that was already compiling successfully via the existing "
+                    "qpid-jms-client dependency alone - the addition was both wrong and unnecessary."
                 )
         # Unified attempt counter for gate_outcomes/logging only - retry_count and
         # targeted_retry_count are the actual budget counters, but a single

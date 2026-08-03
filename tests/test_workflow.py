@@ -675,6 +675,15 @@ async def test_workflow_full_set_prompt_includes_existing_dependencies_checklist
     assert "Existing Maven dependencies" in developer_prompt
     assert "org.apache.ignite:ignite-indexing" in developer_prompt
     assert "org.apache.ignite:ignite-core" in developer_prompt
+    # Regression test for a real bug found live during golden-use-case
+    # validation: the preservation checklist only ever protected against
+    # DROPPING an existing dependency - nothing stopped the model from ADDING
+    # a new, redundant (and in the real case, nonexistent) dependency for a
+    # package that was already resolvable via an existing one. A retry added
+    # javax.jms:jms:1.1 (removed from Maven Central) for a javax.jms.* import
+    # that was already compiling fine via the existing qpid-jms-client
+    # dependency alone - both wrong and unnecessary.
+    assert "you must NOT add a new, separate dependency" in developer_prompt
 
 
 @pytest.mark.asyncio
