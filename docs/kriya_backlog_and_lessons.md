@@ -2,7 +2,9 @@
 
 **Current, kept live and edited in place** — not a chronological log. When an item closes it moves out of the backlog; when a new one opens it's added here. For the full session-by-session narrative behind any of this, see the archived [`kriya_production_readiness.md`](kriya_production_readiness.md) (frozen as of tag `0.10`).
 
-Score as of tag `0.10`: **8.5/10**.
+Score as of tag `0.10`: **8.5/10**. Recalibrated mid-session (2026-08-03) to **7-7.5/10** after repeated live cold-start M3 failures - the infrastructure fixes below are real and well-tested, but end-to-end reliability on a moderately complex, novel goal is not yet where it needs to be; don't let a closed backlog item count substitute for outcome evidence.
+
+**Status as of 2026-08-03 end of day**: `accuracy-improvements` branch (18 commits ahead of `main`, all pushed, 529 tests passing, ruff clean) has six real, evidenced, regression-tested structural fixes from today (JAVA_HOME crash, stack-detection false positive, LSP visibility x2, runtime-verification file-scoping, process-group leak). Deliberately NOT merged into `main` yet - explicitly deferred to next session. Open question before merging (or after - it doesn't block, but should be tracked): whether the retry-loop improvements (LSP grounding, `likely_files` scoping) measurably improve M3-class success rate, not just that they engage correctly - not yet observed live, since every M3 run today either passed on the first attempt (mechanisms unexercised) or failed for a root cause the mechanisms got a chance to help with but the run still exhausted its retry budget before recovering.
 
 ## Current backlog
 
