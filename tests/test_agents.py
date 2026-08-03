@@ -389,6 +389,74 @@ async def test_fill_missing_content_no_fix_analysis_instruction_without_prior_er
     assert files[0]["content"] == "public class App {}"
 
 @pytest.mark.asyncio
+async def test_fill_missing_content_scopes_fix_analysis_to_implicated_files_only():
+    """Regression test for a real bug found live during golden-use-case
+    validation: a full-set retry regenerates every file in the batch, and
+    without scoping, EVERY file's per-file prompt got the same "explain the
+    fix" instruction even though the compile error only ever implicated ONE
+    of them - producing confused/wrong analyses for unrelated files (a real
+    run blamed a perfectly fine Person.java for a bug that was actually a
+    raw-type cache access mistake in a completely different file) and
+    diluting the one analysis call that actually mattered. Only the
+    implicated file's prompt should carry the fix-analysis instruction and
+    error_source_context; an unrelated file in the same batch must be asked
+    to regenerate normally, as if it were a clean attempt."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    file_list_response = json.dumps([
+        {"filepath": "Broken.java"},
+        {"filepath": "Unrelated.java"},
+    ])
+    llm.complete = AsyncMock(side_effect=[
+        file_list_response,
+        "FIX ANALYSIS: fixed it\nFILE CONTENT:\nclass Broken {}",
+        "class Unrelated {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        prior_error_context="incompatible types at Broken.java:[10,5]",
+        implicated_files=["Broken.java"],
+        error_source_context={"Broken.java": "\n>> 10: bad line\n"},
+    )
+
+    broken_prompt = llm.complete.call_args_list[1][0][1]
+    unrelated_prompt = llm.complete.call_args_list[2][0][1]
+
+    assert "FIX ANALYSIS" in broken_prompt
+    assert "bad line" in broken_prompt
+    assert "FIX ANALYSIS" not in unrelated_prompt
+    assert "bad line" not in unrelated_prompt
+
+    files_by_path = {f["filepath"]: f["content"] for f in files}
+    assert files_by_path["Broken.java"] == "class Broken {}"
+    assert files_by_path["Unrelated.java"] == "class Unrelated {}"
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_implicated_files_none_applies_to_all():
+    """implicated_files=None (the default, and what a targeted retry passes,
+    where every file in the batch already IS implicated by construction) must
+    preserve the pre-existing behavior: apply the fix-analysis instruction to
+    every file needing content, not just a subset."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "FIX ANALYSIS: fixed a\nFILE CONTENT:\nclass A {}",
+        "FIX ANALYSIS: fixed b\nFILE CONTENT:\nclass B {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["A.java", "B.java"],
+        prior_error_context="some error",
+    )
+
+    for call in llm.complete.call_args_list:
+        assert "FIX ANALYSIS" in call[0][1]
+
+@pytest.mark.asyncio
 async def test_run_generation_without_known_target_files_still_asks_for_file_list():
     """known_target_files must be strictly opt-in - a normal (non-targeted)
     generation call, which doesn't know the file set in advance, must be

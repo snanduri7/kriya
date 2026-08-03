@@ -22,6 +22,7 @@ from kriya.workflow.workflow import (
     IncompleteGenerationError,
     WorkflowEngine,
     _augment_error_with_live_lookup,
+    _build_error_source_context,
     _build_full_set_retry_prompt,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
@@ -36,6 +37,7 @@ from kriya.workflow.workflow import (
     _scoped_skill_gap_description,
     classify_environment_failure,
     extract_error_search_terms,
+    extract_error_source_locations,
     extract_expected_files,
     extract_implicated_files,
     find_missing_expected_files,
@@ -2513,6 +2515,46 @@ def test_extract_error_search_terms_ignores_location_class_shape_even_with_depen
     )
     assert result == []
 
+def test_extract_error_source_locations_finds_absolute_worktree_path():
+    error = (
+        "[ERROR] /Users/dev/proj/.kriya/worktree/src/main/java/com/example/"
+        "IntegrationApp.java:[91,79] incompatible types: java.lang.Object cannot be converted to com.example.Person"
+    )
+    assert extract_error_source_locations(error) == [("IntegrationApp.java", 91)]
+
+def test_extract_error_source_locations_dedups_and_finds_multiple():
+    error = (
+        "[ERROR] .../IntegrationApp.java:[91,79] incompatible types\n"
+        "[ERROR] .../IntegrationApp.java:[91,79] incompatible types\n"
+        "[ERROR] .../Other.java:[5,1] cannot find symbol"
+    )
+    assert extract_error_source_locations(error) == [("IntegrationApp.java", 91), ("Other.java", 5)]
+
+def test_extract_error_source_locations_no_match_returns_empty():
+    assert extract_error_source_locations("Process exited with code 1.") == []
+
+def test_build_error_source_context_extracts_real_source_window(tmp_path):
+    (tmp_path / "IntegrationApp.java").write_text(
+        "\n".join(f"line {i}" for i in range(1, 20))
+    )
+    error = "[ERROR] .../IntegrationApp.java:[10,5] incompatible types"
+    result = _build_error_source_context(str(tmp_path), error, known_files=["IntegrationApp.java"])
+    assert "IntegrationApp.java" in result
+    snippet = result["IntegrationApp.java"]
+    assert ">> 10: line 10" in snippet
+    assert "9: line 9" in snippet
+    assert "11: line 11" in snippet
+    assert "line 1\n" not in snippet  # far-away lines excluded from the window
+
+def test_build_error_source_context_skips_unknown_file(tmp_path):
+    error = "[ERROR] .../NotWritten.java:[10,5] incompatible types"
+    result = _build_error_source_context(str(tmp_path), error, known_files=["IntegrationApp.java"])
+    assert result == {}
+
+def test_build_error_source_context_no_locations_returns_empty(tmp_path):
+    result = _build_error_source_context(str(tmp_path), "Process exited with code 1.", known_files=["App.java"])
+    assert result == {}
+
 def test_normalize_error_for_repeat_detection_strips_maven_timing_lines():
     # Real, byte-for-byte identical underlying failure (Qpid's SystemLauncher
     # UnsupportedOperationException) as captured across two separate Kriya
@@ -3141,6 +3183,58 @@ async def test_workflow_passes_prior_error_context_to_developer_only_on_retries(
     second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
     assert first_call_kwargs["prior_error_context"] is None
     assert same_error in second_call_kwargs["prior_error_context"]
+    # implicated_files must also be None on the clean first attempt, and
+    # correctly scoped to math.py (the only file the error text names) on
+    # the retry - not left unset/always-None, which would silently defeat
+    # the DeveloperAgent-side scoping fix even though prior_error_context
+    # itself was passed correctly.
+    assert first_call_kwargs["implicated_files"] is None
+    assert second_call_kwargs["implicated_files"] == ["math.py"]
+
+@pytest.mark.asyncio
+async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tmp_path):
+    """Regression test for a real bug found live during golden-use-case
+    validation: without this, a full-set retry's per-file fix-analysis
+    instruction (and the source-line context meant to accompany it) got
+    broadcast to every file in the batch, not just the one the compile error
+    actually named. Confirms the retry loop reads the real broken line from
+    the worktree and threads it through scoped to exactly the implicated
+    file."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    error_with_location = (
+        "[ERROR] .../App.java:[3,5] incompatible types: java.lang.Object cannot be converted to java.lang.String"
+    )
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": error_with_location},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                [{"filepath": "App.java", "content": "class App {\n  Object x;\n  String s = x;\n}"}],
+                [{"filepath": "App.java", "content": "class App {\n  Object x;\n  String s = (String) x;\n}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    source_context = second_call_kwargs["error_source_context"]
+    assert source_context is not None
+    assert "App.java" in source_context
+    assert ">> 3:" in source_context["App.java"]
 
 
 def test_incomplete_generation_error_carries_missing_files():

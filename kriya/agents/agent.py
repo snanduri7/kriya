@@ -319,11 +319,25 @@ class DeveloperAgent(BaseAgent):
         base_url_override: Optional[str],
         api_key_override: Optional[str],
         prior_error_context: Optional[str] = None,
+        implicated_files: Optional[List[str]] = None,
+        error_source_context: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
         so a model that only fills in some files in its file-list response doesn't
-        silently end up with empty or missing files."""
+        silently end up with empty or missing files.
+
+        implicated_files scopes prior_error_context's fix-analysis instruction to
+        only the file(s) the error actually names - found live as a real bug: a
+        full-set retry regenerates every file in the batch, and without this scope
+        EVERY file's per-file prompt got the same "explain the fix" instruction
+        even though the error only ever implicated one of them, producing
+        confused/wrong analyses for unrelated files (e.g. blaming a fine Person.java
+        for a bug that was actually in a different file's raw-type cache access)
+        and diluting the one analysis call that actually mattered. None means
+        "apply to every file" (the pre-existing behavior, and correct for a
+        targeted retry, where every file in the batch already IS implicated by
+        construction via known_target_files)."""
         all_paths = [e["filepath"] for e in file_entries]
         files_out = []
         for entry in file_entries:
@@ -353,14 +367,20 @@ class DeveloperAgent(BaseAgent):
 
             # Only present on a retry that's directly responding to a real prior
             # Quality Gate failure (targeted retries, and full-set retries after
-            # attempt 1) - never on a clean first attempt, where there's no error
-            # yet to analyze. Forces an explicit "identify the error, then fix it"
-            # step before code generation - confirmed live as a real, generalizable
-            # gap: single-shot completion with no forcing function regenerated
+            # attempt 1) AND only for a file the error actually implicates - never
+            # on a clean first attempt, where there's no error yet to analyze, and
+            # never on an unrelated file just along for the ride in a full-set
+            # regeneration (implicated_files is None for a targeted retry, where
+            # every file in the batch already IS implicated by construction).
+            # Forces an explicit "identify the error, then fix it" step before
+            # code generation - confirmed live as a real, generalizable gap:
+            # single-shot completion with no forcing function regenerated
             # byte-for-byte identical broken code across 7 straight retries despite
             # the exact error being present in every prompt, because nothing required
             # the model to actually engage with it before writing code. See
             # _split_fix_analysis for the full live-testing rationale.
+            file_is_implicated = implicated_files is None or filepath in implicated_files
+            apply_fix_analysis = bool(prior_error_context) and file_is_implicated
             fix_analysis_instruction = (
                 "\nThis is a RETRY: the previous attempt at this file failed the error described "
                 "in the Task section above. Before writing any code, you MUST first write a line "
@@ -368,7 +388,17 @@ class DeveloperAgent(BaseAgent):
                 "error and exactly what you are changing to address it. Only after that analysis, "
                 "write the line \"FILE CONTENT:\" on its own line, followed by the complete file "
                 "content and nothing else after it.\n"
-            ) if prior_error_context else ""
+            ) if apply_fix_analysis else ""
+
+            # The exact broken source line(s), read fresh from the worktree by
+            # extract_error_source_locations()/_build_error_source_context()
+            # (kriya/workflow/workflow.py) - generic across any compile error
+            # shape, since it keys off javac's universal file:[line,col] locator
+            # rather than any specific error message. Only shown alongside the
+            # fix-analysis instruction, same scoping (this file, this retry).
+            source_context_block = (
+                (error_source_context or {}).get(filepath, "") if apply_fix_analysis else ""
+            )
 
             # Stable, large blocks first (existing code context, then architecture design) so
             # same-model retries can reuse the inference server's KV-cache prefix; the task
@@ -385,6 +415,7 @@ class DeveloperAgent(BaseAgent):
                 f"{sibling_section}"
                 f"Please generate the complete, correct, and production-grade file content for: '{filepath}'\n"
                 f"Return ONLY the content of '{filepath}' - nothing before it, nothing after it, no other file."
+                f"{source_context_block}"
                 f"{fix_analysis_instruction}"
             )
 
@@ -398,7 +429,7 @@ class DeveloperAgent(BaseAgent):
                 api_key_override=api_key_override
             )
 
-            if prior_error_context:
+            if apply_fix_analysis:
                 analysis, content = self._split_fix_analysis(content)
                 if analysis:
                     logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
@@ -417,6 +448,8 @@ class DeveloperAgent(BaseAgent):
         api_key_override: Optional[str] = None,
         known_target_files: Optional[List[str]] = None,
         prior_error_context: Optional[str] = None,
+        implicated_files: Optional[List[str]] = None,
+        error_source_context: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -438,13 +471,20 @@ class DeveloperAgent(BaseAgent):
         prior_error_context: the raw Quality Gate failure text this call is retrying
         in response to, if any - passed straight through to _fill_missing_content to
         trigger the mandatory fix-analysis step (see _split_fix_analysis). None on a
-        clean first attempt, where there's no error yet to analyze."""
+        clean first attempt, where there's no error yet to analyze.
+
+        implicated_files/error_source_context: see _fill_missing_content - scopes
+        the fix-analysis instruction and source-line context to only the file(s)
+        the error actually names, mattering specifically for a full-set retry
+        (known_target_files unset, every written file passes through this same
+        per-file loop) where without this scope every file in the batch got the
+        same "explain the fix" instruction regardless of relevance."""
         if known_target_files:
             file_entries = [{"filepath": p, "content": None, "edits": None} for p in known_target_files]
             return await self._fill_missing_content(
                 file_entries, task_description, design_context, existing_code_context,
                 stream_callback, model_override, base_url_override, api_key_override,
-                prior_error_context,
+                prior_error_context, implicated_files, error_source_context,
             )
 
         # Step 1: Query the model for the list of files to generate (or full implementation if mocked in tests)
@@ -477,7 +517,7 @@ class DeveloperAgent(BaseAgent):
                 return await self._fill_missing_content(
                     file_entries, task_description, design_context, existing_code_context,
                     stream_callback, model_override, base_url_override, api_key_override,
-                    prior_error_context,
+                    prior_error_context, implicated_files, error_source_context,
                 )
 
         except Exception as e:

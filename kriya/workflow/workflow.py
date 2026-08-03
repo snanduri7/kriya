@@ -1088,6 +1088,74 @@ def extract_error_search_terms(
     return terms
 
 
+_ERROR_LOCATION_PATTERN = re.compile(r"([\w./\\-]+\.java):\[(\d+),\d+\]")
+
+
+def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
+    """Extracts (filename, line_number) pairs from compiler error text via
+    javac's own universal locator shape (`File.java:[line,col]`) - deliberately
+    generic, not tied to any specific error MESSAGE (unlike
+    extract_error_search_terms()'s coordinate/wrong-import patterns, which each
+    needed their own new regex the first time that error shape was actually
+    hit live). Every javac diagnostic - incompatible types, cannot find symbol,
+    missing return, wrong argument count, all of them - carries this same
+    locator, so this one mechanism covers the whole family without needing to
+    anticipate each message shape in advance. Returns the bare basename
+    referenced in the error text (which may be an absolute worktree path,
+    e.g. '.../worktree/src/main/java/com/example/Foo.java:[91,79]') - callers
+    resolve it against the known written-files list."""
+    seen = set()
+    locations: List[Tuple[str, int]] = []
+    for m in _ERROR_LOCATION_PATTERN.finditer(error_text):
+        key = (os.path.basename(m.group(1)), int(m.group(2)))
+        if key not in seen:
+            seen.add(key)
+            locations.append(key)
+    return locations
+
+
+def _build_error_source_context(
+    worktree_path: str, error_text: str, known_files: Iterable[str]
+) -> Dict[str, str]:
+    """For each (file, line) the error text locates, reads a small window of
+    the REAL current source around that line from the worktree and formats it
+    for direct inclusion in that file's own retry prompt - the exact broken
+    line(s), not a prose description buried inside a noisy multi-line Maven
+    build banner. Generic across any compile error shape (see
+    extract_error_source_locations). Returns {filepath: formatted_snippet},
+    keyed by the real relative filepath (matched against known_files by
+    basename, since the error text's own path may be absolute/worktree-
+    rooted) - a location naming a file Kriya doesn't know about (already
+    deleted, or a dependency's own source) is silently skipped, not an error."""
+    locations = extract_error_source_locations(error_text)
+    if not locations:
+        return {}
+    by_basename = {os.path.basename(f): f for f in known_files}
+    context_by_file: Dict[str, str] = {}
+    for filename, line_no in locations:
+        filepath = by_basename.get(filename)
+        if not filepath:
+            continue
+        try:
+            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()
+        except Exception as ex:
+            logger.debug(f"Failed to read source context for {filepath}:{line_no}: {ex}")
+            continue
+        if not (1 <= line_no <= len(lines)):
+            continue
+        start, end = max(0, line_no - 4), min(len(lines), line_no + 3)
+        snippet = "\n".join(
+            f"{'>>' if (i + 1) == line_no else '  '} {i + 1}: {lines[i].rstrip()}"
+            for i in range(start, end)
+        )
+        context_by_file[filepath] = (
+            context_by_file.get(filepath, "")
+            + f"\n=== Source context at the reported error location (line {line_no}) ===\n{snippet}\n"
+        )
+    return context_by_file
+
+
 async def _augment_error_with_live_lookup(
     error_text: str, terms: List[str], search_base_url: str, top_k: int
 ) -> str:
@@ -2172,6 +2240,11 @@ class WorkflowEngine:
         # the same class of problem (the model didn't finish the job), not a new
         # kind of retry that deserves its own budget.
         last_missing_files: Optional[List[str]] = None
+        # {filepath: source-line snippet} for the MOST RECENT failure's error
+        # location(s) (see _build_error_source_context) - None/empty whenever
+        # the last failure's error text named no javac-style file:[line,col]
+        # locator, or before any failure has happened yet.
+        last_error_source_context: Dict[str, str] = {}
         # Rendered once (design does not change across retries) and appended to the
         # full-set task description on every attempt, so the Developer sees an
         # explicit, unambiguous checklist of what the design requires BEFORE
@@ -2344,6 +2417,8 @@ class WorkflowEngine:
                         api_key_override=api_key_override,
                         known_target_files=last_implicated_files,
                         prior_error_context=error_context or None,
+                        implicated_files=last_implicated_files,
+                        error_source_context=last_error_source_context or None,
                     )
                 elif use_missing_files:
                     # Missing-file recovery: same primary-model-only, non-escalating
@@ -2457,6 +2532,8 @@ class WorkflowEngine:
                         api_key_override=api_key_override,
                         known_target_files=known_target_files,
                         prior_error_context=error_context or None,
+                        implicated_files=last_implicated_files,
+                        error_source_context=last_error_source_context or None,
                     )
 
                 # Normalize filepaths before anything downstream uses them - the
@@ -3031,6 +3108,17 @@ class WorkflowEngine:
                     implicated = extract_implicated_files(raw_error_context, all_files_written)
                     last_implicated_files = implicated if implicated else None
                     last_missing_files = None
+
+                # Generic across ANY compile error shape (see
+                # extract_error_source_locations) - the exact broken source
+                # line(s), read fresh from the worktree, keyed by file so the
+                # next retry's per-file prompt shows this only to the file(s)
+                # actually implicated, not broadcast to every file in a
+                # full-set batch (same scoping fix as prior_error_context
+                # below).
+                last_error_source_context = _build_error_source_context(
+                    worktree_path, raw_error_context, all_files_written
+                )
 
                 if use_targeted or use_missing_files:
                     targeted_retry_count += 1
