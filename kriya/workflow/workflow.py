@@ -2867,6 +2867,7 @@ class WorkflowEngine:
                                         success_criteria=judgment["success_criteria"],
                                         output=run_res["output"],
                                         returncode=run_res["returncode"],
+                                        files_written=list(all_files_written),
                                     )
                                 gate_outcomes.append({
                                     "attempt": attempt_number,
@@ -2875,7 +2876,27 @@ class WorkflowEngine:
                                     "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
                                 })
                                 if not grade["passed"]:
-                                    raise ValueError(f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}\n\nCaptured output:\n{run_res['output']}")
+                                    # A compile error always names its own broken file
+                                    # (file:[line,col]), which is what lets
+                                    # extract_implicated_files() scope the retry to just
+                                    # that file - a runtime failure's captured output
+                                    # (broker banners, SLF4J lines with no .java suffix)
+                                    # structurally never does, so without this, every
+                                    # runtime-verification failure fell back to a blind
+                                    # full-set retry with none of the FIX ANALYSIS forcing
+                                    # instruction, anchored-edit preference, or file-scoped
+                                    # LSP grounding that a compile failure gets. Naming the
+                                    # grader's likely_files here (already validated against
+                                    # the real file list) lets the exact same downstream
+                                    # basename-matching pick it up with no other plumbing.
+                                    likely_files_note = (
+                                        f"\n\nLikely responsible file(s): {', '.join(grade['likely_files'])}"
+                                        if grade.get("likely_files") else ""
+                                    )
+                                    raise ValueError(
+                                        f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}{likely_files_note}"
+                                        f"\n\nCaptured output:\n{run_res['output']}"
+                                    )
                                 logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
                                 # A passing real-world run is exactly the proof the
                                 # skill-verification gap check is looking for - mark every

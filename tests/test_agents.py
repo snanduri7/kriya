@@ -864,6 +864,51 @@ async def test_run_verifier_grade_unparseable_response_defaults_to_failure():
     grade = await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
 
     assert grade["passed"] is False
+    assert grade["likely_files"] == []
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_returns_likely_files_on_failure():
+    """A runtime failure's captured output structurally never names a .java
+    file the way a compile error does - the grader naming the responsible
+    file directly is what lets the retry loop scope a fix instead of
+    retrying blind against every file."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": False,
+        "reasoning": "The Person was never found in the cache.",
+        "likely_files": ["src/main/java/com/example/CombinedApplication.java"],
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(
+        goal="Cache a Person", success_criteria="Person is cached and logged",
+        output="No Person found in cache", returncode=0,
+        files_written=["src/main/java/com/example/CombinedApplication.java", "src/main/java/com/example/Person.java"],
+    )
+
+    assert grade["passed"] is False
+    assert grade["likely_files"] == ["src/main/java/com/example/CombinedApplication.java"]
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_filters_out_hallucinated_likely_files():
+    # Trust boundary: never let the grader point the retry loop at a file
+    # that was never actually generated for this goal.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": False,
+        "reasoning": "Something failed.",
+        "likely_files": ["src/main/java/com/example/CombinedApplication.java", "NotARealFile.java"],
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(
+        goal="Goal", success_criteria="Criteria", output="output", returncode=0,
+        files_written=["src/main/java/com/example/CombinedApplication.java"],
+    )
+
+    assert grade["likely_files"] == ["src/main/java/com/example/CombinedApplication.java"]
 
 @pytest.mark.asyncio
 async def test_skill_gap_agent_extracts_rules_and_examples():

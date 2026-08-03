@@ -775,21 +775,32 @@ class RunVerifierAgent(BaseAgent):
         success_criteria: str,
         output: str,
         returncode: Optional[int],
+        files_written: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         grader_system_prompt = (
             "You are the Kriya Run Verification Grader.\n"
             "You will be given the original goal, a description of what a successful run's "
-            "output should show, and the ACTUAL captured stdout/stderr and exit code from "
-            "actually running the generated application.\n"
+            "output should show, the list of files generated for this goal, and the ACTUAL "
+            "captured stdout/stderr and exit code from actually running the generated "
+            "application.\n"
             "Decide whether the captured output demonstrates the goal was genuinely achieved - "
             "not merely that the process didn't crash. Be strict: exit code 0 alone is not "
             "sufficient evidence if the described behavior isn't actually visible in the output.\n"
+            "If the run FAILED, also identify which of the given files is most likely "
+            "responsible (the one implementing the missing/incorrect behavior, not just the "
+            "one that happened to log the failure) - a compile error always points the retry "
+            "loop at the exact broken file, but a runtime failure like this one otherwise gives "
+            "it nothing to scope a fix to, so it retries blind against every file. Only name "
+            "files that actually appear in the list below, exactly as given. Leave it empty if "
+            "the run passed or you genuinely cannot tell which file is responsible.\n"
             "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
-            '{"passed": true or false, "reasoning": "one or two sentences citing specific evidence from the output"}'
+            '{"passed": true or false, "reasoning": "one or two sentences citing specific '
+            'evidence from the output", "likely_files": ["exact/path/from/the/list/below", ...] or []}'
         )
         prompt = (
             f"=== Goal ===\n{goal}\n\n"
             f"=== Expected Success Criteria ===\n{success_criteria}\n\n"
+            f"=== Files Generated ===\n{chr(10).join(files_written or [])}\n\n"
             f"=== Actual Exit Code ===\n{returncode}\n\n"
             f"=== Actual Captured Output ===\n{output}\n\n"
             "Did this run actually succeed per the criteria above?"
@@ -802,12 +813,25 @@ class RunVerifierAgent(BaseAgent):
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
             logger.warning(f"Run Verifier grade() returned unparseable JSON, treating as failure: {e}")
-            return {"passed": False, "reasoning": f"Grader response could not be parsed: {e}"}
+            return {"passed": False, "reasoning": f"Grader response could not be parsed: {e}", "likely_files": []}
 
         if not isinstance(parsed, dict):
-            return {"passed": False, "reasoning": "Grader response was not a JSON object."}
+            return {"passed": False, "reasoning": "Grader response was not a JSON object.", "likely_files": []}
 
-        return {"passed": bool(parsed.get("passed")), "reasoning": parsed.get("reasoning") or ""}
+        # Trust boundary: only accept filepaths the grader could have legitimately named -
+        # never let a hallucinated or malformed entry reach the retry loop's file-scoping
+        # logic, same reasoning as check_skill_conflicts()'s index validation elsewhere.
+        raw_likely = parsed.get("likely_files")
+        known_files = set(files_written or [])
+        likely_files = (
+            [f for f in raw_likely if isinstance(f, str) and f in known_files]
+            if isinstance(raw_likely, list) else []
+        )
+        return {
+            "passed": bool(parsed.get("passed")),
+            "reasoning": parsed.get("reasoning") or "",
+            "likely_files": likely_files,
+        }
 
 
 class SkillGapAgent(BaseAgent):

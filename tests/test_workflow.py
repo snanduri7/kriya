@@ -1056,6 +1056,59 @@ async def test_workflow_run_verification_judgment_cached_across_retry_attempts(t
     assert we.run_verifier.grade.call_count == 2
 
 @pytest.mark.asyncio
+async def test_workflow_scopes_retry_to_grader_likely_files_on_run_verification_failure(tmp_path):
+    """A compile error always names its own broken file (file:[line,col]),
+    which is what lets extract_implicated_files() scope a retry to just that
+    file. A runtime verification failure's captured output structurally
+    never does (broker banners, SLF4J lines with no .java suffix) - without
+    the grader naming a likely-responsible file directly, this failure class
+    always fell back to a blind full-set retry with none of the FIX ANALYSIS
+    forcing instruction, anchored-edit preference, or file-scoped LSP
+    grounding a compile failure gets. Confirms the grader's likely_files
+    reaches the next attempt's implicated_files with no extra plumbing."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",                    # Planner
+        "Design: Write app.py and helper.py",     # Architect
+        "Review: Approved",                       # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [
+            {"filepath": "app.py", "content": "import helper\nprint('[SUCCESS]' if helper.check() else 'nope')\n"},
+            {"filepath": "helper.py", "content": "def check():\n    return False\n"},
+        ],
+        [{"filepath": "helper.py", "content": "def check():\n    return True\n"}],
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(side_effect=[
+        {"passed": False, "reasoning": "Missing expected marker.", "likely_files": ["helper.py"]},
+        {"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."},
+    ])
+
+    res = await we.run_generation_workflow(
+        goal="Run with python app.py; it should print [SUCCESS]",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert we.run_verifier.grade.call_count == 2
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    # "app.py" may also match independently (it's coincidentally echoed in the
+    # captured output's run-command line) - what matters here is that the
+    # grader's likely_files made it through at all, not exclusivity.
+    assert "helper.py" in second_call_kwargs["implicated_files"]
+
+@pytest.mark.asyncio
 async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_path):
     """Reproduces a real observed failure: the Runtime Verification judge inferred a
     bare 'python' run command, which isn't on PATH on many real systems (Homebrew
