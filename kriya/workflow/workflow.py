@@ -1170,10 +1170,21 @@ async def _get_or_start_jdtls_client(existing_client: Any, project_root: str) ->
     from kriya.tools.lsp import JdtlsClient, find_jdtls
     jdtls_path = find_jdtls()
     if not jdtls_path:
+        # INFO, not silent: even a successful "ran fine, found nothing worth
+        # surfacing" check produces zero log output by design (that's not a
+        # failure), which made "LSP grounding never engaged this run" and
+        # "it engaged and just had nothing to add" indistinguishable from the
+        # log - confirmed live, 2026-08-03: a real, LSP-catchable missing-
+        # import compile error occurred and NOTHING in the run's log (not
+        # even the WARNING-level failure path above) explained whether jdtls
+        # ever got a chance to check it at all. This one-time positive/
+        # negative signal removes that ambiguity going forward.
+        logger.info("jdtls not found on PATH - no LSP grounding for this run.")
         return None
     client = JdtlsClient(project_root, jdtls_path)
     try:
         await client.start()
+        logger.info(f"jdtls started successfully ({jdtls_path}) - LSP grounding active for this run.")
         return client
     except Exception as ex:
         # WARNING, not debug: jdtls being found on PATH but failing to start is

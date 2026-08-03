@@ -2741,6 +2741,36 @@ async def test_get_or_start_jdtls_client_logs_start_failure_at_warning_not_debug
     assert any("jdtls" in r.message.lower() and "failed to start" in r.message.lower() for r in caplog.records)
 
 @pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_logs_not_found_at_info(caplog):
+    """Regression test for a residual visibility gap found live, 2026-08-03,
+    right after the WARNING-level fix above: a successful jdtls check that
+    finds zero diagnostics produces zero log output by design (not a
+    failure), which meant 'LSP grounding never engaged this run' and 'it
+    engaged and had nothing to add' were still indistinguishable from the
+    log even after the failure path was fixed. This one-time INFO note on
+    the not-found path (previously completely silent) closes that gap."""
+    with caplog.at_level(logging.INFO, logger="kriya.workflow.workflow"), \
+         patch("kriya.tools.lsp.find_jdtls", return_value=None):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is None
+    assert any("jdtls" in r.message.lower() and "not found" in r.message.lower() for r in caplog.records)
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_logs_success_at_info(caplog):
+    """The mirror image of the not-found case above - a successful start
+    must also leave a positive trace, so a run's log can affirmatively
+    confirm LSP grounding was active rather than leaving it ambiguous
+    whether a lack of ground-truth text means 'didn't run' or 'ran and
+    found nothing wrong'."""
+    mock_client = AsyncMock()
+    with caplog.at_level(logging.INFO, logger="kriya.workflow.workflow"), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is mock_client
+    assert any("jdtls" in r.message.lower() and "active" in r.message.lower() for r in caplog.records)
+
+@pytest.mark.asyncio
 async def test_build_lsp_diagnostics_context_only_checks_java_files(tmp_path):
     (tmp_path / "App.java").write_text("class App {}")
     (tmp_path / "pom.xml").write_text("<project></project>")
