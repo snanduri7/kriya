@@ -1637,6 +1637,19 @@ class WorkflowEngine:
                             convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
                     logger.info(f"Loaded engineering skill '{skill.name}' for generation context.")
 
+        # Names of every skill-gap candidate (Stage 1.2 goal-text-derived, Stage 2B
+        # design-derived) that generation proceeds WITHOUT ever having been backed
+        # by verified or newly-extracted information - a human declined/never asked,
+        # live lookup found nothing usable and no fallback existed, or extraction
+        # itself came up empty. Found live as a real, previously-invisible gap: skill-
+        # gap detection and live-lookup resolution both genuinely work, but nothing
+        # downstream ever connected a resulting run (pass OR fail) back to "this
+        # proceeded on an unresolved knowledge gap" - a fresh-install user with no
+        # accumulated skills gets no signal that a shaky success or failure might
+        # trace back to this, distinct from and complementary to failure_category
+        # (which only covers the retry loop's own failure modes, not this one).
+        unresolved_skill_gap_names: List[str] = []
+
         # 1.2. Skill Gap Detection & Interactive Resolution. Compile/test/run-verification
         # passing can't tell you a skill's CONTENT was wrong to begin with - only whether
         # it was ever proven right (a passing Runtime Verification Gate run, or a human
@@ -1664,6 +1677,12 @@ class WorkflowEngine:
                     missing_skill_candidates.append(lib)
         except Exception as ex:
             logger.debug(f"Failed to scan for missing-skill candidates: {ex}")
+
+        if (unverified_relevant or missing_skill_candidates) and not skill_gap_callback:
+            # No callback wired at all (e.g. `fix`, which doesn't wire one) - a real
+            # gap exists but was never even offered a chance to resolve.
+            unresolved_skill_gap_names.extend(s.name for s in unverified_relevant)
+            unresolved_skill_gap_names.extend(missing_skill_candidates)
 
         if (unverified_relevant or missing_skill_candidates) and skill_gap_callback:
             reason_parts = []
@@ -1797,6 +1816,8 @@ class WorkflowEngine:
             else:
                 for s in remaining_unverified:
                     se.mark_gap_acknowledged(s.name)
+                unresolved_skill_gap_names.extend(s.name for s in remaining_unverified)
+                unresolved_skill_gap_names.extend(remaining_missing)
 
             for target, extraction, source in auto_resolutions + manual_resolutions:
                 if extraction["conflicts"]:
@@ -1820,6 +1841,7 @@ class WorkflowEngine:
                     logger.info(f"Strengthened skill '{target.name}' with {len(extraction['rules'])} new rule(s) and {len(extraction['examples'])} example(s) from supplied reference.")
                 else:
                     logger.info(f"Supplied reference material didn't contain anything usable for skill '{target.name}'.")
+                    unresolved_skill_gap_names.append(target.name)
 
         # 1.3. Skill-to-Skill Conflict Detection & Resolution. Two independently
         # correct skills can still conflict when both are active in the same run (e.g.
@@ -2102,6 +2124,13 @@ class WorkflowEngine:
                     # fallback below, exactly as if lookup had been tried and come
                     # up empty - not silently drop this gap-resolution path entirely.
                     found = []
+                if not found:
+                    # Pre-existing asymmetry (see Stage 2B's own docstring elsewhere):
+                    # a search that legitimately finds nothing at all never reaches the
+                    # human-ask fallback below, unlike Stage 1.2. Not fixed here - out
+                    # of scope - but these terms genuinely went unaddressed either way,
+                    # so still worth surfacing in the final report.
+                    unresolved_skill_gap_names.extend(new_design_terms)
                 proceed = bool(found)
                 if found and web_lookup_callback:
                     try:
@@ -2190,6 +2219,8 @@ class WorkflowEngine:
                             if target.name not in active_skills:
                                 active_skills.append(target.name)
                             logger.info(f"Live lookup bootstrapped new skill '{target.name}' from architect design with {len(extraction['rules'])} rule(s).")
+                        else:
+                            unresolved_skill_gap_names.append(target.name)
 
         # Snapshot each active skill's rule set now, before the Developer retry loop -
         # this is what "this run's active context" actually contains (all extraction
@@ -3257,6 +3288,7 @@ class WorkflowEngine:
             "environment_failure": environment_failure if not quality_passed else None,
             "failure_category": failure_category,
             "toolchain_warning": toolchain_warning,
+            "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
             "review": review,
             "run_id": run_id,
         }

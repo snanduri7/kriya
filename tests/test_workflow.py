@@ -1405,6 +1405,78 @@ async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_pa
     se = SkillEngine(str(skills_dir), load_global=False)
     se.discover_and_load()
     assert se.get_skill("widgetlib").verification_gap_acknowledged is True
+    # Regression test for a real, previously-invisible gap: skill-gap detection
+    # and the decline path both correctly happen, but nothing downstream ever
+    # connected a resulting run - pass or fail - back to "this proceeded on an
+    # unresolved knowledge gap." A human explicitly acknowledging "proceed
+    # without it" is still a genuinely unresolved gap for the code that gets
+    # generated, distinct from a real fact being added.
+    assert res["unresolved_skill_gaps"] == ["widgetlib"]
+
+@pytest.mark.asyncio
+async def test_workflow_no_skill_gap_callback_still_reports_unresolved_gap(tmp_path):
+    """A gap exists but no skill_gap_callback was even wired (e.g. as `fix`
+    doesn't wire one) - the gap is never offered a chance to resolve at all,
+    which must still surface in the final report, not disappear silently."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something with the widgetlib skill",
+        workspace_path=str(tmp_path),
+        # No skill_gap_callback passed at all.
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["unresolved_skill_gaps"] == ["widgetlib"]
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    # No callback means the skill was never even asked about - must NOT be
+    # silently marked acknowledged, unlike the explicit-decline case above.
+    assert se.get_skill("widgetlib").verification_gap_acknowledged is False
+
+@pytest.mark.asyncio
+async def test_workflow_unresolved_skill_gaps_none_when_nothing_flagged(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build a simple math library",
+        workspace_path=str(tmp_path),
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["unresolved_skill_gaps"] is None
 
 @pytest.mark.asyncio
 async def test_workflow_skill_gap_not_reasked_once_acknowledged(tmp_path):

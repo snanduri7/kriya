@@ -1164,6 +1164,16 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             # THIS goal may still bite on a different machine or a later,
             # JVM-flag-sensitive one.
             click.secho(f"[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
+        if res.get("unresolved_skill_gaps"):
+            # Shown regardless of pass/fail - a shaky success is exactly the case
+            # this matters most for: nothing else would ever tell you the result
+            # rests on a technology Kriya has no verified information for.
+            click.secho(
+                "[UNVERIFIED KNOWLEDGE] Generation proceeded without verified information for: "
+                f"{', '.join(res['unresolved_skill_gaps'])}. Consider `kriya skills show <name>` "
+                "or supplying reference material via a future run.",
+                fg="yellow",
+            )
         if res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
@@ -1692,6 +1702,12 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         )
         if res.get("toolchain_warning"):
             click.secho(f"\n[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
+        if res.get("unresolved_skill_gaps"):
+            click.secho(
+                "\n[UNVERIFIED KNOWLEDGE] Generation proceeded without verified information for: "
+                f"{', '.join(res['unresolved_skill_gaps'])}.",
+                fg="yellow",
+            )
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:
