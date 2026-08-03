@@ -1,4 +1,8 @@
-# Kriya Production-Readiness Log
+# Kriya Production-Readiness Log (ARCHIVED at tag 0.10)
+
+**This file is frozen as of tag `0.10` (2026-08-03).** It's a full chronological narrative, kept for historical "why did we do X" provenance only - it is no longer updated. For the CURRENT backlog and durable lessons learned, see [`kriya_backlog_and_lessons.md`](kriya_backlog_and_lessons.md) instead.
+
+---
 
 Running, dated log of the incremental production-hardening effort on Kriya - what's been done, what broke, what was found and fixed via real live-model testing, and the current honest readiness assessment. Mirrored from this session's working memory; kept updated going forward as part of the repo rather than only externally.
 
