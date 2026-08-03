@@ -1156,6 +1156,61 @@ def _build_error_source_context(
     return context_by_file
 
 
+async def _get_or_start_jdtls_client(existing_client: Any, project_root: str) -> Any:
+    """Lazily starts a JdtlsClient for this generation run if jdtls is
+    available, reusing an already-started one across retries rather than
+    spinning up a fresh process per attempt (real, observed startup/indexing
+    cost, up to ~2 minutes on larger codebases). Returns None (never raises)
+    if jdtls isn't found on PATH or fails to start - clean, silent degrade
+    to no LSP grounding, matching how Kriya treats every other optional
+    local capability (`kriya doctor` reports whether jdtls was found;
+    nothing here requires it)."""
+    if existing_client is not None:
+        return existing_client
+    from kriya.tools.lsp import JdtlsClient, find_jdtls
+    jdtls_path = find_jdtls()
+    if not jdtls_path:
+        return None
+    client = JdtlsClient(project_root, jdtls_path)
+    try:
+        await client.start()
+        return client
+    except Exception as ex:
+        logger.debug(f"Failed to start jdtls, proceeding without LSP grounding: {ex}")
+        return None
+
+
+async def _build_lsp_diagnostics_context(client: Any, worktree_path: str, filepaths: Iterable[str]) -> Dict[str, str]:
+    """For each .java file in filepaths, checks its CURRENT worktree content
+    against jdtls's real, resolved type graph and returns {filepath:
+    formatted diagnostic text} for any with real (severity=Error) issues -
+    see kriya/tools/lsp.py::format_diagnostics_for_prompt for the actual
+    prompt framing. Best-effort per file: one file's check failing (timeout,
+    a transient jdtls error) never blocks the others or raises - the caller
+    merges this into the same error_source_context dict the retry loop
+    already threads into the scoped per-file prompt, so a jdtls hiccup just
+    means that one file's prompt has one less (still purely additive) signal
+    this attempt, never a hard failure."""
+    from kriya.tools.lsp import format_diagnostics_for_prompt
+    context: Dict[str, str] = {}
+    for filepath in filepaths:
+        if not filepath.endswith(".java"):
+            continue
+        full_path = os.path.join(worktree_path, filepath)
+        if not os.path.exists(full_path):
+            continue
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+            diagnostics = await client.check_file(full_path, content)
+            formatted = format_diagnostics_for_prompt(filepath, diagnostics)
+            if formatted:
+                context[filepath] = formatted
+        except Exception as ex:
+            logger.debug(f"LSP check failed for '{filepath}': {ex}")
+    return context
+
+
 async def _augment_error_with_live_lookup(
     error_text: str, terms: List[str], search_base_url: str, top_k: int
 ) -> str:
@@ -2276,6 +2331,14 @@ class WorkflowEngine:
         # the last failure's error text named no javac-style file:[line,col]
         # locator, or before any failure has happened yet.
         last_error_source_context: Dict[str, str] = {}
+        # One jdtls process for this whole generation run (lazily started on
+        # first real need, kept alive across retries, shut down at run end) -
+        # None until first used, and stays None permanently (no repeated
+        # start attempts) if jdtls isn't found or fails to start. See
+        # kriya/tools/lsp.py - Java-only, informational grounding merged
+        # directly into last_error_source_context below, never gating.
+        jdtls_client = None
+        jdtls_unavailable = False
         # Rendered once (design does not change across retries) and appended to the
         # full-set task description on every attempt, so the Developer sees an
         # explicit, unambiguous checklist of what the design requires BEFORE
@@ -3161,6 +3224,26 @@ class WorkflowEngine:
                     worktree_path, raw_error_context, all_files_written
                 )
 
+                # LSP grounding (Java only, silently skipped if jdtls isn't
+                # installed or this isn't a Maven project) - deterministic,
+                # real-classpath ground truth for the same implicated file(s),
+                # merged directly into the existing error_source_context dict
+                # so it reaches the retry prompt through the same, already-
+                # scoped injection point rather than needing new plumbing.
+                if not jdtls_unavailable and os.path.exists(os.path.join(worktree_path, "pom.xml")):
+                    jdtls_client = await _get_or_start_jdtls_client(jdtls_client, worktree_path)
+                    if jdtls_client is None:
+                        jdtls_unavailable = True
+                    else:
+                        lsp_context = await _build_lsp_diagnostics_context(
+                            jdtls_client, worktree_path,
+                            last_implicated_files if last_implicated_files else all_files_written,
+                        )
+                        for lsp_filepath, lsp_text in lsp_context.items():
+                            last_error_source_context[lsp_filepath] = (
+                                last_error_source_context.get(lsp_filepath, "") + lsp_text
+                            )
+
                 if use_targeted or use_missing_files:
                     targeted_retry_count += 1
                 else:
@@ -3279,6 +3362,12 @@ class WorkflowEngine:
                 f"Quality Gates never passed after {retry_count} attempt(s) - checkpoint '{run_id}' "
                 "left on disk in case a later `--resume-id` run wants to skip Plan/Design and retry Developer."
             )
+
+        if jdtls_client is not None:
+            try:
+                await jdtls_client.shutdown()
+            except Exception as ex:
+                logger.debug(f"jdtls shutdown failed (non-fatal): {ex}")
 
         return {
             "plan": plan,

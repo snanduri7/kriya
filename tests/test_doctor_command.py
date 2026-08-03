@@ -159,3 +159,47 @@ def test_doctor_skips_toolchain_section_cleanly_when_neither_found(tmp_path):
 
     assert "Checking Java/Maven toolchain" not in res.output
     assert res.exit_code == 0
+
+
+def test_doctor_reports_jdtls_found(tmp_path):
+    cfg = _cfg(tmp_path)
+
+    mock_response = MagicMock()
+    mock_response.getcode.return_value = 200
+    mock_response.read.return_value = b'{"data": [{"id": "qwen3-coder:30b"}]}'
+    mock_response.__enter__.return_value = mock_response
+    mock_response.__exit__.return_value = False
+
+    runner = CliRunner()
+    with patch("kriya.cli.load_config", return_value=cfg), \
+         patch("urllib.request.urlopen", return_value=mock_response), \
+         patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", return_value=[0.1] * 384), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/opt/homebrew/bin/jdtls"):
+        res = runner.invoke(main, ["doctor"])
+
+    assert "[FOUND] jdtls at /opt/homebrew/bin/jdtls" in res.output
+    assert "JDK 21+ to RUN" in res.output
+    assert res.exit_code == 0
+
+
+def test_doctor_reports_jdtls_not_found_without_failing(tmp_path):
+    """jdtls is entirely optional - not finding it must never fail doctor's
+    exit code, only note that LSP grounding is unavailable."""
+    cfg = _cfg(tmp_path)
+
+    mock_response = MagicMock()
+    mock_response.getcode.return_value = 200
+    mock_response.read.return_value = b'{"data": [{"id": "qwen3-coder:30b"}]}'
+    mock_response.__enter__.return_value = mock_response
+    mock_response.__exit__.return_value = False
+
+    runner = CliRunner()
+    with patch("kriya.cli.load_config", return_value=cfg), \
+         patch("urllib.request.urlopen", return_value=mock_response), \
+         patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", return_value=[0.1] * 384), \
+         patch("kriya.tools.lsp.find_jdtls", return_value=None):
+        res = runner.invoke(main, ["doctor"])
+
+    assert "Not found on PATH" in res.output
+    assert "brew install jdtls" in res.output
+    assert res.exit_code == 0

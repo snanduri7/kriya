@@ -267,6 +267,28 @@ def doctor(ctx: click.Context) -> None:
         else:
             click.secho("  - [SUCCESS] No version mismatch detected.", fg="green")
 
+    # Optional, Java-only - a missing jdtls is never an error, just a
+    # capability Kriya proceeds without (LSP grounding degrades cleanly to
+    # today's behavior). Manual install only (e.g. `brew install jdtls`),
+    # matching how mvn/java/Ollama are already treated - never auto-
+    # downloaded. jdtls itself needs a modern JVM to RUN, separate from
+    # whatever JDK the analyzed project targets - a real, previously-hit
+    # pitfall elsewhere (a tool assuming "17+" here hit a silent LSP init
+    # timeout in the wild) worth flagging explicitly rather than assuming
+    # the reader already knows.
+    from kriya.tools.lsp import JDTLS_MIN_JAVA_MAJOR_VERSION, find_jdtls
+    jdtls_path = find_jdtls()
+    click.echo("\nChecking optional LSP grounding (Java retry-loop diagnostics):")
+    if jdtls_path:
+        click.secho(f"  - [FOUND] jdtls at {jdtls_path}", fg="green")
+        click.echo(
+            f"    Note: jdtls itself needs JDK {JDTLS_MIN_JAVA_MAJOR_VERSION}+ to RUN - "
+            "separate from whatever JDK your project targets."
+        )
+    else:
+        click.echo("  - Not found on PATH - optional, generation proceeds without LSP grounding.")
+        click.echo("    Install with `brew install jdtls` (or equivalent) to enable it.")
+
     if errors_found:
         click.echo()
         click.secho("One or more checks failed - see [ERROR] lines above.", fg="red", bold=True)

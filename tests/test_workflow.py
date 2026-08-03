@@ -24,10 +24,12 @@ from kriya.workflow.workflow import (
     _augment_error_with_live_lookup,
     _build_error_source_context,
     _build_full_set_retry_prompt,
+    _build_lsp_diagnostics_context,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
     _check_java_toolchain_mismatch,
     _filter_misattributed_extraction,
+    _get_or_start_jdtls_client,
     _is_near_duplicate_rule,
     _java_toolchain_fact,
     _likely_misattributed_sibling,
@@ -2635,6 +2637,156 @@ def test_build_error_source_context_skips_unknown_file(tmp_path):
 def test_build_error_source_context_no_locations_returns_empty(tmp_path):
     result = _build_error_source_context(str(tmp_path), "Process exited with code 1.", known_files=["App.java"])
     assert result == {}
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_returns_none_when_jdtls_not_found():
+    with patch("kriya.tools.lsp.find_jdtls", return_value=None):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_reuses_existing_client():
+    existing = object()
+    with patch("kriya.tools.lsp.find_jdtls") as mock_find:
+        result = await _get_or_start_jdtls_client(existing, "/fake/project")
+    assert result is existing
+    mock_find.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_starts_new_client_when_found():
+    mock_client = AsyncMock()
+    with patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is mock_client
+    mock_client.start.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_degrades_cleanly_if_start_fails():
+    mock_client = AsyncMock()
+    mock_client.start.side_effect = RuntimeError("jdtls crashed on launch")
+    with patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_build_lsp_diagnostics_context_only_checks_java_files(tmp_path):
+    (tmp_path / "App.java").write_text("class App {}")
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    mock_client = AsyncMock()
+    mock_client.check_file.return_value = [
+        {"severity": 1, "range": {"start": {"line": 0}}, "message": "cannot resolve import"}
+    ]
+    result = await _build_lsp_diagnostics_context(mock_client, str(tmp_path), ["App.java", "pom.xml"])
+    assert "App.java" in result
+    assert "pom.xml" not in result
+    assert mock_client.check_file.call_count == 1
+
+@pytest.mark.asyncio
+async def test_build_lsp_diagnostics_context_skips_files_with_no_errors(tmp_path):
+    (tmp_path / "App.java").write_text("class App {}")
+    mock_client = AsyncMock()
+    mock_client.check_file.return_value = []
+    result = await _build_lsp_diagnostics_context(mock_client, str(tmp_path), ["App.java"])
+    assert result == {}
+
+@pytest.mark.asyncio
+async def test_build_lsp_diagnostics_context_survives_a_check_failure(tmp_path):
+    (tmp_path / "App.java").write_text("class App {}")
+    (tmp_path / "Other.java").write_text("class Other {}")
+    mock_client = AsyncMock()
+    mock_client.check_file.side_effect = [
+        RuntimeError("timeout"),
+        [{"severity": 1, "range": {"start": {"line": 0}}, "message": "cannot resolve import"}],
+    ]
+    result = await _build_lsp_diagnostics_context(mock_client, str(tmp_path), ["App.java", "Other.java"])
+    assert "App.java" not in result
+    assert "Other.java" in result
+
+@pytest.mark.asyncio
+async def test_workflow_merges_lsp_diagnostics_into_retry_prompt_for_java_project(tmp_path):
+    """End-to-end wiring test: when jdtls is available (mocked - no real
+    jdtls needed) and the project is a Maven Java project, a real compile
+    failure's retry prompt for the implicated file includes the LSP
+    diagnostic's forceful ground-truth framing, merged into the same
+    error_source_context scoping mechanism already used for the generic
+    file:line:col source-context fix."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    mock_jdtls = AsyncMock()
+    mock_jdtls.check_file.return_value = [
+        {"severity": 1, "range": {"start": {"line": 4}}, "message": "The import org.apache.ignite.cache.IgniteCache cannot be resolved"}
+    ]
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_jdtls):
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[5,1] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                [{"filepath": "App.java", "content": "class App {}"}],
+                [{"filepath": "App.java", "content": "class App {}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    mock_jdtls.start.assert_awaited_once()
+    mock_jdtls.shutdown.assert_awaited_once()
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    error_source_context = second_call_kwargs["error_source_context"]
+    assert "App.java" in error_source_context
+    assert "ground truth" in error_source_context["App.java"].lower()
+    assert "IgniteCache cannot be resolved" in error_source_context["App.java"]
+
+@pytest.mark.asyncio
+async def test_workflow_skips_lsp_gracefully_when_jdtls_not_found(tmp_path):
+    """A project with no jdtls installed must proceed exactly as before this
+    feature existed - zero errors, zero behavior change, confirmed by
+    reusing the exact same retry scenario without mocking JdtlsClient at all."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.lsp.find_jdtls", return_value=None):
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[5,1] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            return_value=[{"filepath": "App.java", "content": "class App {}"}]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
 
 def test_normalize_error_for_repeat_detection_strips_maven_timing_lines():
     # Real, byte-for-byte identical underlying failure (Qpid's SystemLauncher
