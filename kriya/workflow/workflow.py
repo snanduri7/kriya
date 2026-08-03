@@ -889,6 +889,17 @@ _ERROR_COORDINATE_PATTERN = re.compile(
     r"\b([a-zA-Z][\w]*(?:\.[a-zA-Z][\w-]*)+):([a-zA-Z][\w-]*)(?::[\w.-]+)?\b"
 )
 
+# javac's "cannot find symbol" shape specifically for a failed import
+# resolution: "symbol:   class X" followed by "location: package Y" (as
+# opposed to "location: class Y", which is javac's shape for a symbol used
+# but never imported at all - not an import-path mistake, nothing to
+# usefully search for). [X,Y] is a bounded gap so this only matches the two
+# lines actually adjacent in real javac output, never spans unrelated error
+# blocks.
+_ERROR_UNRESOLVED_IMPORT_PATTERN = re.compile(
+    r"symbol:\s*class\s+(\w+)[\s\S]{0,80}?location:\s*package\s+([\w.]+)"
+)
+
 # Maven prints these two lines at the end of EVERY build, success or failure,
 # and their values (build duration, wall-clock timestamp) differ on every
 # single invocation even when the underlying failure is byte-for-byte
@@ -1011,7 +1022,11 @@ def _normalize_error_for_repeat_detection(error_text: str) -> str:
     return normalized
 
 
-def extract_error_search_terms(error_text: str, exclude_coordinates: Optional[Iterable[str]] = None) -> List[str]:
+def extract_error_search_terms(
+    error_text: str,
+    exclude_coordinates: Optional[Iterable[str]] = None,
+    dependency_coordinates: Optional[Iterable[str]] = None,
+) -> List[str]:
     """Extracts safe search terms from Quality Gate error/output text for
     error-triggered live lookup (kriya/workflow/workflow.py's Developer retry
     loop) - restricted to well-known, publicly-referenceable Maven/Gradle-style
@@ -1020,10 +1035,7 @@ def extract_error_search_terms(error_text: str, exclude_coordinates: Optional[It
     a prompt instruction: never the raw error/stack-trace text itself (which can
     contain project-specific class/variable/file names), never goal/design/code
     text - the same principle as the existing extract_library_versions()-based
-    goal/design-stage live lookup. A failure with no such coordinate in it (e.g.
-    a plain "cannot find symbol" compile error naming only a class, not an
-    artifact) simply yields no terms and is never searched - most such failures
-    are code-coherence issues a search wouldn't help with anyway.
+    goal/design-stage live lookup.
 
     exclude_coordinates filters out matches that are technically present but
     useless as a search target - confirmed live as a real bug: Maven's own build
@@ -1033,7 +1045,27 @@ def extract_error_search_terms(error_text: str, exclude_coordinates: Optional[It
     artifact ID gets treated as a genuine third-party library worth searching
     for, wasting a real repeated-failure live-lookup recovery attempt on a term
     that can never find anything useful. Callers pass the workspace's own
-    pom.xml coordinate (get_pom_own_coordinate()) here."""
+    pom.xml coordinate (get_pom_own_coordinate()) here.
+
+    dependency_coordinates covers a DIFFERENT, previously-unhandled failure
+    shape - confirmed live during golden-use-case validation as a real,
+    generalizable gap, not library-specific: "wrong import path within a
+    library the project already, legitimately depends on" (e.g. writing
+    `import org.apache.ignite.cache.IgniteCache;` when the class actually
+    lives at the top-level `org.apache.ignite` package). Unlike a missing-
+    dependency error, javac's diagnostic for this has no groupId:artifactId
+    coordinate anywhere in it - just "symbol: class X" / "location: package
+    Y" - so without this, such a failure yields zero terms and the repeated-
+    failure trigger has nothing to search for, no matter how many times it
+    recurs identically. Matched safely, same trust boundary as the rest of
+    this function: Y (the WRONG package javac tried and failed to resolve)
+    only becomes a search term if its dot-prefix matches the groupId of one
+    of the caller-supplied dependency_coordinates - i.e. only for a class
+    that demonstrably belongs to a library already declared as a real
+    project dependency, never an arbitrary/private symbol name. Pass
+    get_pom_dependencies() here. Renders as "{matched coordinate} {symbol}",
+    e.g. "org.apache.ignite:ignite-core IgniteCache", which _resolve_via_web_
+    lookup() then suffixes with " example" like every other term."""
     seen = set()
     terms = []
     exclude = set(exclude_coordinates) if exclude_coordinates else set()
@@ -1042,6 +1074,17 @@ def extract_error_search_terms(error_text: str, exclude_coordinates: Optional[It
         if term not in seen and term not in exclude:
             seen.add(term)
             terms.append(term)
+
+    if dependency_coordinates:
+        for symbol, wrong_package in _ERROR_UNRESOLVED_IMPORT_PATTERN.findall(error_text):
+            for coord in dependency_coordinates:
+                group_id = coord.split(":", 1)[0]
+                if wrong_package == group_id or wrong_package.startswith(group_id + "."):
+                    term = f"{coord} {symbol}"
+                    if term not in seen and term not in exclude:
+                        seen.add(term)
+                        terms.append(term)
+                    break
     return terms
 
 
@@ -2917,14 +2960,16 @@ class WorkflowEngine:
                 # resolve (a test-assertion failure is usually application-logic-
                 # specific, not something external docs fix). Terms are extracted
                 # via a hard, code-enforced regex restricted to Maven/Gradle-style
-                # groupId:artifactId coordinates found IN the error text - the same
+                # groupId:artifactId coordinates found IN the error text, plus
+                # (separately, safety-bounded via the worktree's own declared
+                # dependencies below) a wrong-import-path shape - the same
                 # query-safety boundary as the existing goal/design-stage live
                 # lookup: never the raw error/stack-trace text itself, which can
-                # contain project-specific class/variable names. When no such
-                # coordinate is found (e.g. a plain Java stack trace), the raw text
-                # itself is the fallback signature - normalized first to strip
-                # Maven's own always-different build-timing lines, or two
-                # occurrences of the exact same failure would never compare equal.
+                # contain project-specific class/variable names. When neither
+                # matches (e.g. a plain Java stack trace), the raw text itself
+                # is the fallback signature - normalized first to strip Maven's
+                # own always-different build-timing lines, or two occurrences
+                # of the exact same failure would never compare equal.
                 environment_failure = classify_environment_failure(raw_error_context)
 
                 # Read fresh from the worktree's CURRENT pom.xml each attempt,
@@ -2935,14 +2980,18 @@ class WorkflowEngine:
                 # build banner for whatever the CURRENT attempt actually named
                 # the project.
                 own_project_coordinate = None
+                worktree_dependency_coordinates = None
                 try:
-                    from kriya.tools.validate import get_pom_own_coordinate
-                    own_project_coordinate = get_pom_own_coordinate(os.path.join(worktree_path, "pom.xml"))
+                    from kriya.tools.validate import get_pom_dependencies, get_pom_own_coordinate
+                    worktree_pom_path = os.path.join(worktree_path, "pom.xml")
+                    own_project_coordinate = get_pom_own_coordinate(worktree_pom_path)
+                    worktree_dependency_coordinates = get_pom_dependencies(worktree_pom_path) or None
                 except Exception as ex:
-                    logger.debug(f"Failed to resolve project's own pom.xml coordinate: {ex}")
+                    logger.debug(f"Failed to resolve project's own pom.xml coordinate/dependencies: {ex}")
                 error_terms = extract_error_search_terms(
                     raw_error_context,
                     exclude_coordinates=[own_project_coordinate] if own_project_coordinate else None,
+                    dependency_coordinates=worktree_dependency_coordinates,
                 )
                 current_failure_signature = (
                     fail_type,

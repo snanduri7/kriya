@@ -2465,6 +2465,54 @@ def test_extract_error_search_terms_no_exclusion_when_none_given():
     error = "[INFO] ----------------< com.example:ignite-qpid-integration >-----------------"
     assert extract_error_search_terms(error) == ["com.example:ignite-qpid-integration"]
 
+def test_extract_error_search_terms_finds_unresolved_import_matching_dependency():
+    # Regression test for a real bug found live during M3 golden-use-case
+    # validation: a wrong-import-path compile failure (e.g. writing
+    # `import org.apache.ignite.cache.IgniteCache;` when the class actually
+    # lives at the top-level org.apache.ignite package) has NO groupId:
+    # artifactId coordinate anywhere in it - just "symbol: class X" /
+    # "location: package Y" - so it previously yielded zero search terms no
+    # matter how many times it recurred identically. This is safety-bounded:
+    # only becomes a term because "org.apache.ignite.cache" shares a dot-
+    # prefix with a coordinate the caller says is a REAL project dependency.
+    error = (
+        "[ERROR] .../IntegrationApp.java:[5,31] cannot find symbol\n"
+        "[ERROR]   symbol:   class IgniteCache\n"
+        "[ERROR]   location: package org.apache.ignite.cache\n"
+    )
+    result = extract_error_search_terms(
+        error, dependency_coordinates=["org.apache.ignite:ignite-core"]
+    )
+    assert result == ["org.apache.ignite:ignite-core IgniteCache"]
+
+def test_extract_error_search_terms_ignores_unresolved_import_with_no_matching_dependency():
+    # Same wrong-import shape, but no supplied dependency's groupId matches
+    # the erroneous package - must NOT become a search term, since that
+    # would mean sending an arbitrary/unverified symbol name outbound.
+    error = (
+        "[ERROR] .../IntegrationApp.java:[5,31] cannot find symbol\n"
+        "[ERROR]   symbol:   class IgniteCache\n"
+        "[ERROR]   location: package org.apache.ignite.cache\n"
+    )
+    result = extract_error_search_terms(
+        error, dependency_coordinates=["org.apache.qpid:qpid-broker-core"]
+    )
+    assert result == []
+
+def test_extract_error_search_terms_ignores_location_class_shape_even_with_dependencies():
+    # "location: class X" (javac's shape for a symbol never imported at all,
+    # not a wrong-import-path mistake) must never match, even when
+    # dependency_coordinates are supplied - only "location: package Y" is
+    # the targeted, safety-bounded shape.
+    error = (
+        "cannot find symbol: class JmsConnectionFactory\n"
+        "location: class com.example.CacheAndMessagingClient\n"
+    )
+    result = extract_error_search_terms(
+        error, dependency_coordinates=["org.apache.qpid:qpid-jms-client"]
+    )
+    assert result == []
+
 def test_normalize_error_for_repeat_detection_strips_maven_timing_lines():
     # Real, byte-for-byte identical underlying failure (Qpid's SystemLauncher
     # UnsupportedOperationException) as captured across two separate Kriya
@@ -2713,6 +2761,64 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
     assert res["quality_gates_passed"] is True
     mock_search.assert_called_once_with(
         "org.codehaus.mojo:exec-maven-plugin example", "http://fake-search:8080", top_k=3
+    )
+
+@pytest.mark.asyncio
+async def test_workflow_repeated_failure_live_lookup_resolves_wrong_import_via_dependency_match(tmp_path):
+    """Regression test for a real bug found live during M3 golden-use-case
+    validation: a wrong-import-path compile failure (e.g. IgniteCache
+    imported from org.apache.ignite.cache instead of the real top-level
+    org.apache.ignite package) has no groupId:artifactId coordinate in it at
+    all, so the repeated-failure live-lookup trigger previously had nothing
+    to search for no matter how many times the SAME failure recurred - this
+    was confirmed live, not just reasoned about (the exact same IgniteCache
+    mistake recurred across all 7 retry attempts of a real M3 run with live
+    lookup enabled, and it never once engaged). Proves the fix end-to-end:
+    once the erroneous package is cross-checked against the project's real
+    declared dependencies, a search DOES fire, scoped to that dependency's
+    coordinate plus the symbol name."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.web_lookup_enabled = True
+    cfg.autonomy.web_lookup_auto_approve = True
+    cfg.search.base_url = "http://fake-search:8080"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    repeated_error = (
+        "[ERROR] .../IntegrationApp.java:[5,31] cannot find symbol\n"
+        "[ERROR]   symbol:   class IgniteCache\n"
+        "[ERROR]   location: package org.apache.ignite.cache\n"
+    )
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Review: Approved",
+    ])
+
+    found = [{"term": "org.apache.ignite:ignite-core IgniteCache", "url": "https://example.com/ignite-quickstart", "snippet": "..."}]
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)) as mock_search, \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="import org.apache.ignite.IgniteCache;")), \
+         patch("kriya.tools.validate.get_pom_own_coordinate", return_value=None), \
+         patch("kriya.tools.validate.get_pom_dependencies", return_value=["org.apache.ignite:ignite-core"]):
+        mock_compile.side_effect = [
+            {"success": False, "output": repeated_error},
+            {"success": False, "output": repeated_error},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    mock_search.assert_called_once_with(
+        "org.apache.ignite:ignite-core IgniteCache example", "http://fake-search:8080", top_k=3
     )
 
 @pytest.mark.asyncio
