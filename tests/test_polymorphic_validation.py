@@ -23,11 +23,43 @@ def test_polymorphic_stack_detection(tmp_path):
     v3 = PolymorphicValidator(str(tmp_path))
     assert v3.stack == "ruby"
 
-def test_python_compile_check(tmp_path):
+
+def test_polymorphic_stack_detection_unknown_for_unsupported_stack(tmp_path):
+    # Regression test: a real JS/TS/Go/Rust/C# project (or any workspace with
+    # none of the Java/Python/Ruby markers) used to silently fall back to
+    # "python" and get a false-positive "compiled successfully" from a check
+    # that matched zero real files. Must be distinguishable as "unknown" now.
+    (tmp_path / "package.json").write_text("{}")
+    (tmp_path / "index.js").write_text("console.log('hi');")
     validator = PolymorphicValidator(str(tmp_path))
-    
-    # Valid Python
+    assert validator.stack == "unknown"
+
+
+def test_unknown_stack_compile_check_is_honest_about_no_validation(tmp_path):
+    (tmp_path / "main.go").write_text("package main\n")
+    validator = PolymorphicValidator(str(tmp_path))
+    res = validator.run_compile_check(["main.go"])
+    # success: True so the retry loop doesn't fail forever on a gate that can
+    # never run for this stack - but the message must not claim a real check
+    # happened, unlike the old blind-Python-default false positive.
+    assert res["success"] is True
+    assert "not confirmed" in res["output"].lower()
+
+
+def test_unknown_stack_run_tests_is_honest_about_no_validation(tmp_path):
+    (tmp_path / "main.go").write_text("package main\n")
+    validator = PolymorphicValidator(str(tmp_path))
+    res = validator.run_tests()
+    assert res["success"] is True
+    assert "not confirmed" in res["output"].lower()
+
+
+def test_python_compile_check(tmp_path):
+    # Written before construction: stack is now detected from real Python
+    # markers (a .py file present, among others), not a blind default.
     (tmp_path / "valid.py").write_text("def ok():\n    pass\n")
+    validator = PolymorphicValidator(str(tmp_path))
+
     res1 = validator.run_compile_check(["valid.py"])
     assert res1["success"] is True
     

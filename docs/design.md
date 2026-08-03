@@ -431,7 +431,7 @@ Both checks run concurrently (`asyncio.gather`, independent computations combine
 ### 4.2 Multi-Language Core (Java & Python)
 Kriya fully supports Java and Python:
 *   **Parsers**: Python's `ast` module for Python; regex-based extraction for Java and Spring XML (`kriya/analyzer/analyzer.py`, `kriya/analyzer/graph.py`) - not tree-sitter.
-*   **Quality Gates**: Automatically detects the build system (Maven for Java; falls back to Python by default otherwise - see `PolymorphicValidator._detect_stack`) and runs `mvn clean compile` then `mvn test` as separate calls for Java (deliberately split for fast-fail), or invokes `pytest` directly via `sys.executable` for Python (no poetry integration).
+*   **Quality Gates**: Automatically detects the build system from real markers - Java (`pom.xml`/`build.gradle`), Ruby (`Gemfile`/`Rakefile`/`spec`), or Python (`requirements.txt`/`pyproject.toml`/`setup.py`/`setup.cfg`/`Pipfile`/any `.py` file present) - see `PolymorphicValidator._detect_stack`. Runs `mvn clean compile` then `mvn test` as separate calls for Java (deliberately split for fast-fail), or invokes `pytest` directly via `sys.executable` for Python (no poetry integration). A workspace matching none of those markers (e.g. a real JS/TS/Go/Rust/C# project) is `"unknown"`, not a silent Python default - `run_compile_check`/`run_tests` report `success: True` with an explicit "no validation available for this stack" message rather than a Python check quietly matching zero real files and reporting a false-positive pass (a real bug, fixed 2026-08-03).
 
 ### 4.3 Staged Skill Accrual
 *   **Rule Staging**: Extracted rules (from auto-debugging escalations) are written to `staged_rules.txt` inside the skill directory.

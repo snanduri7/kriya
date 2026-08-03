@@ -86,21 +86,48 @@ class PolymorphicValidator:
         return get_pom_dependencies(pom_path)
 
     def _detect_stack(self) -> str:
-        """Determines if the workspace uses Python, Java, or Ruby."""
+        """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
+        for anything else (JS/TS, Go, Rust, C#, ...). Python used to be the blind
+        default for anything not Java/Ruby, which meant a genuinely unsupported
+        stack silently ran the Python compile-check branch, matched zero .py
+        files, and reported a false-positive "Python files compiled successfully"
+        - a quality gate that never actually checked anything. Python is now
+        detected the same way Java/Ruby are, by real markers, so "no markers
+        matched" is distinguishable from "this is a Python project"."""
         # 1. Check for Java
-        if (os.path.exists(os.path.join(self.workspace_path, "pom.xml")) or 
+        if (os.path.exists(os.path.join(self.workspace_path, "pom.xml")) or
             os.path.exists(os.path.join(self.workspace_path, "build.gradle")) or
             os.path.exists(os.path.join(self.workspace_path, "src", "main", "java"))):
             return "java"
-            
+
         # 2. Check for Ruby
-        if (os.path.exists(os.path.join(self.workspace_path, "Gemfile")) or 
+        if (os.path.exists(os.path.join(self.workspace_path, "Gemfile")) or
             os.path.exists(os.path.join(self.workspace_path, "Rakefile")) or
             os.path.exists(os.path.join(self.workspace_path, "spec"))):
             return "ruby"
-            
-        # Default fallback to Python
-        return "python"
+
+        # 3. Check for Python
+        if (os.path.exists(os.path.join(self.workspace_path, "requirements.txt")) or
+            os.path.exists(os.path.join(self.workspace_path, "pyproject.toml")) or
+            os.path.exists(os.path.join(self.workspace_path, "setup.py")) or
+            os.path.exists(os.path.join(self.workspace_path, "setup.cfg")) or
+            os.path.exists(os.path.join(self.workspace_path, "Pipfile")) or
+            self._has_any_py_file()):
+            return "python"
+
+        return "unknown"
+
+    def _has_any_py_file(self) -> bool:
+        """Bounded recursive fallback for a Python project with none of the
+        standard marker files (e.g. a single-script goal with no packaging
+        metadata yet) - stops at the first hit, skips common non-source/
+        dependency directories so it doesn't walk a huge vendored tree."""
+        skip_dirs = {".git", "node_modules", "venv", ".venv", "__pycache__", "build", "dist", ".kriya"}
+        for _root, dirs, filenames in os.walk(self.workspace_path):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            if any(f.endswith(".py") for f in filenames):
+                return True
+        return False
 
     def _run_cmd_with_timeout(self, cmd: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
         env = None
@@ -261,7 +288,17 @@ class PolymorphicValidator:
                 return {"success": False, "output": "\n".join(errors)}
             return {"success": True, "output": "Ruby files syntax check passed."}
 
-        return {"success": True, "output": "Unsupported tech stack compilation check skipped."}
+        # "unknown" - no Java/Python/Ruby markers matched. success: True so an
+        # unsupported stack doesn't fail the retry loop forever over a gate that
+        # was never going to pass, but the message is honest about zero real
+        # validation having happened - never claim a check that didn't run.
+        return {
+            "success": True,
+            "output": (
+                "No compile check available: workspace does not match a supported "
+                "stack (Java/Python/Ruby). Quality gate skipped, NOT confirmed to compile."
+            ),
+        }
 
     def run_tests(self, target_test: Optional[str] = None) -> Dict[str, Any]:
         """Runs tech-stack specific test execution suite."""
@@ -327,7 +364,18 @@ class PolymorphicValidator:
                         cmd.append(target_test)
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
- 
+
+            # "unknown" stack - same reasoning as run_compile_check: succeed so
+            # the retry loop doesn't fail forever on a gate that can never run,
+            # but say plainly that nothing was actually tested.
+            return {
+                "success": True,
+                "output": (
+                    "No test runner available: workspace does not match a supported "
+                    "stack (Java/Python/Ruby). Quality gate skipped, NOT confirmed to pass."
+                ),
+            }
+
         except Exception as e:
             return {"success": False, "output": f"Failed to execute local test suite: {e}"}
 
