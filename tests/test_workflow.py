@@ -1468,8 +1468,8 @@ _BETA_RULE = "Configure the broker to listen on port 5673 for AMQP clients."
 # "brokeralpha" (< "brokerbeta") is always passed as skill_a/rule_a here.
 _CONFLICT_RESPONSE = json.dumps({
     "conflicts": [{
-        "rule_a": _ALPHA_RULE,
-        "rule_b": _BETA_RULE,
+        "rule_a_index": 1,
+        "rule_b_index": 1,
         "explanation": "Both skills configure the same embedded broker's AMQP port to a different value."
     }]
 })

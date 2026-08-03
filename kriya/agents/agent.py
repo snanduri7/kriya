@@ -913,27 +913,53 @@ class SkillGapAgent(BaseAgent):
         if not skill_a_rules or not skill_b_rules:
             return []
 
+        # Index-based referencing instead of asking the model to reproduce rule
+        # text verbatim - found live as a real, near-total efficiency loss: real
+        # runs saw up to 28 "conflicts" discarded from a SINGLE call (one pair of
+        # skills), ~93s and ~4700 output tokens burned, zero real conflicts
+        # surfacing, because the verbatim-match safety check (necessarily strict -
+        # a hallucinated/paraphrased conflict must never silently exclude real
+        # rule content) rejected nearly everything the model returned. Asking for
+        # an integer index instead of reproducing potentially-long rule text
+        # character-for-character removes the failure mode structurally: an
+        # index is either a valid position in the real list or it isn't - no
+        # "almost right" case exists for a fuzzy match to fail on. Kriya still
+        # resolves the actual rule text itself from the real list at that index,
+        # never trusting anything the model claims the text says - same trust
+        # boundary as before, just without the lossy verbatim-reproduction step
+        # in between. A short worked example of each outcome is included since
+        # the raw candidate volume itself (not just the match-failure rate) was
+        # also high - a concrete anchor for "genuinely contradicts" vs. "shares a
+        # topic but doesn't conflict" narrows judgment better than prose alone.
+        numbered_a = "\n".join(f"[{i}] {r}" for i, r in enumerate(skill_a_rules, 1))
+        numbered_b = "\n".join(f"[{i}] {r}" for i, r in enumerate(skill_b_rules, 1))
         system_prompt = (
             "You are the Kriya Skill Conflict Checker.\n"
-            "You are given the rule sets of two engineering skills that are both active "
-            "for the same code generation run. Identify pairs of rules that GENUINELY "
+            "You are given the NUMBERED rule sets of two engineering skills that are both "
+            "active for the same code generation run. Identify pairs of rules that GENUINELY "
             "contradict each other if both were followed at once (e.g. two different "
             "version pins for what should be the same dependency, two different values "
             "for what must be a single shared config setting like a port or protocol). "
             "Do NOT flag rules that merely share a topic but don't actually conflict "
             "(e.g. two different brokers each defining their own, independent config "
             "key is not a conflict).\n"
+            "Example - genuine conflict: Skill A rule 'Use port 5672 for AMQP' vs Skill B "
+            "rule 'Use port 5673 for AMQP' - both name the SAME setting with DIFFERENT "
+            "required values, impossible to satisfy both.\n"
+            "Example - NOT a conflict: Skill A rule 'Ignite cache name must be \"orders\"' vs "
+            "Skill B rule 'Qpid queue name must be \"orders.queue\"' - different systems, "
+            "different settings, no actual contradiction even though both mention naming.\n"
             "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
             "{\n"
-            '  "conflicts": [{"rule_a": "<verbatim from Skill A>", "rule_b": "<verbatim from Skill B>", "explanation": "..."}]\n'
+            '  "conflicts": [{"rule_a_index": <int>, "rule_b_index": <int>, "explanation": "..."}]\n'
             "}\n"
-            "rule_a and rule_b MUST be copied verbatim, character-for-character, from "
-            "the provided rule lists - do not paraphrase or summarize them.\n"
-            'If nothing genuinely conflicts, return {"conflicts": []}.'
+            "rule_a_index/rule_b_index MUST be the bracketed number shown next to the rule - "
+            "do not include the rule text itself in your response.\n"
+            'If nothing genuinely conflicts, return {"conflicts": []} - most skill pairs have none.'
         )
         prompt = (
-            f"=== Skill A: {skill_a_name} ===\n" + "\n".join(skill_a_rules) + "\n\n"
-            f"=== Skill B: {skill_b_name} ===\n" + "\n".join(skill_b_rules) + "\n\n"
+            f"=== Skill A: {skill_a_name} ===\n{numbered_a}\n\n"
+            f"=== Skill B: {skill_b_name} ===\n{numbered_b}\n\n"
             "Identify any genuine contradictions per the instructions above."
         )
         response_str = await call_with_escalation(
@@ -952,21 +978,30 @@ class SkillGapAgent(BaseAgent):
             return []
 
         # Defensive, same reasoning as extract_skill_update's mutual-exclusivity fix:
-        # only trust a "conflict" whose rule text is an exact match against the real
-        # rule sets, so a hallucinated or paraphrased conflict can never silently
-        # exclude real rule content from generation context.
+        # only trust a "conflict" whose index resolves to a real position in the
+        # real rule sets, so a hallucinated/out-of-range index can never silently
+        # exclude real rule content from generation context. Rule TEXT is always
+        # read from the real list at that position, never from anything the model
+        # returned directly.
         valid = []
         for c in conflicts:
             if not isinstance(c, dict):
                 continue
-            rule_a = c.get("rule_a", "")
-            rule_b = c.get("rule_b", "")
-            if rule_a in skill_a_rules and rule_b in skill_b_rules:
-                valid.append({"rule_a": rule_a, "rule_b": rule_b, "explanation": c.get("explanation", "")})
+            idx_a = c.get("rule_a_index")
+            idx_b = c.get("rule_b_index")
+            if (
+                isinstance(idx_a, int) and isinstance(idx_b, int)
+                and 1 <= idx_a <= len(skill_a_rules) and 1 <= idx_b <= len(skill_b_rules)
+            ):
+                valid.append({
+                    "rule_a": skill_a_rules[idx_a - 1],
+                    "rule_b": skill_b_rules[idx_b - 1],
+                    "explanation": c.get("explanation", ""),
+                })
             else:
                 logger.warning(
-                    f"Skill Conflict Checker returned a conflict whose rule text didn't "
-                    f"exactly match '{skill_a_name}'/'{skill_b_name}' rules - discarding."
+                    f"Skill Conflict Checker returned a conflict with an out-of-range index "
+                    f"for '{skill_a_name}'/'{skill_b_name}' ({idx_a!r}/{idx_b!r}) - discarding."
                 )
         return valid
 

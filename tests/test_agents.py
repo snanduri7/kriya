@@ -975,8 +975,8 @@ async def test_check_skill_conflicts_returns_valid_conflict():
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({
         "conflicts": [{
-            "rule_a": "Broker must bind AMQP to port 5672.",
-            "rule_b": "Configure the broker to listen on port 5673 for AMQP clients.",
+            "rule_a_index": 1,
+            "rule_b_index": 1,
             "explanation": "Both skills configure the same embedded broker's AMQP port to different values."
         }]
     }))
@@ -992,16 +992,22 @@ async def test_check_skill_conflicts_returns_valid_conflict():
     assert result[0]["rule_b"] == "Configure the broker to listen on port 5673 for AMQP clients."
 
 @pytest.mark.asyncio
-async def test_check_skill_conflicts_discards_hallucinated_rule_text():
+async def test_check_skill_conflicts_discards_out_of_range_index():
     # Defensive check mirroring extract_skill_update's mutual-exclusivity fix: a
-    # "conflict" whose rule text doesn't exactly match either skill's actual rules
-    # must never be trusted, since it would silently exclude real rule content.
+    # "conflict" whose index doesn't resolve to a real position in either skill's
+    # actual rule list must never be trusted, since it would silently exclude
+    # real rule content. Index-based referencing (not verbatim text) is itself
+    # the fix for a real efficiency bug found live: asking the model to
+    # reproduce rule text character-for-character caused a near-100% discard
+    # rate (up to 28 discarded "conflicts" from a single call) even when the
+    # model's underlying judgment may have been reasonable - an index is either
+    # a valid position or it isn't, no "almost right" case to fail on.
     cfg = AppConfig()
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({
         "conflicts": [{
-            "rule_a": "Paraphrased version of the real rule.",
-            "rule_b": "Use port 5673.",
+            "rule_a_index": 5,  # out of range - skill_a only has 1 rule
+            "rule_b_index": 1,
             "explanation": "Ports differ."
         }]
     }))
