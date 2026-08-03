@@ -321,11 +321,21 @@ class DeveloperAgent(BaseAgent):
         prior_error_context: Optional[str] = None,
         implicated_files: Optional[List[str]] = None,
         error_source_context: Optional[Dict[str, str]] = None,
+        retry_temperature: Optional[float] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
         so a model that only fills in some files in its file-list response doesn't
         silently end up with empty or missing files.
+
+        retry_temperature, when set (config-driven, see LLMConfig.retry_temperature),
+        overrides the completion temperature ONLY for a file this call is actually
+        applying the fix-analysis instruction to (same scope as implicated_files) -
+        a real, cited finding (not this project's own speculation) found code-gen
+        success rate drops as temperature rises even within the low end of the
+        range Kriya already defaults to, the opposite of "add randomness to shake a
+        stuck retry loose." Left unset (None) by default - opt-in, not a silent
+        behavior change.
 
         implicated_files scopes prior_error_context's fix-analysis instruction to
         only the file(s) the error actually names - found live as a real bug: a
@@ -426,7 +436,8 @@ class DeveloperAgent(BaseAgent):
                 json_mode=False,
                 model_override=model_override,
                 base_url_override=base_url_override,
-                api_key_override=api_key_override
+                api_key_override=api_key_override,
+                temperature_override=retry_temperature if apply_fix_analysis else None,
             )
 
             if apply_fix_analysis:
@@ -450,6 +461,7 @@ class DeveloperAgent(BaseAgent):
         prior_error_context: Optional[str] = None,
         implicated_files: Optional[List[str]] = None,
         error_source_context: Optional[Dict[str, str]] = None,
+        retry_temperature: Optional[float] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -484,7 +496,7 @@ class DeveloperAgent(BaseAgent):
             return await self._fill_missing_content(
                 file_entries, task_description, design_context, existing_code_context,
                 stream_callback, model_override, base_url_override, api_key_override,
-                prior_error_context, implicated_files, error_source_context,
+                prior_error_context, implicated_files, error_source_context, retry_temperature,
             )
 
         # Step 1: Query the model for the list of files to generate (or full implementation if mocked in tests)
@@ -517,7 +529,7 @@ class DeveloperAgent(BaseAgent):
                 return await self._fill_missing_content(
                     file_entries, task_description, design_context, existing_code_context,
                     stream_callback, model_override, base_url_override, api_key_override,
-                    prior_error_context, implicated_files, error_source_context,
+                    prior_error_context, implicated_files, error_source_context, retry_temperature,
                 )
 
         except Exception as e:

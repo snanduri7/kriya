@@ -199,6 +199,30 @@ def test_java_ruby_compile_invocation(tmp_path):
         res_rb = validator_rb.run_compile_check(["test.rb"])
         assert res_rb["success"] is True
 
+def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
+    """javac's default one-line "uses unchecked or unsafe operations" summary
+    carries no file:line location at all - useless for pointing a retry at the
+    actual mistake. showWarnings + compilerArgument are standard, portable
+    maven-compiler-plugin CLI properties that turn on full -Xlint:rawtypes,
+    unchecked diagnostics with real locations, no target pom.xml cooperation
+    needed. Confirmed live as directly relevant: a raw-type cache access
+    mistake (`ignite.cache(name)` used without generics) causes a later
+    "incompatible types" hard error - the rawtypes warning names the exact
+    same root cause precisely, for free, once these flags are on."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "App.java").write_text("class App {}")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    mock_result = MagicMock(returncode=0, stdout="BUILD SUCCESS", stderr="")
+    with patch("subprocess.run", return_value=mock_result) as mock_run:
+        res = validator.run_compile_check(["App.java"])
+
+    assert res["success"] is True
+    invoked_cmd = mock_run.call_args.args[0]
+    assert "-Dmaven.compiler.showWarnings=true" in invoked_cmd
+    assert "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked" in invoked_cmd
+
 def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path):
     # Regression test: previously a missing 'mvn' binary was silently logged at
     # debug level and execution fell through to the raw javac fallback below -

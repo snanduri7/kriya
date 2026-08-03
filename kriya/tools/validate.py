@@ -165,7 +165,26 @@ class PolymorphicValidator:
             # 2. Run Maven compile if pom.xml exists
             if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                 try:
-                    res = self._run_cmd_with_timeout(["mvn", "clean", "compile"], cwd=self.workspace_path)
+                    # showWarnings + compilerArgument enable javac's -Xlint:rawtypes,
+                    # unchecked diagnostics with real file:line pointers (javac's
+                    # default one-line "uses unchecked or unsafe operations" summary
+                    # has no location info at all) - these are standard, portable
+                    # maven-compiler-plugin CLI properties, no pom.xml cooperation
+                    # needed. On a real compile FAILURE, this text is already
+                    # captured into error_output below for free - a raw-type mistake
+                    # (e.g. `ignite.cache(name)` used without generics, causing a
+                    # later "incompatible types: Object cannot be converted to X"
+                    # error) now shows up as an explicit, precisely-located "rawtypes"
+                    # warning alongside the hard error, rather than the model having
+                    # to infer the root cause from the type-mismatch message alone.
+                    res = self._run_cmd_with_timeout(
+                        [
+                            "mvn", "clean", "compile",
+                            "-Dmaven.compiler.showWarnings=true",
+                            "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked",
+                        ],
+                        cwd=self.workspace_path,
+                    )
                     if res["returncode"] == 0:
                         return {"success": True, "output": "Maven compilation succeeded."}
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"

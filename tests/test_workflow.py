@@ -3201,6 +3201,41 @@ async def test_workflow_passes_prior_error_context_to_developer_only_on_retries(
     assert second_call_kwargs["implicated_files"] == ["math.py"]
 
 @pytest.mark.asyncio
+async def test_workflow_passes_configured_retry_temperature_to_developer(tmp_path):
+    """cfg.llm.retry_temperature must reach DeveloperAgent.run_generation on
+    every call (its own scoping to the implicated file is DeveloperAgent's
+    job, tested in test_agents.py) - unset (None) by default, so this is
+    strictly opt-in and never changes behavior for a project that doesn't
+    configure it."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm.retry_temperature = 0.05
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "Failed to build math.py"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            return_value=[{"filepath": "math.py", "content": "def add(a,b): return a+b"}]
+        )
+        res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    for call in we.developer.run_generation.call_args_list:
+        assert call.kwargs["retry_temperature"] == 0.05
+
+@pytest.mark.asyncio
 async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tmp_path):
     """Regression test for a real bug found live during golden-use-case
     validation: without this, a full-set retry's per-file fix-analysis

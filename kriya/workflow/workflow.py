@@ -2427,6 +2427,7 @@ class WorkflowEngine:
                         prior_error_context=error_context or None,
                         implicated_files=last_implicated_files,
                         error_source_context=last_error_source_context or None,
+                        retry_temperature=self.kernel.config.llm.retry_temperature,
                     )
                 elif use_missing_files:
                     # Missing-file recovery: same primary-model-only, non-escalating
@@ -2542,6 +2543,7 @@ class WorkflowEngine:
                         prior_error_context=error_context or None,
                         implicated_files=last_implicated_files,
                         error_source_context=last_error_source_context or None,
+                        retry_temperature=self.kernel.config.llm.retry_temperature,
                     )
 
                 # Normalize filepaths before anything downstream uses them - the
