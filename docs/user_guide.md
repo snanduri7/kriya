@@ -384,6 +384,8 @@ In a full-set retry (regenerating every file in the batch, not just one), this "
 
 If a failure doesn't clearly point at one of your files (a bare exit code, a build-tool configuration error with no source file involved), Kriya falls back to a normal full-file-set retry - targeting is a bonus when it can confidently narrow the fix, never a guess.
 
+When a retry knows the exact broken source line, it now prefers asking for a small, anchored patch (a targeted before/after code block) over regenerating the whole file - found live that a full regeneration can correctly state the right fix in its own analysis and then still lose it while rewriting everything else around it. Falls back to full-file content automatically if the fix genuinely needs broader changes.
+
 Java compile checks always pass `-Xlint:rawtypes,unchecked` to javac now, so a raw-type mistake (e.g. using a cache/collection without generics, a real and recurring cause of "incompatible types" failures) shows up as a precisely-located warning right next to the resulting error, rather than javac's default one-line notice with no file/line at all - one more concrete thing the fix-analysis step above has to work with.
 
 ### 4.8 Completeness Prevention & Missing-File Recovery
