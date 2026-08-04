@@ -183,8 +183,10 @@ regression from either change:
   `bundle exec` onto an inferred `rspec`/`rake` command whenever a real
   `Gemfile` exists - same deterministic-ground-truth pattern already used
   there for the Maven exec:java/exec:exec correction, just for a different
-  toolchain. 3 new regression tests, confirmed failing pre-fix. Not yet
-  re-validated live.
+  toolchain. 3 new regression tests, confirmed failing pre-fix.
+  **Re-validated live (batch 20260804-145911)**: `ruby_word_count` now
+  passes clean on attempt 1 (34.9s) - both Ruby fixes confirmed working
+  end-to-end, not just against mocks.
 - **Lesson reinforced**: the exact same underlying gap (gems never
   installed) can resurface through more than one independent code path -
   `PolymorphicValidator.run_tests()`'s fixed invocation and
@@ -195,3 +197,63 @@ regression from either change:
   mechanisms needing the *same* fix, discoverable only by re-running live
   after the first fix, not by inspecting the first fix's own code in
   isolation.
+
+### Batch 20260804-151655 (qwen3-coder:30b / embeddinggemma:latest, full 5-goal batch, 2400s/goal)
+
+First full batch since both Ruby fixes landed. Pass rate 1/5 traced rows
+(20%) - one clean pass, one expected model-side environment failure, one
+new real Kriya bug found+fixed, one confirmed-recurring unresolved finding,
+one goal still timing out even at double the previous limit.
+
+- **`python_greeter` passed clean again.** Stable baseline across all 3
+  batches so far.
+- **`ignite_qpid_person`: identical JVM Security Manager crash, third batch
+  in a row.** Same `-Djava.security.manager=allow` mistake, same
+  circuit-breaker stopping it after 1 attempt. Purely model-side at this
+  point (3/3 batches) - a `skills/ignite-java17/rules.txt` rule against
+  that flag is a real, cheap candidate fix, not yet done.
+- **Real Kriya bug found: `bundle install` itself can fail non-interactively
+  on an unmodified macOS system Ruby.** `ruby_word_count` regressed from
+  its previous clean pass (34.9s, attempt 1) to `quality_gates_exhausted`
+  (7 attempts, ~22.7 min) - not a regression in the fix itself, a different
+  failure mode the fix's own `bundle install` call newly exposed. This
+  machine's default Ruby is macOS's bundled system Ruby (2.6.0, no
+  rbenv/rvm), whose gem directory (`/Library/Ruby/Gems/2.6.0`) is
+  permission-protected - `bundle install` needed `sudo` to write there and
+  failed with `Bundler::SudoNotPermittedError` since there's no interactive
+  terminal to prompt. The model correctly diagnosed nothing (there was
+  nothing wrong with its own Gemfile/code) and burned its whole retry
+  budget uselessly editing a Gemfile that could never fix a host permission
+  issue. **Fixed same session**: `bundle install --path vendor/bundle`
+  installs gems into a project-local, sandbox-writable directory instead of
+  the host Ruby's own gem path - portable across Bundler 1.x/2.x, and the
+  path choice persists via `.bundle/config` so the later `bundle exec`
+  call needs no extra plumbing. Updated regression test, confirmed failing
+  pre-fix. Not yet re-validated live.
+- **Confirmed recurring (2/2 batches so far): `django_healthcheck_gap`
+  still produces Java/Spring code for a Django/Python goal.** Same pattern
+  as the first batch - `HealthCheckController.java` using
+  `@RestController`/`@GetMapping`, compile-failing on missing Spring
+  dependencies never declared anywhere. Two batches now, same goal, same
+  wrong-language outcome - upgrades this from "one data point" to a real
+  pattern worth investigating, though still not root-caused (still don't
+  know if it's the always-loaded Spring skill content biasing the model, or
+  the model's own prior).
+- **`python_task_tracker` still timed out, even at 2400s (double the first
+  batch's 1200s).** Same root cause as batch 1, now confirmed on a second
+  independent run: the model invented a Maven-style
+  `src/main/python/tasks/...` / `src/test/python/tests/...` layout for a
+  goal that only ever asked for a flat `tasks/`/`tests/` structure -
+  structurally unresolvable by `PolymorphicValidator.run_tests()`'s Python
+  src-layout support (`workspace_path`/`workspace_path/src` only), so every
+  retry fails identically regardless of code correctness, no amount of
+  extra timeout would let it succeed. Deliberately **not fixing this one**:
+  unlike the Ruby fixes, there's no clean ground-truth signal here (a
+  Gemfile definitively proves Bundler is needed; there's no equivalent
+  "this nested layout is definitely what was intended" signal) - extending
+  path resolution to cover an invented convention would be guessing at
+  which wrong pattern to special-case, not a generalizable fix. Logged as
+  an open, harder problem, plausibly related to the `django_healthcheck_gap`
+  finding above (same session, same always-loaded Java-heavy skill
+  library, both non-Java goals drifting toward Java/Maven conventions) but
+  not confirmed as the same root cause.

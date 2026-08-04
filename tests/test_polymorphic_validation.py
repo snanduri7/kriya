@@ -300,7 +300,7 @@ def test_ruby_run_tests_installs_gems_before_rspec(tmp_path):
     assert mock_popen.call_count == 2
     first_cmd = mock_popen.call_args_list[0].args[0]
     second_cmd = mock_popen.call_args_list[1].args[0]
-    assert first_cmd == ["bundle", "install"]
+    assert first_cmd == ["bundle", "install", "--path", "vendor/bundle"]
     assert second_cmd[:3] == ["bundle", "exec", "rspec"]
 
 

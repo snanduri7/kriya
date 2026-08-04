@@ -377,7 +377,19 @@ class PolymorphicValidator:
                 # act on; without one, skip straight to the exec attempt below,
                 # which still gets a chance via its own fallback.
                 if os.path.exists(os.path.join(self.workspace_path, "Gemfile")):
-                    install_res = self._run_cmd_with_timeout(["bundle", "install"], cwd=self.workspace_path)
+                    # --path installs gems into a project-local, sandbox-writable
+                    # directory instead of the host Ruby's own gem path - confirmed
+                    # live (eval harness batch 20260804-151655) that a plain
+                    # `bundle install` fails outright on an unmodified macOS system
+                    # Ruby (no rbenv/rvm), whose gem directory is permission-
+                    # protected and requires sudo the install can never provide
+                    # non-interactively (Bundler::SudoNotPermittedError). --path is
+                    # portable across Bundler 1.x/2.x and, once set, is remembered
+                    # via .bundle/config for the `bundle exec` call below too - no
+                    # other plumbing needed.
+                    install_res = self._run_cmd_with_timeout(
+                        ["bundle", "install", "--path", "vendor/bundle"], cwd=self.workspace_path
+                    )
                     if install_res["returncode"] != 0:
                         return {
                             "success": False,
