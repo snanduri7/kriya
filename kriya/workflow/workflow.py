@@ -1380,9 +1380,59 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
     return implicated
 
 
+ECOSYSTEM_INVARIANT_HEADER = (
+    "\n\n=== Ecosystem Preservation (required) ===\n"
+    "Preserve the language, framework, build system, project directory layout, "
+    "dependency manager, and configuration file formats that the goal or the "
+    "existing repository already establishes. Do not substitute a different "
+    "ecosystem's conventions for the one actually requested - for example, do "
+    "not write Java/Spring/Maven code for a Python/Django goal, and do not "
+    "invent a Maven-style src/main/src/test directory layout for a goal that "
+    "only ever asked for a flat layout. This applies even if you are more "
+    "confident writing a different stack's idioms for the same kind of task. "
+    "The only exceptions: the goal explicitly asks you to migrate, port, or "
+    "rewrite the project into a different stack, or the repository already "
+    "contains more than one language/framework side by side (a genuine "
+    "polyglot project) - in either case, follow what the goal actually asks "
+    "for instead of defaulting to a single ecosystem."
+)
+
+
+def _build_ecosystem_invariant_block(repo_model: Any) -> str:
+    """A standing, always-present checklist instruction (not conditionally
+    triggered) that the goal/existing repo's language and framework must be
+    preserved, not silently substituted for a different one the model is more
+    confident writing. Confirmed live (2026-08-04 eval harness): a Django/
+    Python goal produced Java/Spring Boot code, and a plain Python goal
+    invented a Maven-style src/main/src/test layout, neither goal ever having
+    mentioned Java - checked traces.db's active_skills directly and confirmed
+    this is NOT skill-content bias (zero skills were active for the Django
+    run), so a prompting-level fix is the right lever, matching the
+    already-validated pattern that passive context alone doesn't stop this
+    class of drift, an explicit instruction does (see the dependency-
+    preservation checklist this mirrors, `required_dependencies_prompt_block`
+    below).
+
+    When the repo analyzer already detected real frameworks (a non-empty,
+    non-fresh repo), name them explicitly - the same specificity that made
+    the dependency-preservation checklist effective (naming the actual
+    dependencies, not just saying "preserve existing ones") over a purely
+    generic instruction."""
+    block = ECOSYSTEM_INVARIANT_HEADER
+    detected_frameworks = getattr(repo_model, "frameworks", None) or []
+    if detected_frameworks:
+        block += (
+            "\n\nThis repository's analyzer already detected: "
+            + ", ".join(sorted(detected_frameworks))
+            + ". Treat this as the established ecosystem unless the goal explicitly says otherwise."
+        )
+    return block
+
+
 def _build_targeted_retry_prompt(
     goal: str, plan: str, error_context: str, target_files: List[str],
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+    ecosystem_invariant_block: str = "",
 ) -> Tuple[str, str]:
     """Builds the task description and code context for a targeted (single/few-
     file) retry: the target file(s) are framed as the fix, every other already-
@@ -1410,8 +1460,10 @@ def _build_targeted_retry_prompt(
                 f"genuinely requires changing it too): {filepath} ===\n{current_content}\n\n"
             )
 
-    task_desc = (
-        f"Goal: {goal}\nPlan: {plan}\n\n=== Previous Error to Fix ===\n{error_context}\n\n"
+    task_desc = f"Goal: {goal}\nPlan: {plan}"
+    task_desc += ecosystem_invariant_block
+    task_desc += (
+        f"\n\n=== Previous Error to Fix ===\n{error_context}\n\n"
         f"This is a TARGETED fix attempt. Based on the error above, the following file(s) are most "
         f"likely responsible: {', '.join(sorted(target_set))}. Focus your fix there - the rest of the "
         "codebase (given below as reference) is already correct, so only touch another file if your "
@@ -1425,6 +1477,7 @@ def _build_full_set_retry_prompt(
     goal: str, plan: str, error_context: str, required_files_prompt_block: str,
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
     required_dependencies_prompt_block: str = "",
+    ecosystem_invariant_block: str = "",
 ) -> Tuple[str, str]:
     """Full-set retries previously never showed the model its own prior attempt's
     content at all, only the abstract error text describing what went wrong -
@@ -1462,6 +1515,7 @@ def _build_full_set_retry_prompt(
         )
 
     task_desc = f"Goal: {goal}\nPlan: {plan}"
+    task_desc += ecosystem_invariant_block
     if error_context:
         task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
     task_desc += required_files_prompt_block
@@ -1473,6 +1527,7 @@ def _build_full_set_retry_prompt(
 def _build_missing_files_retry_prompt(
     goal: str, plan: str, design: str, missing_files: List[str],
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+    ecosystem_invariant_block: str = "",
 ) -> Tuple[str, str]:
     """Builds the task description and code context for a missing-file recovery
     retry, used after an IncompleteGenerationError: the Architect's design called
@@ -1494,9 +1549,10 @@ def _build_missing_files_retry_prompt(
             f"integrating the new file(s) genuinely requires a change to it too): {filepath} ===\n{current_content}\n\n"
         )
 
-    task_desc = (
-        f"Goal: {goal}\nPlan: {plan}\n\n"
-        f"This is a MISSING-FILE recovery attempt. The Architect's design (below, in the code context) "
+    task_desc = f"Goal: {goal}\nPlan: {plan}"
+    task_desc += ecosystem_invariant_block
+    task_desc += (
+        "\n\nThis is a MISSING-FILE recovery attempt. The Architect's design (below, in the code context) "
         f"calls for the following file(s), which were NOT generated in the previous attempt: "
         f"{', '.join(sorted(missing_files))}. Generate ONLY these missing file(s) now, in full - do not "
         f"regenerate any file already listed as existing below unless integrating the new file(s) "
@@ -2511,6 +2567,13 @@ class WorkflowEngine:
         # workspace_path's pom.xml (the same stable "original" reference the
         # regression check itself compares against, via original_workspace_path)
         # rather than the worktree's possibly-already-regressed prior attempt.
+        # Computed once, before the loop, and threaded into every prompt builder
+        # (generation and all three retry modes alike, since they all funnel
+        # through the same task_desc string) - a standing invariant, not a
+        # reactive one, unlike required_dependencies_prompt_block below which
+        # only has something concrete to preserve once a project exists.
+        ecosystem_invariant_block = _build_ecosystem_invariant_block(repo_model)
+
         required_dependencies_prompt_block = ""
         _original_pom_path = os.path.join(workspace_path, "pom.xml")
         if os.path.exists(_original_pom_path):
@@ -2647,6 +2710,7 @@ class WorkflowEngine:
                     task_desc, active_code_context = _build_targeted_retry_prompt(
                         goal, plan, error_context, last_implicated_files,
                         all_files_written, worktree_path, base_code_context,
+                        ecosystem_invariant_block=ecosystem_invariant_block,
                     )
                     logger.info(f"Targeted retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: focusing on {', '.join(last_implicated_files)}.")
 
@@ -2702,6 +2766,7 @@ class WorkflowEngine:
                     task_desc, active_code_context = _build_missing_files_retry_prompt(
                         goal, plan, design, resolved_missing_files,
                         all_files_written, worktree_path, base_code_context,
+                        ecosystem_invariant_block=ecosystem_invariant_block,
                     )
                     logger.info(f"Missing-file recovery retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: adding {', '.join(resolved_missing_files)}.")
 
@@ -2745,6 +2810,7 @@ class WorkflowEngine:
                         goal, plan, error_context, required_files_prompt_block,
                         all_files_written, worktree_path, active_code_context,
                         required_dependencies_prompt_block,
+                        ecosystem_invariant_block=ecosystem_invariant_block,
                     )
 
                     # Track model hops

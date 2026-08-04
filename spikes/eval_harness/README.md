@@ -121,24 +121,18 @@ single trace row. Real, mixed signal on the first ever live run:
 - **Unresolved: `django_healthcheck_gap` produced Java/Spring code for a
   Python/Django goal.** The goal text never mentions Java/Spring/Maven, but
   the Developer wrote `DjangoHealthCheckView.java` using Spring's
-  `MockMvc`/`ResponseEntity`. The always-loaded global skill library did
-  include a `Spring Boot` skill for this run (expected/documented
-  behavior, not itself a bug), but whether that irrelevant content in the
-  prompt actually caused the language mix-up, versus the model
-  independently defaulting to a familiar Spring pattern for "a view that
-  returns JSON," is not established from one data point - would need a
-  controlled comparison (same goal, global skills stripped) to know which.
-  Flagged, not root-caused.
+  `MockMvc`/`ResponseEntity`. The `Spring Boot` skill did get *loaded* off
+  disk for this run (expected - the global skill library always loads
+  regardless of relevance), but not root-caused beyond that at the time.
+  See the 20260804-151655 batch entry below for the correction: this is
+  NOT skill-content bias - confirmed model-side.
 - **Harness tuning: 1200s/goal was too short.** 2 of 5 goals
   (`python_task_tracker`, `django_healthcheck_gap`) hit the timeout
   mid-retry, not stuck - genuinely still working. `python_task_tracker`
   was mid-attempt-5 on a real `ModuleNotFoundError` caused by the model
   inventing a Maven-style `src/test/python/tests/...` layout for a goal
-  that only ever asked for a flat `tasks/`/`tests/` layout - plausibly (not
-  confirmed) the same kind of cross-goal bias as the Spring/Django finding
-  above, given how Java/Maven-heavy the always-loaded global skill library
-  currently is. Next batch should raise `--timeout-per-goal` well above
-  1200s for multi-file goals.
+  that only ever asked for a flat `tasks/`/`tests/` layout. Next batch
+  should raise `--timeout-per-goal` well above 1200s for multi-file goals.
 - **Forensics gap noticed while investigating this batch**: failed
   quality-gate attempts leave no persisted record of the actual generated
   content anywhere (checkpoints only save on a `developer_success` stage
@@ -229,16 +223,30 @@ one goal still timing out even at double the previous limit.
   the host Ruby's own gem path - portable across Bundler 1.x/2.x, and the
   path choice persists via `.bundle/config` so the later `bundle exec`
   call needs no extra plumbing. Updated regression test, confirmed failing
-  pre-fix. Not yet re-validated live.
-- **Confirmed recurring (2/2 batches so far): `django_healthcheck_gap`
-  still produces Java/Spring code for a Django/Python goal.** Same pattern
-  as the first batch - `HealthCheckController.java` using
+  pre-fix. **Re-validated live**: `ruby_word_count` passes again -
+  three real, independent Ruby-toolchain bugs found and fixed across three
+  live batches (missing `bundle install`, an inferred command bypassing
+  Bundler, and `bundle install` itself needing a non-system gem path), each
+  invisible to the fully-mocked test suite.
+- **Confirmed recurring (2/2 batches): `django_healthcheck_gap` still
+  produces Java/Spring code for a Django/Python goal - and the skill-bias
+  hypothesis is now DISPROVEN, not just unconfirmed.** Same pattern as the
+  first batch - `HealthCheckController.java` using
   `@RestController`/`@GetMapping`, compile-failing on missing Spring
-  dependencies never declared anywhere. Two batches now, same goal, same
-  wrong-language outcome - upgrades this from "one data point" to a real
-  pattern worth investigating, though still not root-caused (still don't
-  know if it's the always-loaded Spring skill content biasing the model, or
-  the model's own prior).
+  dependencies never declared anywhere. Checked `traces.db`'s persisted
+  `active_skills` column directly for this run (ground truth, not the
+  "Loaded skill" log lines, which only reflect the always-on discovery
+  phase - every skill in the global library gets read off disk regardless
+  of relevance): **empty string.** Zero skills activated for this run - the
+  `Spring Boot` skill's only tag (`spring-boot`) never appears in the goal
+  text, and the fresh repo has no dependencies to fact-match against, so
+  `kriya/workflow/workflow.py`'s `is_relevant` gate (goal-text/tag match or
+  repo-fact match - `workflow.py:1785-1817`) correctly excluded it. No
+  skill content of any kind reached this prompt. The Java/Spring drift is
+  therefore a pure model-side pattern-completion bias, unrelated to Kriya's
+  skill system - a different and more useful conclusion than "unresolved,"
+  since it rules out a whole category of fix (skill tuning) and points at
+  the Developer's own prompt instead (see the next Findings entry below).
 - **`python_task_tracker` still timed out, even at 2400s (double the first
   batch's 1200s).** Same root cause as batch 1, now confirmed on a second
   independent run: the model invented a Maven-style
@@ -247,13 +255,57 @@ one goal still timing out even at double the previous limit.
   structurally unresolvable by `PolymorphicValidator.run_tests()`'s Python
   src-layout support (`workspace_path`/`workspace_path/src` only), so every
   retry fails identically regardless of code correctness, no amount of
-  extra timeout would let it succeed. Deliberately **not fixing this one**:
-  unlike the Ruby fixes, there's no clean ground-truth signal here (a
-  Gemfile definitively proves Bundler is needed; there's no equivalent
-  "this nested layout is definitely what was intended" signal) - extending
-  path resolution to cover an invented convention would be guessing at
-  which wrong pattern to special-case, not a generalizable fix. Logged as
-  an open, harder problem, plausibly related to the `django_healthcheck_gap`
-  finding above (same session, same always-loaded Java-heavy skill
-  library, both non-Java goals drifting toward Java/Maven conventions) but
-  not confirmed as the same root cause.
+  extra timeout would let it succeed. Deliberately **not fixing the path-
+  resolution side**: unlike the Ruby fixes, there's no clean ground-truth
+  signal here (a Gemfile definitively proves Bundler is needed; there's no
+  equivalent "this nested layout is definitely what was intended" signal)
+  - extending path resolution to cover an invented convention would be
+  guessing at which wrong pattern to special-case. Given the Django
+  finding above ruled out skill-content bias as the mechanism, this is the
+  same underlying class of problem (the model substituting a different
+  ecosystem's convention for the one actually requested) and the same
+  fix category likely applies - see below.
+- **Root-cause hypothesis for both findings above: no explicit instruction
+  anywhere tells the Developer to stay in the goal's stated language/
+  framework.** Matches an already-established, already-validated pattern
+  from this project's own history: "passive reference material is never
+  enough - the model needs explicit checklists/instructions" (confirmed
+  repeatedly for dependency-preservation, wrong-import, and other classes
+  of mistake).
+
+### Ecosystem-preservation invariant (implemented, not yet live-validated)
+
+User reviewed a written fix plan before any code was touched, then approved
+implementation. Added `ECOSYSTEM_INVARIANT_HEADER` /
+`_build_ecosystem_invariant_block()` (`kriya/workflow/workflow.py`) - a
+standing checklist instruction (always present, not reactively triggered by
+a failure), computed once per run from the repo analyzer's already-detected
+`frameworks` (named explicitly when present, generic wording when the repo
+is fresh) and threaded through all three prompt builders
+(`_build_targeted_retry_prompt`, `_build_full_set_retry_prompt`,
+`_build_missing_files_retry_prompt`). Covers attempt 1 too - it flows
+through the same `_build_full_set_retry_prompt` attempt 1 already uses -
+and reaches every real LLM call site (batch-JSON and per-file
+`_fill_missing_content` alike), since they all embed the same
+`task_description` string; no changes needed in `agent.py`.
+
+Found and fixed a real pre-existing gap while implementing: the
+dependency-preservation checklist this was modeled on
+(`required_dependencies_prompt_block`) was only ever wired into the
+full-set builder - `_build_targeted_retry_prompt` and
+`_build_missing_files_retry_prompt` never carried it. The ecosystem
+invariant deliberately covers all three, so a targeted or missing-file
+retry mid-run gets the same protection as a fresh full-set attempt.
+
+5 new regression tests (2 pure-function unit tests on
+`_build_ecosystem_invariant_block`, 3 integration tests confirming the
+invariant reaches attempt 1, a targeted retry, and a missing-files retry),
+confirmed failing pre-fix (`ImportError`, since the function didn't exist
+yet), full suite green (552 passed), ruff clean.
+
+**Not yet live-validated.** A mocked test can only confirm the instruction
+text is present in the prompt - never that the model actually obeys it.
+The real test is the next full batch: does `django_healthcheck_gap`
+produce real Django code, and does `python_task_tracker` stop inventing a
+Maven-style layout? Run by the user in their own terminal, same as every
+other batch in this file.

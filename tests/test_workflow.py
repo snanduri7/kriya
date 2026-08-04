@@ -24,6 +24,7 @@ from kriya.workflow.workflow import (
     IncompleteGenerationError,
     WorkflowEngine,
     _augment_error_with_live_lookup,
+    _build_ecosystem_invariant_block,
     _build_error_source_context,
     _build_full_set_retry_prompt,
     _build_lsp_diagnostics_context,
@@ -710,6 +711,108 @@ async def test_workflow_full_set_prompt_includes_existing_dependencies_checklist
     # that was already compiling fine via the existing qpid-jms-client
     # dependency alone - both wrong and unnecessary.
     assert "you must NOT add a new, separate dependency" in developer_prompt
+
+
+def test_build_ecosystem_invariant_block_names_detected_frameworks():
+    """Unit test for the pure helper: when the repo analyzer already detected
+    real frameworks, name them explicitly - the same specificity that made
+    the dependency-preservation checklist effective over a purely generic
+    instruction."""
+    class FakeRepoModel:
+        frameworks = ["Django"]
+    block = _build_ecosystem_invariant_block(FakeRepoModel())
+    assert "Ecosystem Preservation" in block
+    assert "Django" in block
+    assert "already detected" in block
+
+def test_build_ecosystem_invariant_block_generic_when_no_frameworks_detected():
+    # A fresh repo with nothing to detect yet must still carry the standing
+    # invariant - it's unconditional, not gated on repo facts existing.
+    class FakeRepoModel:
+        frameworks = []
+    block = _build_ecosystem_invariant_block(FakeRepoModel())
+    assert "Ecosystem Preservation" in block
+    assert "already detected" not in block
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_ecosystem_invariant_on_first_attempt(tmp_path):
+    """Regression test for a real bug found live (2026-08-04 eval harness): a
+    Django/Python goal produced Java/Spring Boot code, and a separate Python
+    goal invented a Maven-style src/main/src/test layout - neither goal ever
+    mentioned Java. Confirmed via traces.db this was NOT skill-content bias
+    (zero skills were active for the Django run) - a prompting-level fix is
+    the right lever. The invariant must reach the very first attempt, not
+    just retries, since attempt 1 is where the drift was actually observed."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write views.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "views.py", "content": "def healthz(request):\n    return {}\n"}
+    ])
+    res = await we.run_generation_workflow(
+        goal="Using Django 5.2, add a minimal view at /healthz", workspace_path=str(tmp_path)
+    )
+    assert res["quality_gates_passed"] is True
+    first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
+    assert "Ecosystem Preservation" in first_call_kwargs["task_description"]
+    assert "Java/Spring/Maven" in first_call_kwargs["task_description"]
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_ecosystem_invariant_on_targeted_retry(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  String x;\n}"}],
+        ])
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert "Ecosystem Preservation" in second_call_kwargs["task_description"]
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_ecosystem_invariant_on_missing_files_retry(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py and helper.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{"filepath": "app.py", "content": "print(1)"}],
+        [{"filepath": "helper.py", "content": "def helper():\n    pass\n"}],
+    ])
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert "Ecosystem Preservation" in second_call_kwargs["task_description"]
 
 
 def _latest_trace_row(logs_dir):
