@@ -463,6 +463,36 @@ def test_split_fix_analysis_edit_falls_back_when_no_markers_at_all():
     assert edits is None
     assert content == text
 
+def test_split_fix_analysis_edit_truncates_redundant_trailing_file_content():
+    """Regression test for a real bug found live, 2026-08-04: a model asked
+    to prefer an anchored edit sometimes ALSO appends a redundant, unasked-
+    for FILE CONTENT: block after its SEARCH/REPLACE - without truncating
+    replace_block there, the entire redundant full-file content (plus the
+    literal "FILE CONTENT:" marker text) got swallowed into the applied
+    patch. Confirmed live: this exact shape (a correct 3-line import fix,
+    plus a redundant trailing FILE CONTENT: block) corrupted a real file
+    with a duplicated package/class declaration, producing "class,
+    interface, enum, or record expected" - not a model mistake, since the
+    SEARCH/REPLACE portion alone was entirely correct."""
+    text = (
+        "FIX ANALYSIS: IgniteCache is imported from the wrong package.\n"
+        "SEARCH:\n"
+        "import org.apache.ignite.cache.IgniteCache;\n"
+        "REPLACE:\n"
+        "import org.apache.ignite.IgniteCache;\n"
+        "\n"
+        "FILE CONTENT:\n"
+        "package com.example;\n"
+        "import org.apache.ignite.IgniteCache;\n"
+        "public class App { /* redundant full regeneration the model wasn't asked for */ }"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits == [{
+        "search": "import org.apache.ignite.cache.IgniteCache;",
+        "replace": "import org.apache.ignite.IgniteCache;",
+    }]
+    assert content is None
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_prefers_anchored_edit_when_source_context_known():
     """A precise source location (error_source_context has a real snippet for

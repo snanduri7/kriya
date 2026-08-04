@@ -298,6 +298,23 @@ class DeveloperAgent(BaseAgent):
             analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
             search_block = text[search_match.end():replace_match.start()].strip()
             replace_block = text[replace_match.end():].strip()
+            # A model asked to prefer an anchored edit sometimes ALSO appends a
+            # redundant trailing "FILE CONTENT:" section anyway (not asked for,
+            # but real, observed model behavior) - without truncating here, the
+            # entire redundant full-file content (plus the literal "FILE
+            # CONTENT:" marker text) gets swallowed into replace_block and
+            # applied as part of the patch. Confirmed live, 2026-08-04: a real
+            # response correctly self-diagnosed and fixed a wrong-import bug
+            # via a clean 3-line SEARCH/REPLACE, but also appended a redundant
+            # full FILE CONTENT: block - the resulting merged file duplicated
+            # the entire package/import/class declaration mid-file and failed
+            # with "class, interface, enum, or record expected". Not a model
+            # mistake (the SEARCH/REPLACE portion alone was correct) - an
+            # unbounded regex in this parsing step swallowing content past
+            # where the actual patch ended.
+            trailing_file_content = re.search(r"file content:", replace_block, re.IGNORECASE)
+            if trailing_file_content:
+                replace_block = replace_block[:trailing_file_content.start()].strip()
             if search_block:
                 return (analysis or None), [{"search": search_block, "replace": replace_block}], None
         analysis, content = DeveloperAgent._split_fix_analysis(text)
