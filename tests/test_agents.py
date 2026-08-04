@@ -493,6 +493,85 @@ def test_split_fix_analysis_edit_truncates_redundant_trailing_file_content():
     }]
     assert content is None
 
+def test_split_fix_analysis_edit_strips_copied_error_source_gutter():
+    """Regression test for a real bug found live, 2026-08-04: a model shown
+    _build_error_source_context()'s own display format (">> N: <line>" for
+    the reported error line) copied that gutter directly into its SEARCH
+    block instead of the bare source line - confirmed live, the real SEARCH
+    text was literally ">> import org.apache.ignite.cache.IgniteCache;"
+    (kept the ">>" marker, dropped the line number). That can never match
+    the real file's plain "import ...;" line, guaranteeing "Anchor matching
+    failed... matched 0 times" regardless of whether the model's intended
+    fix was otherwise correct - a real, self-inflicted retry-budget waste,
+    not a model reasoning failure."""
+    text = (
+        "FIX ANALYSIS: wrong package for IgniteCache.\n"
+        "SEARCH:\n"
+        "```java\n"
+        "import org.apache.ignite.Ignite;\n"
+        "import org.apache.ignite.Ignition;\n"
+        ">> import org.apache.ignite.cache.IgniteCache;\n"
+        "import org.slf4j.Logger;\n"
+        "```\n"
+        "REPLACE:\n"
+        "```java\n"
+        "import org.apache.ignite.Ignite;\n"
+        "import org.apache.ignite.Ignition;\n"
+        "import org.apache.ignite.IgniteCache;\n"
+        "import org.slf4j.Logger;\n"
+        "```"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits == [{
+        "search": (
+            "import org.apache.ignite.Ignite;\n"
+            "import org.apache.ignite.Ignition;\n"
+            "import org.apache.ignite.cache.IgniteCache;\n"
+            "import org.slf4j.Logger;"
+        ),
+        "replace": (
+            "import org.apache.ignite.Ignite;\n"
+            "import org.apache.ignite.Ignition;\n"
+            "import org.apache.ignite.IgniteCache;\n"
+            "import org.slf4j.Logger;"
+        ),
+    }]
+
+def test_split_fix_analysis_edit_strips_gutter_with_line_number_preserved():
+    # The other real gutter shape (surrounding, non-highlighted context
+    # lines): "  N: <line>", also emitted by _build_error_source_context.
+    text = (
+        "SEARCH:\n"
+        "  9: import org.apache.ignite.Ignite;\n"
+        ">> 10: import org.apache.ignite.cache.IgniteCache;\n"
+        "REPLACE:\n"
+        "import org.apache.ignite.Ignite;\n"
+        "import org.apache.ignite.IgniteCache;"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits[0]["search"] == (
+        "import org.apache.ignite.Ignite;\n"
+        "import org.apache.ignite.cache.IgniteCache;"
+    )
+
+def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
+    # Must NOT strip legitimate 2-space (or deeper) indentation on real code
+    # that has no line-number gutter - only the exact ">>"/"  N:" shapes
+    # Kriya itself emits are stripped.
+    text = (
+        "SEARCH:\n"
+        "public class App {\n"
+        "  public static void main(String[] args) {\n"
+        "REPLACE:\n"
+        "public class App implements Serializable {\n"
+        "  public static void main(String[] args) {"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits[0]["search"] == (
+        "public class App {\n"
+        "  public static void main(String[] args) {"
+    )
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_prefers_anchored_edit_when_source_context_known():
     """A precise source location (error_source_context has a real snippet for

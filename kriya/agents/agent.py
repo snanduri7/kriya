@@ -9,6 +9,12 @@ from kriya.core.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
+# Matches _build_error_source_context()'s own display gutter (">> N: " for
+# the reported line, "  N: " for surrounding context lines) - see
+# DeveloperAgent._split_fix_analysis_edit for why this needs stripping from
+# a model's SEARCH/REPLACE blocks before anchor matching.
+_GUTTER_PREFIX_RE = re.compile(r"^(?:>>\s*(?:\d+:)?|[ ]{2}\d+:)\s?", re.MULTILINE)
+
 
 async def call_with_escalation(
     llm: LLMClient,
@@ -296,8 +302,12 @@ class DeveloperAgent(BaseAgent):
         if search_match and replace_match and replace_match.start() > search_match.start():
             analysis = text[:search_match.start()].strip()
             analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
-            search_block = text[search_match.end():replace_match.start()].strip()
-            replace_block = text[replace_match.end():].strip()
+            # Not .strip()'d yet - deferred until after gutter-stripping below,
+            # since stripping now would eat a "  N: " gutter's leading spaces
+            # on whichever line happens to land first, before the regex made
+            # for detecting exactly that ever sees them.
+            search_block = text[search_match.end():replace_match.start()]
+            replace_block = text[replace_match.end():]
             # A model asked to prefer an anchored edit sometimes ALSO appends a
             # redundant trailing "FILE CONTENT:" section anyway (not asked for,
             # but real, observed model behavior) - without truncating here, the
@@ -314,7 +324,33 @@ class DeveloperAgent(BaseAgent):
             # where the actual patch ended.
             trailing_file_content = re.search(r"file content:", replace_block, re.IGNORECASE)
             if trailing_file_content:
-                replace_block = replace_block[:trailing_file_content.start()].strip()
+                replace_block = replace_block[:trailing_file_content.start()]
+            # A model shown _build_error_source_context()'s own display format
+            # (">> N: <source line>" for the reported line, "   N: <source
+            # line>" for surrounding context) sometimes copies that gutter
+            # into its SEARCH/REPLACE blocks instead of the bare source line -
+            # confirmed live, 2026-08-04: a real SEARCH block was literally
+            # ">> import org.apache.ignite.cache.IgniteCache;" (the model kept
+            # the ">>" marker, dropped the line number), which can never match
+            # the real file's plain "import ...;" line, guaranteeing "Anchor
+            # matching failed... matched 0 times" regardless of whether the
+            # model's intended fix was otherwise correct. Also strips a
+            # wrapping ```lang fence, the same defensive normalization already
+            # applied to full FILE CONTENT: responses elsewhere. Safe against
+            # false positives on real code: no real Java/XML/JSON/properties
+            # line legitimately starts with ">>", and the non-highlighted
+            # gutter form is only stripped when followed by a colon-terminated
+            # line number, not just any 2-space indent.
+            # Gutter-strip BEFORE fence-strip: _strip_markdown_fences() calls
+            # text.strip(), which trims the block's absolute leading
+            # whitespace - if that ran first, a "  N: " (non-highlighted,
+            # unmarked) gutter as the block's very first line would already
+            # have lost its leading 2 spaces before the gutter regex ever
+            # saw them, silently leaving a stray "N: " behind.
+            search_block = _GUTTER_PREFIX_RE.sub("", search_block)
+            replace_block = _GUTTER_PREFIX_RE.sub("", replace_block)
+            search_block = DeveloperAgent._strip_markdown_fences(search_block)
+            replace_block = DeveloperAgent._strip_markdown_fences(replace_block)
             if search_block:
                 return (analysis or None), [{"search": search_block, "replace": replace_block}], None
         analysis, content = DeveloperAgent._split_fix_analysis(text)
