@@ -1786,7 +1786,7 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
     conn = get_connection(db_path)
     cursor = conn.cursor()
     total = cursor.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified FROM runs ORDER BY timestamp DESC"
+    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified, failure_category FROM runs ORDER BY timestamp DESC"
     if not show_all:
         query += " LIMIT ?"
         cursor.execute(query, (limit,))
@@ -1799,13 +1799,14 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
         click.echo("No run traces recorded yet.")
         return
 
-    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
-    click.echo("-" * 100)
-    for _r_id, ts, goal, dur, att, status, _files in rows:
+    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'CATEGORY':<22} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
+    click.echo("-" * 120)
+    for _r_id, ts, goal, dur, att, status, _files, category in rows:
         dur_str = f"{dur:.2f}s"
         status_color = "green" if status.lower() == "success" else "red"
         status_styled = click.style(f"{status:<10}", fg=status_color)
-        click.echo(f"{ts:<20} | {status_styled} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
+        category_str = category or ""
+        click.echo(f"{ts:<20} | {status_styled} | {category_str:<22} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
 
     if not show_all and total > len(rows):
         click.echo(f"\nShowing {len(rows)} of {total} recorded runs. Use -n/--limit or --all to see more.")
