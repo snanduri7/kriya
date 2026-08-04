@@ -369,6 +369,20 @@ class PolymorphicValidator:
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
  
             elif self.stack == "ruby":
+                # A fresh sandbox never has gems installed, so `bundle exec rspec`
+                # fails with "bundler: command not found: rspec" regardless of what
+                # the model writes - confirmed live (eval harness batch
+                # 20260804-115621) burning a full retry budget on correct Ruby code
+                # for exactly this reason. `bundle install` needs a real Gemfile to
+                # act on; without one, skip straight to the exec attempt below,
+                # which still gets a chance via its own fallback.
+                if os.path.exists(os.path.join(self.workspace_path, "Gemfile")):
+                    install_res = self._run_cmd_with_timeout(["bundle", "install"], cwd=self.workspace_path)
+                    if install_res["returncode"] != 0:
+                        return {
+                            "success": False,
+                            "output": f"'bundle install' failed:\n{install_res['stdout']}\n{install_res['stderr']}",
+                        }
                 cmd = ["bundle", "exec", "rspec"]
                 if target_test:
                     cmd.append(target_test)

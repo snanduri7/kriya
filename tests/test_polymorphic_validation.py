@@ -269,6 +269,83 @@ def test_java_ruby_compile_invocation(tmp_path):
         res_rb = validator_rb.run_compile_check(["test.rb"])
         assert res_rb["success"] is True
 
+def test_ruby_run_tests_installs_gems_before_rspec(tmp_path):
+    """Regression test for a real bug found live (eval harness batch
+    20260804-115621): a fresh sandbox never has gems installed, so `bundle exec
+    rspec` fails with 'bundler: command not found: rspec' regardless of whether
+    the generated Ruby code is correct - confirmed live burning a full 6-attempt
+    retry budget on code that was already right. `bundle install` must run first
+    whenever a real Gemfile is present."""
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
+    (tmp_path / "spec").mkdir()
+    (tmp_path / "spec" / "example_spec.rb").write_text("RSpec.describe 'x' do; end\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "ruby"
+
+    with patch("subprocess.Popen") as mock_popen:
+        install_process = MagicMock()
+        install_process.returncode = 0
+        install_process.communicate.return_value = ("Bundle complete.", "")
+
+        rspec_process = MagicMock()
+        rspec_process.returncode = 0
+        rspec_process.communicate.return_value = ("1 example, 0 failures", "")
+
+        mock_popen.side_effect = [install_process, rspec_process]
+
+        res = validator.run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 2
+    first_cmd = mock_popen.call_args_list[0].args[0]
+    second_cmd = mock_popen.call_args_list[1].args[0]
+    assert first_cmd == ["bundle", "install"]
+    assert second_cmd[:3] == ["bundle", "exec", "rspec"]
+
+
+def test_ruby_run_tests_reports_bundle_install_failure_without_running_rspec(tmp_path):
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        install_process = MagicMock()
+        install_process.returncode = 1
+        install_process.communicate.return_value = ("", "Could not find gem 'rspec'.")
+        mock_popen.return_value = install_process
+
+        res = validator.run_tests()
+
+    assert res["success"] is False
+    assert "bundle install" in res["output"]
+    # Only the failed `bundle install` call should have been made - rspec must
+    # never run against a gem environment that's known to be broken.
+    assert mock_popen.call_count == 1
+
+
+def test_ruby_run_tests_skips_bundle_install_without_a_gemfile(tmp_path):
+    # Stack detection also accepts a bare Rakefile/*.gemspec with no Gemfile -
+    # `bundle install` has nothing to act on in that case and must be skipped,
+    # not attempted and failed.
+    (tmp_path / "Rakefile").write_text("")
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "ruby"
+
+    with patch("subprocess.Popen") as mock_popen:
+        rspec_process = MagicMock()
+        rspec_process.returncode = 0
+        rspec_process.communicate.return_value = ("0 examples, 0 failures", "")
+        mock_popen.return_value = rspec_process
+
+        res = validator.run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 1
+    assert mock_popen.call_args_list[0].args[0][:3] == ["bundle", "exec", "rspec"]
+
+
 def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
     """javac's default one-line "uses unchecked or unsafe operations" summary
     carries no file:line location at all - useless for pointing a retry at the
