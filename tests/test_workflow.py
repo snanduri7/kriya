@@ -243,6 +243,28 @@ def test_resolve_run_command_ignores_non_python_commands():
 def test_resolve_run_command_handles_empty_command():
     assert _resolve_run_command([]) == []
 
+def test_resolve_run_command_prefixes_bundle_exec_for_rspec_with_gemfile(tmp_path):
+    """Regression test for a real bug found live (2026-08-04 eval harness batch,
+    after the run_tests()-side bundle-install fix): RunVerifierAgent.judge()
+    inferred a bare `rspec <spec>` run command for a Ruby goal - rspec is a
+    Bundler-installed executable, never on a bare system PATH, so the run failed
+    immediately with 'No such file or directory: rspec' regardless of whether the
+    generated code was correct (confirmed - it was). A Gemfile's presence is
+    ground truth this project's gems are Bundler-managed."""
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
+    assert _resolve_run_command(["rspec", "spec/word_count_spec.rb"], str(tmp_path)) == [
+        "bundle", "exec", "rspec", "spec/word_count_spec.rb"
+    ]
+
+def test_resolve_run_command_leaves_rspec_alone_without_a_gemfile(tmp_path):
+    # No Gemfile means nothing for `bundle exec` to act on - same reasoning as
+    # PolymorphicValidator.run_tests()'s own Gemfile guard.
+    assert _resolve_run_command(["rspec", "spec/foo_spec.rb"], str(tmp_path)) == ["rspec", "spec/foo_spec.rb"]
+
+def test_resolve_run_command_does_not_double_prefix_existing_bundle_exec(tmp_path):
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\n")
+    assert _resolve_run_command(["bundle", "exec", "rspec"], str(tmp_path)) == ["bundle", "exec", "rspec"]
+
 def test_resolve_run_command_adds_dash_e_for_maven():
     """Regression test for a real bug caught live: a goal-explicit command like
     'mvn -q compile exec:java ...' (many skills recommend -q so

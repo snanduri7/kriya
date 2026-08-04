@@ -517,6 +517,18 @@ def _resolve_run_command(command: List[str], workspace_path: Optional[str] = Non
             pom_content = ""
         if re.search(r"<classpath\s*/>", pom_content):
             command = [tok if tok != "exec:java" else "exec:exec" for tok in command]
+    # Confirmed live (2026-08-04 eval harness batch): RunVerifierAgent.judge() can
+    # infer a bare `rspec`/`rake` run command for a Ruby goal - these are Bundler-
+    # installed executables, never on a bare system PATH, so the run fails
+    # immediately with "No such file or directory: 'rspec'" regardless of whether
+    # the generated code is correct. A Gemfile's presence is ground truth that this
+    # project's gems are Bundler-managed - same class of correction as the mvn
+    # exec:java/exec:exec fix above, just for a different toolchain.
+    if (
+        workspace_path and command and command[0] in ("rspec", "rake")
+        and os.path.exists(os.path.join(workspace_path, "Gemfile"))
+    ):
+        command = ["bundle", "exec"] + list(command)
     return command
 
 EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")

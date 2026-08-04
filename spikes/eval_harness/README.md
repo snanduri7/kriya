@@ -115,9 +115,9 @@ single trace row. Real, mixed signal on the first ever live run:
   session**: `run_tests()`'s ruby branch now runs `bundle install` first
   whenever a real `Gemfile` is present (skipped when the project only has a
   bare `Rakefile`/`*.gemspec`, since `bundle install` has nothing to act on
-  there), 3 new regression tests, confirmed failing pre-fix. Not yet
-  re-validated live - the next batch run should confirm `ruby_word_count`
-  actually passes now, not just that the unit tests pass.
+  there), 3 new regression tests, confirmed failing pre-fix. Re-validated
+  live in the next batch (20260804-144646 below) - it surfaced a second,
+  different bug in the same symptom class, now also fixed.
 - **Unresolved: `django_healthcheck_gap` produced Java/Spring code for a
   Python/Django goal.** The goal text never mentions Java/Spring/Maven, but
   the Developer wrote `DjangoHealthCheckView.java` using Spring's
@@ -150,3 +150,48 @@ single trace row. Real, mixed signal on the first ever live run:
   carries (or references) the actual content that failed, not just the
   tool's error text, would make exactly this kind of investigation
   possible without needing DEBUG logging turned on in advance.
+
+### Batch 20260804-144646 (qwen3-coder:30b / embeddinggemma:latest, partial re-run: ruby_word_count + ignite_qpid_person only, post-refactor validation)
+
+Live validation of both the `bundle install` fix and the unified
+failure-grounding refactor (item 1). Both goals still failed, but for two
+completely different (and individually informative) reasons - neither is a
+regression from either change:
+
+- **`ignite_qpid_person`: identical JVM Security Manager crash, same
+  circuit-breaker behavior as the first batch.** The model wrote
+  `-Djava.security.manager=allow` into `pom.xml` again (a different random
+  attempt, same class of mistake), and Kriya stopped after exactly 1 attempt
+  again. Confirms the failure-grounding refactor didn't regress the
+  environment-failure fast-stop path - real live parity, not just passing
+  mocks. (The recurring mistake itself is model-side; a
+  `skills/ignite-java17/rules.txt` rule against that flag is a plausible
+  follow-up, not yet done.)
+- **`ruby_word_count`: the `bundle install` fix worked, but exposed a
+  second, different bug in a different mechanism.** The targeted-test gate
+  (`PolymorphicValidator.run_tests()`, the code path fixed in the previous
+  batch) passed - `bundle install` ran, `bundle exec rspec` succeeded.
+  Runtime Verification then independently inferred its own run command
+  (`RunVerifierAgent.judge()`) and picked a bare `rspec spec/word_count_spec.rb`
+  - never routed through Bundler at all, since that inference path doesn't
+  go through `run_tests()`. Failed immediately: `Failed to execute: [Errno 2]
+  No such file or directory: 'rspec'` (system-wide `rspec` was never
+  installed - only available via `bundle exec` in this project's local
+  bundle). `environment_failure`'s "missing executable" classifier correctly
+  caught it and stopped after 1 attempt. **Fixed same session**:
+  `_resolve_run_command()` (`kriya/workflow/workflow.py`) now prefixes
+  `bundle exec` onto an inferred `rspec`/`rake` command whenever a real
+  `Gemfile` exists - same deterministic-ground-truth pattern already used
+  there for the Maven exec:java/exec:exec correction, just for a different
+  toolchain. 3 new regression tests, confirmed failing pre-fix. Not yet
+  re-validated live.
+- **Lesson reinforced**: the exact same underlying gap (gems never
+  installed) can resurface through more than one independent code path -
+  `PolymorphicValidator.run_tests()`'s fixed invocation and
+  `RunVerifierAgent.judge()`'s free-form command inference are structurally
+  different mechanisms that both happened to need the same fix. Matches the
+  durable lesson already on file: "not every 'the model got it wrong' case
+  needs the same fix" - here it's the reverse shape, two different
+  mechanisms needing the *same* fix, discoverable only by re-running live
+  after the first fix, not by inspecting the first fix's own code in
+  isolation.
