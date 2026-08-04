@@ -29,6 +29,7 @@ from kriya.workflow.checkpoint import (
     new_run_id,
     save_checkpoint,
 )
+from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 
 logger = logging.getLogger(__name__)
 
@@ -548,11 +549,24 @@ class IncompleteGenerationError(ValueError):
     block can recognize this specific failure and route to a missing-file recovery
     retry - asking the Developer for exactly the missing file(s) - instead of either
     a full-file-set regeneration or a compile/test-error-style targeted retry, neither
-    of which addresses "the model just didn't write this file" at all."""
+    of which addresses "the model just didn't write this file" at all.
+
+    Stays a ValueError subclass (not QualityGateFailure) for backward compatibility
+    with existing isinstance(err, ValueError) callers/tests, but carries a `.failure`
+    Failure object the same way every QualityGateFailure does - the except block
+    reads `.failure` off either via getattr, so this is the one failure source that
+    was already structured end-to-end (missing_files as a real attribute, no string
+    round-trip) before this module existed, now folded into the same shape."""
 
     def __init__(self, missing_files: List[str], message: str) -> None:
         super().__init__(message)
         self.missing_files = missing_files
+        self.failure = Failure(
+            type="incomplete_generation",
+            message=message,
+            raw_output=message,
+            likely_files=list(missing_files),
+        )
 
 
 def find_missing_expected_files(expected_files: set, written_files: set, goal: str = "") -> List[str]:
@@ -1156,6 +1170,74 @@ def _build_error_source_context(
     return context_by_file
 
 
+def _resolve_file_locations(error_text: str, known_files: Iterable[str]) -> List[FileLocation]:
+    """Same basename resolution _build_error_source_context() does internally,
+    but returning structured FileLocation objects for a Failure instead of a
+    prompt-ready snippet dict - lets a compile-error raise site populate
+    Failure.file_locations directly instead of leaving it to be re-derived
+    later from str(e)."""
+    by_basename = {os.path.basename(f): f for f in known_files}
+    locations: List[FileLocation] = []
+    for filename, line_no in extract_error_source_locations(error_text):
+        filepath = by_basename.get(filename)
+        if filepath:
+            locations.append(FileLocation(filepath=filepath, line=line_no))
+    return locations
+
+
+def _capture_failed_content(worktree_path: str, files: Iterable[str]) -> Dict[str, str]:
+    """Reads the real current content of every given file from the worktree at
+    the moment a Failure is raised - still on disk, since the next Developer
+    attempt hasn't overwritten it yet. Closes a real forensics gap found live
+    (2026-08-04 eval harness batch): a failed attempt's actual generated
+    content was otherwise never persisted anywhere, only the tool's error
+    text, making a recurring live bug impossible to root-cause after the
+    fact. Best-effort - a file that can't be read (already deleted, race)
+    is silently skipped, matching _build_error_source_context's own
+    tolerance for a location naming a file Kriya doesn't have."""
+    content: Dict[str, str] = {}
+    for filepath in files:
+        try:
+            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                content[filepath] = fh.read()
+        except Exception as ex:
+            logger.debug(f"Failed to capture failed content for {filepath}: {ex}")
+    return content
+
+
+def _build_quality_gate_failure(
+    type_: str,
+    message: str,
+    raw_output: str,
+    worktree_path: str,
+    known_files: Iterable[str],
+    attempt: int,
+    extra_likely_files: Optional[List[str]] = None,
+) -> Failure:
+    """Shared construction for the compile/test/run_verification/regression_test
+    raise sites - each just supplies its own type/message/raw_output (and, for
+    run_verification, RunVerifierAgent.grade()'s already-validated likely_files
+    as extra_likely_files). Populates file_locations/likely_files/failed_content
+    uniformly instead of leaving them to be re-derived later from str(e), and
+    captures failed_content only for the files this failure actually implicates
+    (not every written file) to keep the I/O bounded."""
+    known_files = list(known_files)
+    file_locations = _resolve_file_locations(raw_output, known_files)
+    likely_files = list(dict.fromkeys(
+        (extra_likely_files or []) + extract_implicated_files(raw_output, known_files)
+    ))
+    implicated = sorted({loc.filepath for loc in file_locations} | set(likely_files))
+    return Failure(
+        type=type_,
+        message=message,
+        raw_output=raw_output,
+        file_locations=file_locations,
+        likely_files=likely_files,
+        failed_content=_capture_failed_content(worktree_path, implicated),
+        attempt=attempt,
+    )
+
+
 async def _get_or_start_jdtls_client(existing_client: Any, project_root: str) -> Any:
     """Lazily starts a JdtlsClient for this generation run if jdtls is
     available, reusing an already-started one across retries rather than
@@ -1588,6 +1670,15 @@ class WorkflowEngine:
         if run_id is None:
             run_id = new_run_id()
 
+        # Trace id/start time are established here, before any early-return gate,
+        # so every terminal state of a run (including knowledge_gap and human
+        # rejection below) is captured in traces.db, not just the ordinary
+        # completed-loop path.
+        import time
+        import uuid
+        trace_id = str(uuid.uuid4())[:8]
+        start_time = time.time()
+
         # 0. KnowledgeGuard Stage 0 Check
         from kriya.tools.knowledge import KnowledgeGuard
         knowledge_config = self.kernel.config.knowledge
@@ -1610,11 +1701,27 @@ class WorkflowEngine:
         if gap_report.has_gaps and not knowledge_risk_confirmed:
             if step_callback:
                 step_callback("knowledge_gap", gap_report.format_report())
+            try:
+                from kriya.core.trace import TraceLogger
+                trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                trace_logger = TraceLogger(trace_db)
+                trace_logger.log_run(
+                    run_id=trace_id,
+                    goal=goal,
+                    duration_sec=time.time() - start_time,
+                    attempts=0,
+                    status="knowledge_gap",
+                    files_modified=[],
+                    failure_category="knowledge_gap"
+                )
+            except Exception as trace_ex:
+                logger.warning(f"Failed to write run trace: {trace_ex}")
             return {
                 "status": "knowledge_gap",
                 "gap_report": gap_report.to_dict(),
                 "goal": goal,
-                "workspace_path": workspace_path
+                "workspace_path": workspace_path,
+                "run_id": trace_id
             }
 
         # Initialize trace lists
@@ -2071,12 +2178,6 @@ class WorkflowEngine:
             
         if learned_rag_context:
             convention_prompt += learned_rag_context
-            
-        # Track trace statistics
-        import time
-        import uuid
-        trace_id = str(uuid.uuid4())[:8]
-        start_time = time.time()
 
         # Fingerprints for any checkpoint saved during this run - computed once,
         # goal/workspace/config are all fixed for the remainder of the call.
@@ -2724,7 +2825,28 @@ class WorkflowEngine:
                             with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
                                 orig_text = fh.read()
                                 
-                        new_content = apply_anchored_edits(orig_text, edits, active_code_context)
+                        try:
+                            new_content = apply_anchored_edits(orig_text, edits, active_code_context)
+                        except ValueError as anchor_ex:
+                            # apply_anchored_edits() itself never receives a filepath, so its
+                            # raised ValueError never named one either - this failure class
+                            # always fell through to a blind full-set retry, unlike a compile
+                            # error (which self-names its file). filepath IS known right here,
+                            # in the caller's loop scope - capture it now instead of losing it.
+                            # orig_text (the real pre-edit content the SEARCH block was
+                            # supposed to match against) is already in memory - exactly what's
+                            # needed to debug an anchor mismatch, no disk re-read needed.
+                            failure = Failure(
+                                type="anchored_edit",
+                                message=f"ANCHORED EDIT FAILURE in {filepath}: {anchor_ex}",
+                                raw_output=str(anchor_ex),
+                                file_locations=[FileLocation(filepath=filepath)],
+                                likely_files=[filepath],
+                                failed_content={filepath: orig_text},
+                                attempt=attempt_number,
+                            )
+                            gate_outcomes.append(failure.to_gate_outcome())
+                            raise QualityGateFailure(failure) from anchor_ex
                         with open(full_path, "w", encoding="utf-8") as f:
                             f.write(new_content)
                     else:
@@ -2767,40 +2889,55 @@ class WorkflowEngine:
                             logger.warning(f"Toolchain preflight: {toolchain_warning}")
 
                     compile_res = validator.run_compile_check(list(all_files_written))
+                    if not compile_res["success"]:
+                        failure = _build_quality_gate_failure(
+                            "compile", f"COMPILATION FAILURE:\n{compile_res['output']}",
+                            compile_res.get("output", ""), worktree_path, all_files_written, attempt_number,
+                        )
+                        gate_outcomes.append(failure.to_gate_outcome())
+                        raise QualityGateFailure(failure)
                     gate_outcomes.append({
                         "attempt": attempt_number,
                         "type": "compile",
-                        "success": compile_res["success"],
+                        "success": True,
                         "output": compile_res.get("output", "")
                     })
-                    if not compile_res["success"]:
-                        raise ValueError(f"COMPILATION FAILURE:\n{compile_res['output']}")
-                    
+
                     target_test = extract_target_test(error_context, list(all_files_written))
                     if target_test:
                         logger.info(f"Quality Gates: Running targeted tests: {target_test}")
                         test_res = validator.run_tests(target_test=target_test)
+                        if not test_res["success"]:
+                            failure = _build_quality_gate_failure(
+                                "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
+                                test_res.get("output", ""), worktree_path, all_files_written, attempt_number,
+                            )
+                            gate_outcomes.append(failure.to_gate_outcome())
+                            raise QualityGateFailure(failure)
                         gate_outcomes.append({
                             "attempt": attempt_number,
                             "type": "targeted_test",
-                            "success": test_res["success"],
+                            "success": True,
                             "output": test_res.get("output", "")
                         })
-                        if not test_res["success"]:
-                            raise ValueError(f"TARGETED TEST FAILURE:\n{test_res['output']}")
                     else:
                         test_written = any("test" in f.lower() or "spec" in f.lower() for f in all_files_written)
                         if test_written:
                             logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                             test_res = validator.run_tests()
+                            if not test_res["success"]:
+                                failure = _build_quality_gate_failure(
+                                    "test", f"TEST FAILURE:\n{test_res['output']}",
+                                    test_res.get("output", ""), worktree_path, all_files_written, attempt_number,
+                                )
+                                gate_outcomes.append(failure.to_gate_outcome())
+                                raise QualityGateFailure(failure)
                             gate_outcomes.append({
                                 "attempt": attempt_number,
                                 "type": "test",
-                                "success": test_res["success"],
+                                "success": True,
                                 "output": test_res.get("output", "")
                             })
-                            if not test_res["success"]:
-                                raise ValueError(f"TEST FAILURE:\n{test_res['output']}")
 
                     # Quality Gates: Runtime Verification. Compiling and passing whatever tests
                     # exist only proves the code is valid - it says nothing about whether it does
@@ -2880,34 +3017,34 @@ class WorkflowEngine:
                                         returncode=run_res["returncode"],
                                         files_written=list(all_files_written),
                                     )
+                                if not grade["passed"]:
+                                    # A compile error always names its own broken file
+                                    # (file:[line,col]) - a runtime failure's captured
+                                    # output (broker banners, SLF4J lines with no .java
+                                    # suffix) structurally never does. RunVerifierAgent.grade()'s
+                                    # already-validated likely_files (grade.get("likely_files"),
+                                    # absent on the two synthetic timed-out/step-failed grades
+                                    # built above, only present from a real grade() call) is
+                                    # passed straight into Failure.likely_files as
+                                    # extra_likely_files - no more stringify-into-the-message-
+                                    # then-re-derive-via-regex round-trip.
+                                    message = (
+                                        f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}"
+                                        f"\n\nCaptured output:\n{run_res['output']}"
+                                    )
+                                    failure = _build_quality_gate_failure(
+                                        "run_verification", message, run_res["output"],
+                                        worktree_path, all_files_written, attempt_number,
+                                        extra_likely_files=grade.get("likely_files") or [],
+                                    )
+                                    gate_outcomes.append(failure.to_gate_outcome())
+                                    raise QualityGateFailure(failure)
                                 gate_outcomes.append({
                                     "attempt": attempt_number,
                                     "type": "run_verification",
-                                    "success": grade["passed"],
+                                    "success": True,
                                     "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
                                 })
-                                if not grade["passed"]:
-                                    # A compile error always names its own broken file
-                                    # (file:[line,col]), which is what lets
-                                    # extract_implicated_files() scope the retry to just
-                                    # that file - a runtime failure's captured output
-                                    # (broker banners, SLF4J lines with no .java suffix)
-                                    # structurally never does, so without this, every
-                                    # runtime-verification failure fell back to a blind
-                                    # full-set retry with none of the FIX ANALYSIS forcing
-                                    # instruction, anchored-edit preference, or file-scoped
-                                    # LSP grounding that a compile failure gets. Naming the
-                                    # grader's likely_files here (already validated against
-                                    # the real file list) lets the exact same downstream
-                                    # basename-matching pick it up with no other plumbing.
-                                    likely_files_note = (
-                                        f"\n\nLikely responsible file(s): {', '.join(grade['likely_files'])}"
-                                        if grade.get("likely_files") else ""
-                                    )
-                                    raise ValueError(
-                                        f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}{likely_files_note}"
-                                        f"\n\nCaptured output:\n{run_res['output']}"
-                                    )
                                 logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
                                 # A passing real-world run is exactly the proof the
                                 # skill-verification gap check is looking for - mark every
@@ -3018,6 +3155,21 @@ class WorkflowEngine:
                                 elif os.path.exists(actual_file):
                                     os.remove(actual_file)
                         delete_checkpoint(workspace_path, run_id)
+                        try:
+                            from kriya.core.trace import TraceLogger
+                            trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                            trace_logger = TraceLogger(trace_db)
+                            trace_logger.log_run(
+                                run_id=trace_id,
+                                goal=goal,
+                                duration_sec=time.time() - start_time,
+                                attempts=retry_count,
+                                status="human_rejected",
+                                files_modified=[],
+                                failure_category="human_rejected"
+                            )
+                        except Exception as trace_ex:
+                            logger.warning(f"Failed to write run trace: {trace_ex}")
                         return {
                             "plan": plan,
                             "design": design,
@@ -3156,14 +3308,22 @@ class WorkflowEngine:
                         logger.warning(f"Toolchain preflight: {toolchain_warning}")
 
                 full_test_res = validator.run_tests()
+                if not full_test_res["success"]:
+                    # Real workspace, not the worktree - the worktree was already reset by
+                    # this point, so failed_content/file_locations must be captured from
+                    # workspace_path or they'd read stale pre-change content.
+                    failure = _build_quality_gate_failure(
+                        "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}",
+                        full_test_res.get("output", ""), workspace_path, all_files_written, attempt_number,
+                    )
+                    gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
                 gate_outcomes.append({
                     "attempt": attempt_number,
                     "type": "regression_test",
-                    "success": full_test_res["success"],
+                    "success": True,
                     "output": full_test_res.get("output", "")
                 })
-                if not full_test_res["success"]:
-                    raise ValueError(f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}")
 
                 quality_gates_succeeded = True
                 break
@@ -3177,14 +3337,19 @@ class WorkflowEngine:
                     f"targeted {targeted_retry_count}/{TARGETED_MAX_RETRIES}): {e}"
                 )
 
-                is_incomplete_generation = isinstance(e, IncompleteGenerationError)
-                fail_type = (
-                    "incomplete_generation" if is_incomplete_generation
-                    else "compile" if "COMPILATION" in raw_error_context
-                    else "run_verification" if "RUNTIME VERIFICATION" in raw_error_context
-                    else "test" if "TEST" in raw_error_context
-                    else "general_error"
+                # Every failure source now raises with a real Failure object attached
+                # (QualityGateFailure.failure directly, or IncompleteGenerationError.failure
+                # for backward compat - see kriya/workflow/failure.py) instead of a bare
+                # message string later re-sniffed for its type by prefix-matching. A bare
+                # Exception (shouldn't normally happen - defensive only) is wrapped the same
+                # way so everything downstream always reads one shape.
+                failure: Failure = getattr(e, "failure", None) or Failure(
+                    type="general_error", message=raw_error_context, raw_output=raw_error_context,
                 )
+                failure.attempt = attempt_number
+                failure.mode = attempt_mode
+                fail_type = failure.type
+                is_incomplete_generation = isinstance(e, IncompleteGenerationError)
 
                 # Error-triggered live lookup: only for a REPEATED failure (same
                 # fail_type + same extracted tool/library terms, or identical raw
@@ -3261,7 +3426,13 @@ class WorkflowEngine:
                     last_missing_files = e.missing_files
                     last_implicated_files = None
                 else:
-                    implicated = extract_implicated_files(raw_error_context, all_files_written)
+                    # failure.likely_files is already populated at the raise site for
+                    # every QualityGateFailure (compile/test/run_verification/
+                    # regression_test via _build_quality_gate_failure(), anchored_edit
+                    # directly) - no more re-deriving it here from raw text. Falls back
+                    # to the legacy regex scan only for the general_error case (a bare,
+                    # unexpected Exception with no Failure of its own).
+                    implicated = failure.likely_files or extract_implicated_files(raw_error_context, all_files_written)
                     last_implicated_files = implicated if implicated else None
                     last_missing_files = None
 
@@ -3309,14 +3480,13 @@ class WorkflowEngine:
                 else:
                     retry_count += 1
 
+                # De-dup fallback: a QualityGateFailure-sourced failure already appended
+                # its own gate_outcome at the raise site (via failure.to_gate_outcome()),
+                # so this only ever fires for a source that never reaches a try-block
+                # append - chiefly IncompleteGenerationError, plus the general_error
+                # defensive path.
                 if not any(o.get("attempt") == attempt_number and o.get("type") == fail_type for o in gate_outcomes):
-                    gate_outcomes.append({
-                        "attempt": attempt_number,
-                        "type": fail_type,
-                        "success": False,
-                        "output": raw_error_context,
-                        "mode": attempt_mode,
-                    })
+                    gate_outcomes.append(failure.to_gate_outcome())
 
                 budgets_exhausted = environment_failure is not None or (
                     retry_count >= max_retries and not (
@@ -3378,15 +3548,13 @@ class WorkflowEngine:
         # A stable, short string identifying WHY this run failed, so a caller
         # (human or script) can always ask "why did this fail" the same way
         # rather than having to know which of several differently-shaped
-        # fields to check. Deliberately scoped to the failure modes reachable
-        # from THIS retry loop only (None on success, "environment_failure",
-        # or "quality_gates_exhausted" for an ordinary exhausted-retry-budget
-        # code failure) - knowledge-gap (its own early-return dict, handled
-        # entirely before this loop even starts) and human-rejected-approval
-        # (raises a catchable exception, not a return value) are genuinely
-        # different control-flow shapes that would need their own redesign to
-        # fold in, not just a field addition - left out of scope deliberately
-        # rather than silently.
+        # fields to check. Scoped to the failure modes reachable from THIS
+        # retry loop (None on success, "environment_failure", or
+        # "quality_gates_exhausted" for an ordinary exhausted-retry-budget
+        # code failure). The other two terminal states Kriya can end a run
+        # in - knowledge-gap and human-rejected-approval - are separate
+        # early-return dicts (above and below this point respectively) that
+        # log their own failure_category directly at their own return site.
         failure_category: Optional[str] = None
         if not quality_passed:
             failure_category = "environment_failure" if environment_failure else "quality_gates_exhausted"
@@ -3408,7 +3576,8 @@ class WorkflowEngine:
                 active_skills=active_skills,
                 prompt_rendered=plan_prompt,
                 gate_outcomes=gate_outcomes,
-                model_hops=model_hops
+                model_hops=model_hops,
+                failure_category=failure_category
             )
             logger.info(f"Persistent run trace recorded: {trace_id}")
         except Exception as trace_ex:
