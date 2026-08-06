@@ -572,6 +572,61 @@ def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
         "  public static void main(String[] args) {"
     )
 
+def test_sanitize_generated_content_none_passthrough():
+    assert DeveloperAgent.sanitize_generated_content(None) is None
+
+def test_sanitize_generated_content_strips_gutter_and_fence():
+    text = (
+        "```java\n"
+        ">> 3: import org.apache.ignite.cache.IgniteCache;\n"
+        "  4: public class App {\n"
+        "```"
+    )
+    assert DeveloperAgent.sanitize_generated_content(text) == (
+        "import org.apache.ignite.cache.IgniteCache;\npublic class App {"
+    )
+
+def test_sanitize_generated_content_truncates_redundant_trailing_marker():
+    text = "public class App {}\n\nFILE CONTENT:\npublic class App { /* duplicated */ }"
+    assert DeveloperAgent.sanitize_generated_content(text) == "public class App {}"
+
+def test_sanitize_generated_content_plain_text_passthrough():
+    # No gutter, no fence, no marker - must not be altered at all.
+    text = "public class App {\n    public static void main(String[] args) {}\n}"
+    assert DeveloperAgent.sanitize_generated_content(text) == text
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_full_content_retry_strips_copied_gutter():
+    """Regression test: unlike the anchored-edit SEARCH/REPLACE path (already
+    covered in test_split_fix_analysis_edit_strips_copied_error_source_gutter),
+    a full FILE CONTENT: retry response is shown the exact same gutter-
+    formatted error_source_context but, before sanitize_generated_content was
+    wired into _fill_missing_content's non-anchored branch, only ever had
+    markdown fences stripped - a model that echoed the gutter back into a
+    full-file response (not just a SEARCH block) would have written it
+    straight to disk uncorrected."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: wrong import package.\n"
+        "FILE CONTENT:\n"
+        ">> 1: import org.apache.ignite.cache.IgniteCache;\n"
+        "  2: public class App {}\n"
+    ))
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="cannot find symbol",
+        # No error_source_context entry for this file - keeps prefer_anchored_edit
+        # False so this exercises the non-anchored FILE CONTENT: branch, not the
+        # SEARCH/REPLACE one already covered by _split_fix_analysis_edit's tests.
+        error_source_context=None,
+    )
+    assert files[0]["content"] == (
+        "import org.apache.ignite.cache.IgniteCache;\npublic class App {}"
+    )
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_prefers_anchored_edit_when_source_context_known():
     """A precise source location (error_source_context has a real snippet for
@@ -1018,6 +1073,43 @@ async def test_run_verifier_grade_filters_out_hallucinated_likely_files():
     )
 
     assert grade["likely_files"] == ["src/main/java/com/example/CombinedApplication.java"]
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_timed_out_adds_prompt_note():
+    """timed_out=True must tell the grader not to treat the forced-kill exit
+    code/output as evidence of failure on its own - the caller (workflow.py)
+    still treats a timeout as disqualifying regardless of grade()'s verdict,
+    but grade() itself must judge purely on whether the goal's described
+    output is genuinely present in what was captured before the kill."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": True,
+        "reasoning": "The [SUCCESS] line is present despite the forced kill.",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(
+        goal="Print [SUCCESS]", success_criteria="Output contains [SUCCESS]",
+        output="[SUCCESS] done\n", returncode=-1, timed_out=True,
+    )
+
+    assert grade["passed"] is True
+    prompt = llm.complete.call_args_list[0][0][1]
+    assert "forcibly killed" in prompt
+    assert "Do NOT treat the exit code or the kill itself as evidence of failure" in prompt
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_no_timeout_note_by_default():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({"passed": True, "reasoning": "ok"}))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
+
+    prompt = llm.complete.call_args_list[0][0][1]
+    assert "forcibly killed" not in prompt
 
 @pytest.mark.asyncio
 async def test_skill_gap_agent_extracts_rules_and_examples():

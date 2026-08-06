@@ -21,6 +21,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
 )
 from kriya.workflow.workflow import (
+    RESOURCE_LIFECYCLE_HEADER,
     IncompleteGenerationError,
     WorkflowEngine,
     _augment_error_with_live_lookup,
@@ -815,6 +816,169 @@ async def test_workflow_prompt_includes_ecosystem_invariant_on_missing_files_ret
     assert "Ecosystem Preservation" in second_call_kwargs["task_description"]
 
 
+def test_resource_lifecycle_header_names_the_core_pattern():
+    # Unlike the ecosystem invariant, this one is a plain constant (no
+    # per-repo dynamic content to name) - stack-agnostic generalization of
+    # skills/ignite-java17/rules.txt's own start-once/reuse/close-once rule.
+    assert "Resource Lifecycle" in RESOURCE_LIFECYCLE_HEADER
+    assert "close" in RESOURCE_LIFECYCLE_HEADER.lower()
+    assert "try-with-resources" in RESOURCE_LIFECYCLE_HEADER
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_resource_lifecycle_on_first_attempt(tmp_path):
+    """Regression test: the resource-lifecycle checklist must reach the very
+    first attempt, not just retries - the Ignite start/close bug it
+    generalizes was a first-attempt mistake, not something only surfacing on
+    a retry after a runtime failure."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "App.py", "content": "def main():\n    pass\n"}
+    ])
+    res = await we.run_generation_workflow(goal="Write a script", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
+    assert "Resource Lifecycle" in first_call_kwargs["task_description"]
+    assert "close" in first_call_kwargs["task_description"].lower()
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_resource_lifecycle_on_targeted_retry(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  String x;\n}"}],
+        ])
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert "Resource Lifecycle" in second_call_kwargs["task_description"]
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_resource_lifecycle_on_missing_files_retry(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py and helper.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{"filepath": "app.py", "content": "print(1)"}],
+        [{"filepath": "helper.py", "content": "def helper():\n    pass\n"}],
+    ])
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert "Resource Lifecycle" in second_call_kwargs["task_description"]
+
+@pytest.mark.asyncio
+async def test_workflow_sanitizes_batch_json_content_before_writing_to_disk(tmp_path):
+    """Regression test for a real, previously-uncovered gap: DeveloperAgent's
+    per-file generation paths (_fill_missing_content) route content through
+    DeveloperAgent.sanitize_generated_content, but a batch JSON response's
+    content field (DeveloperAgent._normalize_file_entries, used when the
+    model returns full file objects in one JSON array) never passed through
+    ANY sanitization before this fix - it went straight from parsed JSON to
+    disk. Mocking run_generation here stands in for that path (as the other
+    workflow-level tests in this file already do for the Developer Agent
+    generally) to confirm the workflow's own write loop - not just the
+    agent-side paths - now sanitizes any content it receives, regardless of
+    which internal path produced it."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "App.py", "content": "```python\n>> 1: def main():\n    pass\n```"}
+    ])
+    res = await we.run_generation_workflow(goal="Write a script", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    written = (tmp_path / "App.py").read_text()
+    assert "```" not in written
+    assert ">>" not in written
+    assert written == "def main():\n    pass"
+
+@pytest.mark.asyncio
+async def test_workflow_sanitizes_batch_json_edits_before_applying(tmp_path):
+    """Same gap as above, for the edits path: a batch JSON response's edits
+    field (search/replace text) also went straight to apply_anchored_edits
+    with zero sanitization before this fix - a model that echoed a gutter
+    into an edit supplied this way (not through _split_fix_analysis_edit,
+    which already sanitized its own edits) would have produced a guaranteed
+    anchor-match failure with no way to recover. Attempt 1 writes the file
+    normally and a mocked compile failure forces a targeted retry, so the
+    edit's target content is legitimately present in apply_anchored_edits'
+    own shown_context guard (mirrors the precedent in
+    test_workflow_anchored_edit_failure_captures_filepath, which exercises
+    the same edits path but for the mismatch-failure case, not success)."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    # "  1: " is Kriya's own non-highlighted context-line gutter (see
+    # _build_error_source_context) prepended to the real, unmarked source
+    # line "    old()" - exactly the shape a model echoing the gutter back
+    # would produce.
+    gutter_prefixed_search = "  1: " + "    old()"
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "App.py: SyntaxError near old()"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.py", "content": "def main():\n    old()\n"}],
+            [{"filepath": "App.py", "edits": [
+                {"search": gutter_prefixed_search, "replace": "    new()"}
+            ]}],
+        ])
+        res = await we.run_generation_workflow(goal="Write a script", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    written = (tmp_path / "App.py").read_text()
+    assert written == "def main():\n    new()\n"
+
+
 def _latest_trace_row(logs_dir):
     """Read back the most recent row from a test-isolated traces.db (cfg.paths.logs
     pointed at tmp_path), as a dict keyed by column name - avoids every trace-related
@@ -1333,6 +1497,131 @@ async def test_workflow_scopes_retry_to_grader_likely_files_on_run_verification_
     # captured output) - what matters is that grade()'s likely_files reached
     # the persisted gate_outcome directly, not exclusivity.
     assert "helper.py" in run_verification_failures[0]["likely_files"]
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_timeout_grades_captured_output_as_succeeded_then_hung(tmp_path):
+    """Regression test for the non-binary Runtime Verification grading fix:
+    _run_cmd_with_timeout still captures whatever stdout/stderr a process
+    produced before being killed - previously the timeout branch never
+    looked at that captured output at all, short-circuiting straight to a
+    flat "Run timed out" message regardless of whether the goal's described
+    behavior had already genuinely happened (the real Ignite/Qpid bug this
+    generalizes: correct final output printed, then an unclosed resource's
+    background threads kept the process alive). Confirms grade() is now
+    called WITH the real captured output and timed_out=True even on a
+    timeout, and that a grade()-confirmed success still counts as an overall
+    failure (a hang is always disqualifying) but is categorized distinctly
+    (type="run_verification_hung") with a message pointing at the resource
+    lifecycle, not application logic."""
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('[SUCCESS] it worked')\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={
+        "passed": True,
+        "reasoning": "The [SUCCESS] line is fully present in the captured output.",
+    })
+    with patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence") as mock_run_seq:
+        mock_run_seq.return_value = {
+            "success": False,
+            "timed_out": True,
+            "returncode": -1,
+            "output": "[SUCCESS] it worked\n",
+        }
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should print [SUCCESS]",
+            workspace_path=str(tmp_path),
+        )
+
+    # A hang is always disqualifying, regardless of grade()'s verdict on the
+    # captured output.
+    assert res["quality_gates_passed"] is False
+    first_grade_call_kwargs = we.run_verifier.grade.call_args_list[0].kwargs
+    assert first_grade_call_kwargs["timed_out"] is True
+    assert first_grade_call_kwargs["output"] == "[SUCCESS] it worked\n"
+
+    # The retry prompt must carry the resource-lifecycle framing, not a bare
+    # "timed out" message with no actionable signal.
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert "never exited on its own" in second_call_kwargs["task_description"]
+    assert "Fix the resource lifecycle" in second_call_kwargs["task_description"]
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    hung_failures = [o for o in gate_outcomes if o.get("type") == "run_verification_hung"]
+    assert len(hung_failures) >= 1, gate_outcomes
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_timeout_with_genuine_failure_stays_plain_category(tmp_path):
+    """The complementary case: a timeout where the captured output does NOT
+    show the goal was achieved either must stay categorized as plain
+    "run_verification" (not "_hung") - the hang-specific resource-lifecycle
+    framing/category is only for a genuinely non-binary outcome, not every
+    timeout."""
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('still working...')\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={
+        "passed": False,
+        "reasoning": "The [SUCCESS] marker never appears in the captured output.",
+    })
+    with patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence") as mock_run_seq:
+        mock_run_seq.return_value = {
+            "success": False,
+            "timed_out": True,
+            "returncode": -1,
+            "output": "still working...\n",
+        }
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should print [SUCCESS]",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is False
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    assert not [o for o in gate_outcomes if o.get("type") == "run_verification_hung"]
+    plain_failures = [o for o in gate_outcomes if o.get("type") == "run_verification"]
+    assert len(plain_failures) >= 1, gate_outcomes
 
 @pytest.mark.asyncio
 async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_path):

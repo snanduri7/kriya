@@ -35,6 +35,11 @@ class Failure:
     a single canonical vocabulary (replaces the two inconsistent taxonomies
     found in gate_outcomes' try-block dict literals and the except block's
     separate fail_type derivation): "compile", "test", "run_verification",
+    "run_verification_hung" (a self-terminating entrypoint whose captured
+    output shows the goal WAS achieved, but the process never exited on its
+    own and had to be killed after timing out - a resource-lifecycle defect,
+    not a wrong-behavior one; see the non-binary grading in
+    kriya/workflow/workflow.py's run-verification timeout branch),
     "regression_test", "incomplete_generation", "anchored_edit", or
     "general_error" (fallback for a bare, non-QualityGateFailure Exception).
     """

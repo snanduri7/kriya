@@ -189,9 +189,20 @@ class DeveloperAgent(BaseAgent):
 
     @staticmethod
     def _strip_markdown_fences(text: str) -> str:
-        cleaned = text.strip()
-        if cleaned.startswith("```"):
-            lines = cleaned.splitlines()
+        # Used only to DETECT a fence (a genuine ``` marker can never be
+        # meaningful leading/trailing whitespace, so stripping first is safe
+        # for detection purposes) - the ORIGINAL, unstripped text is what gets
+        # returned whenever no fence is actually found. Found live via
+        # sanitize_generated_content: a single-line anchored REPLACE block
+        # whose entire content is an indented statement (e.g. "    new()")
+        # was having its own meaningful leading indentation silently eaten by
+        # an unconditional .strip() that had nothing to do with fences at
+        # all - the same blanket strip also dropped a real file's own
+        # trailing newline for plain (non-fenced) full-file content passed
+        # through the workflow write loop's own new sanitization step.
+        stripped_for_fence_check = text.strip()
+        if stripped_for_fence_check.startswith("```"):
+            lines = stripped_for_fence_check.splitlines()
             if lines[0].startswith("```"):
                 lines = lines[1:]
             if lines and lines[-1].startswith("```"):
@@ -202,11 +213,48 @@ class DeveloperAgent(BaseAgent):
         # surround it with conversational preamble/postamble instead of returning
         # only the fence. Prefer the largest fenced block over the raw text in that
         # case (largest, since a short illustrative aside could also be fenced).
-        fences = re.findall(r"```[a-zA-Z0-9_+-]*\n(.*?)\n```", cleaned, re.DOTALL)
+        fences = re.findall(r"```[a-zA-Z0-9_+-]*\n(.*?)\n```", stripped_for_fence_check, re.DOTALL)
         if fences:
             return max(fences, key=len).strip()
 
-        return cleaned
+        return text
+
+    @staticmethod
+    def sanitize_generated_content(text: Optional[str]) -> Optional[str]:
+        """Single, uniform sanitization step for ANY text a model returns as file
+        content or an anchored edit's search/replace block. Three real model habits
+        - each found live, each originally patched only in the one path where it was
+        first noticed (_split_fix_analysis_edit's SEARCH/REPLACE parsing) - are
+        generalized here so every extraction point applies the same cleanup, not
+        just the first one that happened to hit the bug:
+        1. A redundant trailing "FILE CONTENT:" marker and everything after it - a
+           model asked for a small patch sometimes over-delivers a second, unasked
+           full-file block appended after the real answer.
+        2. This module's own line-numbered display gutter (">> N: " / "  N: ", see
+           _build_error_source_context in kriya/workflow/workflow.py) sometimes gets
+           echoed back verbatim instead of the bare source line underneath it.
+        3. A wrapping ```lang fence, or a fenced block buried in surrounding prose.
+
+        Order matters, same as the original single-path fix: truncate before
+        gutter-stripping (so a gutter line straddling the truncation point doesn't
+        leave a stray fragment behind), gutter-strip before fence-stripping.
+
+        Deliberately does NOT blanket-strip whitespace beyond that: plain
+        pass-through content (no marker, no fence) is returned exactly as given,
+        including a real trailing newline - only the newline(s) left immediately
+        before a truncated "FILE CONTENT:" marker are trimmed, since those are a
+        structural artifact of where the model chose to place that marker, not
+        part of the real answer either side of it.
+
+        Returns None unchanged - callers routinely pass content that's legitimately
+        absent (e.g. a file entry still awaiting generation)."""
+        if text is None:
+            return None
+        trailing_file_content = re.search(r"file content:", text, re.IGNORECASE)
+        if trailing_file_content:
+            text = text[:trailing_file_content.start()].rstrip("\n")
+        text = _GUTTER_PREFIX_RE.sub("", text)
+        return DeveloperAgent._strip_markdown_fences(text)
 
     @staticmethod
     def _extract_json_value(text: str) -> Any:
@@ -302,55 +350,25 @@ class DeveloperAgent(BaseAgent):
         if search_match and replace_match and replace_match.start() > search_match.start():
             analysis = text[:search_match.start()].strip()
             analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
-            # Not .strip()'d yet - deferred until after gutter-stripping below,
-            # since stripping now would eat a "  N: " gutter's leading spaces
-            # on whichever line happens to land first, before the regex made
-            # for detecting exactly that ever sees them.
-            search_block = text[search_match.end():replace_match.start()]
-            replace_block = text[replace_match.end():]
-            # A model asked to prefer an anchored edit sometimes ALSO appends a
-            # redundant trailing "FILE CONTENT:" section anyway (not asked for,
-            # but real, observed model behavior) - without truncating here, the
-            # entire redundant full-file content (plus the literal "FILE
-            # CONTENT:" marker text) gets swallowed into replace_block and
-            # applied as part of the patch. Confirmed live, 2026-08-04: a real
-            # response correctly self-diagnosed and fixed a wrong-import bug
-            # via a clean 3-line SEARCH/REPLACE, but also appended a redundant
-            # full FILE CONTENT: block - the resulting merged file duplicated
-            # the entire package/import/class declaration mid-file and failed
-            # with "class, interface, enum, or record expected". Not a model
-            # mistake (the SEARCH/REPLACE portion alone was correct) - an
-            # unbounded regex in this parsing step swallowing content past
-            # where the actual patch ended.
-            trailing_file_content = re.search(r"file content:", replace_block, re.IGNORECASE)
-            if trailing_file_content:
-                replace_block = replace_block[:trailing_file_content.start()]
-            # A model shown _build_error_source_context()'s own display format
-            # (">> N: <source line>" for the reported line, "   N: <source
-            # line>" for surrounding context) sometimes copies that gutter
-            # into its SEARCH/REPLACE blocks instead of the bare source line -
-            # confirmed live, 2026-08-04: a real SEARCH block was literally
-            # ">> import org.apache.ignite.cache.IgniteCache;" (the model kept
-            # the ">>" marker, dropped the line number), which can never match
-            # the real file's plain "import ...;" line, guaranteeing "Anchor
-            # matching failed... matched 0 times" regardless of whether the
-            # model's intended fix was otherwise correct. Also strips a
-            # wrapping ```lang fence, the same defensive normalization already
-            # applied to full FILE CONTENT: responses elsewhere. Safe against
-            # false positives on real code: no real Java/XML/JSON/properties
-            # line legitimately starts with ">>", and the non-highlighted
-            # gutter form is only stripped when followed by a colon-terminated
-            # line number, not just any 2-space indent.
-            # Gutter-strip BEFORE fence-strip: _strip_markdown_fences() calls
-            # text.strip(), which trims the block's absolute leading
-            # whitespace - if that ran first, a "  N: " (non-highlighted,
-            # unmarked) gutter as the block's very first line would already
-            # have lost its leading 2 spaces before the gutter regex ever
-            # saw them, silently leaving a stray "N: " behind.
-            search_block = _GUTTER_PREFIX_RE.sub("", search_block)
-            replace_block = _GUTTER_PREFIX_RE.sub("", replace_block)
-            search_block = DeveloperAgent._strip_markdown_fences(search_block)
-            replace_block = DeveloperAgent._strip_markdown_fences(replace_block)
+            # Trim ONLY the leading/trailing newline(s) that slicing right after a
+            # "SEARCH:"/"REPLACE:" marker structurally introduces (the marker is
+            # always followed by a newline before the real block starts) - NOT a
+            # blanket whitespace strip, which would also eat meaningful leading
+            # indentation on a block whose entire content is a single indented
+            # line (e.g. "    new()"). That distinction is why this trims "\n"
+            # specifically here, at the point the artifact is introduced, rather
+            # than inside sanitize_generated_content below, which must also handle
+            # plain full-file content where a genuine trailing newline is real,
+            # not an artifact.
+            search_block = text[search_match.end():replace_match.start()].strip("\n")
+            replace_block = text[replace_match.end():].strip("\n")
+            # Both real, observed model habits this used to hand-patch here alone
+            # (a redundant trailing FILE CONTENT: over-delivery, and this module's
+            # own display gutter getting echoed back verbatim) are now handled by
+            # one shared step applied uniformly wherever model text is extracted -
+            # see sanitize_generated_content for the full history/rationale.
+            search_block = DeveloperAgent.sanitize_generated_content(search_block)
+            replace_block = DeveloperAgent.sanitize_generated_content(replace_block)
             if search_block:
                 return (analysis or None), [{"search": search_block, "replace": replace_block}], None
         analysis, content = DeveloperAgent._split_fix_analysis(text)
@@ -571,7 +589,7 @@ class DeveloperAgent(BaseAgent):
             if edits:
                 files_out.append({"filepath": filepath, "content": None, "edits": edits})
             else:
-                files_out.append({"filepath": filepath, "content": self._strip_markdown_fences(content)})
+                files_out.append({"filepath": filepath, "content": self.sanitize_generated_content(content)})
         return files_out
 
     async def run_generation(
@@ -829,6 +847,7 @@ class RunVerifierAgent(BaseAgent):
         output: str,
         returncode: Optional[int],
         files_written: Optional[List[str]] = None,
+        timed_out: bool = False,
     ) -> Dict[str, Any]:
         grader_system_prompt = (
             "You are the Kriya Run Verification Grader.\n"
@@ -850,12 +869,23 @@ class RunVerifierAgent(BaseAgent):
             '{"passed": true or false, "reasoning": "one or two sentences citing specific '
             'evidence from the output", "likely_files": ["exact/path/from/the/list/below", ...] or []}'
         )
+        timeout_note = (
+            "\n\nNOTE: this process was forcibly killed after exceeding its execution timeout - "
+            "the exit code and output above are whatever was captured up to that forced kill, not "
+            "a clean exit. Do NOT treat the exit code or the kill itself as evidence of failure. "
+            "Judge 'passed' purely on whether the goal's described output is fully and correctly "
+            "present in what was captured before the kill - if it is, the goal's OBSERVABLE "
+            "BEHAVIOR was genuinely achieved, even though the process failing to exit on its own "
+            "is a separate problem the caller will handle independently of this judgment."
+            if timed_out else ""
+        )
         prompt = (
             f"=== Goal ===\n{goal}\n\n"
             f"=== Expected Success Criteria ===\n{success_criteria}\n\n"
             f"=== Files Generated ===\n{chr(10).join(files_written or [])}\n\n"
             f"=== Actual Exit Code ===\n{returncode}\n\n"
-            f"=== Actual Captured Output ===\n{output}\n\n"
+            f"=== Actual Captured Output ===\n{output}"
+            f"{timeout_note}\n\n"
             "Did this run actually succeed per the criteria above?"
         )
         response_str = await call_with_escalation(

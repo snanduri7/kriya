@@ -1398,6 +1398,28 @@ ECOSYSTEM_INVARIANT_HEADER = (
 )
 
 
+RESOURCE_LIFECYCLE_HEADER = (
+    "\n\n=== Resource Lifecycle (required) ===\n"
+    "Any stateful resource you open in this goal's code - a database/cache client "
+    "or connection (e.g. Ignite, JDBC, Redis), a message broker client/connection, "
+    "a thread pool or executor, a network socket or server, a file handle - must be "
+    "started/opened exactly ONCE for the lifetime it's actually needed, reused "
+    "rather than re-opened per operation/method call, and explicitly closed/shut "
+    "down exactly once when the application is done with it. Prefer your "
+    "language's own scoped-resource construct (e.g. Java/Kotlin try-with-resources, "
+    "Python's 'with', Go's 'defer') over a manual close call you might forget on an "
+    "error path. Opening a fresh instance of the same kind of resource in a "
+    "different method just to \"read back\" what an earlier method wrote is almost "
+    "always wrong - reuse the SAME instance across every method/step that needs it "
+    "instead of creating a new, disconnected one with no knowledge of the first. An "
+    "unclosed resource with its own background threads (a cache/broker client, an "
+    "executor) can leave the process alive indefinitely even after all application "
+    "logic, including any output the goal expects, has already completed "
+    "successfully - a silent hang with no visible error is the classic symptom of "
+    "exactly this mistake."
+)
+
+
 def _build_ecosystem_invariant_block(repo_model: Any) -> str:
     """A standing, always-present checklist instruction (not conditionally
     triggered) that the goal/existing repo's language and framework must be
@@ -1433,6 +1455,7 @@ def _build_targeted_retry_prompt(
     goal: str, plan: str, error_context: str, target_files: List[str],
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
     ecosystem_invariant_block: str = "",
+    resource_lifecycle_block: str = "",
 ) -> Tuple[str, str]:
     """Builds the task description and code context for a targeted (single/few-
     file) retry: the target file(s) are framed as the fix, every other already-
@@ -1462,6 +1485,7 @@ def _build_targeted_retry_prompt(
 
     task_desc = f"Goal: {goal}\nPlan: {plan}"
     task_desc += ecosystem_invariant_block
+    task_desc += resource_lifecycle_block
     task_desc += (
         f"\n\n=== Previous Error to Fix ===\n{error_context}\n\n"
         f"This is a TARGETED fix attempt. Based on the error above, the following file(s) are most "
@@ -1478,6 +1502,7 @@ def _build_full_set_retry_prompt(
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
     required_dependencies_prompt_block: str = "",
     ecosystem_invariant_block: str = "",
+    resource_lifecycle_block: str = "",
 ) -> Tuple[str, str]:
     """Full-set retries previously never showed the model its own prior attempt's
     content at all, only the abstract error text describing what went wrong -
@@ -1516,6 +1541,7 @@ def _build_full_set_retry_prompt(
 
     task_desc = f"Goal: {goal}\nPlan: {plan}"
     task_desc += ecosystem_invariant_block
+    task_desc += resource_lifecycle_block
     if error_context:
         task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
     task_desc += required_files_prompt_block
@@ -1528,6 +1554,7 @@ def _build_missing_files_retry_prompt(
     goal: str, plan: str, design: str, missing_files: List[str],
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
     ecosystem_invariant_block: str = "",
+    resource_lifecycle_block: str = "",
 ) -> Tuple[str, str]:
     """Builds the task description and code context for a missing-file recovery
     retry, used after an IncompleteGenerationError: the Architect's design called
@@ -1551,6 +1578,7 @@ def _build_missing_files_retry_prompt(
 
     task_desc = f"Goal: {goal}\nPlan: {plan}"
     task_desc += ecosystem_invariant_block
+    task_desc += resource_lifecycle_block
     task_desc += (
         "\n\nThis is a MISSING-FILE recovery attempt. The Architect's design (below, in the code context) "
         f"calls for the following file(s), which were NOT generated in the previous attempt: "
@@ -2574,6 +2602,15 @@ class WorkflowEngine:
         # only has something concrete to preserve once a project exists.
         ecosystem_invariant_block = _build_ecosystem_invariant_block(repo_model)
 
+        # Stack-agnostic generalization of skills/ignite-java17/rules.txt's own
+        # start-once/reuse/close-once rule, which only ever fires for an
+        # Ignite-tagged goal. A goal using any other stateful resource (a JDBC
+        # connection, a broker client, a thread pool) gets no equivalent
+        # instruction cold-start, with no skill yet to learn it from. Threaded
+        # through every prompt builder the same way ecosystem_invariant_block is -
+        # a standing invariant present on every attempt, not a reactive one.
+        resource_lifecycle_block = RESOURCE_LIFECYCLE_HEADER
+
         required_dependencies_prompt_block = ""
         _original_pom_path = os.path.join(workspace_path, "pom.xml")
         if os.path.exists(_original_pom_path):
@@ -2711,6 +2748,7 @@ class WorkflowEngine:
                         goal, plan, error_context, last_implicated_files,
                         all_files_written, worktree_path, base_code_context,
                         ecosystem_invariant_block=ecosystem_invariant_block,
+                        resource_lifecycle_block=resource_lifecycle_block,
                     )
                     logger.info(f"Targeted retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: focusing on {', '.join(last_implicated_files)}.")
 
@@ -2767,6 +2805,7 @@ class WorkflowEngine:
                         goal, plan, design, resolved_missing_files,
                         all_files_written, worktree_path, base_code_context,
                         ecosystem_invariant_block=ecosystem_invariant_block,
+                        resource_lifecycle_block=resource_lifecycle_block,
                     )
                     logger.info(f"Missing-file recovery retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: adding {', '.join(resolved_missing_files)}.")
 
@@ -2811,6 +2850,7 @@ class WorkflowEngine:
                         all_files_written, worktree_path, active_code_context,
                         required_dependencies_prompt_block,
                         ecosystem_invariant_block=ecosystem_invariant_block,
+                        resource_lifecycle_block=resource_lifecycle_block,
                     )
 
                     # Track model hops
@@ -2886,10 +2926,30 @@ class WorkflowEngine:
                     filepath = file_obj.get("filepath", "")
                     content = file_obj.get("content", "")
                     edits = file_obj.get("edits", [])
-                    
+
                     if not filepath:
                         continue
-                    
+
+                    # Single choke point every content path (batch JSON, iterative
+                    # per-file, a full-set retry) converges through before a byte
+                    # reaches disk - closes a real gap the per-path fixes upstream
+                    # (DeveloperAgent.sanitize_generated_content) don't: a batch JSON
+                    # response's content/edits fields are consumed directly from
+                    # parsed JSON and never passed through any sanitization at all
+                    # before this point. Idempotent/harmless to re-apply to content
+                    # that already went through it upstream.
+                    if edits:
+                        edits = [
+                            {
+                                **e,
+                                "search": DeveloperAgent.sanitize_generated_content(e.get("search", "")),
+                                "replace": DeveloperAgent.sanitize_generated_content(e.get("replace", "")),
+                            }
+                            for e in edits
+                        ]
+                    elif content is not None:
+                        content = DeveloperAgent.sanitize_generated_content(content)
+
                     full_path = os.path.join(worktree_path, filepath)
                     os.makedirs(os.path.dirname(full_path), exist_ok=True)
                     
@@ -3079,8 +3139,63 @@ class WorkflowEngine:
                                     resolved_run_commands,
                                     timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
                                 )
+                                gate_type = "run_verification"
                                 if run_res["timed_out"]:
-                                    grade = {"passed": False, "reasoning": f"Run timed out after {autonomy_cfg_rv.run_verification_timeout_seconds}s."}
+                                    # _run_cmd_with_timeout still reaps and captures whatever
+                                    # stdout/stderr the process produced before being killed (see
+                                    # kriya/tools/validate.py) - a forced kill does NOT mean nothing
+                                    # happened. Grading that captured output, same as a clean run,
+                                    # instead of short-circuiting straight to a flat "timed out"
+                                    # message, is what lets a genuinely-non-binary outcome surface.
+                                    # Confirmed live, 2026-08-04: a real Ignite/Qpid run printed its
+                                    # correct final "[RESULT]" output, then hung (an unclosed Ignite
+                                    # node's background threads kept the JVM alive) - the old flat
+                                    # message gave the retry loop zero signal, so every attempt kept
+                                    # trying timeout-tuning fixes that could never fix a genuine
+                                    # resource leak, burning the whole retry budget on the wrong
+                                    # class of change.
+                                    grade = await self.run_verifier.grade(
+                                        goal=goal,
+                                        success_criteria=judgment["success_criteria"],
+                                        output=run_res["output"],
+                                        returncode=run_res["returncode"],
+                                        files_written=list(all_files_written),
+                                        timed_out=True,
+                                    )
+                                    timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
+                                    if grade["passed"]:
+                                        # The goal's described behavior WAS genuinely produced -
+                                        # this is a categorically different defect than "wrong
+                                        # behavior": a self-terminating entrypoint that doesn't
+                                        # terminate is still a real bug (still fails this gate,
+                                        # still needs a retry), but the fix is almost always the
+                                        # resource lifecycle (see RESOURCE_LIFECYCLE_HEADER above),
+                                        # not the application logic that already produced the
+                                        # correct result - pointing the retry there directly,
+                                        # rather than at a generic timeout message, is the entire
+                                        # point of grading the captured output instead of skipping
+                                        # straight to a synthetic failure.
+                                        gate_type = "run_verification_hung"
+                                        grade["reasoning"] = (
+                                            f"The goal's described output WAS produced correctly, but the "
+                                            f"process never exited on its own and had to be killed after "
+                                            f"{timeout_s}s. This is still a real defect, not a false alarm - "
+                                            "almost always an unclosed resource (a connection, broker client, "
+                                            "executor, or similar) keeping the process alive after all "
+                                            "application logic already finished. Fix the resource lifecycle "
+                                            f"(see Resource Lifecycle above), not the application logic, which "
+                                            f"already works. Grader's evidence: {grade['reasoning']}"
+                                        )
+                                    else:
+                                        grade["reasoning"] = (
+                                            f"Run timed out after {timeout_s}s, and the output captured before "
+                                            f"the forced kill does not show the goal was achieved either: "
+                                            f"{grade['reasoning']}"
+                                        )
+                                    # A hang is always disqualifying regardless of what the
+                                    # captured-output grade concluded - only the message/gate_type
+                                    # above differ based on it.
+                                    grade["passed"] = False
                                 elif not run_res["success"]:
                                     # A non-final step failing can still leave the LAST step's
                                     # returncode at 0 (every command runs regardless of an
@@ -3111,7 +3226,7 @@ class WorkflowEngine:
                                         f"\n\nCaptured output:\n{run_res['output']}"
                                     )
                                     failure = _build_quality_gate_failure(
-                                        "run_verification", message, run_res["output"],
+                                        gate_type, message, run_res["output"],
                                         worktree_path, all_files_written, attempt_number,
                                         extra_likely_files=grade.get("likely_files") or [],
                                     )
@@ -3478,7 +3593,7 @@ class WorkflowEngine:
                 error_context = raw_error_context
                 if (
                     current_failure_signature == last_failure_signature
-                    and fail_type in ("compile", "run_verification")
+                    and fail_type in ("compile", "run_verification", "run_verification_hung")
                     and self.kernel.config.autonomy.web_lookup_enabled
                     and self.kernel.config.search.base_url
                     and error_terms
