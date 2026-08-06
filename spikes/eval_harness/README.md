@@ -309,3 +309,54 @@ The real test is the next full batch: does `django_healthcheck_gap`
 produce real Django code, and does `python_task_tracker` stop inventing a
 Maven-style layout? Run by the user in their own terminal, same as every
 other batch in this file.
+
+### Batch 20260804-195517 (qwen3-coder:30b / embeddinggemma:latest, full 5-goal batch, 2400-3600s/goal) - live validation of the ecosystem invariant
+
+Pass rate 3/5 traced rows (60%) - the best batch yet. The invariant is a
+confirmed, real, partial win - honest result, not a full fix for the
+whole class it was aimed at:
+
+- **`django_healthcheck_gap`: fixed.** Went from Java/Spring Boot code (2
+  consecutive prior batches) to a clean pass, attempt 1, 38.6s. Verified
+  the actual generated content, not just the pass/fail signal: real,
+  idiomatic Django - `from django.http import JsonResponse`,
+  `from django.urls import path`, a correct `urlpatterns` list. The
+  language/framework-substitution failure mode is gone for this goal.
+  One cosmetic leftover: the files landed at
+  `src/main/java/com/example/urls.py` (Java-Maven-style directory
+  nesting on top of correctly-Python file content and extension) -
+  harmless here since Python stack detection only needs a `.py` file to
+  exist anywhere, not any particular path.
+- **`python_task_tracker`: NOT fixed - same root cause persists despite
+  the invariant explicitly naming it.** Still timed out (this run used
+  3600s, triple the original limit) still writing
+  `src/main/python/tasks/store.py` / `src/test/python/tests/test_store.py`
+  - the exact Maven-style layout the invariant's own text explicitly
+  calls out ("do not invent a Maven-style src/main/src/test directory
+  layout for a goal that only ever asked for a flat layout"). Confirmed
+  via the regression tests added with the fix that this instruction text
+  really is present in this goal's prompt - this isn't a wiring bug, the
+  model saw the instruction and didn't follow it for this specific
+  pattern, on a multi-file goal, even though the same underlying model
+  did follow the (arguably harder) instruction to write real Django
+  instead of Spring on a simpler, single-file goal in the same batch.
+- **Reframe, not a failure of the fix**: "ecosystem substitution" turned
+  out to be two distinguishable sub-problems, not one - *which*
+  language/framework to write (the invariant fixed this, confirmed) and
+  *which directory layout convention* to use within the correct language
+  (the invariant did not reliably fix this, at least not yet, at least
+  not for a 4-file goal). Matches the durable lesson already on file:
+  "not every 'the model got it wrong' case needs the same fix." Possible
+  next angles, not yet decided: the layout habit may be a stronger prior
+  needing more than one checklist line to override (matches cited
+  research already on file about models struggling to override strong
+  priors via in-context instructions alone), or the instruction may be
+  landing less saliently in a longer, multi-attempt, multi-file prompt
+  than in the Django goal's much shorter one - genuinely unclear which
+  from one data point, would need more batches or a targeted comparison
+  to know.
+- **`ruby_word_count` and `ignite_qpid_person` behaved exactly as the
+  last batch** - Ruby passed again (2nd consecutive pass, all three Ruby
+  fixes holding), Ignite/Qpid hit the identical JVM Security Manager
+  mistake a 4th batch running, circuit breaker correctly stopping it
+  every time. Both confirm no regression from this session's changes.
