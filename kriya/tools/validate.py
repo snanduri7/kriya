@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -86,21 +87,48 @@ class PolymorphicValidator:
         return get_pom_dependencies(pom_path)
 
     def _detect_stack(self) -> str:
-        """Determines if the workspace uses Python, Java, or Ruby."""
+        """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
+        for anything else (JS/TS, Go, Rust, C#, ...). Python used to be the blind
+        default for anything not Java/Ruby, which meant a genuinely unsupported
+        stack silently ran the Python compile-check branch, matched zero .py
+        files, and reported a false-positive "Python files compiled successfully"
+        - a quality gate that never actually checked anything. Python is now
+        detected the same way Java/Ruby are, by real markers, so "no markers
+        matched" is distinguishable from "this is a Python project"."""
         # 1. Check for Java
-        if (os.path.exists(os.path.join(self.workspace_path, "pom.xml")) or 
+        if (os.path.exists(os.path.join(self.workspace_path, "pom.xml")) or
             os.path.exists(os.path.join(self.workspace_path, "build.gradle")) or
             os.path.exists(os.path.join(self.workspace_path, "src", "main", "java"))):
             return "java"
-            
+
         # 2. Check for Ruby
-        if (os.path.exists(os.path.join(self.workspace_path, "Gemfile")) or 
+        if (os.path.exists(os.path.join(self.workspace_path, "Gemfile")) or
             os.path.exists(os.path.join(self.workspace_path, "Rakefile")) or
             os.path.exists(os.path.join(self.workspace_path, "spec"))):
             return "ruby"
-            
-        # Default fallback to Python
-        return "python"
+
+        # 3. Check for Python
+        if (os.path.exists(os.path.join(self.workspace_path, "requirements.txt")) or
+            os.path.exists(os.path.join(self.workspace_path, "pyproject.toml")) or
+            os.path.exists(os.path.join(self.workspace_path, "setup.py")) or
+            os.path.exists(os.path.join(self.workspace_path, "setup.cfg")) or
+            os.path.exists(os.path.join(self.workspace_path, "Pipfile")) or
+            self._has_any_py_file()):
+            return "python"
+
+        return "unknown"
+
+    def _has_any_py_file(self) -> bool:
+        """Bounded recursive fallback for a Python project with none of the
+        standard marker files (e.g. a single-script goal with no packaging
+        metadata yet) - stops at the first hit, skips common non-source/
+        dependency directories so it doesn't walk a huge vendored tree."""
+        skip_dirs = {".git", "node_modules", "venv", ".venv", "__pycache__", "build", "dist", ".kriya"}
+        for _root, dirs, filenames in os.walk(self.workspace_path):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            if any(f.endswith(".py") for f in filenames):
+                return True
+        return False
 
     def _run_cmd_with_timeout(self, cmd: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
         env = None
@@ -110,20 +138,36 @@ class PolymorphicValidator:
             preexec_fn = posix_resource_limits_preexec_fn(
                 self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
             )
+        # start_new_session=True (POSIX setsid) puts the child in its own
+        # process group - required for the timeout-kill below to actually
+        # work for a command like `mvn exec:exec`, which forks its own
+        # separate `java` child process to run the app (that's the entire
+        # point of exec:exec over exec:java). Confirmed live, 2026-08-03:
+        # subprocess.run()'s own built-in timeout handling only kills the
+        # DIRECT child (mvn) - the grandchild java process it forked
+        # survived the kill, kept an embedded Qpid broker bound to its port
+        # for over an hour, and silently broke a LATER, completely
+        # unrelated validation run that happened to need the same port.
+        # Killing the whole process group on timeout is the only way to
+        # actually terminate what a command like this really started.
+        process = subprocess.Popen(
+            cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=env, preexec_fn=preexec_fn, start_new_session=True,
+        )
         try:
-            res = subprocess.run(
-                cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
-                env=env, preexec_fn=preexec_fn,
-            )
-            return {"returncode": res.returncode, "stdout": res.stdout, "stderr": res.stderr, "timeout": False}
-        except subprocess.TimeoutExpired as te:
-            stdout = te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else (te.stdout or "")
-            stderr = te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else (te.stderr or "")
+            stdout, stderr = process.communicate(timeout=timeout)
+            return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr, "timeout": False}
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # already exited between the timeout firing and this kill
+            stdout, stderr = process.communicate()  # reap the process, collect whatever output exists
             return {
-                "returncode": -1, 
-                "stdout": stdout, 
-                "stderr": stderr + f"\n[TIMEOUT] Command timed out after {timeout} seconds.", 
-                "timeout": True
+                "returncode": -1,
+                "stdout": stdout,
+                "stderr": stderr + f"\n[TIMEOUT] Command timed out after {timeout} seconds.",
+                "timeout": True,
             }
 
     def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
@@ -165,7 +209,26 @@ class PolymorphicValidator:
             # 2. Run Maven compile if pom.xml exists
             if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                 try:
-                    res = self._run_cmd_with_timeout(["mvn", "clean", "compile"], cwd=self.workspace_path)
+                    # showWarnings + compilerArgument enable javac's -Xlint:rawtypes,
+                    # unchecked diagnostics with real file:line pointers (javac's
+                    # default one-line "uses unchecked or unsafe operations" summary
+                    # has no location info at all) - these are standard, portable
+                    # maven-compiler-plugin CLI properties, no pom.xml cooperation
+                    # needed. On a real compile FAILURE, this text is already
+                    # captured into error_output below for free - a raw-type mistake
+                    # (e.g. `ignite.cache(name)` used without generics, causing a
+                    # later "incompatible types: Object cannot be converted to X"
+                    # error) now shows up as an explicit, precisely-located "rawtypes"
+                    # warning alongside the hard error, rather than the model having
+                    # to infer the root cause from the type-mismatch message alone.
+                    res = self._run_cmd_with_timeout(
+                        [
+                            "mvn", "clean", "compile",
+                            "-Dmaven.compiler.showWarnings=true",
+                            "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked",
+                        ],
+                        cwd=self.workspace_path,
+                    )
                     if res["returncode"] == 0:
                         return {"success": True, "output": "Maven compilation succeeded."}
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
@@ -242,7 +305,17 @@ class PolymorphicValidator:
                 return {"success": False, "output": "\n".join(errors)}
             return {"success": True, "output": "Ruby files syntax check passed."}
 
-        return {"success": True, "output": "Unsupported tech stack compilation check skipped."}
+        # "unknown" - no Java/Python/Ruby markers matched. success: True so an
+        # unsupported stack doesn't fail the retry loop forever over a gate that
+        # was never going to pass, but the message is honest about zero real
+        # validation having happened - never claim a check that didn't run.
+        return {
+            "success": True,
+            "output": (
+                "No compile check available: workspace does not match a supported "
+                "stack (Java/Python/Ruby). Quality gate skipped, NOT confirmed to compile."
+            ),
+        }
 
     def run_tests(self, target_test: Optional[str] = None) -> Dict[str, Any]:
         """Runs tech-stack specific test execution suite."""
@@ -296,6 +369,32 @@ class PolymorphicValidator:
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
  
             elif self.stack == "ruby":
+                # A fresh sandbox never has gems installed, so `bundle exec rspec`
+                # fails with "bundler: command not found: rspec" regardless of what
+                # the model writes - confirmed live (eval harness batch
+                # 20260804-115621) burning a full retry budget on correct Ruby code
+                # for exactly this reason. `bundle install` needs a real Gemfile to
+                # act on; without one, skip straight to the exec attempt below,
+                # which still gets a chance via its own fallback.
+                if os.path.exists(os.path.join(self.workspace_path, "Gemfile")):
+                    # --path installs gems into a project-local, sandbox-writable
+                    # directory instead of the host Ruby's own gem path - confirmed
+                    # live (eval harness batch 20260804-151655) that a plain
+                    # `bundle install` fails outright on an unmodified macOS system
+                    # Ruby (no rbenv/rvm), whose gem directory is permission-
+                    # protected and requires sudo the install can never provide
+                    # non-interactively (Bundler::SudoNotPermittedError). --path is
+                    # portable across Bundler 1.x/2.x and, once set, is remembered
+                    # via .bundle/config for the `bundle exec` call below too - no
+                    # other plumbing needed.
+                    install_res = self._run_cmd_with_timeout(
+                        ["bundle", "install", "--path", "vendor/bundle"], cwd=self.workspace_path
+                    )
+                    if install_res["returncode"] != 0:
+                        return {
+                            "success": False,
+                            "output": f"'bundle install' failed:\n{install_res['stdout']}\n{install_res['stderr']}",
+                        }
                 cmd = ["bundle", "exec", "rspec"]
                 if target_test:
                     cmd.append(target_test)
@@ -308,7 +407,18 @@ class PolymorphicValidator:
                         cmd.append(target_test)
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
- 
+
+            # "unknown" stack - same reasoning as run_compile_check: succeed so
+            # the retry loop doesn't fail forever on a gate that can never run,
+            # but say plainly that nothing was actually tested.
+            return {
+                "success": True,
+                "output": (
+                    "No test runner available: workspace does not match a supported "
+                    "stack (Java/Python/Ruby). Quality gate skipped, NOT confirmed to pass."
+                ),
+            }
+
         except Exception as e:
             return {"success": False, "output": f"Failed to execute local test suite: {e}"}
 

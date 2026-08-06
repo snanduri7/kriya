@@ -19,6 +19,20 @@ class LLMConfig(BaseModel):
     context_window: int = Field(default=32768)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
+    # Applied ONLY to Developer generation calls that are directly responding to a
+    # real prior Quality Gate failure (the same scope as prior_error_context's
+    # fix-analysis instruction) - None (default) means no override, unchanged
+    # behavior. A real, cited finding motivated this as opt-in rather than
+    # lowering `temperature` globally: code-gen success rate measured dropping
+    # ~25.7% going from 0.0->0.2 temperature for only a ~9.6% diversity gain
+    # (AAAI-38 adaptive-temperature-sampling study) - the opposite of "add
+    # randomness to shake a stuck retry loose." Deliberately NOT changed as the
+    # global default: `temperature` defaults to 0.7 in default_config.yaml with
+    # its own documented rationale (avoiding MoE repetition loops on longer,
+    # from-scratch attempt-1 generations) that this finding doesn't touch or
+    # contradict - a retry's typically-shorter, narrower regeneration is a
+    # different case, not evidence the global default should change too.
+    retry_temperature: Optional[float] = Field(default=None)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")

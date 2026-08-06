@@ -1,6 +1,8 @@
 import hashlib
 import json
+import logging
 import os
+import sqlite3
 import subprocess
 import sys
 from unittest.mock import AsyncMock, patch
@@ -22,12 +24,15 @@ from kriya.workflow.workflow import (
     IncompleteGenerationError,
     WorkflowEngine,
     _augment_error_with_live_lookup,
+    _build_ecosystem_invariant_block,
     _build_error_source_context,
     _build_full_set_retry_prompt,
+    _build_lsp_diagnostics_context,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
     _check_java_toolchain_mismatch,
     _filter_misattributed_extraction,
+    _get_or_start_jdtls_client,
     _is_near_duplicate_rule,
     _java_toolchain_fact,
     _likely_misattributed_sibling,
@@ -238,6 +243,28 @@ def test_resolve_run_command_ignores_non_python_commands():
 
 def test_resolve_run_command_handles_empty_command():
     assert _resolve_run_command([]) == []
+
+def test_resolve_run_command_prefixes_bundle_exec_for_rspec_with_gemfile(tmp_path):
+    """Regression test for a real bug found live (2026-08-04 eval harness batch,
+    after the run_tests()-side bundle-install fix): RunVerifierAgent.judge()
+    inferred a bare `rspec <spec>` run command for a Ruby goal - rspec is a
+    Bundler-installed executable, never on a bare system PATH, so the run failed
+    immediately with 'No such file or directory: rspec' regardless of whether the
+    generated code was correct (confirmed - it was). A Gemfile's presence is
+    ground truth this project's gems are Bundler-managed."""
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
+    assert _resolve_run_command(["rspec", "spec/word_count_spec.rb"], str(tmp_path)) == [
+        "bundle", "exec", "rspec", "spec/word_count_spec.rb"
+    ]
+
+def test_resolve_run_command_leaves_rspec_alone_without_a_gemfile(tmp_path):
+    # No Gemfile means nothing for `bundle exec` to act on - same reasoning as
+    # PolymorphicValidator.run_tests()'s own Gemfile guard.
+    assert _resolve_run_command(["rspec", "spec/foo_spec.rb"], str(tmp_path)) == ["rspec", "spec/foo_spec.rb"]
+
+def test_resolve_run_command_does_not_double_prefix_existing_bundle_exec(tmp_path):
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\n")
+    assert _resolve_run_command(["bundle", "exec", "rspec"], str(tmp_path)) == ["bundle", "exec", "rspec"]
 
 def test_resolve_run_command_adds_dash_e_for_maven():
     """Regression test for a real bug caught live: a goal-explicit command like
@@ -686,6 +713,122 @@ async def test_workflow_full_set_prompt_includes_existing_dependencies_checklist
     assert "you must NOT add a new, separate dependency" in developer_prompt
 
 
+def test_build_ecosystem_invariant_block_names_detected_frameworks():
+    """Unit test for the pure helper: when the repo analyzer already detected
+    real frameworks, name them explicitly - the same specificity that made
+    the dependency-preservation checklist effective over a purely generic
+    instruction."""
+    class FakeRepoModel:
+        frameworks = ["Django"]
+    block = _build_ecosystem_invariant_block(FakeRepoModel())
+    assert "Ecosystem Preservation" in block
+    assert "Django" in block
+    assert "already detected" in block
+
+def test_build_ecosystem_invariant_block_generic_when_no_frameworks_detected():
+    # A fresh repo with nothing to detect yet must still carry the standing
+    # invariant - it's unconditional, not gated on repo facts existing.
+    class FakeRepoModel:
+        frameworks = []
+    block = _build_ecosystem_invariant_block(FakeRepoModel())
+    assert "Ecosystem Preservation" in block
+    assert "already detected" not in block
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_ecosystem_invariant_on_first_attempt(tmp_path):
+    """Regression test for a real bug found live (2026-08-04 eval harness): a
+    Django/Python goal produced Java/Spring Boot code, and a separate Python
+    goal invented a Maven-style src/main/src/test layout - neither goal ever
+    mentioned Java. Confirmed via traces.db this was NOT skill-content bias
+    (zero skills were active for the Django run) - a prompting-level fix is
+    the right lever. The invariant must reach the very first attempt, not
+    just retries, since attempt 1 is where the drift was actually observed."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write views.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "views.py", "content": "def healthz(request):\n    return {}\n"}
+    ])
+    res = await we.run_generation_workflow(
+        goal="Using Django 5.2, add a minimal view at /healthz", workspace_path=str(tmp_path)
+    )
+    assert res["quality_gates_passed"] is True
+    first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
+    assert "Ecosystem Preservation" in first_call_kwargs["task_description"]
+    assert "Java/Spring/Maven" in first_call_kwargs["task_description"]
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_ecosystem_invariant_on_targeted_retry(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  String x;\n}"}],
+        ])
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert "Ecosystem Preservation" in second_call_kwargs["task_description"]
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_ecosystem_invariant_on_missing_files_retry(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py and helper.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{"filepath": "app.py", "content": "print(1)"}],
+        [{"filepath": "helper.py", "content": "def helper():\n    pass\n"}],
+    ])
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert "Ecosystem Preservation" in second_call_kwargs["task_description"]
+
+
+def _latest_trace_row(logs_dir):
+    """Read back the most recent row from a test-isolated traces.db (cfg.paths.logs
+    pointed at tmp_path), as a dict keyed by column name - avoids every trace-related
+    test needing to know the runs table's raw column order."""
+    db_path = os.path.join(logs_dir, "traces.db")
+    if not os.path.exists(db_path):
+        return None
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 @pytest.mark.asyncio
 async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_path):
     """Regression test: a JVM crashing during its own startup (e.g. a startup
@@ -697,6 +840,7 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
     identically across 3 real retry attempts before a human had to intervene."""
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -731,6 +875,10 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
     assert "JVM failed during its own startup" in res["environment_failure"]
     assert mock_compile.call_count == 1
     assert res["failure_category"] == "environment_failure"
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    assert trace_row["status"] == "failure"
+    assert trace_row["failure_category"] == "environment_failure"
 
 
 @pytest.mark.asyncio
@@ -758,6 +906,7 @@ async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
     which specific failure mode it was."""
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=(
@@ -770,6 +919,69 @@ async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
     assert res["quality_gates_passed"] is False
     assert res["environment_failure"] is None
     assert res["failure_category"] == "quality_gates_exhausted"
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    assert trace_row["status"] == "failure"
+    assert trace_row["failure_category"] == "quality_gates_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_workflow_traces_knowledge_gap(tmp_path):
+    """The knowledge-gap early return happens before the retry loop even starts,
+    so it used to skip trace logging entirely - closing that gap so an eval
+    harness reading traces.db can see this outcome, not just the ordinary
+    success/failure path."""
+    from kriya.tools.knowledge import GapReport
+
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    gap_report = GapReport()
+    gap_report.add_gap("somelib", "9.9.9", None, "high", "released after training cutoff")
+
+    with patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=gap_report):
+        res = await we.run_generation_workflow(goal="Use somelib 9.9.9", workspace_path=str(tmp_path))
+
+    assert res["status"] == "knowledge_gap"
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    assert trace_row["status"] == "knowledge_gap"
+    assert trace_row["failure_category"] == "knowledge_gap"
+
+
+@pytest.mark.asyncio
+async def test_workflow_traces_human_rejected(tmp_path):
+    """The human-rejected-approval early return also used to skip trace logging
+    entirely - same gap as the knowledge-gap path, closed the same way."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "human-in-the-loop"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create app",
+        workspace_path=str(tmp_path),
+        approval_callback=lambda files, reason: False,
+    )
+
+    assert res["quality_gates_passed"] is False
+    assert res["review"] == "Rejected by user during approval gate review."
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    assert trace_row["status"] == "human_rejected"
+    assert trace_row["failure_category"] == "human_rejected"
+
 
 @pytest.mark.asyncio
 async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
@@ -1051,6 +1263,76 @@ async def test_workflow_run_verification_judgment_cached_across_retry_attempts(t
     assert res["quality_gates_passed"] is True
     we.run_verifier.judge.assert_called_once()
     assert we.run_verifier.grade.call_count == 2
+
+@pytest.mark.asyncio
+async def test_workflow_scopes_retry_to_grader_likely_files_on_run_verification_failure(tmp_path):
+    """A compile error always names its own broken file (file:[line,col]),
+    which is what lets extract_implicated_files() scope a retry to just that
+    file. A runtime verification failure's captured output structurally
+    never does (broker banners, SLF4J lines with no .java suffix) - without
+    the grader naming a likely-responsible file directly, this failure class
+    always fell back to a blind full-set retry with none of the FIX ANALYSIS
+    forcing instruction, anchored-edit preference, or file-scoped LSP
+    grounding a compile failure gets. Confirms the grader's likely_files
+    reaches the next attempt's implicated_files with no extra plumbing, and
+    (since kriya/workflow/failure.py) that it flows there as structured data
+    - grade()'s likely_files assigned directly to Failure.likely_files - not
+    via the old stringify-into-the-message-then-regex-re-extract round-trip."""
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",                    # Planner
+        "Design: Write app.py and helper.py",     # Architect
+        "Review: Approved",                       # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [
+            {"filepath": "app.py", "content": "import helper\nprint('[SUCCESS]' if helper.check() else 'nope')\n"},
+            {"filepath": "helper.py", "content": "def check():\n    return False\n"},
+        ],
+        [{"filepath": "helper.py", "content": "def check():\n    return True\n"}],
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(side_effect=[
+        {"passed": False, "reasoning": "Missing expected marker.", "likely_files": ["helper.py"]},
+        {"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."},
+    ])
+
+    res = await we.run_generation_workflow(
+        goal="Run with python app.py; it should print [SUCCESS]",
+        workspace_path=str(tmp_path)
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert we.run_verifier.grade.call_count == 2
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    # "app.py" may also match independently (it's coincidentally echoed in the
+    # captured output's run-command line) - what matters here is that the
+    # grader's likely_files made it through at all, not exclusivity.
+    assert "helper.py" in second_call_kwargs["implicated_files"]
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    run_verification_failures = [o for o in gate_outcomes if o.get("type") == "run_verification" and not o["success"]]
+    assert len(run_verification_failures) == 1, gate_outcomes
+    # As above: "app.py" may also be present (coincidentally echoed in the
+    # captured output) - what matters is that grade()'s likely_files reached
+    # the persisted gate_outcome directly, not exclusivity.
+    assert "helper.py" in run_verification_failures[0]["likely_files"]
 
 @pytest.mark.asyncio
 async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_path):
@@ -1405,6 +1687,78 @@ async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_pa
     se = SkillEngine(str(skills_dir), load_global=False)
     se.discover_and_load()
     assert se.get_skill("widgetlib").verification_gap_acknowledged is True
+    # Regression test for a real, previously-invisible gap: skill-gap detection
+    # and the decline path both correctly happen, but nothing downstream ever
+    # connected a resulting run - pass or fail - back to "this proceeded on an
+    # unresolved knowledge gap." A human explicitly acknowledging "proceed
+    # without it" is still a genuinely unresolved gap for the code that gets
+    # generated, distinct from a real fact being added.
+    assert res["unresolved_skill_gaps"] == ["widgetlib"]
+
+@pytest.mark.asyncio
+async def test_workflow_no_skill_gap_callback_still_reports_unresolved_gap(tmp_path):
+    """A gap exists but no skill_gap_callback was even wired (e.g. as `fix`
+    doesn't wire one) - the gap is never offered a chance to resolve at all,
+    which must still surface in the final report, not disappear silently."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something with the widgetlib skill",
+        workspace_path=str(tmp_path),
+        # No skill_gap_callback passed at all.
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["unresolved_skill_gaps"] == ["widgetlib"]
+
+    se = SkillEngine(str(skills_dir), load_global=False)
+    se.discover_and_load()
+    # No callback means the skill was never even asked about - must NOT be
+    # silently marked acknowledged, unlike the explicit-decline case above.
+    assert se.get_skill("widgetlib").verification_gap_acknowledged is False
+
+@pytest.mark.asyncio
+async def test_workflow_unresolved_skill_gaps_none_when_nothing_flagged(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved"
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build a simple math library",
+        workspace_path=str(tmp_path),
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["unresolved_skill_gaps"] is None
 
 @pytest.mark.asyncio
 async def test_workflow_skill_gap_not_reasked_once_acknowledged(tmp_path):
@@ -1468,8 +1822,8 @@ _BETA_RULE = "Configure the broker to listen on port 5673 for AMQP clients."
 # "brokeralpha" (< "brokerbeta") is always passed as skill_a/rule_a here.
 _CONFLICT_RESPONSE = json.dumps({
     "conflicts": [{
-        "rule_a": _ALPHA_RULE,
-        "rule_b": _BETA_RULE,
+        "rule_a_index": 1,
+        "rule_b_index": 1,
         "explanation": "Both skills configure the same embedded broker's AMQP port to a different value."
     }]
 })
@@ -2564,6 +2918,243 @@ def test_build_error_source_context_no_locations_returns_empty(tmp_path):
     result = _build_error_source_context(str(tmp_path), "Process exited with code 1.", known_files=["App.java"])
     assert result == {}
 
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_returns_none_when_jdtls_not_found():
+    with patch("kriya.tools.lsp.find_jdtls", return_value=None):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_reuses_existing_client():
+    existing = object()
+    with patch("kriya.tools.lsp.find_jdtls") as mock_find:
+        result = await _get_or_start_jdtls_client(existing, "/fake/project")
+    assert result is existing
+    mock_find.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_starts_new_client_when_found():
+    mock_client = AsyncMock()
+    with patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is mock_client
+    mock_client.start.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_degrades_cleanly_if_start_fails():
+    mock_client = AsyncMock()
+    mock_client.start.side_effect = RuntimeError("jdtls crashed on launch")
+    with patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_logs_start_failure_at_warning_not_debug(caplog):
+    """Regression test for a real gap found live (2026-08-03): a real
+    'cannot find symbol' compile error went completely uncaught by LSP
+    grounding during an actual generation run, and the only line that could
+    have explained why was logged at DEBUG - invisible at the default log
+    level, making the whole feature silently undebuggable from the field.
+    'jdtls found but failed to start' must be visible at WARNING."""
+    mock_client = AsyncMock()
+    mock_client.start.side_effect = RuntimeError("jdtls crashed on launch")
+    with caplog.at_level(logging.WARNING, logger="kriya.workflow.workflow"), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
+        await _get_or_start_jdtls_client(None, "/fake/project")
+    assert any("jdtls" in r.message.lower() and "failed to start" in r.message.lower() for r in caplog.records)
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_logs_not_found_at_info(caplog):
+    """Regression test for a residual visibility gap found live, 2026-08-03,
+    right after the WARNING-level fix above: a successful jdtls check that
+    finds zero diagnostics produces zero log output by design (not a
+    failure), which meant 'LSP grounding never engaged this run' and 'it
+    engaged and had nothing to add' were still indistinguishable from the
+    log even after the failure path was fixed. This one-time INFO note on
+    the not-found path (previously completely silent) closes that gap."""
+    with caplog.at_level(logging.INFO, logger="kriya.workflow.workflow"), \
+         patch("kriya.tools.lsp.find_jdtls", return_value=None):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is None
+    assert any("jdtls" in r.message.lower() and "not found" in r.message.lower() for r in caplog.records)
+
+@pytest.mark.asyncio
+async def test_get_or_start_jdtls_client_logs_success_at_info(caplog):
+    """The mirror image of the not-found case above - a successful start
+    must also leave a positive trace, so a run's log can affirmatively
+    confirm LSP grounding was active rather than leaving it ambiguous
+    whether a lack of ground-truth text means 'didn't run' or 'ran and
+    found nothing wrong'."""
+    mock_client = AsyncMock()
+    with caplog.at_level(logging.INFO, logger="kriya.workflow.workflow"), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
+        result = await _get_or_start_jdtls_client(None, "/fake/project")
+    assert result is mock_client
+    assert any("jdtls" in r.message.lower() and "active" in r.message.lower() for r in caplog.records)
+
+@pytest.mark.asyncio
+async def test_build_lsp_diagnostics_context_only_checks_java_files(tmp_path):
+    (tmp_path / "App.java").write_text("class App {}")
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    mock_client = AsyncMock()
+    mock_client.check_file.return_value = [
+        {"severity": 1, "range": {"start": {"line": 0}}, "message": "cannot resolve import"}
+    ]
+    result = await _build_lsp_diagnostics_context(mock_client, str(tmp_path), ["App.java", "pom.xml"])
+    assert "App.java" in result
+    assert "pom.xml" not in result
+    assert mock_client.check_file.call_count == 1
+
+@pytest.mark.asyncio
+async def test_build_lsp_diagnostics_context_skips_files_with_no_errors(tmp_path):
+    (tmp_path / "App.java").write_text("class App {}")
+    mock_client = AsyncMock()
+    mock_client.check_file.return_value = []
+    result = await _build_lsp_diagnostics_context(mock_client, str(tmp_path), ["App.java"])
+    assert result == {}
+
+@pytest.mark.asyncio
+async def test_build_lsp_diagnostics_context_survives_a_check_failure(tmp_path):
+    (tmp_path / "App.java").write_text("class App {}")
+    (tmp_path / "Other.java").write_text("class Other {}")
+    mock_client = AsyncMock()
+    mock_client.check_file.side_effect = [
+        RuntimeError("timeout"),
+        [{"severity": 1, "range": {"start": {"line": 0}}, "message": "cannot resolve import"}],
+    ]
+    result = await _build_lsp_diagnostics_context(mock_client, str(tmp_path), ["App.java", "Other.java"])
+    assert "App.java" not in result
+    assert "Other.java" in result
+
+@pytest.mark.asyncio
+async def test_workflow_merges_lsp_diagnostics_into_retry_prompt_for_java_project(tmp_path):
+    """End-to-end wiring test: when jdtls is available (mocked - no real
+    jdtls needed) and the project is a Maven Java project, a real compile
+    failure's retry prompt for the implicated file includes the LSP
+    diagnostic's forceful ground-truth framing, merged into the same
+    error_source_context scoping mechanism already used for the generic
+    file:line:col source-context fix."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    mock_jdtls = AsyncMock()
+    mock_jdtls.check_file.return_value = [
+        {"severity": 1, "range": {"start": {"line": 4}}, "message": "The import org.apache.ignite.cache.IgniteCache cannot be resolved"}
+    ]
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient", return_value=mock_jdtls):
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[5,1] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                [{"filepath": "App.java", "content": "class App {}"}],
+                [{"filepath": "App.java", "content": "class App {}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    mock_jdtls.start.assert_awaited_once()
+    mock_jdtls.shutdown.assert_awaited_once()
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    error_source_context = second_call_kwargs["error_source_context"]
+    assert "App.java" in error_source_context
+    assert "ground truth" in error_source_context["App.java"].lower()
+    assert "IgniteCache cannot be resolved" in error_source_context["App.java"]
+
+@pytest.mark.asyncio
+async def test_workflow_surfaces_lsp_warning_when_jdtls_found_but_fails_to_start(tmp_path):
+    """jdtls being found on PATH but failing to start is a real, actionable
+    problem (unlike simply not being installed) - must be surfaced in the
+    final result dict and printed by generate/fix regardless of pass/fail,
+    same treatment as toolchain_warning."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
+         patch("kriya.tools.lsp.JdtlsClient") as mock_jdtls_cls:
+        mock_jdtls_cls.return_value.start = AsyncMock(side_effect=RuntimeError("jdtls crashed on launch"))
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[5,1] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                [{"filepath": "App.java", "content": "class App {}"}],
+                [{"filepath": "App.java", "content": "class App {}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert res["lsp_warning"] is not None
+    assert "jdtls" in res["lsp_warning"].lower() and "failed to start" in res["lsp_warning"].lower()
+
+@pytest.mark.asyncio
+async def test_workflow_skips_lsp_gracefully_when_jdtls_not_found(tmp_path):
+    """A project with no jdtls installed must proceed exactly as before this
+    feature existed - zero errors, zero behavior change, confirmed by
+    reusing the exact same retry scenario without mocking JdtlsClient at all."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.lsp.find_jdtls", return_value=None):
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[5,1] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            return_value=[{"filepath": "App.java", "content": "class App {}"}]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+
 def test_normalize_error_for_repeat_detection_strips_maven_timing_lines():
     # Real, byte-for-byte identical underlying failure (Qpid's SystemLauncher
     # UnsupportedOperationException) as captured across two separate Kriya
@@ -3201,6 +3792,41 @@ async def test_workflow_passes_prior_error_context_to_developer_only_on_retries(
     assert second_call_kwargs["implicated_files"] == ["math.py"]
 
 @pytest.mark.asyncio
+async def test_workflow_passes_configured_retry_temperature_to_developer(tmp_path):
+    """cfg.llm.retry_temperature must reach DeveloperAgent.run_generation on
+    every call (its own scoping to the implicated file is DeveloperAgent's
+    job, tested in test_agents.py) - unset (None) by default, so this is
+    strictly opt-in and never changes behavior for a project that doesn't
+    configure it."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm.retry_temperature = 0.05
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "Failed to build math.py"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            return_value=[{"filepath": "math.py", "content": "def add(a,b): return a+b"}]
+        )
+        res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    for call in we.developer.run_generation.call_args_list:
+        assert call.kwargs["retry_temperature"] == 0.05
+
+@pytest.mark.asyncio
 async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tmp_path):
     """Regression test for a real bug found live during golden-use-case
     validation: without this, a full-set retry's per-file fix-analysis
@@ -3212,6 +3838,7 @@ async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tm
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -3244,6 +3871,77 @@ async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tm
     assert source_context is not None
     assert "App.java" in source_context
     assert ">> 3:" in source_context["App.java"]
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    compile_failures = [o for o in gate_outcomes if o.get("type") == "compile" and not o["success"]]
+    assert len(compile_failures) == 1, gate_outcomes
+    assert compile_failures[0]["file_locations"] == [{"filepath": "App.java", "line": 3, "col": None}]
+
+
+@pytest.mark.asyncio
+async def test_workflow_anchored_edit_failure_captures_filepath(tmp_path):
+    """Regression test for a real gap found this session: apply_anchored_edits()
+    (workflow.py) never received a filepath, so a failed anchor match never named
+    one either - this failure class always fell through to a blind full-set retry,
+    unlike a compile error (which self-names its file via a file:[line,col]
+    locator). The filepath IS known in the caller's loop scope at the exact raise
+    point - kriya/workflow/failure.py's Failure/QualityGateFailure now captures it
+    there instead of losing it. Confirms the persisted gate_outcomes entry (read
+    back from a real traces.db, not a mock) for the anchor-match failure carries
+    the real filepath in both likely_files and file_locations."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                # Attempt 1: full content, fails compile above.
+                [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+                # Attempt 2: an anchored edit whose search block does not match the
+                # real on-disk content at all - forces apply_anchored_edits() to
+                # raise "matched 0 times" (never reaches the compile check).
+                [{"filepath": "App.java", "edits": [
+                    {"search": "this text does not appear anywhere in App.java", "replace": "class App {}"}
+                ]}],
+                # Attempt 3: full content again, succeeds compile.
+                [{"filepath": "App.java", "content": "class App {\n  String x;\n}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+
+    anchor_failures = [o for o in gate_outcomes if o.get("type") == "anchored_edit"]
+    assert len(anchor_failures) == 1, gate_outcomes
+    assert anchor_failures[0]["likely_files"] == ["App.java"]
+    assert anchor_failures[0]["file_locations"] == [{"filepath": "App.java", "line": None, "col": None}]
+    assert anchor_failures[0]["success"] is False
 
 
 def test_incomplete_generation_error_carries_missing_files():

@@ -1,4 +1,5 @@
 import sys
+import time
 from unittest.mock import MagicMock, patch
 
 from kriya.config import AppConfig
@@ -23,11 +24,43 @@ def test_polymorphic_stack_detection(tmp_path):
     v3 = PolymorphicValidator(str(tmp_path))
     assert v3.stack == "ruby"
 
-def test_python_compile_check(tmp_path):
+
+def test_polymorphic_stack_detection_unknown_for_unsupported_stack(tmp_path):
+    # Regression test: a real JS/TS/Go/Rust/C# project (or any workspace with
+    # none of the Java/Python/Ruby markers) used to silently fall back to
+    # "python" and get a false-positive "compiled successfully" from a check
+    # that matched zero real files. Must be distinguishable as "unknown" now.
+    (tmp_path / "package.json").write_text("{}")
+    (tmp_path / "index.js").write_text("console.log('hi');")
     validator = PolymorphicValidator(str(tmp_path))
-    
-    # Valid Python
+    assert validator.stack == "unknown"
+
+
+def test_unknown_stack_compile_check_is_honest_about_no_validation(tmp_path):
+    (tmp_path / "main.go").write_text("package main\n")
+    validator = PolymorphicValidator(str(tmp_path))
+    res = validator.run_compile_check(["main.go"])
+    # success: True so the retry loop doesn't fail forever on a gate that can
+    # never run for this stack - but the message must not claim a real check
+    # happened, unlike the old blind-Python-default false positive.
+    assert res["success"] is True
+    assert "not confirmed" in res["output"].lower()
+
+
+def test_unknown_stack_run_tests_is_honest_about_no_validation(tmp_path):
+    (tmp_path / "main.go").write_text("package main\n")
+    validator = PolymorphicValidator(str(tmp_path))
+    res = validator.run_tests()
+    assert res["success"] is True
+    assert "not confirmed" in res["output"].lower()
+
+
+def test_python_compile_check(tmp_path):
+    # Written before construction: stack is now detected from real Python
+    # markers (a .py file present, among others), not a blind default.
     (tmp_path / "valid.py").write_text("def ok():\n    pass\n")
+    validator = PolymorphicValidator(str(tmp_path))
+
     res1 = validator.run_compile_check(["valid.py"])
     assert res1["success"] is True
     
@@ -66,6 +99,42 @@ def test_run_app_timeout(tmp_path):
 
     assert res["success"] is False
     assert res["timed_out"] is True
+
+def test_run_app_timeout_kills_child_processes_too(tmp_path):
+    """Regression test for a real, live-found bug (2026-08-03): the previous
+    subprocess.run()-based timeout handling only killed the DIRECT child
+    process - if that process itself forks its own child (exactly what
+    `mvn exec:exec` does, launching a separate `java` process to actually
+    run the app), the grandchild survived the parent's death entirely.
+    Confirmed live: an embedded Qpid broker process leaked this way, stayed
+    alive for over an hour after its own run timed out, and broke an
+    entirely separate, later validation run that happened to need the same
+    port. Spawns a real child process that continuously proves it's alive
+    (a heartbeat file) and confirms it actually stops - not just gets
+    orphaned and keeps running - once the timed-out parent is killed."""
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "parent.py").write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, 'child.py'])\n"
+        "time.sleep(10)\n"
+    )
+    (tmp_path / "child.py").write_text(
+        "import time\n"
+        "for _ in range(100):\n"
+        "    with open('heartbeat.txt', 'a') as f:\n"
+        "        f.write('x')\n"
+        "    time.sleep(0.1)\n"
+    )
+
+    res = validator.run_app([sys.executable, "parent.py"], timeout=1)
+    assert res["timed_out"] is True
+
+    heartbeat = tmp_path / "heartbeat.txt"
+    time.sleep(0.3)
+    size_after_kill = heartbeat.stat().st_size if heartbeat.exists() else 0
+    time.sleep(1.0)
+    size_later = heartbeat.stat().st_size if heartbeat.exists() else 0
+    assert size_after_kill == size_later, "child process kept running after the timed-out parent was killed"
 
 def test_run_app_no_command():
     validator = PolymorphicValidator(".")
@@ -179,13 +248,14 @@ def test_java_ruby_compile_invocation(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
     
-    with patch("subprocess.run") as mock_run:
-        mock_res = MagicMock()
-        mock_res.returncode = 0
-        mock_run.return_value = mock_res
-        
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
+
         res = validator.run_compile_check(["UserService.java"])
-        assert mock_run.called
+        assert mock_popen.called
         assert res["success"] is True
         
         # Test Ruby compile invocation mocks
@@ -198,6 +268,108 @@ def test_java_ruby_compile_invocation(tmp_path):
         
         res_rb = validator_rb.run_compile_check(["test.rb"])
         assert res_rb["success"] is True
+
+def test_ruby_run_tests_installs_gems_before_rspec(tmp_path):
+    """Regression test for a real bug found live (eval harness batch
+    20260804-115621): a fresh sandbox never has gems installed, so `bundle exec
+    rspec` fails with 'bundler: command not found: rspec' regardless of whether
+    the generated Ruby code is correct - confirmed live burning a full 6-attempt
+    retry budget on code that was already right. `bundle install` must run first
+    whenever a real Gemfile is present."""
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
+    (tmp_path / "spec").mkdir()
+    (tmp_path / "spec" / "example_spec.rb").write_text("RSpec.describe 'x' do; end\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "ruby"
+
+    with patch("subprocess.Popen") as mock_popen:
+        install_process = MagicMock()
+        install_process.returncode = 0
+        install_process.communicate.return_value = ("Bundle complete.", "")
+
+        rspec_process = MagicMock()
+        rspec_process.returncode = 0
+        rspec_process.communicate.return_value = ("1 example, 0 failures", "")
+
+        mock_popen.side_effect = [install_process, rspec_process]
+
+        res = validator.run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 2
+    first_cmd = mock_popen.call_args_list[0].args[0]
+    second_cmd = mock_popen.call_args_list[1].args[0]
+    assert first_cmd == ["bundle", "install", "--path", "vendor/bundle"]
+    assert second_cmd[:3] == ["bundle", "exec", "rspec"]
+
+
+def test_ruby_run_tests_reports_bundle_install_failure_without_running_rspec(tmp_path):
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        install_process = MagicMock()
+        install_process.returncode = 1
+        install_process.communicate.return_value = ("", "Could not find gem 'rspec'.")
+        mock_popen.return_value = install_process
+
+        res = validator.run_tests()
+
+    assert res["success"] is False
+    assert "bundle install" in res["output"]
+    # Only the failed `bundle install` call should have been made - rspec must
+    # never run against a gem environment that's known to be broken.
+    assert mock_popen.call_count == 1
+
+
+def test_ruby_run_tests_skips_bundle_install_without_a_gemfile(tmp_path):
+    # Stack detection also accepts a bare Rakefile/*.gemspec with no Gemfile -
+    # `bundle install` has nothing to act on in that case and must be skipped,
+    # not attempted and failed.
+    (tmp_path / "Rakefile").write_text("")
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "ruby"
+
+    with patch("subprocess.Popen") as mock_popen:
+        rspec_process = MagicMock()
+        rspec_process.returncode = 0
+        rspec_process.communicate.return_value = ("0 examples, 0 failures", "")
+        mock_popen.return_value = rspec_process
+
+        res = validator.run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 1
+    assert mock_popen.call_args_list[0].args[0][:3] == ["bundle", "exec", "rspec"]
+
+
+def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
+    """javac's default one-line "uses unchecked or unsafe operations" summary
+    carries no file:line location at all - useless for pointing a retry at the
+    actual mistake. showWarnings + compilerArgument are standard, portable
+    maven-compiler-plugin CLI properties that turn on full -Xlint:rawtypes,
+    unchecked diagnostics with real locations, no target pom.xml cooperation
+    needed. Confirmed live as directly relevant: a raw-type cache access
+    mistake (`ignite.cache(name)` used without generics) causes a later
+    "incompatible types" hard error - the rawtypes warning names the exact
+    same root cause precisely, for free, once these flags are on."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "App.java").write_text("class App {}")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    mock_process = MagicMock(returncode=0)
+    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
+    with patch("subprocess.Popen", return_value=mock_process) as mock_popen:
+        res = validator.run_compile_check(["App.java"])
+
+    assert res["success"] is True
+    invoked_cmd = mock_popen.call_args.args[0]
+    assert "-Dmaven.compiler.showWarnings=true" in invoked_cmd
+    assert "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked" in invoked_cmd
 
 def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path):
     # Regression test: previously a missing 'mvn' binary was silently logged at
@@ -213,14 +385,14 @@ def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path)
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
 
-    with patch("subprocess.run", side_effect=FileNotFoundError(2, "No such file or directory", "mvn")) as mock_run:
+    with patch("subprocess.Popen", side_effect=FileNotFoundError(2, "No such file or directory", "mvn")) as mock_popen:
         res = validator.run_compile_check(["UserService.java"])
 
     assert res["success"] is False
     assert "Failed to invoke mvn compile" in res["output"]
     assert "No such file or directory" in res["output"]
     # Must not silently fall through to a javac (or gradle) fallback attempt.
-    assert mock_run.call_count == 1
+    assert mock_popen.call_count == 1
 
 
 def test_check_java_toolchain_detects_mismatch(monkeypatch):
@@ -386,10 +558,11 @@ def test_java_dependency_regression(tmp_path):
 </project>"""
     (new_dir / "pom.xml").write_text(new_pom_preserved)
 
-    with patch("subprocess.run") as mock_run:
-        mock_res = MagicMock()
-        mock_res.returncode = 0
-        mock_run.return_value = mock_res
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
         res_ok = validator.run_compile_check(["pom.xml"])
         assert res_ok["success"] is True
 
@@ -400,14 +573,15 @@ def test_sandbox_execution_restricts_subprocess_env_by_default(tmp_path, monkeyp
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.run") as mock_run:
-        mock_res = MagicMock()
-        mock_res.returncode = 0
-        mock_run.return_value = mock_res
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
         validator.run_compile_check(["UserService.java"])
 
-        assert mock_run.called
-        _, kwargs = mock_run.call_args
+        assert mock_popen.called
+        _, kwargs = mock_popen.call_args
         assert "KRIYA_TEST_SECRET" not in kwargs["env"]
         assert kwargs["preexec_fn"] is not None
 
@@ -420,13 +594,14 @@ def test_sandbox_execution_disabled_uses_full_env(tmp_path, monkeypatch):
     cfg.autonomy.sandbox_execution = False
     validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=cfg.autonomy)
 
-    with patch("subprocess.run") as mock_run:
-        mock_res = MagicMock()
-        mock_res.returncode = 0
-        mock_run.return_value = mock_res
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
         validator.run_compile_check(["UserService.java"])
 
-        _, kwargs = mock_run.call_args
+        _, kwargs = mock_popen.call_args
         assert kwargs["env"] is None
         assert kwargs["preexec_fn"] is None
 

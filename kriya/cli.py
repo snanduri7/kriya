@@ -267,6 +267,28 @@ def doctor(ctx: click.Context) -> None:
         else:
             click.secho("  - [SUCCESS] No version mismatch detected.", fg="green")
 
+    # Optional, Java-only - a missing jdtls is never an error, just a
+    # capability Kriya proceeds without (LSP grounding degrades cleanly to
+    # today's behavior). Manual install only (e.g. `brew install jdtls`),
+    # matching how mvn/java/Ollama are already treated - never auto-
+    # downloaded. jdtls itself needs a modern JVM to RUN, separate from
+    # whatever JDK the analyzed project targets - a real, previously-hit
+    # pitfall elsewhere (a tool assuming "17+" here hit a silent LSP init
+    # timeout in the wild) worth flagging explicitly rather than assuming
+    # the reader already knows.
+    from kriya.tools.lsp import JDTLS_MIN_JAVA_MAJOR_VERSION, find_jdtls
+    jdtls_path = find_jdtls()
+    click.echo("\nChecking optional LSP grounding (Java retry-loop diagnostics):")
+    if jdtls_path:
+        click.secho(f"  - [FOUND] jdtls at {jdtls_path}", fg="green")
+        click.echo(
+            f"    Note: jdtls itself needs JDK {JDTLS_MIN_JAVA_MAJOR_VERSION}+ to RUN - "
+            "separate from whatever JDK your project targets."
+        )
+    else:
+        click.echo("  - Not found on PATH - optional, generation proceeds without LSP grounding.")
+        click.echo("    Install with `brew install jdtls` (or equivalent) to enable it.")
+
     if errors_found:
         click.echo()
         click.secho("One or more checks failed - see [ERROR] lines above.", fg="red", bold=True)
@@ -1164,6 +1186,21 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             # THIS goal may still bite on a different machine or a later,
             # JVM-flag-sensitive one.
             click.secho(f"[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
+        if res.get("lsp_warning"):
+            # Same reasoning as toolchain_warning above - a run that silently
+            # got no LSP grounding when it should have is worth knowing about
+            # regardless of whether the run otherwise passed.
+            click.secho(f"[LSP WARNING] {res['lsp_warning']}", fg="yellow")
+        if res.get("unresolved_skill_gaps"):
+            # Shown regardless of pass/fail - a shaky success is exactly the case
+            # this matters most for: nothing else would ever tell you the result
+            # rests on a technology Kriya has no verified information for.
+            click.secho(
+                "[UNVERIFIED KNOWLEDGE] Generation proceeded without verified information for: "
+                f"{', '.join(res['unresolved_skill_gaps'])}. Consider `kriya skills show <name>` "
+                "or supplying reference material via a future run.",
+                fg="yellow",
+            )
         if res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
@@ -1692,6 +1729,14 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         )
         if res.get("toolchain_warning"):
             click.secho(f"\n[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
+        if res.get("lsp_warning"):
+            click.secho(f"\n[LSP WARNING] {res['lsp_warning']}", fg="yellow")
+        if res.get("unresolved_skill_gaps"):
+            click.secho(
+                "\n[UNVERIFIED KNOWLEDGE] Generation proceeded without verified information for: "
+                f"{', '.join(res['unresolved_skill_gaps'])}.",
+                fg="yellow",
+            )
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:
@@ -1741,7 +1786,7 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
     conn = get_connection(db_path)
     cursor = conn.cursor()
     total = cursor.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified FROM runs ORDER BY timestamp DESC"
+    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified, failure_category FROM runs ORDER BY timestamp DESC"
     if not show_all:
         query += " LIMIT ?"
         cursor.execute(query, (limit,))
@@ -1754,13 +1799,14 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
         click.echo("No run traces recorded yet.")
         return
 
-    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
-    click.echo("-" * 100)
-    for _r_id, ts, goal, dur, att, status, _files in rows:
+    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'CATEGORY':<22} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
+    click.echo("-" * 120)
+    for _r_id, ts, goal, dur, att, status, _files, category in rows:
         dur_str = f"{dur:.2f}s"
         status_color = "green" if status.lower() == "success" else "red"
         status_styled = click.style(f"{status:<10}", fg=status_color)
-        click.echo(f"{ts:<20} | {status_styled} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
+        category_str = category or ""
+        click.echo(f"{ts:<20} | {status_styled} | {category_str:<22} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
 
     if not show_all and total > len(rows):
         click.echo(f"\nShowing {len(rows)} of {total} recorded runs. Use -n/--limit or --all to see more.")

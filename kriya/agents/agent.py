@@ -9,6 +9,12 @@ from kriya.core.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
+# Matches _build_error_source_context()'s own display gutter (">> N: " for
+# the reported line, "  N: " for surrounding context lines) - see
+# DeveloperAgent._split_fix_analysis_edit for why this needs stripping from
+# a model's SEARCH/REPLACE blocks before anchor matching.
+_GUTTER_PREFIX_RE = re.compile(r"^(?:>>\s*(?:\d+:)?|[ ]{2}\d+:)\s?", re.MULTILINE)
+
 
 async def call_with_escalation(
     llm: LLMClient,
@@ -272,6 +278,85 @@ class DeveloperAgent(BaseAgent):
         return (analysis or None), content
 
     @staticmethod
+    def _split_fix_analysis_edit(text: str) -> Tuple[Optional[str], Optional[List[Dict[str, str]]], Optional[str]]:
+        """Splits a per-file retry completion into (fix_analysis, edits, full_content)
+        when the model was asked to prefer a small, anchored SEARCH:/REPLACE: patch
+        over regenerating the whole file (see _fill_missing_content) - returns
+        (analysis, [{"search":..., "replace":...}], None) if both markers are found
+        in order, else falls back to _split_fix_analysis's plain FILE CONTENT: parsing
+        (analysis, None, content).
+
+        Motivated by a real, distinct failure mode found live: a full-file
+        regeneration correctly self-diagnosed a one-line fix in its own FIX ANALYSIS
+        text (a class needing `implements Serializable` added) and then still
+        emitted the class WITHOUT it - the intention was stated correctly and lost
+        somewhere across regenerating the entire surrounding file from scratch. A
+        small, localized edit has nowhere for that to happen: there's no unrelated
+        content for a one-line fix to get lost inside. A failed/ambiguous anchor
+        match (0 or >1 occurrences) raises inside apply_anchored_edits() and is
+        caught by the same retry-loop exception handling as any other Quality Gate
+        failure - not a new failure mode, just becomes the next attempt's error
+        text, same as a compile failure would."""
+        search_match = re.search(r"search:", text, re.IGNORECASE)
+        replace_match = re.search(r"replace:", text, re.IGNORECASE)
+        if search_match and replace_match and replace_match.start() > search_match.start():
+            analysis = text[:search_match.start()].strip()
+            analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
+            # Not .strip()'d yet - deferred until after gutter-stripping below,
+            # since stripping now would eat a "  N: " gutter's leading spaces
+            # on whichever line happens to land first, before the regex made
+            # for detecting exactly that ever sees them.
+            search_block = text[search_match.end():replace_match.start()]
+            replace_block = text[replace_match.end():]
+            # A model asked to prefer an anchored edit sometimes ALSO appends a
+            # redundant trailing "FILE CONTENT:" section anyway (not asked for,
+            # but real, observed model behavior) - without truncating here, the
+            # entire redundant full-file content (plus the literal "FILE
+            # CONTENT:" marker text) gets swallowed into replace_block and
+            # applied as part of the patch. Confirmed live, 2026-08-04: a real
+            # response correctly self-diagnosed and fixed a wrong-import bug
+            # via a clean 3-line SEARCH/REPLACE, but also appended a redundant
+            # full FILE CONTENT: block - the resulting merged file duplicated
+            # the entire package/import/class declaration mid-file and failed
+            # with "class, interface, enum, or record expected". Not a model
+            # mistake (the SEARCH/REPLACE portion alone was correct) - an
+            # unbounded regex in this parsing step swallowing content past
+            # where the actual patch ended.
+            trailing_file_content = re.search(r"file content:", replace_block, re.IGNORECASE)
+            if trailing_file_content:
+                replace_block = replace_block[:trailing_file_content.start()]
+            # A model shown _build_error_source_context()'s own display format
+            # (">> N: <source line>" for the reported line, "   N: <source
+            # line>" for surrounding context) sometimes copies that gutter
+            # into its SEARCH/REPLACE blocks instead of the bare source line -
+            # confirmed live, 2026-08-04: a real SEARCH block was literally
+            # ">> import org.apache.ignite.cache.IgniteCache;" (the model kept
+            # the ">>" marker, dropped the line number), which can never match
+            # the real file's plain "import ...;" line, guaranteeing "Anchor
+            # matching failed... matched 0 times" regardless of whether the
+            # model's intended fix was otherwise correct. Also strips a
+            # wrapping ```lang fence, the same defensive normalization already
+            # applied to full FILE CONTENT: responses elsewhere. Safe against
+            # false positives on real code: no real Java/XML/JSON/properties
+            # line legitimately starts with ">>", and the non-highlighted
+            # gutter form is only stripped when followed by a colon-terminated
+            # line number, not just any 2-space indent.
+            # Gutter-strip BEFORE fence-strip: _strip_markdown_fences() calls
+            # text.strip(), which trims the block's absolute leading
+            # whitespace - if that ran first, a "  N: " (non-highlighted,
+            # unmarked) gutter as the block's very first line would already
+            # have lost its leading 2 spaces before the gutter regex ever
+            # saw them, silently leaving a stray "N: " behind.
+            search_block = _GUTTER_PREFIX_RE.sub("", search_block)
+            replace_block = _GUTTER_PREFIX_RE.sub("", replace_block)
+            search_block = DeveloperAgent._strip_markdown_fences(search_block)
+            replace_block = DeveloperAgent._strip_markdown_fences(replace_block)
+            if search_block:
+                return (analysis or None), [{"search": search_block, "replace": replace_block}], None
+        analysis, content = DeveloperAgent._split_fix_analysis(text)
+        return analysis, None, content
+
+    @staticmethod
     def _normalize_file_entries(parsed: Any) -> Optional[List[Dict[str, Any]]]:
         """Normalizes whatever shape the file-list completion parsed into - a list of
         path strings, a list of dicts with filepath/path (+ optional content/edits), or
@@ -321,11 +406,21 @@ class DeveloperAgent(BaseAgent):
         prior_error_context: Optional[str] = None,
         implicated_files: Optional[List[str]] = None,
         error_source_context: Optional[Dict[str, str]] = None,
+        retry_temperature: Optional[float] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
         so a model that only fills in some files in its file-list response doesn't
         silently end up with empty or missing files.
+
+        retry_temperature, when set (config-driven, see LLMConfig.retry_temperature),
+        overrides the completion temperature ONLY for a file this call is actually
+        applying the fix-analysis instruction to (same scope as implicated_files) -
+        a real, cited finding (not this project's own speculation) found code-gen
+        success rate drops as temperature rises even within the low end of the
+        range Kriya already defaults to, the opposite of "add randomness to shake a
+        stuck retry loose." Left unset (None) by default - opt-in, not a silent
+        behavior change.
 
         implicated_files scopes prior_error_context's fix-analysis instruction to
         only the file(s) the error actually names - found live as a real bug: a
@@ -381,14 +476,6 @@ class DeveloperAgent(BaseAgent):
             # _split_fix_analysis for the full live-testing rationale.
             file_is_implicated = implicated_files is None or filepath in implicated_files
             apply_fix_analysis = bool(prior_error_context) and file_is_implicated
-            fix_analysis_instruction = (
-                "\nThis is a RETRY: the previous attempt at this file failed the error described "
-                "in the Task section above. Before writing any code, you MUST first write a line "
-                "\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of that "
-                "error and exactly what you are changing to address it. Only after that analysis, "
-                "write the line \"FILE CONTENT:\" on its own line, followed by the complete file "
-                "content and nothing else after it.\n"
-            ) if apply_fix_analysis else ""
 
             # The exact broken source line(s), read fresh from the worktree by
             # extract_error_source_locations()/_build_error_source_context()
@@ -399,6 +486,45 @@ class DeveloperAgent(BaseAgent):
             source_context_block = (
                 (error_source_context or {}).get(filepath, "") if apply_fix_analysis else ""
             )
+
+            # A precise source location means a small, anchored SEARCH:/REPLACE:
+            # patch is well-grounded - prefer requesting one over a full-file
+            # regeneration. Found live as a real, distinct failure mode: a full
+            # regeneration correctly self-diagnosed a one-line fix in its own FIX
+            # ANALYSIS text, then still emitted the file without it - the stated
+            # intention got lost somewhere across rewriting the whole surrounding
+            # file from scratch. A small edit has no unrelated content for that to
+            # happen inside. Kept as a preference, not a hard requirement (real
+            # fixes sometimes genuinely need broader changes) - falls back to full
+            # FILE CONTENT: parsing if the model doesn't use the markers, and an
+            # anchor that fails to match exactly once raises inside
+            # apply_anchored_edits(), caught by the same retry-loop exception
+            # handling as any other Quality Gate failure.
+            prefer_anchored_edit = apply_fix_analysis and bool(source_context_block)
+            if prefer_anchored_edit:
+                fix_analysis_instruction = (
+                    "\nThis is a RETRY: the previous attempt at this file failed the error described "
+                    "in the Task section above. Before writing any code, you MUST first write a line "
+                    "\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of that "
+                    "error and exactly what you are changing to address it. Then, PREFER a small, "
+                    "localized fix: write the line \"SEARCH:\" followed by the exact original code "
+                    "(copied verbatim from the source context above) that needs to change, then the line "
+                    "\"REPLACE:\" followed by the corrected code - include only the lines that actually "
+                    "need to change plus the minimum surrounding context needed to uniquely identify them, "
+                    "not the whole file. Only if the fix genuinely requires broader restructuring beyond a "
+                    "small patch, instead write \"FILE CONTENT:\" followed by the complete corrected file.\n"
+                )
+            elif apply_fix_analysis:
+                fix_analysis_instruction = (
+                    "\nThis is a RETRY: the previous attempt at this file failed the error described "
+                    "in the Task section above. Before writing any code, you MUST first write a line "
+                    "\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of that "
+                    "error and exactly what you are changing to address it. Only after that analysis, "
+                    "write the line \"FILE CONTENT:\" on its own line, followed by the complete file "
+                    "content and nothing else after it.\n"
+                )
+            else:
+                fix_analysis_instruction = ""
 
             # Stable, large blocks first (existing code context, then architecture design) so
             # same-model retries can reuse the inference server's KV-cache prefix; the task
@@ -426,15 +552,26 @@ class DeveloperAgent(BaseAgent):
                 json_mode=False,
                 model_override=model_override,
                 base_url_override=base_url_override,
-                api_key_override=api_key_override
+                api_key_override=api_key_override,
+                temperature_override=retry_temperature if apply_fix_analysis else None,
             )
 
-            if apply_fix_analysis:
+            edits = None
+            if prefer_anchored_edit:
+                analysis, edits, content = self._split_fix_analysis_edit(content)
+                if analysis:
+                    logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
+                if edits:
+                    logger.info(f"Developer returned an anchored edit for '{filepath}' instead of full content.")
+            elif apply_fix_analysis:
                 analysis, content = self._split_fix_analysis(content)
                 if analysis:
                     logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
 
-            files_out.append({"filepath": filepath, "content": self._strip_markdown_fences(content)})
+            if edits:
+                files_out.append({"filepath": filepath, "content": None, "edits": edits})
+            else:
+                files_out.append({"filepath": filepath, "content": self._strip_markdown_fences(content)})
         return files_out
 
     async def run_generation(
@@ -450,6 +587,7 @@ class DeveloperAgent(BaseAgent):
         prior_error_context: Optional[str] = None,
         implicated_files: Optional[List[str]] = None,
         error_source_context: Optional[Dict[str, str]] = None,
+        retry_temperature: Optional[float] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -484,7 +622,7 @@ class DeveloperAgent(BaseAgent):
             return await self._fill_missing_content(
                 file_entries, task_description, design_context, existing_code_context,
                 stream_callback, model_override, base_url_override, api_key_override,
-                prior_error_context, implicated_files, error_source_context,
+                prior_error_context, implicated_files, error_source_context, retry_temperature,
             )
 
         # Step 1: Query the model for the list of files to generate (or full implementation if mocked in tests)
@@ -517,7 +655,7 @@ class DeveloperAgent(BaseAgent):
                 return await self._fill_missing_content(
                     file_entries, task_description, design_context, existing_code_context,
                     stream_callback, model_override, base_url_override, api_key_override,
-                    prior_error_context, implicated_files, error_source_context,
+                    prior_error_context, implicated_files, error_source_context, retry_temperature,
                 )
 
         except Exception as e:
@@ -690,21 +828,32 @@ class RunVerifierAgent(BaseAgent):
         success_criteria: str,
         output: str,
         returncode: Optional[int],
+        files_written: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         grader_system_prompt = (
             "You are the Kriya Run Verification Grader.\n"
             "You will be given the original goal, a description of what a successful run's "
-            "output should show, and the ACTUAL captured stdout/stderr and exit code from "
-            "actually running the generated application.\n"
+            "output should show, the list of files generated for this goal, and the ACTUAL "
+            "captured stdout/stderr and exit code from actually running the generated "
+            "application.\n"
             "Decide whether the captured output demonstrates the goal was genuinely achieved - "
             "not merely that the process didn't crash. Be strict: exit code 0 alone is not "
             "sufficient evidence if the described behavior isn't actually visible in the output.\n"
+            "If the run FAILED, also identify which of the given files is most likely "
+            "responsible (the one implementing the missing/incorrect behavior, not just the "
+            "one that happened to log the failure) - a compile error always points the retry "
+            "loop at the exact broken file, but a runtime failure like this one otherwise gives "
+            "it nothing to scope a fix to, so it retries blind against every file. Only name "
+            "files that actually appear in the list below, exactly as given. Leave it empty if "
+            "the run passed or you genuinely cannot tell which file is responsible.\n"
             "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
-            '{"passed": true or false, "reasoning": "one or two sentences citing specific evidence from the output"}'
+            '{"passed": true or false, "reasoning": "one or two sentences citing specific '
+            'evidence from the output", "likely_files": ["exact/path/from/the/list/below", ...] or []}'
         )
         prompt = (
             f"=== Goal ===\n{goal}\n\n"
             f"=== Expected Success Criteria ===\n{success_criteria}\n\n"
+            f"=== Files Generated ===\n{chr(10).join(files_written or [])}\n\n"
             f"=== Actual Exit Code ===\n{returncode}\n\n"
             f"=== Actual Captured Output ===\n{output}\n\n"
             "Did this run actually succeed per the criteria above?"
@@ -717,12 +866,25 @@ class RunVerifierAgent(BaseAgent):
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
             logger.warning(f"Run Verifier grade() returned unparseable JSON, treating as failure: {e}")
-            return {"passed": False, "reasoning": f"Grader response could not be parsed: {e}"}
+            return {"passed": False, "reasoning": f"Grader response could not be parsed: {e}", "likely_files": []}
 
         if not isinstance(parsed, dict):
-            return {"passed": False, "reasoning": "Grader response was not a JSON object."}
+            return {"passed": False, "reasoning": "Grader response was not a JSON object.", "likely_files": []}
 
-        return {"passed": bool(parsed.get("passed")), "reasoning": parsed.get("reasoning") or ""}
+        # Trust boundary: only accept filepaths the grader could have legitimately named -
+        # never let a hallucinated or malformed entry reach the retry loop's file-scoping
+        # logic, same reasoning as check_skill_conflicts()'s index validation elsewhere.
+        raw_likely = parsed.get("likely_files")
+        known_files = set(files_written or [])
+        likely_files = (
+            [f for f in raw_likely if isinstance(f, str) and f in known_files]
+            if isinstance(raw_likely, list) else []
+        )
+        return {
+            "passed": bool(parsed.get("passed")),
+            "reasoning": parsed.get("reasoning") or "",
+            "likely_files": likely_files,
+        }
 
 
 class SkillGapAgent(BaseAgent):
@@ -828,27 +990,53 @@ class SkillGapAgent(BaseAgent):
         if not skill_a_rules or not skill_b_rules:
             return []
 
+        # Index-based referencing instead of asking the model to reproduce rule
+        # text verbatim - found live as a real, near-total efficiency loss: real
+        # runs saw up to 28 "conflicts" discarded from a SINGLE call (one pair of
+        # skills), ~93s and ~4700 output tokens burned, zero real conflicts
+        # surfacing, because the verbatim-match safety check (necessarily strict -
+        # a hallucinated/paraphrased conflict must never silently exclude real
+        # rule content) rejected nearly everything the model returned. Asking for
+        # an integer index instead of reproducing potentially-long rule text
+        # character-for-character removes the failure mode structurally: an
+        # index is either a valid position in the real list or it isn't - no
+        # "almost right" case exists for a fuzzy match to fail on. Kriya still
+        # resolves the actual rule text itself from the real list at that index,
+        # never trusting anything the model claims the text says - same trust
+        # boundary as before, just without the lossy verbatim-reproduction step
+        # in between. A short worked example of each outcome is included since
+        # the raw candidate volume itself (not just the match-failure rate) was
+        # also high - a concrete anchor for "genuinely contradicts" vs. "shares a
+        # topic but doesn't conflict" narrows judgment better than prose alone.
+        numbered_a = "\n".join(f"[{i}] {r}" for i, r in enumerate(skill_a_rules, 1))
+        numbered_b = "\n".join(f"[{i}] {r}" for i, r in enumerate(skill_b_rules, 1))
         system_prompt = (
             "You are the Kriya Skill Conflict Checker.\n"
-            "You are given the rule sets of two engineering skills that are both active "
-            "for the same code generation run. Identify pairs of rules that GENUINELY "
+            "You are given the NUMBERED rule sets of two engineering skills that are both "
+            "active for the same code generation run. Identify pairs of rules that GENUINELY "
             "contradict each other if both were followed at once (e.g. two different "
             "version pins for what should be the same dependency, two different values "
             "for what must be a single shared config setting like a port or protocol). "
             "Do NOT flag rules that merely share a topic but don't actually conflict "
             "(e.g. two different brokers each defining their own, independent config "
             "key is not a conflict).\n"
+            "Example - genuine conflict: Skill A rule 'Use port 5672 for AMQP' vs Skill B "
+            "rule 'Use port 5673 for AMQP' - both name the SAME setting with DIFFERENT "
+            "required values, impossible to satisfy both.\n"
+            "Example - NOT a conflict: Skill A rule 'Ignite cache name must be \"orders\"' vs "
+            "Skill B rule 'Qpid queue name must be \"orders.queue\"' - different systems, "
+            "different settings, no actual contradiction even though both mention naming.\n"
             "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
             "{\n"
-            '  "conflicts": [{"rule_a": "<verbatim from Skill A>", "rule_b": "<verbatim from Skill B>", "explanation": "..."}]\n'
+            '  "conflicts": [{"rule_a_index": <int>, "rule_b_index": <int>, "explanation": "..."}]\n'
             "}\n"
-            "rule_a and rule_b MUST be copied verbatim, character-for-character, from "
-            "the provided rule lists - do not paraphrase or summarize them.\n"
-            'If nothing genuinely conflicts, return {"conflicts": []}.'
+            "rule_a_index/rule_b_index MUST be the bracketed number shown next to the rule - "
+            "do not include the rule text itself in your response.\n"
+            'If nothing genuinely conflicts, return {"conflicts": []} - most skill pairs have none.'
         )
         prompt = (
-            f"=== Skill A: {skill_a_name} ===\n" + "\n".join(skill_a_rules) + "\n\n"
-            f"=== Skill B: {skill_b_name} ===\n" + "\n".join(skill_b_rules) + "\n\n"
+            f"=== Skill A: {skill_a_name} ===\n{numbered_a}\n\n"
+            f"=== Skill B: {skill_b_name} ===\n{numbered_b}\n\n"
             "Identify any genuine contradictions per the instructions above."
         )
         response_str = await call_with_escalation(
@@ -867,21 +1055,30 @@ class SkillGapAgent(BaseAgent):
             return []
 
         # Defensive, same reasoning as extract_skill_update's mutual-exclusivity fix:
-        # only trust a "conflict" whose rule text is an exact match against the real
-        # rule sets, so a hallucinated or paraphrased conflict can never silently
-        # exclude real rule content from generation context.
+        # only trust a "conflict" whose index resolves to a real position in the
+        # real rule sets, so a hallucinated/out-of-range index can never silently
+        # exclude real rule content from generation context. Rule TEXT is always
+        # read from the real list at that position, never from anything the model
+        # returned directly.
         valid = []
         for c in conflicts:
             if not isinstance(c, dict):
                 continue
-            rule_a = c.get("rule_a", "")
-            rule_b = c.get("rule_b", "")
-            if rule_a in skill_a_rules and rule_b in skill_b_rules:
-                valid.append({"rule_a": rule_a, "rule_b": rule_b, "explanation": c.get("explanation", "")})
+            idx_a = c.get("rule_a_index")
+            idx_b = c.get("rule_b_index")
+            if (
+                isinstance(idx_a, int) and isinstance(idx_b, int)
+                and 1 <= idx_a <= len(skill_a_rules) and 1 <= idx_b <= len(skill_b_rules)
+            ):
+                valid.append({
+                    "rule_a": skill_a_rules[idx_a - 1],
+                    "rule_b": skill_b_rules[idx_b - 1],
+                    "explanation": c.get("explanation", ""),
+                })
             else:
                 logger.warning(
-                    f"Skill Conflict Checker returned a conflict whose rule text didn't "
-                    f"exactly match '{skill_a_name}'/'{skill_b_name}' rules - discarding."
+                    f"Skill Conflict Checker returned a conflict with an out-of-range index "
+                    f"for '{skill_a_name}'/'{skill_b_name}' ({idx_a!r}/{idx_b!r}) - discarding."
                 )
         return valid
 
