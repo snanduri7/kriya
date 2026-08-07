@@ -325,3 +325,46 @@ async def test_developer_step1_unsafe_path_in_new_shape_falls_through_not_used_r
     # same as before this change) - the point of this test is that the new
     # contract path did NOT silently pass the unsafe path through unchecked.
     assert files == [{"filepath": "../outside.py", "content": "outside content"}]
+
+
+# ---------------------------------------------------------------------------
+# DeveloperAgent._resolve_step1_file_list - the extracted, directly testable
+# unit run_generation() delegates to, and what a per-stage eval calls to
+# observe WHICH path resolved the list, not just the end result.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_resolve_step1_file_list_reports_contract_source():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value='{"files": ["cli.py", "tasks/store.py"]}')
+    dev = DeveloperAgent("developer", llm)
+
+    file_entries, source = await dev._resolve_step1_file_list("Task", "Design")
+
+    assert source == "contract"
+    assert {e["filepath"] for e in file_entries} == {"cli.py", "tasks/store.py"}
+
+@pytest.mark.asyncio
+async def test_resolve_step1_file_list_reports_fallback_source():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps(["pom.xml", "App.java"]))
+    dev = DeveloperAgent("developer", llm)
+
+    file_entries, source = await dev._resolve_step1_file_list("Task", "Design")
+
+    assert source == "fallback"
+    assert {e["filepath"] for e in file_entries} == {"pom.xml", "App.java"}
+
+@pytest.mark.asyncio
+async def test_resolve_step1_file_list_reports_none_source():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="I think we should add an import statement here.")
+    dev = DeveloperAgent("developer", llm)
+
+    file_entries, source = await dev._resolve_step1_file_list("Task", "Design")
+
+    assert file_entries is None
+    assert source == "none"

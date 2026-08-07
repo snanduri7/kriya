@@ -45,9 +45,16 @@ building it.
    and isolates the Architect specifically instead of only ever getting
    indirect evidence about it through a full-pipeline pass/fail. Reuses
    `goals.py`'s shared fixture set - a regression here is directly
-   comparable against a full-pipeline regression on the identical goal. The
-   template for doing the same to Developer/Reviewer once they get
-   contracts of their own.
+   comparable against a full-pipeline regression on the identical goal.
+5. `developer_eval.py` (2026-08-07) - same shape, one stage further: runs
+   Planner -> Architect -> `DeveloperAgent._resolve_step1_file_list()` (the
+   same file-list contract generalized to Developer's own Step 1 - see
+   `docs/design.md` sec 2.4) and reports which of its three paths resolved
+   the list (`contract`/`fallback`/`none`), plus how much Developer's own
+   list overlaps with Architect's. Stops before `_fill_missing_content()`
+   (per-file content generation) and Quality Gates - measuring the
+   file-list mechanism specifically, not overall Developer output quality.
+   The template for doing the same to Reviewer once it gets a contract.
 
 ## Running it
 
@@ -79,6 +86,9 @@ correctness benefit for a fact-recall-class retry while being 13x slower.
 
 # Architect-only, no compile/test/run-verification - seconds per goal:
 .venv/bin/python spikes/eval_harness/architect_eval.py --model qwen3-coder:30b
+
+# Developer's Step 1 file-list query specifically, one stage further:
+.venv/bin/python spikes/eval_harness/developer_eval.py --model qwen3-coder:30b
 ```
 
 **Run this yourself, in your own terminal - don't ask an assistant session

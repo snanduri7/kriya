@@ -641,6 +641,72 @@ class DeveloperAgent(BaseAgent):
                 files_out.append({"filepath": filepath, "content": self.sanitize_generated_content(content)})
         return files_out
 
+    async def _resolve_step1_file_list(
+        self,
+        task_description: str,
+        design_context: str,
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+    ) -> Tuple[Optional[List[Dict[str, Any]]], str]:
+        """Runs run_generation()'s Step 1 - "which files do I need" - as its own
+        method, both for run_generation() itself and for anything (e.g. a
+        per-stage eval) that wants to observe which path actually resolved the
+        file list, not just the end result. Returns (file_entries, source)
+        where source is one of:
+          "contract" - the validated {"files": [...]} schema (kriya/agents/
+                        contracts.py, the same one ArchitectAgent.
+                        run_with_file_list() uses) matched on the first try.
+          "fallback" - the older, more permissive _extract_json_value()/
+                        _normalize_file_entries() extraction recovered it
+                        instead (a bare path array, or a model over-
+                        delivering full {filepath, content} objects here -
+                        kept because _normalize_file_entries() already
+                        gracefully uses that content directly rather than
+                        discarding it, a real behavior worth preserving).
+          "none"     - neither worked; the caller degrades to single-stage
+                        generation."""
+        system_list_prompt = (
+            "You are the Kriya File List Planner.\n"
+            "Your task is to identify and return a list of file paths that need to be created or modified based on the design.\n"
+            'Return ONLY a JSON object of the exact shape {"files": ["path/one.ext", "path/two.ext"]} - '
+            "the complete list of every file path (workspace-relative, no leading '/', no '..') this task "
+            "requires creating or modifying. Do not include markdown wraps."
+        )
+        list_prompt = (
+            f"=== Design ===\n{design_context}\n\n"
+            f"=== Task ===\n{task_description}\n\n"
+            "Please return the JSON file list."
+        )
+        response_str = await self.llm.complete(
+            system_list_prompt,
+            list_prompt,
+            json_mode=True,
+            model_override=model_override,
+            base_url_override=base_url_override,
+            api_key_override=api_key_override,
+        )
+
+        files, err = parse_file_list(response_str)
+        if files is not None:
+            return [{"filepath": p, "content": None, "edits": None} for p in files], "contract"
+        logger.debug(f"Developer file-list response didn't validate against the contract ({err}) - trying the older, more permissive extraction.")
+
+        # _extract_json_value() raises (not returns None) when it can't recover
+        # any JSON at all - caught here so this method never raises for a parse
+        # failure either, same "always returns a tuple" contract as
+        # parse_file_list() itself. run_generation()'s own try/except (wrapping
+        # the call to this method) still catches a genuine completion/network
+        # failure the same as before this method existed.
+        try:
+            parsed = self._extract_json_value(response_str)
+        except Exception:
+            return None, "none"
+        file_entries = self._normalize_file_entries(parsed)
+        if file_entries:
+            return file_entries, "fallback"
+        return None, "none"
+
     async def run_generation(
         self,
         task_description: str,
@@ -692,60 +758,10 @@ class DeveloperAgent(BaseAgent):
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
             )
 
-        # Step 1: Query the model for the list of files to generate (or full implementation if mocked in tests)
-        system_list_prompt = (
-            "You are the Kriya File List Planner.\n"
-            "Your task is to identify and return a list of file paths that need to be created or modified based on the design.\n"
-            'Return ONLY a JSON object of the exact shape {"files": ["path/one.ext", "path/two.ext"]} - '
-            "the complete list of every file path (workspace-relative, no leading '/', no '..') this task "
-            "requires creating or modifying. Do not include markdown wraps."
-        )
-
-        list_prompt = (
-            f"=== Design ===\n{design_context}\n\n"
-            f"=== Task ===\n{task_description}\n\n"
-            "Please return the JSON file list."
-        )
-
         try:
-            response_str = await self.llm.complete(
-                system_list_prompt,
-                list_prompt,
-                json_mode=True,
-                model_override=model_override,
-                base_url_override=base_url_override,
-                api_key_override=api_key_override
+            file_entries, _source = await self._resolve_step1_file_list(
+                task_description, design_context, model_override, base_url_override, api_key_override,
             )
-
-            # Tried first: the validated {"files": [...]} contract (see
-            # kriya/agents/contracts.py) - the same shape/parser
-            # ArchitectAgent.run_with_file_list() uses, since this is
-            # structurally the identical problem (a bare list of file paths).
-            # Falls through to the older, more permissive extraction below on
-            # any failure, rather than a corrective retry call - mirrors
-            # ArchitectAgent's own choice not to add a speculative extra
-            # round-trip before live data shows how often this path alone
-            # already succeeds.
-            files, err = parse_file_list(response_str)
-            if files is not None:
-                file_entries = [{"filepath": p, "content": None, "edits": None} for p in files]
-                return await self._fill_missing_content(
-                    file_entries, task_description, design_context, existing_code_context,
-                    stream_callback, model_override, base_url_override, api_key_override,
-                    prior_error_context, implicated_files, error_source_context, retry_temperature,
-                )
-            logger.debug(f"Developer file-list response didn't validate against the contract ({err}) - trying the older, more permissive extraction.")
-
-            # Older, more permissive fallback: also accepts a bare JSON array
-            # of path strings (no wrapping object) or an array of {filepath,
-            # content} objects when a model over-delivers full content here
-            # instead of just paths - kept because _normalize_file_entries()
-            # already gracefully uses that content directly rather than
-            # discarding it, a real behavior worth preserving, not just an
-            # implementation detail of how the file list was recovered.
-            parsed = self._extract_json_value(response_str)
-            file_entries = self._normalize_file_entries(parsed)
-
             if file_entries:
                 return await self._fill_missing_content(
                     file_entries, task_description, design_context, existing_code_context,
