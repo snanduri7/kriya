@@ -4,22 +4,23 @@ Deliberately narrow: only fields something else actually parses belong here -
 free-text rationale/design reasoning stays plain text in the agent's own
 response and is never forced through a schema.
 
-First (and currently only) contract: the Architect's file list. Everything
-else in a design - interface sketches, minimalism reasoning, the build-
-manifest rule - stays prose. The file list is different: it's the one part
-of the design IncompleteGenerationError's completeness check and the
-Developer's upfront "required files" prompt block both depend on being
-accurate, and it used to be recovered by extract_expected_files() - a blanket
-regex over the ENTIRE design's prose matching any "word.ext"-shaped token,
-with no way to distinguish a real requirement from an incidental mention
-(e.g. "similar to Foo.java elsewhere in the codebase" would match), returning
-bare basenames that needed a second, separately fragile regex pass
-(_resolve_file_paths_from_design) to recover a real path. See
-kriya/workflow/workflow.py for both - kept as this module's fallback of last
-resort, not removed, since local models don't get schema-constrained
-decoding from LLMClient today (kriya/core/llm.py's json_mode only guarantees
-SOME valid JSON, not any particular shape) and a malformed response must
-degrade, never crash the run.
+First contract, shared by two call sites: a validated list of file paths.
+ArchitectAgent.run_with_file_list() uses it for the design's authoritative
+file list - the one part of a design IncompleteGenerationError's completeness
+check and the Developer's upfront "required files" prompt block both depend
+on being accurate, previously recovered by extract_expected_files() (a
+blanket regex over the ENTIRE design's prose matching any "word.ext"-shaped
+token, with no way to distinguish a real requirement from an incidental
+mention like "similar to Foo.java elsewhere in the codebase"). Generalized
+2026-08-07 to DeveloperAgent.run_generation()'s own Step 1 (the "which files
+do I need to write" query, structurally the identical problem - previously
+_extract_json_value()+_normalize_file_entries()'s hand-rolled parsing, no
+schema at all) - see kriya/workflow/workflow.py and kriya/agents/agent.py for
+both call sites' own older, heuristic fallbacks, kept as this module's
+fallback of last resort in each, not removed, since local models don't get
+schema-constrained decoding from LLMClient today (kriya/core/llm.py's
+json_mode only guarantees SOME valid JSON, not any particular shape) and a
+malformed response must degrade, never crash the run.
 """
 import json
 import re
@@ -28,8 +29,10 @@ from typing import List, Optional, Tuple
 from pydantic import BaseModel, ValidationError, field_validator
 
 
-class ArchitectFileList(BaseModel):
-    """The authoritative list of file paths an Architect design calls for."""
+class FileList(BaseModel):
+    """A validated list of workspace-relative file paths - the authoritative
+    set of files a design calls for (ArchitectAgent), or the set a Developer
+    completion says it needs to create/modify (DeveloperAgent's Step 1)."""
 
     files: List[str]
 
@@ -56,31 +59,35 @@ class ArchitectFileList(BaseModel):
         return cleaned
 
 
-# Takes the LAST fenced ```json ... ``` (or bare ```...```) block in the
-# design specifically - a design occasionally includes a smaller
-# illustrative JSON snippet earlier (e.g. a sample config payload) before
-# the real file-list block, which is always meant to be the final thing in
-# the response per ArchitectAgent's own system prompt.
+# Takes the LAST fenced ```json ... ``` (or bare ```...```) block in the text
+# specifically - a design occasionally includes a smaller illustrative JSON
+# snippet earlier (e.g. a sample config payload) before the real file-list
+# block, which is always meant to be the final thing in the response per
+# ArchitectAgent's own system prompt.
 _FENCED_JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
-# Last-resort match for a model that emits the JSON object without ever
-# wrapping it in a fence at all - anchored on the "files" key specifically
-# so it doesn't accidentally grab an unrelated brace-delimited snippet.
+# Last-resort match for a response that emits the JSON object without ever
+# wrapping it in a fence at all (DeveloperAgent's Step 1 is asked to return
+# exactly this shape, no fence) - anchored on the "files" key specifically so
+# it doesn't accidentally grab an unrelated brace-delimited snippet.
 _BARE_FILES_OBJECT = re.compile(r'\{[^{}]*"files"\s*:\s*\[[^\]]*\][^{}]*\}', re.DOTALL)
 
 
-def parse_architect_file_list(design: str) -> Tuple[Optional[List[str]], Optional[str]]:
-    """Extracts and validates the Architect's trailing JSON file-list block.
+def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
+    """Extracts and validates a {"files": [...]} JSON block from a completion
+    - a full Architect design (the file list is a trailing block inside a
+    much larger prose response) or a Developer Step-1 response (asked to be
+    exactly this shape, nothing else).
 
     Returns (files, None) on success or (None, error_message) on any failure
     - never raises, so callers can decide how to degrade (retry, fall back to
     a heuristic) without wrapping every call in a try/except for a
     json.JSONDecodeError or a pydantic ValidationError."""
-    if not design or not design.strip():
-        return None, "design is empty"
+    if not text or not text.strip():
+        return None, "text is empty"
 
-    candidates = _FENCED_JSON_BLOCK.findall(design) or _BARE_FILES_OBJECT.findall(design)
+    candidates = _FENCED_JSON_BLOCK.findall(text) or _BARE_FILES_OBJECT.findall(text)
     if not candidates:
-        return None, "no JSON file-list block found in the design"
+        return None, "no JSON file-list block found in the text"
 
     # Last block wins - see the illustrative-snippet-before-the-real-list case above.
     try:
@@ -89,6 +96,6 @@ def parse_architect_file_list(design: str) -> Tuple[Optional[List[str]], Optiona
         return None, f"file-list JSON block did not parse: {e}"
 
     try:
-        return ArchitectFileList.model_validate(parsed).files, None
+        return FileList.model_validate(parsed).files, None
     except ValidationError as e:
         return None, f"file-list JSON block failed schema validation: {e}"

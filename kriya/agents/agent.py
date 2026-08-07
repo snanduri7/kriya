@@ -4,7 +4,7 @@ import re
 from abc import ABC
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from kriya.agents.contracts import parse_architect_file_list
+from kriya.agents.contracts import parse_file_list
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 
@@ -208,7 +208,7 @@ class ArchitectAgent(BaseAgent):
         (extract_expected_files/_resolve_file_paths_from_design) for exactly
         this case, kept specifically as this method's safety net, not removed."""
         design = await self.run(prompt, stream_callback=stream_callback)
-        files, err = parse_architect_file_list(design)
+        files, err = parse_file_list(design)
         if files is None:
             logger.warning(f"Architect file list didn't validate ({err}) - caller will fall back to heuristic extraction.")
         return design, files
@@ -696,13 +696,15 @@ class DeveloperAgent(BaseAgent):
         system_list_prompt = (
             "You are the Kriya File List Planner.\n"
             "Your task is to identify and return a list of file paths that need to be created or modified based on the design.\n"
-            "Return ONLY a JSON list of strings (e.g. [\"pom.xml\", \"src/main/java/App.java\"]). Do not include markdown wraps."
+            'Return ONLY a JSON object of the exact shape {"files": ["path/one.ext", "path/two.ext"]} - '
+            "the complete list of every file path (workspace-relative, no leading '/', no '..') this task "
+            "requires creating or modifying. Do not include markdown wraps."
         )
 
         list_prompt = (
             f"=== Design ===\n{design_context}\n\n"
             f"=== Task ===\n{task_description}\n\n"
-            "Please return the JSON list of files to create/modify."
+            "Please return the JSON file list."
         )
 
         try:
@@ -715,6 +717,32 @@ class DeveloperAgent(BaseAgent):
                 api_key_override=api_key_override
             )
 
+            # Tried first: the validated {"files": [...]} contract (see
+            # kriya/agents/contracts.py) - the same shape/parser
+            # ArchitectAgent.run_with_file_list() uses, since this is
+            # structurally the identical problem (a bare list of file paths).
+            # Falls through to the older, more permissive extraction below on
+            # any failure, rather than a corrective retry call - mirrors
+            # ArchitectAgent's own choice not to add a speculative extra
+            # round-trip before live data shows how often this path alone
+            # already succeeds.
+            files, err = parse_file_list(response_str)
+            if files is not None:
+                file_entries = [{"filepath": p, "content": None, "edits": None} for p in files]
+                return await self._fill_missing_content(
+                    file_entries, task_description, design_context, existing_code_context,
+                    stream_callback, model_override, base_url_override, api_key_override,
+                    prior_error_context, implicated_files, error_source_context, retry_temperature,
+                )
+            logger.debug(f"Developer file-list response didn't validate against the contract ({err}) - trying the older, more permissive extraction.")
+
+            # Older, more permissive fallback: also accepts a bare JSON array
+            # of path strings (no wrapping object) or an array of {filepath,
+            # content} objects when a model over-delivers full content here
+            # instead of just paths - kept because _normalize_file_entries()
+            # already gracefully uses that content directly rather than
+            # discarding it, a real behavior worth preserving, not just an
+            # implementation detail of how the file list was recovered.
             parsed = self._extract_json_value(response_str)
             file_entries = self._normalize_file_entries(parsed)
 

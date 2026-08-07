@@ -35,6 +35,19 @@ building it.
    breakdown by `status`/`failure_category` (the column
    `kriya/core/trace.py` now persists - see the architecture-initiative
    Part 1 work this spike depends on) and a per-run detail table.
+4. `architect_eval.py` (2026-08-07) - a per-stage eval, not a full-pipeline
+   one: runs only Planner -> Architect for each `goals.py` goal, in-process
+   (no `kriya generate` subprocess, no worktree, no compile/test/run-
+   verification), and checks whether `ArchitectAgent.run_with_file_list()`'s
+   structured JSON file list (`kriya/agents/contracts.py`) validated, plus
+   whether a goal establishing Maven/Gradle/Bundler actually got its build
+   manifest listed. Seconds per goal instead of `run_harness.py`'s minutes,
+   and isolates the Architect specifically instead of only ever getting
+   indirect evidence about it through a full-pipeline pass/fail. Reuses
+   `goals.py`'s shared fixture set - a regression here is directly
+   comparable against a full-pipeline regression on the identical goal. The
+   template for doing the same to Developer/Reviewer once they get
+   contracts of their own.
 
 ## Running it
 
@@ -63,6 +76,9 @@ correctness benefit for a fact-recall-class retry while being 13x slower.
 
 # After a batch finishes:
 .venv/bin/python spikes/eval_harness/report.py --logs-dir spikes/eval_harness/runs/<batch>/logs
+
+# Architect-only, no compile/test/run-verification - seconds per goal:
+.venv/bin/python spikes/eval_harness/architect_eval.py --model qwen3-coder:30b
 ```
 
 **Run this yourself, in your own terminal - don't ask an assistant session
