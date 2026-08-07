@@ -4,6 +4,7 @@ import re
 from abc import ABC
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from kriya.agents.contracts import parse_architect_file_list
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 
@@ -164,20 +165,22 @@ class ArchitectAgent(BaseAgent):
             "file the Developer Agent must remember to actually create, and unnecessary splitting directly causes "
             "incomplete-generation failures downstream.\n"
             "\n"
-            "REQUIRED FILES LIST: Always begin your design with a section titled exactly '## Files to Create or Modify' "
-            "followed by one bullet per file you are designing, each bullet containing that file's exact relative "
-            "path (e.g. '- src/main/java/com/example/BrokerServer.java'). When extending an existing project, this "
-            "list MUST also include already-existing files that need real changes, not just brand-new ones - e.g. "
-            "adding a new dependency to an already-existing pom.xml/build.gradle, or adding a bean to an "
-            "already-existing Spring XML context. Check the Workspace Context above for what already exists before "
-            "assuming a file only needs to be created. This list is the authoritative, complete set of files the "
-            "Developer Agent must produce - do not mention any additional file path later in the design that is not "
-            "already in this list, and do not list a file here that you don't actually design.\n"
+            "REQUIRED FILES LIST: End your design with a fenced JSON code block of the exact shape "
+            '{"files": ["path/one.ext", "path/two.ext"]} - one workspace-relative path per file you are '
+            "designing (no leading '/', no '..' segments). When extending an existing project, this list "
+            "MUST also include already-existing files that need real changes, not just brand-new ones - "
+            "e.g. adding a new dependency to an already-existing pom.xml/build.gradle, or adding a bean to "
+            "an already-existing Spring XML context. Check the Workspace Context above for what already "
+            "exists before assuming a file only needs to be created. This list is the authoritative, "
+            "complete set of files the Developer Agent must produce - do not mention any additional file "
+            "path elsewhere in the design that is not already in this list, and do not list a file here "
+            "that you don't actually design. This JSON block is parsed programmatically: it must be the "
+            "LAST thing in your response, valid JSON, and contain nothing else inside the fence.\n"
             "\n"
             "BUILD MANIFEST IS NOT IMPLICIT: if the goal or existing repository establishes Maven "
             "(a 'Maven project', or any mention of pom.xml/Maven dependencies) or Gradle (a 'Gradle "
             "project', or any mention of build.gradle), the corresponding pom.xml or build.gradle "
-            "MUST be its own explicit bullet in the Files to Create or Modify list, even though the "
+            "MUST be its own explicit entry in the files JSON list, even though the "
             "goal never asked for that file by name - the goal describing a Maven/Gradle project is "
             "itself the request, since neither build tool can compile anything without its own "
             "manifest declaring every external dependency the code needs. Confirmed live as a real, "
@@ -185,6 +188,30 @@ class ArchitectAgent(BaseAgent):
             "explicitly, no attempt across an entire generation run ever created one, and every "
             "single retry failed on the exact same missing-dependency compile errors as a result."
         )
+
+    async def run_with_file_list(
+        self, prompt: str, stream_callback: Optional[Callable[[str], None]] = None
+    ) -> Tuple[str, Optional[List[str]]]:
+        """Runs the Architect and additionally extracts+validates its structured
+        file list (kriya/agents/contracts.py) - the one part of the design
+        consumed programmatically downstream, not just read as prose. A single
+        completion, same call count as plain run() - no corrective follow-up call
+        on a validation failure (yet): local models don't get schema-constrained
+        decoding from this client today (LLMClient's json_mode only guarantees
+        SOME valid JSON, not any particular shape - see kriya/core/llm.py), so a
+        malformed file list is a real, expected outcome, not just a theoretical
+        one, and a retry call's actual value here is unmeasured - deliberately
+        deferred until live batches show how often it would even help, rather
+        than adding a second model round-trip speculatively. Returns (design,
+        None) when the file list doesn't validate - the caller
+        (kriya/workflow/workflow.py) has an older, heuristic fallback
+        (extract_expected_files/_resolve_file_paths_from_design) for exactly
+        this case, kept specifically as this method's safety net, not removed."""
+        design = await self.run(prompt, stream_callback=stream_callback)
+        files, err = parse_architect_file_list(design)
+        if files is None:
+            logger.warning(f"Architect file list didn't validate ({err}) - caller will fall back to heuristic extraction.")
+        return design, files
 
 
 class DeveloperAgent(BaseAgent):

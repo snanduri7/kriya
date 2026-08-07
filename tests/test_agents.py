@@ -1343,9 +1343,15 @@ def test_architect_prompt_requires_listing_files_that_need_modification_too():
     referencing Qpid/JMS classes compiled against a pom.xml that still only
     had Ignite dependencies, since pom.xml was never in the Architect's
     "Files to Create" list. The prompt must explicitly cover modifying
-    existing files, not just creating new ones."""
+    existing files, not just creating new ones.
+
+    The original fix used a markdown heading ("## Files to Create or
+    Modify") later replaced by a validated JSON contract (see
+    kriya/agents/contracts.py, ArchitectAgent.run_with_file_list) - this
+    test now checks for the JSON shape instead of the old heading text,
+    same regression intent."""
     prompt = ArchitectAgent("architect", None).system_prompt
-    assert "Files to Create or Modify" in prompt
+    assert '"files"' in prompt
     assert "already-existing" in prompt.lower() or "existing files" in prompt.lower()
 
 def test_architect_agent_requires_explicit_build_manifest():

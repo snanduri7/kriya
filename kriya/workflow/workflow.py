@@ -536,7 +536,17 @@ EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradl
 def extract_expected_files(design: str) -> set:
     """Extracts basenames of files the Architect's design calls for (directory trees,
     bullet lists, or prose mentions all match), so the Developer Agent's actual output
-    can be checked for completeness - not just whether what it did write compiles."""
+    can be checked for completeness - not just whether what it did write compiles.
+
+    FALLBACK ONLY as of the Architect file-list contract (kriya/agents/contracts.py,
+    ArchitectAgent.run_with_file_list): the mainline path now uses the Architect's own
+    validated, structured JSON file list, which has no way to distinguish a real
+    requirement from an incidental filename mention elsewhere in the design's prose
+    (e.g. "similar to Foo.java elsewhere in the codebase" would match here) and only
+    ever returns bare basenames requiring a second, separately fragile regex pass
+    (_resolve_file_paths_from_design) to recover a real path. Kept specifically for
+    when structured extraction fails twice (main response + one corrective retry) and
+    the run needs to degrade to something rather than fail outright - not removed."""
     if not design:
         return set()
     pattern = r'\b[\w\-]+\.(?:' + "|".join(EXPECTED_FILE_EXTENSIONS) + r')\b'
@@ -603,26 +613,23 @@ def find_missing_expected_files(expected_files: set, written_files: set, goal: s
 
 
 def _resolve_file_paths_from_design(basenames: List[str], design: str) -> List[str]:
-    """Resolves each bare basename (extract_expected_files/find_missing_expected_files
-    only ever return basenames, matched against the design's own basename mentions) to
-    a real directory path by searching the Architect's design text for a fuller path
-    mention ending in that basename (e.g. a bullet list line literally saying
-    "src/main/resources/foo.xml" resolves "foo.xml" -> "src/main/resources/foo.xml").
-    Falls back to the bare basename (correct for root-level files like pom.xml) when
-    no path mention is found - e.g. a directory-tree diagram line like
-    "|-- foo.xml" has no real path separator immediately before the name and won't
-    match, which is fine since a bullet-list or prose mention of the same file
-    elsewhere in the design usually does.
+    """Resolves each bare basename to a real directory path by searching the
+    Architect's design text for a fuller path mention ending in that basename (e.g. a
+    bullet list line literally saying "src/main/resources/foo.xml" resolves "foo.xml"
+    -> "src/main/resources/foo.xml"). Falls back to the bare basename (correct for
+    root-level files like pom.xml) when no path mention is found - e.g. a
+    directory-tree diagram line like "|-- foo.xml" has no real path separator
+    immediately before the name and won't match, which is fine since a bullet-list or
+    prose mention of the same file elsewhere in the design usually does.
 
-    Confirmed live as necessary: relying on the model's own file-list call (rather
-    than trusting known_target_files directly, since a bare basename used as-is
-    writes flat at the sandbox root instead of its real nested location) was
-    observed to reliably return only a subset of the intended files even when
-    explicitly told which ones were needed, silently dropping the rest and burning
-    the entire retry budget without ever recovering them. Resolving paths ourselves
-    lets known_target_files be used safely wherever a deterministic file list is
-    already known (missing-file recovery, and the initial generation call - see
-    both call sites), skipping that unreliable call altogether."""
+    FALLBACK ONLY as of the Architect file-list contract (kriya/agents/contracts.py):
+    the mainline path resolves basenames via a direct lookup against the Architect's
+    own structured, already-resolved file list (_architect_basename_to_path, built
+    once where architect_files is finalized) instead of re-scanning prose with a
+    regex every time. This function's only remaining caller is the one place that
+    lookup can't be built at all - when structured extraction itself failed twice and
+    extract_expected_files()'s basename-only regex is the only file list available in
+    the first place. Kept, not removed, for exactly that case."""
     resolved = []
     for basename in basenames:
         pattern = re.compile(r'(?<![\w/.-])[\w][\w./-]*/' + re.escape(basename) + r'(?![\w.])')
@@ -2640,15 +2647,29 @@ class WorkflowEngine:
         design_prompt = f"Plan:\n{plan}\n\nWorkspace Context:\n{repo_context}" + convention_prompt
         if resume_state and resume_state.get("design"):
             design = resume_state["design"]
+            architect_files = resume_state.get("architect_files")
             logger.info(f"Resuming checkpoint '{run_id}': using saved Design, skipping Architect Agent call.")
         else:
             logger.info("Architect Agent defining interface designs...")
             architect_stream = (lambda token: stream_callback("Architect Design", token)) if stream_callback else None
-            design = await self.architect.run(
+            design, architect_files = await self.architect.run_with_file_list(
                 design_prompt,
                 stream_callback=architect_stream
             )
-            _save_stage_checkpoint("design", plan=plan, design=design)
+            _save_stage_checkpoint("design", plan=plan, design=design, architect_files=architect_files)
+        if not architect_files:
+            # The Architect's response had no valid JSON file-list block (see
+            # ArchitectAgent.run_with_file_list/kriya/agents/contracts.py), or
+            # this is an old checkpoint saved before architect_files existed at
+            # all. Fall back to the older heuristic regex extraction rather than
+            # fail the run outright over a formatting hiccup in a newer
+            # mechanism - kept specifically as this path's safety net, see
+            # kriya/agents/contracts.py's module docstring.
+            architect_files = _resolve_file_paths_from_design(sorted(extract_expected_files(design)), design)
+            logger.warning(
+                "Architect file list: structured JSON extraction unavailable - falling back to "
+                "heuristic regex extraction over the design's prose."
+            )
         if step_callback:
             step_callback("Design", design)
 
@@ -2900,7 +2921,16 @@ class WorkflowEngine:
         # half of the completeness fix; the missing-file recovery retry below is the
         # cheaper, targeted recovery half for when prevention still doesn't work.
         required_files_prompt_block = ""
-        _expected_files_upfront = sorted(extract_expected_files(design))
+        _expected_files_upfront = sorted(set(architect_files))
+        # basename -> full path, built once from the already-resolved architect_files
+        # list (see the Architect call above) so a missing-file recovery retry (below)
+        # can resolve a bare basename back to its real path via a simple lookup instead
+        # of re-scanning the design's prose with a regex. First occurrence wins on a
+        # basename collision across two different directories - a deterministic,
+        # rare-edge-case tie-break, not expected to matter in practice.
+        _architect_basename_to_path: Dict[str, str] = {}
+        for _f in architect_files:
+            _architect_basename_to_path.setdefault(os.path.basename(_f), _f)
         if _expected_files_upfront:
             required_files_prompt_block = (
                 "\n\nRequired files (from the Architect's design - you must generate ALL of these, "
@@ -3120,18 +3150,19 @@ class WorkflowEngine:
                         base_code_context += learned_rag_context
 
                     # last_missing_files (from find_missing_expected_files) is always
-                    # bare basenames - the Architect's design text doesn't carry
-                    # directory paths, so "helper.py", never "pkg/helper.py". Resolve
-                    # each to a real path by searching the design text itself for a
-                    # fuller path mention ending in that basename (falls back to the
-                    # bare basename for root-level files like pom.xml, which is
-                    # already correct). This lets known_target_files be used safely:
-                    # confirmed live (Qpid+Ignite validation) that leaving this to the
-                    # model's own file-list call - even when explicitly told exactly
-                    # which 1-4 files are missing - reliably returns only ONE of them,
-                    # silently dropping the rest and burning the whole retry budget
-                    # without ever recovering them.
-                    resolved_missing_files = _resolve_file_paths_from_design(last_missing_files, design)
+                    # bare basenames (compared against written files by basename).
+                    # Resolve each to a real path via _architect_basename_to_path (built
+                    # once from the Architect's already-resolved file list above) -
+                    # falls back to the bare basename itself for root-level files like
+                    # pom.xml, or if a basename genuinely isn't in the map. This lets
+                    # known_target_files be used safely: confirmed live (Qpid+Ignite
+                    # validation) that leaving this to the model's own file-list call -
+                    # even when explicitly told exactly which 1-4 files are missing -
+                    # reliably returns only ONE of them, silently dropping the rest and
+                    # burning the whole retry budget without ever recovering them.
+                    resolved_missing_files = [
+                        _architect_basename_to_path.get(basename, basename) for basename in last_missing_files
+                    ]
 
                     task_desc, active_code_context = _build_missing_files_retry_prompt(
                         goal, plan, design, resolved_missing_files,
@@ -3201,9 +3232,14 @@ class WorkflowEngine:
                     # category outright on attempt 1 instead of only recovering from
                     # it after the fact. Falls back to today's ask-the-model-for-a-
                     # list behavior when the design didn't yield a usable list.
+                    # _expected_files_upfront is already resolved to real paths by
+                    # this point (architect_files comes pre-resolved either from the
+                    # Architect's own structured JSON file list, or, in the fallback
+                    # case above, from _resolve_file_paths_from_design already) - no
+                    # separate resolution step needed here anymore.
                     known_target_files = None
                     if retry_count == 0 and _expected_files_upfront:
-                        known_target_files = _resolve_file_paths_from_design(_expected_files_upfront, design)
+                        known_target_files = _expected_files_upfront
 
                     # Generate code files
                     dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
@@ -3339,7 +3375,10 @@ class WorkflowEngine:
                     # (e.g. only writing pom.xml when the Architect's design called for 7 files).
                     # A trivially-passing compile on a near-empty sandbox would otherwise report
                     # PASSED and get applied to the workspace despite the goal not being met.
-                    expected_files = extract_expected_files(design)
+                    # Sourced from architect_files (the structured file list, or its heuristic
+                    # fallback - see the Architect call above) rather than re-deriving via a
+                    # second independent regex pass over the design's prose.
+                    expected_files = {os.path.basename(f) for f in architect_files}
                     missing_files = find_missing_expected_files(expected_files, all_files_written, goal=goal)
                     if missing_files:
                         raise IncompleteGenerationError(

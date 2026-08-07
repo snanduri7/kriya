@@ -269,6 +269,150 @@ def test_python_run_tests_resolves_maven_style_invented_layout(tmp_path):
     res = validator.run_tests()
     assert res["success"] is True, res["output"]
 
+def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest(tmp_path):
+    """Regression test for a real bug found live (2026-08-07 eval harness,
+    django_healthcheck_gap): a goal needing a real third-party package (e.g.
+    Django) failed every attempt with ModuleNotFoundError, since
+    PolymorphicValidator ran tests via sys.executable - Kriya's OWN
+    interpreter, which only has whatever Kriya itself depends on installed -
+    with no per-project dependency install step, unlike Ruby's `bundle
+    install` fix. A requirements.txt with real content must get installed
+    into an ISOLATED project-local venv (not sys.executable directly, which
+    would risk breaking Kriya's own environment) before pytest runs, and
+    pytest itself must then run under THAT venv's interpreter."""
+    (tmp_path / "requirements.txt").write_text("django==5.2\n")
+    (tmp_path / "app.py").write_text("import django\n")
+    venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n")  # simulates an already-created venv
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "python"
+
+    with patch("subprocess.Popen") as mock_popen:
+        install_process = MagicMock()
+        install_process.returncode = 0
+        install_process.communicate.return_value = ("Successfully installed django", "")
+
+        pytest_process = MagicMock()
+        pytest_process.returncode = 0
+        pytest_process.communicate.return_value = ("1 passed", "")
+
+        mock_popen.side_effect = [install_process, pytest_process]
+        res = validator.run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 2
+    install_cmd = mock_popen.call_args_list[0].args[0]
+    pytest_cmd = mock_popen.call_args_list[1].args[0]
+    assert install_cmd == [str(venv_python), "-m", "pip", "install", "-q", "-r", str(tmp_path / "requirements.txt"), "pytest"]
+    # pytest itself must run under the VENV's interpreter, not sys.executable -
+    # installing into an isolated venv is pointless if the test run doesn't
+    # actually use it.
+    assert pytest_cmd[0] == str(venv_python)
+    assert pytest_cmd[0] != sys.executable
+
+def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp_path):
+    (tmp_path / "requirements.txt").write_text("this-package-does-not-exist==999.0\n")
+    (tmp_path / "app.py").write_text("pass\n")
+    venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        install_process = MagicMock()
+        install_process.returncode = 1
+        install_process.communicate.return_value = ("", "ERROR: No matching distribution found for this-package-does-not-exist==999.0")
+        mock_popen.return_value = install_process
+
+        res = validator.run_tests()
+
+    assert res["success"] is False
+    assert "pip install" in res["output"]
+    assert "this-package-does-not-exist" in res["output"]
+    # Only the failed install call should have been made - pytest must never
+    # run against a dependency environment known to be broken.
+    assert mock_popen.call_count == 1
+
+def test_python_run_tests_skips_venv_without_requirements_txt(tmp_path):
+    # No requirements.txt at all (e.g. python_task_tracker/python_greeter,
+    # stdlib-only goals) - must reproduce the exact pre-existing behavior,
+    # sys.executable, no venv/pip machinery invoked at all.
+    (tmp_path / "app.py").write_text("pass\n")
+    (tmp_path / "test_app.py").write_text("def test_ok():\n    assert True\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("1 passed", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 1
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[0] == sys.executable
+
+def test_python_run_tests_skips_venv_for_comments_only_requirements_txt(tmp_path):
+    # A requirements.txt with no real entries isn't worth a venv+pip round
+    # trip over - must behave exactly like having no requirements.txt at all.
+    (tmp_path / "requirements.txt").write_text("# no external deps needed\n\n")
+    (tmp_path / "app.py").write_text("pass\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("1 passed", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 1
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[0] == sys.executable
+
+def test_python_run_tests_creates_venv_from_scratch_when_not_already_present(tmp_path):
+    (tmp_path / "requirements.txt").write_text("requests==2.31.0\n")
+    (tmp_path / "app.py").write_text("import requests\n")
+    venv_python_path = str(tmp_path / ".kriya" / "venv" / "bin" / "python")
+
+    def _popen_side_effect(cmd, **kwargs):
+        process = MagicMock()
+        process.returncode = 0
+        if "venv" in cmd:
+            # Real venv creation would produce this file - simulate that side
+            # effect so PolymorphicValidator's own os.path.exists check (its
+            # actual success signal, not just the mocked returncode) passes.
+            os.makedirs(os.path.dirname(venv_python_path), exist_ok=True)
+            with open(venv_python_path, "w") as f:
+                f.write("#!/bin/sh\n")
+            process.communicate.return_value = ("", "")
+        elif "pip" in cmd:
+            process.communicate.return_value = ("Successfully installed requests", "")
+        else:
+            process.communicate.return_value = ("1 passed", "")
+        return process
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert not os.path.exists(venv_python_path)
+
+    with patch("subprocess.Popen") as mock_popen:
+        mock_popen.side_effect = _popen_side_effect
+        res = validator.run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 3
+    venv_cmd = mock_popen.call_args_list[0].args[0]
+    assert venv_cmd == [sys.executable, "-m", "venv", str(tmp_path / ".kriya" / "venv")]
+
 def test_java_ruby_compile_invocation(tmp_path):
     # Test Java compile invocation mocks
     (tmp_path / "pom.xml").write_text("<project></project>")

@@ -149,6 +149,84 @@ def test_resolve_file_paths_from_design_ignores_tree_diagram_lines():
 def test_resolve_file_paths_from_design_falls_back_when_no_path_mentioned():
     assert _resolve_file_paths_from_design(["pom.xml"], "Create pom.xml for the project.") == ["pom.xml"]
 
+@pytest.mark.asyncio
+async def test_workflow_uses_structured_architect_file_list_for_known_target_files(tmp_path):
+    """Demonstrates the actual value-add of the Architect file-list contract
+    (kriya/agents/contracts.py) over the old heuristic it supersedes: a
+    design whose prose NEVER mentions the nested directory a file actually
+    belongs in - only the trailing JSON file list does.
+    _resolve_file_paths_from_design's regex heuristic has nothing to match
+    here and would have fallen back to the bare basename ("Person.java"),
+    silently writing it flat at the sandbox root instead of its real nested
+    location - the exact class of bug this contract exists to close. The
+    structured path gets it right because it never needs to re-derive a
+    path from prose at all."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        (
+            "This design wires a Person record into an Ignite cache. No "
+            "directory structure is described anywhere in this prose.\n\n"
+            "```json\n"
+            '{"files": ["src/main/java/com/example/Person.java", "pom.xml"]}\n'
+            "```\n"
+        ),
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "src/main/java/com/example/Person.java", "content": "public class Person {}"},
+        {"filepath": "pom.xml", "content": "<project></project>"},
+    ])
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
+    assert first_call_kwargs["known_target_files"] == [
+        "pom.xml", "src/main/java/com/example/Person.java",
+    ]
+
+@pytest.mark.asyncio
+async def test_workflow_falls_back_to_heuristic_file_list_when_architect_response_has_no_json(tmp_path):
+    """Regression/safety-net test: an Architect response with no valid JSON
+    file-list block (an old-style plain-prose design, or a model that just
+    ignores the new instruction) must not fail the run - it degrades to the
+    older heuristic extraction (extract_expected_files/
+    _resolve_file_paths_from_design), reproducing the exact behavior Kriya
+    had before the structured contract existed, with no extra completion
+    call spent trying to recover it."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: create pom.xml and Main.java, no JSON list here.",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "pom.xml", "content": "<project></project>"},
+        {"filepath": "Main.java", "content": "public class Main {}"},
+    ])
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
+    assert first_call_kwargs["known_target_files"] == ["Main.java", "pom.xml"]
+    # Exactly 3 completions (Planner, Architect, Reviewer) - no extra
+    # corrective follow-up call was made for the malformed file list.
+    assert llm.complete.await_count == 3
+
 def test_is_near_duplicate_rule_catches_real_observed_rephrasings():
     """Regression test using the actual duplicate pairs observed live: qpid/rules.txt
     accumulated ~11 near-duplicate rules across one session's repeated skill-gap

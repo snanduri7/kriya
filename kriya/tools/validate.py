@@ -6,7 +6,7 @@ import signal
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
@@ -69,6 +69,21 @@ def get_pom_own_coordinate(pom_path: str) -> Optional[str]:
         return None
 
 
+def _has_real_requirements(requirements_path: str) -> bool:
+    """A requirements.txt with no real entries (empty, or comments only) isn't
+    worth the cost of creating a venv and running pip over - module-level since
+    it's a pure text check, no PolymorphicValidator state needed."""
+    try:
+        with open(requirements_path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
@@ -99,6 +114,67 @@ class PolymorphicValidator:
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
+
+    def _ensure_project_venv(self, requirements_path: str) -> Tuple[Optional[str], Optional[str]]:
+        """Creates (if not already present) a project-local virtual environment
+        under .kriya/venv and installs requirements.txt into it, so a Python
+        goal needing a real third-party package can actually be tested -
+        PolymorphicValidator otherwise runs tests via sys.executable (KRIYA'S
+        OWN interpreter), which only has whatever Kriya itself depends on
+        installed. The same class of gap Ruby's `bundle install` fix closed for
+        that stack (2026-08-04) - a structurally unwinnable quality gate the
+        model's own code correctness can never fix.
+
+        Deliberately installs into an ISOLATED venv, not sys.executable
+        directly: pip-installing an arbitrary generated project's dependencies
+        straight into Kriya's OWN environment risks breaking Kriya itself (e.g.
+        downgrading a package version Kriya's own pyproject.toml needs).
+
+        Lives inside the (already git-untracked, worktree-scoped) .kriya/
+        directory - reused across retries within the same run the same way the
+        worktree itself is, and cleaned up the same way (git clean -fd) once
+        the worktree is reset for reuse by a later, unrelated run.
+
+        Returns (venv_python_path, None) on success. Returns (None, None) if
+        venv CREATION itself fails - an infrastructure problem, not something
+        a code retry can fix, so the caller falls back to sys.executable
+        (today's pre-existing behavior) rather than failing the gate. Returns
+        (None, error_message) if the actual `pip install` fails - a real
+        dependency problem (e.g. a nonexistent package/version the model
+        wrote), which the caller fails the gate on so the retry loop sees it,
+        mirroring the Ruby bundle-install precedent exactly."""
+        venv_dir = os.path.join(self.workspace_path, ".kriya", "venv")
+        venv_python = os.path.join(venv_dir, "bin", "python")
+        if not os.path.exists(venv_python):
+            try:
+                create_res = self._run_cmd_with_timeout(
+                    [sys.executable, "-m", "venv", venv_dir], cwd=self.workspace_path, timeout=60,
+                )
+                if create_res["returncode"] != 0 or not os.path.exists(venv_python):
+                    logger.warning(
+                        f"Failed to create project-local venv at {venv_dir} - falling back to "
+                        f"Kriya's own interpreter for this test run: {create_res['stderr']}"
+                    )
+                    return None, None
+            except Exception as e:
+                logger.warning(
+                    f"Failed to create project-local venv at {venv_dir} - falling back to "
+                    f"Kriya's own interpreter for this test run: {e}"
+                )
+                return None, None
+
+        # Re-run on every call, even when the venv already existed - a retry
+        # may have just edited requirements.txt, and pip itself is a fast
+        # no-op when nothing actually changed since the last install.
+        install_res = self._run_cmd_with_timeout(
+            [venv_python, "-m", "pip", "install", "-q", "-r", requirements_path, "pytest"],
+            cwd=self.workspace_path, timeout=300,
+        )
+        if install_res["returncode"] != 0:
+            return None, (
+                f"'pip install -r requirements.txt' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
+            )
+        return venv_python, None
 
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
@@ -389,8 +465,26 @@ class PolymorphicValidator:
                     candidate = os.path.join(self.workspace_path, *maven_style_root.split("/"))
                     if os.path.isdir(candidate):
                         extra_roots.append(candidate)
+
+                # A goal needing a real third-party package (e.g. Django) can only
+                # ever pass this gate if that package happens to already be
+                # installed in KRIYA'S OWN interpreter (sys.executable) - there was
+                # no per-project dependency install step for Python, unlike Ruby's
+                # `bundle install` fix. Confirmed live, 2026-08-07
+                # (django_healthcheck_gap): every attempt failed identically with
+                # ModuleNotFoundError: No module named 'django', regardless of the
+                # generated code's correctness - a structurally unwinnable gate.
+                python_interpreter = sys.executable
+                requirements_path = os.path.join(self.workspace_path, "requirements.txt")
+                if os.path.exists(requirements_path) and _has_real_requirements(requirements_path):
+                    venv_python, install_error = self._ensure_project_venv(requirements_path)
+                    if install_error:
+                        return {"success": False, "output": install_error}
+                    if venv_python:
+                        python_interpreter = venv_python
+
                 cmd = [
-                    sys.executable,
+                    python_interpreter,
                     "-c",
                     "import sys, os; "
                     "sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; "
