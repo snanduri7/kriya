@@ -113,7 +113,14 @@ When configuring the Ignite instance in Spring XML, use:
   IgniteCache<Integer, String> cache = ignite.getOrCreateCache("my-cache");
 
 ## 5. Starting Ignite with Spring XML Configuration
-There are two valid ways to start Ignite with Spring XML:
+There are two valid ways to start Ignite with Spring XML - use EXACTLY ONE,
+never both together: if your XML defines an `IgniteSpringBean` (Method B),
+it auto-starts the node the instant the Spring context loads, so a
+subsequent `Ignition.start(...)` call (Method A) on that same XML parses it
+as a second, independent Spring context and starts a SECOND node under the
+identical instance name - guaranteed "Ignite instance with this name has
+already been started" at runtime, confirmed live, regardless of how correct
+the rest of the code is.
 ### Method A: Direct Ignition (Recommended)
 You do not need to initialize a Spring `ApplicationContext` in Java. Ignite's `Ignition.start(...)` automatically loads and parses the XML file:
 ```java
@@ -150,9 +157,13 @@ public class App {
     public static void main(String[] args) {
         ApplicationContext context = new ClassPathXmlApplicationContext("ignite-config.xml");
         
-        // Retrieve the initialized Ignite bean from the context
-        Ignite ignite = context.getBean(Ignite.class);
+        // Retrieve the initialized Ignite bean from the context BY ITS BEAN
+        // ID, not by type - context.getBean(Ignite.class) throws
+        // NoSuchBeanDefinitionException, since the bean is only registered
+        // under the id "igniteNode" given to it above, not the Ignite type.
+        Ignite ignite = (Ignite) context.getBean("igniteNode");
         
+        // Do NOT also call Ignition.start(...) here - see Method A above.
         // Write/read cache...
     }
 }
