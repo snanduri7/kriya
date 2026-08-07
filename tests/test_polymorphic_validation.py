@@ -241,6 +241,34 @@ def test_python_run_tests_resolves_src_layout_imports(tmp_path):
     res_qualified = validator.run_tests()
     assert res_qualified["success"] is True, res_qualified["output"]
 
+def test_python_run_tests_resolves_maven_style_invented_layout(tmp_path):
+    """Regression test for a real bug found live (2026-08-07 eval harness,
+    python_task_tracker): the Developer Agent invents a Maven/Gradle-style
+    src/main/python nesting for pure-Python goals despite an explicit prompt
+    instruction against it, and neither of the two existing fallback roots
+    (workspace root, workspace/src) reaches a package three levels deep at
+    src/main/python/tasks - every attempt failed with ModuleNotFoundError
+    regardless of the generated code's actual correctness. Confirmed
+    reproducible across 7/7 attempts on two different models before this fix;
+    make test collection robust to the specific nesting shape actually
+    observed instead of continuing to rely on prompting alone."""
+    src_main_python = tmp_path / "src" / "main" / "python"
+    tasks_dir = src_main_python / "tasks"
+    tasks_dir.mkdir(parents=True)
+    (tasks_dir / "store.py").write_text(
+        "class TaskStore:\n    def __init__(self):\n        self.tasks = []\n"
+    )
+    tests_dir = src_main_python / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_store.py").write_text(
+        "from tasks.store import TaskStore\n\n"
+        "def test_store_constructs():\n    assert TaskStore().tasks == []\n"
+    )
+
+    validator = PolymorphicValidator(str(tmp_path))
+    res = validator.run_tests()
+    assert res["success"] is True, res["output"]
+
 def test_java_ruby_compile_invocation(tmp_path):
     # Test Java compile invocation mocks
     (tmp_path / "pom.xml").write_text("<project></project>")

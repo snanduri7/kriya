@@ -80,13 +80,17 @@ GOALS: List[Goal] = [
     Goal(
         id="python_task_tracker",
         text=(
-            "Build a small in-memory Python CLI task tracker across "
-            "multiple modules: tasks/model.py (a Task dataclass: id, title, "
-            "done), tasks/store.py (an in-memory TaskStore with add/"
-            "complete/list_pending methods), and cli.py (argparse-based "
-            "commands: add <title>, done <id>, list) that wires them "
-            "together. Include tests/test_store.py covering add, complete, "
-            "and list_pending."
+            "Build a small Python CLI task tracker across multiple modules: "
+            "tasks/model.py (a Task dataclass: id, title, done), "
+            "tasks/store.py (a TaskStore holding tasks in memory with add/"
+            "complete/list_pending methods, plus load/save methods that "
+            "persist the tasks to a JSON file so state survives between "
+            "separate runs of the CLI), and cli.py (argparse-based commands: "
+            "add <title>, done <id>, list - each invocation loads the "
+            "TaskStore from the JSON file before acting and saves it back "
+            "after) that wires them together. Include tests/test_store.py "
+            "covering add, complete, and list_pending against a TaskStore "
+            "instance directly (no file I/O needed in these tests)."
         ),
         hypothesis=(
             "Multi-file, stdlib-only, sized to plausibly cross a real diff-"
@@ -96,7 +100,17 @@ GOALS: List[Goal] = [
             "under -y, on_approval always auto-approves (kriya/cli.py), so "
             "this cannot exercise the human_rejected category in an "
             "unattended harness run by design - that category is inherently "
-            "interactive-only and will never appear in harness batch data."
+            "interactive-only and will never appear in harness batch data. "
+            "Wording fixed 2026-08-07: the original text asked for an "
+            "'in-memory' TaskStore with argparse CLI commands, which is "
+            "self-contradictory once run_verification exercises them as "
+            "separate 'python cli.py <cmd>' shell invocations (confirmed "
+            "live - each invocation is a fresh process, so a genuinely "
+            "in-memory-only store can never show state added by an earlier "
+            "invocation, regardless of how correct the generated code is). "
+            "Now explicit that persistence goes through a JSON file between "
+            "CLI invocations, matching how a real CLI tool would actually "
+            "need to work, while the TaskStore/tests stay pure in-memory."
         ),
     ),
     Goal(

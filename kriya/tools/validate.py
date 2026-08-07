@@ -365,6 +365,30 @@ class PolymorphicValidator:
                 src_dir = os.path.join(self.workspace_path, "src")
                 if os.path.isdir(src_dir):
                     extra_roots.append(src_dir)
+                # The Developer Agent keeps inventing a Maven/Gradle-style
+                # src/main/<lang> (and src/test/<lang>) nesting for pure-Python
+                # goals despite an explicit, correctly-worded prompt instruction
+                # against it (ECOSYSTEM_INVARIANT_HEADER in workflow.py names this
+                # exact anti-pattern verbatim) - confirmed live, 2026-08-07
+                # (python_task_tracker): 7/7 attempts across TWO different models
+                # wrote to src/main/python/, and every one of the resulting
+                # ModuleNotFoundError failures was misdiagnosed by the model's own
+                # fix-analysis as a sys.path problem rather than a layout problem,
+                # so retries never escaped the pattern. A genuine prompting-ceiling
+                # case, not an under-specified one - the same class already hit for
+                # Ignite's Security Manager flag (see _strip_jdk_incompatible_jvm_
+                # flags). Rather than keep fighting the model's habit at the prompt
+                # level, make test collection robust to the specific nesting shape
+                # actually observed - the same "meet the model where it is"
+                # philosophy already used for Java's classpath-based test-class
+                # resolution (java_test_class in run_tests below, resolves
+                # regardless of package/src-root convention). Conditioned on the
+                # directory actually existing, so this is a no-op for every
+                # correctly-flat-laid-out project.
+                for maven_style_root in ("src/main/python", "src/main", "src/test/python", "src/test"):
+                    candidate = os.path.join(self.workspace_path, *maven_style_root.split("/"))
+                    if os.path.isdir(candidate):
+                        extra_roots.append(candidate)
                 cmd = [
                     sys.executable,
                     "-c",

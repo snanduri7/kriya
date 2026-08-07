@@ -1171,7 +1171,7 @@ _JDK_INCOMPATIBLE_JVM_FLAGS: List[Tuple[str, int, str]] = [
 ]
 
 
-def _strip_jdk_incompatible_jvm_flags(worktree_path: str) -> Optional[str]:
+def _strip_jdk_incompatible_jvm_flags(worktree_path: str, java_home_override: Optional[str] = None) -> Optional[str]:
     """Deterministically strips a JVM flag from the worktree's pom.xml
     exec-maven-plugin <argument> list when it's known to be fatal on the
     actually-resolved target JDK, right before the run-verification gate
@@ -1190,6 +1190,21 @@ def _strip_jdk_incompatible_jvm_flags(worktree_path: str) -> Optional[str]:
     deterministically correcting a known-wrong invocation detail rather
     than asking the model to get it right.
 
+    java_home_override, when given, is the JDK home _resolve_java_home_override()
+    already resolved for this run - pass it through rather than letting this
+    function re-derive the target independently. Confirmed live, 2026-08-07:
+    without this, the function called check_java_toolchain() fresh and used
+    mvn's UNMODIFIED default JDK (26 on the validation machine) to decide
+    what to strip, even on a run where JAVA_HOME was already being forced
+    onto JDK 17 for every Maven subprocess - two independent "what JDK is
+    this?" computations that can disagree about the one that actually
+    matters (the JDK the subprocess will really run under). Harmless that
+    time (the flag is optional either way on JDK 17), but not guaranteed to
+    stay harmless. When set, the override's JDK IS toolchain['java_version']
+    by construction (_resolve_java_home_override only ever overrides onto
+    the 'java' side of a detected mismatch), so that's used instead of
+    mvn_java_version.
+
     Best-effort and silent on any I/O problem - this is a defensive
     correction, not a required step, and must never itself break a run that
     would otherwise be fine. Returns a human-readable note describing what
@@ -1201,7 +1216,10 @@ def _strip_jdk_incompatible_jvm_flags(worktree_path: str) -> Optional[str]:
     try:
         from kriya.tools.validate import check_java_toolchain
         toolchain = check_java_toolchain()
-        version_str = toolchain["mvn_java_version"] or toolchain["java_version"]
+        if java_home_override:
+            version_str = toolchain["java_version"]
+        else:
+            version_str = toolchain["mvn_java_version"] or toolchain["java_version"]
         if not version_str:
             return None
         resolved_major = int(version_str)
@@ -3462,7 +3480,7 @@ class WorkflowEngine:
                                         "One or more inferred run commands aren't resolvable as given here - "
                                         "substituted Kriya's own interpreter/PATH-resolved equivalents."
                                     )
-                                jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(worktree_path)
+                                jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(worktree_path, java_home_override)
                                 if jvm_flag_correction:
                                     logger.warning(f"JVM flag preflight: {jvm_flag_correction}")
                                     toolchain_warning = (

@@ -1469,6 +1469,72 @@ async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path
     assert "-Djava.security.manager=allow" not in final_pom
 
 @pytest.mark.asyncio
+async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(tmp_path):
+    """Workflow-level regression test for a real bug found live (2026-08-07,
+    ignite_qpid_person re-run immediately after the JAVA_HOME override
+    feature shipped): with java_home_override active, the flag-strip call
+    used to decide against mvn's UNMODIFIED default JDK (26 here) via a
+    fresh, independent check_java_toolchain() call, ignoring that this same
+    run was already forcing every Maven subprocess onto JDK 17 via
+    JAVA_HOME. Confirms the wiring fix: with the override active and its
+    target (17) reported as toolchain['java_version'], the flag - required
+    on 17, forbidden only on 24+ - must survive, even though mvn's own
+    untouched default is 26."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "pom.xml", "content": _POM_WITH_SECURITY_MANAGER_FLAG}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["mvn", "-e", "exec:exec"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={
+        "passed": True, "reasoning": "Output contains the expected [SUCCESS] line.",
+    })
+
+    with patch(
+        "kriya.workflow.workflow._resolve_java_home_override",
+        return_value="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
+    ), patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "Maven compilation succeeded."},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "[SUCCESS] it worked"},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Create a Java app using Maven, targeting Java 17; run mvn exec:exec, it should print [SUCCESS]",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    # The mismatch warning itself still fires (java/mvn genuinely disagree on
+    # this machine), but the flag-strip note must NOT - the effective target
+    # under the override is JDK 17, where this flag is required.
+    if res["toolchain_warning"]:
+        assert "java.security.manager" not in res["toolchain_warning"]
+    final_pom = (tmp_path / "pom.xml").read_text()
+    assert "-Djava.security.manager=allow" in final_pom
+
+@pytest.mark.asyncio
 async def test_workflow_recovers_missing_build_manifest_never_requested_by_architect(tmp_path):
     """Workflow-level regression test for the real bug (2026-08-07,
     kriya-protocol-parser-app): even when the Architect's design never
@@ -3873,6 +3939,47 @@ def test_strip_jdk_incompatible_jvm_flags_none_when_flag_absent(tmp_path):
 
 def test_strip_jdk_incompatible_jvm_flags_none_when_no_pom(tmp_path):
     assert _strip_jdk_incompatible_jvm_flags(str(tmp_path)) is None
+
+def test_strip_jdk_incompatible_jvm_flags_uses_override_target_not_mvn_default(tmp_path):
+    """Regression test for a real bug found live (2026-08-07 eval harness,
+    ignite_qpid_person re-run after the JAVA_HOME override fix): with
+    java_home_override set, this function used to call check_java_toolchain()
+    fresh and decide against mvn's UNMODIFIED default JDK (26 here) even
+    though JAVA_HOME was already being forced onto JDK 17 for every Maven
+    subprocess in this same run - two independent 'what JDK is this?'
+    computations that disagreed about the one that actually mattered (the
+    JDK the subprocess will really run under). When java_home_override is
+    passed, the decision must be made against toolchain['java_version'] (the
+    JDK actually in effect), not mvn_java_version (mvn's untouched
+    default)."""
+    (tmp_path / "pom.xml").write_text(_POM_WITH_SECURITY_MANAGER_FLAG)
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        note = _strip_jdk_incompatible_jvm_flags(
+            str(tmp_path),
+            java_home_override="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
+        )
+    # Effective target is JDK 17 (the override), where this flag is
+    # required, not JDK 26 (mvn's untouched default) - must NOT be stripped.
+    assert note is None
+    assert "-Djava.security.manager=allow" in (tmp_path / "pom.xml").read_text()
+
+def test_strip_jdk_incompatible_jvm_flags_still_strips_when_override_target_is_forbidden(tmp_path):
+    """Same override-aware decision, opposite direction: when the overridden
+    target itself is JDK 24+, the flag must still be stripped."""
+    (tmp_path / "pom.xml").write_text(_POM_WITH_SECURITY_MANAGER_FLAG)
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "26",
+        "mvn_found": True, "mvn_java_version": "17",
+        "mismatch": True,
+    }):
+        note = _strip_jdk_incompatible_jvm_flags(str(tmp_path), java_home_override="/some/jdk-26/Home")
+    assert note is not None
+    assert "JDK 26" in note
+    assert "-Djava.security.manager=allow" not in (tmp_path / "pom.xml").read_text()
 
 def test_resolve_jdk_home_for_version_uses_java_home_tool_on_macos():
     """Regression test for a real, live bug (2026-08-07): the ORIGINAL

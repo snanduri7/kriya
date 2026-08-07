@@ -370,3 +370,66 @@ whole class it was aimed at:
   fixes holding), Ignite/Qpid hit the identical JVM Security Manager
   mistake a 4th batch running, circuit breaker correctly stopping it
   every time. Both confirm no regression from this session's changes.
+
+### `python_task_tracker`, `--goal-id`-only re-runs (2026-08-07) - the layout-invention thread finally closes
+
+Two single-goal re-runs, not full batches, tracking one goal through two
+fixes in sequence.
+
+**Run 1 (`20260807-141317`)**: first re-run since the `--fallback-model`
+fix (README's own eval-harness-config section) - this goal had never
+once completed across 5 prior batches, always timing out (1200-3600s).
+This run finished in 166.7s, `quality_gates_exhausted`, 7 attempts. The
+timeout is gone - confirmed, not inferred: `model_hops` shows a clean
+escalation to `deepseek-coder-v2:16b` partway through with no
+multi-minute stalls. But it still failed, and for the exact reason
+flagged as unresolved in the 2026-08-04 batch above: all 7 attempts,
+across BOTH models, wrote to `src/main/python/tasks/...` and hit
+`ModuleNotFoundError: No module named 'tasks'` on every one, every
+fix-analysis misdiagnosing it as a sys.path problem rather than a layout
+problem. Conclusively answers the open question from the earlier entry:
+this is a genuine prompting-ceiling case (`ECOSYSTEM_INVARIANT_HEADER`
+already names this exact anti-pattern verbatim and still lost 7/7), not
+a saliency/prompt-length issue. Fixed deterministically instead of via
+more prompting: `PolymorphicValidator.run_tests()`'s Python sys.path
+fallback now also covers `src/main/python`/`src/main`/`src/test/python`/
+`src/test` when they exist on disk (`kriya/tools/validate.py`).
+
+**Run 2 (`20260807-142704`)**: re-ran immediately after that fix. Compile
+and targeted tests now pass cleanly on **all 7 attempts** (`collected 7
+items ... 7 passed`, every time) - the `ModuleNotFoundError` is
+completely gone, first time this goal has ever gotten past test
+collection. But `run_verification` then failed on every attempt with a
+genuine state-persistence problem:
+```
+add "Task 1"  -> Added task 1: Task 1
+add "Task 2"  -> Added task 1: Task 2   (also id 1 - fresh process)
+done 1        -> Task 1 not found
+list          -> No pending tasks
+```
+Root cause: each `python cli.py <cmd>` in the inferred run-verification
+sequence is a **separate process**. The original goal text asked for an
+"in-memory" `TaskStore` with argparse CLI commands - self-contradictory
+once exercised as separate shell invocations, since a genuinely
+in-memory-only store can never see state an earlier process added,
+regardless of how correct the generated code is. Not a Kriya bug and not
+a model bug - the test suite passed precisely because it correctly
+exercises `TaskStore` within one process, which is all "in-memory" can
+mean. **Fixed by rewording the goal itself** (`goals.py`), not the
+pipeline: now explicit that `TaskStore` persists to a JSON file between
+CLI invocations (matching how a real CLI tool would need to work) while
+staying a plain in-memory structure within any single process/test.
+
+Net effect of this whole thread: two real, evidenced Kriya-pipeline fixes
+(fallback-model timeout, layout-invention sys.path robustness) plus one
+goal-wording fix, landing three fixes deep on a single goal that had
+never once completed before this session.
+
+**Run 3 (`20260807-143555`), re-run with the corrected wording**: clean
+pass, `run_id 97786725`, first attempt, no fallback escalation, 70s total.
+Compile, targeted test, run_verification, and regression test all passed.
+`run_verification`'s own grader reasoning: "The CLI successfully added
+tasks, listed them, marked one as done, and listed them again showing the
+updated status. The task state persisted between invocations as
+demonstrated by the load/save functionality." First clean pass this goal
+has ever had - thread closed.
