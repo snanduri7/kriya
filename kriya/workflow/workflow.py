@@ -297,6 +297,38 @@ def estimate_tokens(text: str) -> int:
     """Estimates the number of tokens in a string using word heuristics (~1.3 tokens per word)."""
     return int(len(text.split()) * 1.3)
 
+# Floor for build_code_context()'s own budget after skills_prompt/learned_rag_context
+# are subtracted below - keeps the allocator functional (still returns SOME matched-file
+# context, just skeletonized more aggressively) rather than collapsing to 0 and silently
+# dropping all graph-RAG context for a retry that's already fighting an undersized window.
+_MIN_GRAPH_CONTEXT_BUDGET = 1000
+
+def _reserve_graph_context_budget(model_context_window: int, *unbounded_texts: str) -> int:
+    """Every retry path computes build_code_context()'s token budget as a flat fraction of
+    the ACTIVE model's context_window (0.75), then separately prepends skills_prompt and
+    learned_rag_context to the result - both unbounded, un-budgeted strings that are
+    IDENTICAL in size regardless of which model is currently active. Confirmed live,
+    2026-08-07 (ignite_qpid_person): 5 active skills' rules+instructions alone measured
+    ~6800 tokens - comfortably absorbed by a large primary model's window, but over half
+    of a 16K-context fallback model's ENTIRE 0.75 budget (12288 tokens) before a single
+    byte of graph-RAG code context was even added. The fallback's own subsequent completion
+    calls then hit real 400 'prompt is longer than context length' errors, and a targeted
+    retry immediately after (same fallback, same unaccounted overhead) produced a truncated,
+    malformed edit - both consistent with the SAME root cause: the model was operating with
+    far less actual headroom than the allocator believed it had.
+
+    Subtracts the estimated size of every unbounded text about to be concatenated onto the
+    SAME prompt (skills_prompt, learned_rag_context) from the flat 0.75 budget BEFORE it's
+    handed to build_code_context() as the graph-RAG budget - so the total prompt this
+    attempt actually sends stays proportioned to what the ACTIVE model can really hold,
+    instead of assuming graph-RAG context is the only occupant. Floored at
+    _MIN_GRAPH_CONTEXT_BUDGET so a very large skills_prompt still leaves build_code_context()
+    something to work with (already-aggressive skeletonization, not a hard zero) rather than
+    silently dropping all matched/related file context for the rest of this attempt."""
+    base_budget = int(model_context_window * 0.75)
+    reserved = sum(estimate_tokens(t) for t in unbounded_texts if t)
+    return max(_MIN_GRAPH_CONTEXT_BUDGET, base_budget - reserved)
+
 def build_code_context(matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int) -> str:
     matched_contents = {}
     for f in matched_files:
@@ -2631,7 +2663,11 @@ class WorkflowEngine:
                     matched_files = matched_files_list
                     related_files = list(related_files_set)
                     
-                    primary_limit = int(self.kernel.config.llm.context_window * 0.75)
+                    # convention_prompt already holds the active skills' rules/instructions/
+                    # examples at this point (built above, before Graph RAG retrieval) - same
+                    # unaccounted-overhead gap _reserve_graph_context_budget's own docstring
+                    # describes for the retry loop, just on the very first attempt instead.
+                    primary_limit = _reserve_graph_context_budget(self.kernel.config.llm.context_window, convention_prompt)
                     graph_rag_context = build_code_context(matched_files, related_files, workspace_path, primary_limit)
         except Exception as ex:
             logger.warning(f"Failed to query Graph RAG: {ex}")
@@ -3167,7 +3203,9 @@ class WorkflowEngine:
                     # Targeted retry: always the primary model, never escalated
                     # (see the budget comment above) - so the context budget is
                     # always the primary model's own window, not a fallback's.
-                    current_limit = int(self.kernel.config.llm.context_window * 0.75)
+                    current_limit = _reserve_graph_context_budget(
+                        self.kernel.config.llm.context_window, skills_prompt, learned_rag_context
+                    )
                     model_override = None
                     base_url_override = None
                     api_key_override = None
@@ -3210,7 +3248,9 @@ class WorkflowEngine:
                     # last_missing_files above) - asks for exactly the file(s) the
                     # completeness check found missing, instead of re-describing an
                     # error or regenerating the whole file set.
-                    current_limit = int(self.kernel.config.llm.context_window * 0.75)
+                    current_limit = _reserve_graph_context_budget(
+                        self.kernel.config.llm.context_window, skills_prompt, learned_rag_context
+                    )
                     model_override = None
                     base_url_override = None
                     api_key_override = None
@@ -3260,7 +3300,9 @@ class WorkflowEngine:
                     )
                 else:
                     # Re-run context budget allocator dynamically for escalated model context window size
-                    current_limit = int(self.kernel.config.llm.context_window * 0.75)
+                    current_limit = _reserve_graph_context_budget(
+                        self.kernel.config.llm.context_window, skills_prompt, learned_rag_context
+                    )
                     model_override = None
                     base_url_override = None
                     api_key_override = None
@@ -3271,7 +3313,9 @@ class WorkflowEngine:
                         model_override = fallback.model
                         base_url_override = fallback.base_url
                         api_key_override = fallback.api_key
-                        current_limit = int(fallback.context_window * 0.75)
+                        current_limit = _reserve_graph_context_budget(
+                            fallback.context_window, skills_prompt, learned_rag_context
+                        )
                         logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} tokens)")
 
                     current_graph_context = build_code_context(matched_files, related_files, workspace_path, current_limit)

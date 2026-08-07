@@ -150,21 +150,34 @@ ignite-config.xml:
 
 App.java:
 import org.apache.ignite.Ignite;
-import org.springframework.context.ApplicationContext;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
 public class App {
     public static void main(String[] args) {
-        ApplicationContext context = new ClassPathXmlApplicationContext("ignite-config.xml");
-        
-        // Retrieve the initialized Ignite bean from the context BY ITS BEAN
-        // ID, not by type - context.getBean(Ignite.class) throws
-        // NoSuchBeanDefinitionException, since the bean is only registered
-        // under the id "igniteNode" given to it above, not the Ignite type.
-        Ignite ignite = (Ignite) context.getBean("igniteNode");
-        
-        // Do NOT also call Ignition.start(...) here - see Method A above.
-        // Write/read cache...
+        // Declare as ConfigurableApplicationContext (or ClassPathXmlApplicationContext
+        // directly), NEVER the bare ApplicationContext interface - ApplicationContext has
+        // no close() method and does not extend Closeable/AutoCloseable, so
+        // `try (ApplicationContext context = ...)` fails to compile. Wrapping the whole
+        // body in try-with-resources here is what actually stops the Ignite node when
+        // main() finishes - closing the context triggers Spring's own bean-destruction
+        // lifecycle, which stops the IgniteSpringBean-managed node as part of it. Without
+        // this, the app can print every expected output and still hang forever afterward,
+        // because nothing ever asked Ignite's background threads to stop - see the
+        // resource-lifecycle rule in rules.txt.
+        try (ConfigurableApplicationContext context = new ClassPathXmlApplicationContext("ignite-config.xml")) {
+            // Retrieve the initialized Ignite bean from the context BY ITS BEAN
+            // ID, not by type - context.getBean(Ignite.class) throws
+            // NoSuchBeanDefinitionException, since the bean is only registered
+            // under the id "igniteNode" given to it above, not the Ignite type.
+            Ignite ignite = (Ignite) context.getBean("igniteNode");
+
+            // Do NOT also call Ignition.start(...) here - see Method A above.
+            // Write/read cache...
+        }
+        // context.close() already happened here (implicit via try-with-resources) -
+        // do NOT also call ignite.close() separately; closing the context is the
+        // correct and sufficient way to stop a Spring-managed IgniteSpringBean.
     }
 }
 

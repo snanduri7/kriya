@@ -40,6 +40,7 @@ from kriya.workflow.workflow import (
     _java_toolchain_fact,
     _likely_misattributed_sibling,
     _normalize_error_for_repeat_detection,
+    _reserve_graph_context_budget,
     _resolve_file_paths_from_design,
     _resolve_java_home_override,
     _resolve_jdk_home_for_version,
@@ -47,6 +48,7 @@ from kriya.workflow.workflow import (
     _scoped_skill_gap_description,
     _strip_jdk_incompatible_jvm_flags,
     classify_environment_failure,
+    estimate_tokens,
     extract_error_search_terms,
     extract_error_source_locations,
     extract_expected_files,
@@ -5195,6 +5197,55 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
     assert unaddressed[0]["likely_files"] == ["App.java"]
     assert unaddressed[0]["file_locations"] == [{"filepath": "App.java", "line": 2, "col": None}]
     assert unaddressed[0]["success"] is False
+
+
+def test_reserve_graph_context_budget_subtracts_unbounded_text_size():
+    """Regression test for a real live failure, 2026-08-07 (ignite_qpid_person):
+    every retry path computed build_code_context()'s budget as a flat fraction
+    of the ACTIVE model's context_window, with zero accounting for
+    skills_prompt/learned_rag_context - both unbounded strings prepended to
+    the SAME prompt afterward. A real run's 5 active skills measured ~6800
+    tokens of rules/instructions alone - comfortably absorbed by a large
+    primary model's window, but over half of a 16K-context fallback model's
+    entire 0.75 budget (12288 tokens) before any code context was even added,
+    causing real 400 'prompt is longer than context length' errors."""
+    skills_text = "word " * 5000  # ~6500 estimated tokens
+    budget = _reserve_graph_context_budget(16384, skills_text, "")
+    expected = int(16384 * 0.75) - estimate_tokens(skills_text)
+    assert budget == expected
+    assert budget < int(16384 * 0.75)  # strictly less than the old flat budget
+
+
+def test_reserve_graph_context_budget_accounts_for_multiple_unbounded_texts():
+    skills_text = "word " * 1000
+    learned_rag_text = "word " * 500
+    budget = _reserve_graph_context_budget(16384, skills_text, learned_rag_text)
+    expected = int(16384 * 0.75) - estimate_tokens(skills_text) - estimate_tokens(learned_rag_text)
+    assert budget == expected
+
+
+def test_reserve_graph_context_budget_ignores_falsy_texts():
+    # None/"" entries must not crash or contribute - the common case (no
+    # learned_rag_context this run) shouldn't require callers to filter first.
+    budget = _reserve_graph_context_budget(16384, "some skills text", "", None)
+    assert budget == int(16384 * 0.75) - estimate_tokens("some skills text")
+
+
+def test_reserve_graph_context_budget_floors_instead_of_going_negative():
+    # A pathologically large skills_prompt must still leave build_code_context()
+    # something to work with, not collapse to 0 or a negative budget.
+    huge_text = "word " * 50000
+    assert _reserve_graph_context_budget(16384, huge_text, "") == 1000
+
+
+def test_reserve_graph_context_budget_barely_affects_a_large_primary_window():
+    # A primary model with a much larger context window should still have
+    # plenty of budget left after the same skills_prompt overhead - this
+    # fix should not meaningfully change behavior for the common, unaffected
+    # case, only the fallback-model-with-a-small-window case it targets.
+    skills_text = "word " * 5000
+    budget = _reserve_graph_context_budget(32768, skills_text, "")
+    assert budget > int(32768 * 0.75) * 0.5
 
 
 def test_incomplete_generation_error_carries_missing_files():
