@@ -76,6 +76,19 @@ output afterward.
 `traces.db`, `summary.txt`) is scratch, regenerated on every invocation -
 already covered by a `.gitignore` entry.
 
+## A real bug this file's own runs used to trigger (fixed)
+
+`runs/` is gitignored but NOT excluded from a bare `pytest`'s filesystem
+walk - every batch leaves real generated code (`test_store.py`, etc.) sitting
+under `spikes/eval_harness/runs/<batch>/workspaces/<goal>/...`, and pytest's
+default `test_*.py` discovery doesn't care that a file lives outside `tests/`.
+Confirmed live, 2026-08-07: running the suite after a `python_task_tracker`
+batch failed collection entirely (`ModuleNotFoundError`, since the landed
+file imports relative to ITS OWN project layout) before a single real Kriya
+test ran. Fixed at the root in `pyproject.toml` (`testpaths = ["tests"]`)
+rather than adding an ignore rule here that the next spike/harness output
+directory would just need again.
+
 ## Known, deliberate limitations (not bugs)
 
 - **`human_rejected` can never appear in harness data.** `-y` auto-approves

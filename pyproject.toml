@@ -37,6 +37,21 @@ include = ["kriya*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
+# Without this, a bare `pytest` from the repo root recursively discovers
+# test_*.py ANYWHERE under the tree - including spikes/eval_harness/runs/,
+# which fills up with real generated code (test_store.py, etc.) every time
+# someone runs the eval harness locally. That directory is gitignored (never
+# reaches CI), but not excluded from pytest's own filesystem walk, so a local
+# `pytest` after any eval-harness batch tries to collect and import whatever
+# a live model happened to generate - confirmed live, 2026-08-07: a landed
+# python_task_tracker workspace's own test_store.py failed collection with
+# ModuleNotFoundError (it imports relative to ITS OWN project layout, not
+# Kriya's), aborting the whole run with "Interrupted: 1 error during
+# collection" before any real Kriya test even got a chance to run. Scoping
+# collection to tests/ (where Kriya's own suite actually lives, per this
+# repo's CLAUDE.md) fixes this at the root instead of chasing every future
+# spike/harness output directory with its own ignore rule.
+testpaths = ["tests"]
 markers = [
     "live_model: requires a real local LLM/embedding endpoint - excluded by default (see tests/test_live_smoke.py), run explicitly with `pytest -m live_model`",
 ]
