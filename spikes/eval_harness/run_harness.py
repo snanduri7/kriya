@@ -87,7 +87,6 @@ def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url,
         "paths": {"skills": "./skills", "memory": "./memory", "logs": shared_logs_dir},
     }
     (workspace_path / "kriya.yaml").write_text(yaml.dump(config))
-    (workspace_path / "skills").mkdir(exist_ok=True)
 
 
 def _kriya_executable():

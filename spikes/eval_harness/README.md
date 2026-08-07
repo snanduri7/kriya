@@ -115,6 +115,21 @@ test ran. Fixed at the root in `pyproject.toml` (`testpaths = ["tests"]`)
 rather than adding an ignore rule here that the next spike/harness output
 directory would just need again.
 
+A second one, found the same day: `_write_config()` used to unconditionally
+`mkdir` an empty `skills/` directory in every goal's workspace before
+generation ever started - dead scaffolding nothing in Kriya's own pipeline
+actually needs (`SkillEngine.discover_and_load()` gracefully skips a missing
+`paths.skills` directory, and every write path under it creates it on demand
+via `os.makedirs(..., exist_ok=True)`). That empty directory was directly
+responsible for a real hallucination: `RepositoryAnalyzer` reported it as a
+`top_level_folder` purely by existing, and `django_healthcheck_gap`'s
+Architect concluded a Django app (and a `manage.py`) already existed there
+when neither did (see `docs/design.md` sec 2.4 for the fuller root-cause
+writeup and the corresponding `RepositoryAnalyzer` fix). Removed the
+unnecessary pre-creation here too - a genuinely fresh `kriya generate` run
+outside this harness would never have hit this specific case in the first
+place, since the directory wouldn't have existed at all.
+
 ## Known, deliberate limitations (not bugs)
 
 - **`human_rejected` can never appear in harness data.** `-y` auto-approves
