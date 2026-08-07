@@ -2148,6 +2148,7 @@ class WorkflowEngine:
         web_lookup_query_callback: Optional[Callable[[List[str], str], Any]] = None,
         resume: bool = False,
         resume_id: Optional[str] = None,
+        trace_id_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -2163,6 +2164,27 @@ class WorkflowEngine:
         stage, design-stage, and the retry loop's repeated-failure lookup alike)
         BEFORE it fires - see _approve_web_lookup(). Separate from web_lookup_callback,
         which only gates whether already-fetched results get used.
+
+        trace_id_override: reuse a specific traces.db run_id instead of generating a
+        fresh one. Exists for kriya/cli.py's generate command specifically: a
+        knowledge_gap gate makes THIS method return early (writing its own trace row)
+        and then, if the CLI auto-confirms/re-invokes with knowledge_risk_confirmed=True,
+        call it again from scratch - two logically-connected calls with no shared state
+        otherwise. Confirmed live, 2026-08-07: an eval-harness batch's own
+        --timeout-per-goal killed the SECOND call (a genuine ~20-minute run) before it
+        ever reached its own trace_logger.log_run(), leaving only the harmless first
+        row (status=knowledge_gap, <1s) behind - traces.db/report.py had no way to tell
+        that apart from a run that genuinely stopped at the gate. Passing the first
+        call's own returned run_id back in as trace_id_override on the retry means the
+        SAME primary key gets used for both calls' trace rows - runs.run_id is the
+        table's PRIMARY KEY and log_run() already does `INSERT OR REPLACE`, so the
+        second call's own eventual final status cleanly supersedes the first row
+        instead of leaving two independent rows behind. If the second call is itself
+        killed before writing, the original (now genuinely accurate, since the run
+        really did make it that far before being killed externally) row is simply what
+        remains - never worse than today's behavior, and correct whenever the retried
+        call actually finishes. None (the default) preserves today's exact behavior for
+        every other caller - a fresh run_id every time.
         """
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
@@ -2210,7 +2232,7 @@ class WorkflowEngine:
         # completed-loop path.
         import time
         import uuid
-        trace_id = str(uuid.uuid4())[:8]
+        trace_id = trace_id_override or str(uuid.uuid4())[:8]
         start_time = time.time()
 
         # 0. KnowledgeGuard Stage 0 Check

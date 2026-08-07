@@ -1203,6 +1203,70 @@ async def test_workflow_traces_knowledge_gap(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_retry_after_knowledge_gap_supersedes_the_transient_trace_row(tmp_path):
+    """Regression test for a real live finding, 2026-08-07: kriya/cli.py's generate
+    command calls run_generation_workflow() TWICE when a knowledge gap is
+    auto-confirmed - once that hits the gap and returns immediately (writing the
+    trace row asserted on above), then again with knowledge_risk_confirmed=True once
+    the CLI decides to proceed. An eval-harness batch's own --timeout-per-goal killed
+    that SECOND call (a genuine ~20-minute real run) before it ever wrote its own
+    trace row, leaving only the harmless first row (status=knowledge_gap, <1s)
+    behind - misleading, since the run's real outcome was never actually captured.
+
+    trace_id_override lets the retry reuse the first call's own run_id - traces.db's
+    run_id is the table's PRIMARY KEY and log_run() already does INSERT OR REPLACE,
+    so passing it through (exactly as kriya/cli.py now does) means the retry's own
+    eventual real outcome cleanly supersedes the transient knowledge_gap row instead
+    of leaving two independent rows behind, with zero change to any other caller
+    (trace_id_override defaults to None, preserving today's fresh-uuid-every-time
+    behavior - confirmed by the unchanged test right above this one)."""
+    from kriya.tools.knowledge import GapReport
+
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    gap_report = GapReport()
+    gap_report.add_gap("somelib", "9.9.9", None, "high", "released after training cutoff")
+
+    # Both calls patched under the SAME mock (a real generate -y run's second call
+    # also re-runs KnowledgeGuard.check_goal() unconditionally - only
+    # knowledge_risk_confirmed=True short-circuits the resulting gate, not the
+    # check itself) - avoids the second call falling through to the REAL,
+    # network-dependent check_goal() for a goal string ("somelib 9.9.9") that
+    # would plausibly also read as a real gap.
+    with patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=gap_report):
+        first_res = await we.run_generation_workflow(goal="Use somelib 9.9.9", workspace_path=str(tmp_path))
+        assert first_res["status"] == "knowledge_gap"
+        first_run_id = first_res["run_id"]
+
+        llm.complete = AsyncMock(side_effect=[
+            "Step 1: Write code",
+            "Design: Write app.py",
+            '[{"filepath": "app.py", "content": "print(1)"}]',
+            "Review: Approved",
+        ])
+        second_res = await we.run_generation_workflow(
+            goal="Use somelib 9.9.9", workspace_path=str(tmp_path),
+            knowledge_risk_confirmed=True, trace_id_override=first_run_id,
+        )
+    assert second_res["quality_gates_passed"] is True
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM runs").fetchall()
+    conn.close()
+
+    assert len(rows) == 1, [dict(r) for r in rows]  # NOT two independent rows
+    assert rows[0]["run_id"] == first_run_id
+    assert rows[0]["status"] == "success"  # the retry's real outcome, not "knowledge_gap"
+
+
+@pytest.mark.asyncio
 async def test_workflow_traces_human_rejected(tmp_path):
     """The human-rejected-approval early return also used to skip trace logging
     entirely - same gap as the knowledge-gap path, closed the same way."""

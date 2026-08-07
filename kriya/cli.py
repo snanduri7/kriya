@@ -1113,7 +1113,12 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     web_lookup_query_callback=on_web_lookup_query,
                     knowledge_risk_confirmed=True,
                     resume=resume,
-                    resume_id=resume_id
+                    resume_id=resume_id,
+                    # Reuse the just-returned run_id so this retry's own eventual
+                    # trace row supersedes (via traces.db's INSERT OR REPLACE on
+                    # run_id, its primary key) the transient knowledge_gap row just
+                    # written above, instead of leaving two independent rows behind.
+                    trace_id_override=res.get("run_id"),
                 )
             elif knowledge_policy == 'strict':
                 click.secho("\n[KRIYA BLOCKED] Knowledge gap detected in strict mode:", bold=True, fg="red")
@@ -1153,7 +1158,12 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         web_lookup_query_callback=on_web_lookup_query,
                         knowledge_risk_confirmed=True,
                         resume=resume,
-                        resume_id=resume_id
+                        resume_id=resume_id,
+                        # Same reasoning as the permissive/acked retry above - reuse
+                        # the just-returned run_id so this retry's own trace row
+                        # supersedes the transient knowledge_gap one instead of
+                        # leaving two independent rows behind.
+                        trace_id_override=res.get("run_id"),
                     )
                 else:
                     if click.confirm("Would you like Kriya to scaffold skill templates for these libraries?"):
