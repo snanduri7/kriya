@@ -487,3 +487,23 @@ tasks, listed them, marked one as done, and listed them again showing the
 updated status. The task state persisted between invocations as
 demonstrated by the load/save functionality." First clean pass this goal
 has ever had - thread closed.
+
+### `ruby_word_count` regression (2026-08-07) - same goal-wording bug class
+
+Had passed reliably every batch since 2026-08-04 (three straight Ruby-
+toolchain fixes holding). Failed for the first time this session
+(`20260807-183715`, `quality_gates_exhausted`, 6 attempts) - confirmed
+unrelated to anything shipped that day. Root cause, read directly from the
+model's own first attempt: the goal asked for "a Gemfile (no external gems
+needed)" while ALSO requiring RSpec tests - self-contradictory, since rspec
+is itself an external gem. The model took the instruction literally
+(`# Empty file - no external gems needed`), then flailed through several
+increasingly confused fix attempts across 6 tries - including pinning
+`gem 'bundler', '~> 2.0'` in its own Gemfile at one point, which then
+collided with this machine's older system bundler (`1.17.2`) - without ever
+reaching the actual fix. All of it downstream of the same original
+contradiction, the same shape as `python_task_tracker`'s "in-memory" vs.
+CLI-persistence bug above. Fixed by rewording the goal, not the pipeline:
+"no external gems" now explicitly scopes to the library implementation
+only, and the Gemfile is explicitly told to declare `rspec` for the test
+suite. Not yet re-validated live.

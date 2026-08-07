@@ -64,17 +64,31 @@ GOALS: List[Goal] = [
     Goal(
         id="ruby_word_count",
         text=(
-            "Create a Ruby project with a Gemfile (no external gems needed) "
-            "and a lib/word_count.rb defining WordCount.count(text) that "
+            "Create a Ruby project with a lib/word_count.rb (pure Ruby "
+            "standard library, no external gems needed for the "
+            "implementation itself) defining WordCount.count(text) that "
             "returns a Hash of word => occurrence count (case-insensitive, "
             "punctuation stripped), plus a spec/word_count_spec.rb with "
             "RSpec tests covering an empty string, repeated words, and mixed "
-            "case."
+            "case, and a Gemfile that declares rspec as a dependency so the "
+            "test suite can actually run."
         ),
         hypothesis=(
             "Zero coverage today outside unit tests - PolymorphicValidator "
             "supports Ruby (Gemfile/Rakefile/spec markers) but no live batch "
-            "run has ever exercised that compile/test path end to end."
+            "run has ever exercised that compile/test path end to end. "
+            "Wording fixed 2026-08-07: the original text asked for a "
+            "Gemfile with 'no external gems needed' while ALSO requiring "
+            "RSpec tests - self-contradictory, since rspec is itself an "
+            "external gem. Confirmed live: the model took the instruction "
+            "literally, wrote an empty Gemfile, then flailed through "
+            "several increasingly confused fix attempts (including pinning "
+            "gem 'bundler', '~> 2.0' in its own Gemfile, which then "
+            "collided with this machine's older system bundler) without "
+            "ever reaching the actual fix - all downstream symptoms of the "
+            "same original contradiction. Now explicit that 'no external "
+            "gems' scopes to the library implementation only, and the "
+            "Gemfile must declare rspec for the test suite."
         ),
     ),
     Goal(
