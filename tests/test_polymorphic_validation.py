@@ -213,6 +213,85 @@ def test_run_app_sequence_no_commands():
     res = validator.run_app_sequence([])
     assert res["success"] is False
 
+def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path):
+    """Regression test for a real bug found live (2026-08-07,
+    django_healthcheck_gap): run_tests() got an isolated, dependency-
+    installed venv, but run_app_sequence() (Runtime Verification) still ran
+    via sys.executable directly - a goal needing a real third-party package
+    hit the identical ModuleNotFoundError one gate later, after the goal
+    finally got far enough to reach Runtime Verification at all. Both gates
+    must resolve to the SAME interpreter."""
+    (tmp_path / "requirements.txt").write_text("django==5.2\n")
+    (tmp_path / "manage.py").write_text("print('would run django here')\n")
+    venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "python"
+
+    with patch("subprocess.Popen") as mock_popen:
+        install_process = MagicMock()
+        install_process.returncode = 0
+        install_process.communicate.return_value = ("Successfully installed django", "")
+
+        run_process = MagicMock()
+        run_process.returncode = 0
+        run_process.communicate.return_value = ("ok", "")
+
+        mock_popen.side_effect = [install_process, run_process]
+        res = validator.run_app_sequence([["python", "manage.py", "runserver", "--help"]])
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 2
+    run_cmd = mock_popen.call_args_list[1].args[0]
+    assert run_cmd[0] == str(venv_python)
+    assert run_cmd[0] != sys.executable
+    assert run_cmd[1:] == ["manage.py", "runserver", "--help"]
+
+def test_run_app_sequence_reports_pip_install_failure_without_running_commands(tmp_path):
+    (tmp_path / "requirements.txt").write_text("this-package-does-not-exist==999.0\n")
+    (tmp_path / "manage.py").write_text("pass\n")
+    venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        install_process = MagicMock()
+        install_process.returncode = 1
+        install_process.communicate.return_value = ("", "ERROR: No matching distribution found")
+        mock_popen.return_value = install_process
+
+        res = validator.run_app_sequence([["python", "manage.py", "runserver"]])
+
+    assert res["success"] is False
+    assert "pip install" in res["output"]
+    # Only the failed install call should have been made - the run command
+    # must never execute against a dependency environment known to be broken.
+    assert mock_popen.call_count == 1
+
+def test_run_app_sequence_without_requirements_txt_uses_sys_executable(tmp_path):
+    # No requirements.txt (e.g. a stdlib-only Python goal) - must behave
+    # exactly as before this fix, sys.executable, no venv machinery invoked.
+    (tmp_path / "app.py").write_text("print('ok')\n")
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("ok", "")
+        mock_popen.return_value = process
+
+        res = validator.run_app_sequence([["python", "app.py"]])
+
+    assert res["success"] is True, res["output"]
+    assert mock_popen.call_count == 1
+    run_cmd = mock_popen.call_args_list[0].args[0]
+    assert run_cmd[0] == sys.executable
+
 def test_python_run_tests_resolves_src_layout_imports(tmp_path):
     # Reproduces a real generation failure: a src/ layout project where the
     # generated test imports the module either bare ("from calculator import x",

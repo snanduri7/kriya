@@ -176,6 +176,38 @@ class PolymorphicValidator:
             )
         return venv_python, None
 
+    def _resolve_python_interpreter(self) -> Tuple[str, Optional[str]]:
+        """Resolves which Python interpreter Python subprocesses for this
+        workspace should use - shared by run_tests() and run_app_sequence()/
+        run_app() so a goal needing a real third-party package (e.g. Django)
+        gets the SAME isolated, dependency-installed interpreter for both its
+        test gate and its Runtime Verification gate, not just the test gate.
+        Confirmed live, 2026-08-07 (django_healthcheck_gap, after the
+        RepositoryAnalyzer manage.py-hallucination fix let this goal reach
+        Runtime Verification for the first time): the isolated venv from
+        run_tests()'s own fix was never reused here - run_verification still
+        ran via sys.executable directly, hitting the identical
+        'No module named django' failure one gate later.
+
+        Returns (interpreter_path, install_error). interpreter_path is
+        sys.executable when there's no requirements.txt, or when venv
+        CREATION itself failed (an infrastructure problem, not something a
+        retry can fix - degrades silently, same reasoning as
+        _ensure_project_venv()'s own docstring). install_error is set ONLY
+        when `pip install` of THIS project's own requirements.txt genuinely
+        failed (a real, potentially code-fixable dependency problem, e.g. a
+        bad package pin) - the caller should treat that as a hard failure
+        rather than silently proceeding with an interpreter missing the
+        dependencies the goal actually needs."""
+        requirements_path = os.path.join(self.workspace_path, "requirements.txt")
+        if os.path.exists(requirements_path) and _has_real_requirements(requirements_path):
+            venv_python, install_error = self._ensure_project_venv(requirements_path)
+            if install_error:
+                return sys.executable, install_error
+            if venv_python:
+                return venv_python, None
+        return sys.executable, None
+
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
         for anything else (JS/TS, Go, Rust, C#, ...). Python used to be the blind
@@ -474,14 +506,9 @@ class PolymorphicValidator:
                 # (django_healthcheck_gap): every attempt failed identically with
                 # ModuleNotFoundError: No module named 'django', regardless of the
                 # generated code's correctness - a structurally unwinnable gate.
-                python_interpreter = sys.executable
-                requirements_path = os.path.join(self.workspace_path, "requirements.txt")
-                if os.path.exists(requirements_path) and _has_real_requirements(requirements_path):
-                    venv_python, install_error = self._ensure_project_venv(requirements_path)
-                    if install_error:
-                        return {"success": False, "output": install_error}
-                    if venv_python:
-                        python_interpreter = venv_python
+                python_interpreter, install_error = self._resolve_python_interpreter()
+                if install_error:
+                    return {"success": False, "output": install_error}
 
                 cmd = [
                     python_interpreter,
@@ -589,6 +616,43 @@ class PolymorphicValidator:
 
         return {"success": True, "output": "Stack test execution skipped."}
 
+    def _substitute_python_interpreter(
+        self, commands: List[List[str]]
+    ) -> Tuple[Optional[List[List[str]]], Optional[str]]:
+        """Rewrites any command's executable (index 0) from a bare "python" or
+        Kriya's own sys.executable to the isolated project-local venv's
+        interpreter (_resolve_python_interpreter()) when this workspace is
+        Python and needs one - shared by run_app()/run_app_sequence() so
+        Runtime Verification gets the SAME isolated, dependency-installed
+        interpreter run_tests() already resolves for the test gate, instead
+        of diverging and hitting the identical missing-dependency failure one
+        gate later. Confirmed live, 2026-08-07 (django_healthcheck_gap, after
+        the RepositoryAnalyzer manage.py-hallucination fix let this goal
+        reach Runtime Verification for the first time): it did exactly that -
+        'No module named django' via sys.executable, despite run_tests()'s
+        own isolated venv already existing for this same workspace.
+
+        A no-op (commands unchanged) for every non-Python stack, and for a
+        Python workspace with no real requirements.txt.
+
+        Returns (commands, None) on success, or (None, error_message) if
+        resolving the interpreter itself hit a real pip install failure -
+        treated as a hard failure here too (matching run_tests()'s own
+        handling), since every command in the sequence would fail
+        identically against a confusing 'module not found' symptom
+        otherwise, rather than the real, potentially code-fixable
+        dependency problem underneath it."""
+        if self.stack != "python":
+            return commands, None
+        interpreter, install_error = self._resolve_python_interpreter()
+        if install_error:
+            return None, install_error
+        rewritten = [
+            ([interpreter] + cmd[1:]) if cmd and cmd[0] in ("python", sys.executable) else cmd
+            for cmd in commands
+        ]
+        return rewritten, None
+
     def run_app(self, command: List[str], timeout: int = 90) -> Dict[str, Any]:
         """Executes an already-resolved run command for a self-terminating/batch entrypoint
         (not a long-running server) inside the sandboxed workspace, and returns the raw
@@ -598,6 +662,10 @@ class PolymorphicValidator:
         against the goal."""
         if not command:
             return {"success": False, "timed_out": False, "returncode": None, "output": "No run command provided."}
+        commands, install_error = self._substitute_python_interpreter([command])
+        if install_error:
+            return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
+        command = commands[0]
         try:
             res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
         except Exception as e:
@@ -628,6 +696,10 @@ class PolymorphicValidator:
         its own timeout budget, not a shared one."""
         if not commands:
             return {"success": False, "timed_out": False, "returncode": None, "output": "No run commands provided."}
+
+        commands, install_error = self._substitute_python_interpreter(commands)
+        if install_error:
+            return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
 
         output_parts = []
         overall_success = True
