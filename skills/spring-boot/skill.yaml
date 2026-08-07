@@ -3,4 +3,7 @@ description: Custom template skill for Spring Boot.
 name: Spring Boot
 tags:
 - spring-boot
-verification_gap_acknowledged: true
+verification_gap_acknowledged: false
+verified: true
+verified_at: '2026-08-07'
+verified_context: version unspecified
