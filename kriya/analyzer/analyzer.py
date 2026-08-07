@@ -303,16 +303,37 @@ class RepositoryAnalyzer:
         directories = set()
 
         ignore_dirs = {
-            ".git", ".venv", "venv", "node_modules", "__pycache__", 
-            ".pytest_cache", "build", "dist", ".egg-info", "eggs", "bin", "obj"
+            ".git", ".venv", "venv", "node_modules", "__pycache__",
+            ".pytest_cache", "build", "dist", ".egg-info", "eggs", "bin", "obj",
+            # Kriya's own reserved paths.* directories (default names - a
+            # differently-configured project's own paths.skills/memory/logs
+            # would need this list threaded through from AppConfig to match,
+            # same known limitation as _has_any_py_file()'s hardcoded
+            # .kriya exclusion elsewhere in this codebase). These are
+            # Kriya's own bookkeeping, never the user's application
+            # structure, and must never be presented to the model as if
+            # they were - confirmed live, 2026-08-07: an Architect prompt
+            # reported an empty "skills" directory as an existing top-level
+            # project folder, and the model concluded a Django app already
+            # existed there (plus a manage.py it never actually saw), then
+            # tried to extend a project that was never created instead of
+            # building one from scratch.
+            "skills", "memory", "logs",
         }
 
         for root, dirs, files in os.walk(self.root_path):
             # Modify dirs in-place to skip ignored directories
             dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
-            
+
             rel_path = os.path.relpath(root, self.root_path)
-            if rel_path != ".":
+            # Only report a top-level folder as real project structure if it
+            # actually contains at least one real (non-dotfile) file - an
+            # empty directory being WALKED INTO used to be enough to report
+            # it as an existing "top_level_folder" regardless of whether
+            # anything was ever in it, which is exactly the false signal
+            # that caused the skills/manage.py hallucination above.
+            real_files_here = [f for f in files if not f.startswith(".")]
+            if rel_path != "." and real_files_here:
                 directories.add(rel_path.split(os.sep)[0])
 
             for file in files:

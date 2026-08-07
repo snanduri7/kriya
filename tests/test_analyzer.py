@@ -57,6 +57,48 @@ def test_analyzer_node_project(tmp_path):
     assert "jest" in model.testing_frameworks
     assert "MVC (Model-View-Controller)" in model.architecture
 
+def test_analyzer_ignores_empty_top_level_directories(tmp_path):
+    """Regression test for a real bug found live (2026-08-07,
+    django_healthcheck_gap): an EMPTY directory used to be reported as a
+    "top_level_folder" purely by being walked into, with no check for
+    whether it actually contained anything. Architect's own reasoning
+    (visible in the log) explicitly cited "there's a skills directory" as
+    evidence a Django app already existed in a fresh, otherwise-empty repo -
+    it didn't, the directory was completely empty, and the model went on to
+    also assume manage.py existed and tried extending a project that was
+    never created. An empty directory must never be reported as meaningful
+    project structure."""
+    project_dir = tmp_path / "fresh_project"
+    project_dir.mkdir()
+    (project_dir / "README.md").write_text("placeholder\n")
+    (project_dir / "empty_folder").mkdir()
+
+    model = RepositoryAnalyzer(str(project_dir)).analyze()
+
+    assert model.project_structure["top_level_folders"] == []
+
+def test_analyzer_excludes_kriyas_own_reserved_directories(tmp_path):
+    """Kriya's own paths.skills/memory/logs directories (default names) must
+    never be presented to the model as if they were the user's application
+    structure, even when they genuinely contain real content (e.g. skill
+    rule files after a first successful run) - they're Kriya's own
+    bookkeeping, not part of the project being generated. Directly
+    motivated by the same live bug as the empty-directory case above: the
+    model concluded a "skills" Django app already existed there."""
+    project_dir = tmp_path / "fresh_project"
+    project_dir.mkdir()
+    (project_dir / "README.md").write_text("placeholder\n")
+    for reserved in ("skills", "memory", "logs"):
+        reserved_dir = project_dir / reserved
+        reserved_dir.mkdir()
+        (reserved_dir / "some_real_file.txt").write_text("real content\n")
+    (project_dir / "myapp").mkdir()
+    (project_dir / "myapp" / "views.py").write_text("# real application code\n")
+
+    model = RepositoryAnalyzer(str(project_dir)).analyze()
+
+    assert model.project_structure["top_level_folders"] == ["myapp"]
+
 def test_chunk_file_syntactically():
     from kriya.analyzer.analyzer import chunk_file_syntactically
     
