@@ -51,6 +51,7 @@ from kriya.workflow.workflow import (
     extract_error_source_locations,
     extract_expected_files,
     extract_implicated_files,
+    find_edits_ignoring_reported_line,
     find_missing_expected_files,
     normalize_written_filepath,
 )
@@ -5065,6 +5066,135 @@ async def test_workflow_anchored_edit_failure_captures_filepath(tmp_path):
     assert anchor_failures[0]["attempted_edits"] == [
         {"search": "this text does not appear anywhere in App.java", "replace": "class App {}"}
     ]
+
+
+def test_find_edits_ignoring_reported_line_flags_a_real_non_fix():
+    """Regression test for a real live failure, 2026-08-07 (ignite_qpid_person):
+    a targeted retry's own SEARCH block spanned the exact line the compiler
+    reported, but its REPLACE text at that same relative position was
+    byte-identical - a method call got renamed nearby, but the actual
+    reported line (`Person person = cache.get(1);`, missing a cast) was never
+    touched. The edit applied cleanly (no anchor-match failure - Kriya's own
+    plumbing worked fine), so the identical compile error simply recurred on
+    the next attempt."""
+    orig = (
+        "public class PersonApp {\n"
+        "    private static void readFromIgniteCacheAndPrint() throws Exception {\n"
+        "        try (Ignite ignite = Ignition.start(\"ignite-config.xml\")) {\n"
+        "            var cache = ignite.cache(CACHE_NAME);\n"
+        "            Person person = cache.get(1);\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    edit = {
+        "search": (
+            "            var cache = ignite.cache(CACHE_NAME);\n"
+            "            Person person = cache.get(1);"
+        ),
+        "replace": (
+            "            var cache = ignite.getOrCreateCache(CACHE_NAME);\n"
+            "            Person person = cache.get(1);"
+        ),
+    }
+    error_context = (
+        "PersonApp.java:[5,38] incompatible types: java.lang.Object cannot be converted to com.example.Person"
+    )
+    ignored = find_edits_ignoring_reported_line(orig, [edit], "PersonApp.java", error_context)
+    assert ignored == [5]
+
+
+def test_find_edits_ignoring_reported_line_does_not_flag_a_valid_alternative_fix():
+    # A legitimate fix that corrects the DECLARATION instead of the usage
+    # site (explicit generics on `cache`, leaving `cache.get(1)` needing no
+    # change at all) must NOT be flagged - the search block here doesn't even
+    # span the reported line, so Layer 1 has no basis to second-guess it.
+    orig = (
+        "public class PersonApp {\n"
+        "    var cache = ignite.cache(CACHE_NAME);\n"
+        "    Person person = cache.get(1);\n"
+        "}\n"
+    )
+    edit = {
+        "search": "    var cache = ignite.cache(CACHE_NAME);",
+        "replace": "    IgniteCache<Integer, Person> cache = ignite.getOrCreateCache(CACHE_NAME);",
+    }
+    error_context = (
+        "PersonApp.java:[3,20] incompatible types: java.lang.Object cannot be converted to com.example.Person"
+    )
+    ignored = find_edits_ignoring_reported_line(orig, [edit], "PersonApp.java", error_context)
+    assert ignored == []
+
+
+def test_find_edits_ignoring_reported_line_empty_without_a_locatable_error():
+    ignored = find_edits_ignoring_reported_line(
+        "class App {}", [{"search": "class App {}", "replace": "class App {}"}],
+        "App.java", "some error with no file:[line,col] locator at all",
+    )
+    assert ignored == []
+
+
+@pytest.mark.asyncio
+async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_path):
+    """End-to-end regression test for the same real live failure
+    (ignite_qpid_person, 2026-08-07): Layer 1 must reject an edit whose search
+    block spans a previously-reported compile-error line but leaves that line
+    unchanged in its replace text - BEFORE the (expensive) compile check ever
+    runs again, not after. Confirmed here by asserting PolymorphicValidator's
+    compile check is called exactly twice (attempt 1's real failure, and the
+    eventual real fix's success) - never for the rejected middle attempt."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {
+                "success": False,
+                "output": "[ERROR] .../App.java:[2,20] incompatible types: java.lang.Object cannot be converted to java.lang.String",
+            },
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                # Attempt 1: full content, fails compile above at line 2.
+                [{"filepath": "App.java", "content": "class App {\n  String x = get();\n}"}],
+                # Attempt 2: search spans line 2 but replace leaves it byte-identical -
+                # the exact non-fix pattern found live (something else renamed instead).
+                [{"filepath": "App.java", "edits": [{
+                    "search": "class App {\n  String x = get();\n}",
+                    "replace": "class App { // renamed for clarity\n  String x = get();\n}",
+                }]}],
+                # Attempt 3: a real fix, actually changes line 2 itself.
+                [{"filepath": "App.java", "content": "class App {\n  String x = (String) get();\n}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert mock_compile.call_count == 2  # attempt 2's rejection never reached compile
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+
+    unaddressed = [o for o in gate_outcomes if o.get("type") == "unaddressed_error_location"]
+    assert len(unaddressed) == 1, gate_outcomes
+    assert unaddressed[0]["likely_files"] == ["App.java"]
+    assert unaddressed[0]["file_locations"] == [{"filepath": "App.java", "line": 2, "col": None}]
+    assert unaddressed[0]["success"] is False
 
 
 def test_incomplete_generation_error_carries_missing_files():

@@ -40,8 +40,13 @@ class Failure:
     own and had to be killed after timing out - a resource-lifecycle defect,
     not a wrong-behavior one; see the non-binary grading in
     kriya/workflow/workflow.py's run-verification timeout branch),
-    "regression_test", "incomplete_generation", "anchored_edit", or
-    "general_error" (fallback for a bare, non-QualityGateFailure Exception).
+    "regression_test", "incomplete_generation", "anchored_edit",
+    "unaddressed_error_location" (an edit applied cleanly - no anchor-match
+    failure - but its own search block spanned the exact line a prior
+    compile error reported, then left that line byte-identical in its
+    replace text; see find_edits_ignoring_reported_line() in
+    kriya/workflow/workflow.py), or "general_error" (fallback for a bare,
+    non-QualityGateFailure Exception).
     """
     type: str
     message: str

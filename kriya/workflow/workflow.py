@@ -419,8 +419,81 @@ def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], sho
                 raise ValueError(
                     f"Anchor matching failed for edit #{idx}: Could not find formatted match inside target content."
                 )
-                
+
     return current_content
+
+def find_edits_ignoring_reported_line(
+    original_content: str, edits: List[Dict[str, str]], filepath: str, error_context: str
+) -> List[int]:
+    """Layer 1 pre-flight check, added 2026-08-07 in direct response to a real
+    live failure (ignite_qpid_person): a targeted retry's own SEARCH block
+    spanned the exact line the compiler reported (javac's universal
+    file:[line,col] locator - the same source extract_error_source_locations()
+    already uses to build _build_error_source_context()'s prompt), yet the
+    REPLACE text at that same relative position was byte-identical to SEARCH.
+    The edit applied cleanly - no anchor-match failure, Kriya's own plumbing
+    worked - but it never actually changed the line the compiler pointed at,
+    so the IDENTICAL compile error recurred verbatim on the very next attempt,
+    burning a full, expensive compile-and-fail cycle to discover something
+    checkable for free beforehand.
+
+    Deliberately narrower than "did the file change anywhere": only flags a
+    reported line when SOME edit's own search block already claimed
+    responsibility for it (by including it in what it chose to match
+    against). An edit whose search block doesn't span the reported line at
+    all is a legitimate alternative fix (e.g. correcting a variable's
+    generic-typed declaration several lines above instead of its usage site,
+    which needs no change at the usage line itself) and is never flagged -
+    this catches the model contradicting its OWN stated scope, not every
+    possible way of fixing the underlying bug.
+
+    Locates each edit's absolute line offset against the ORIGINAL, pre-edit
+    content (not the progressively-edited content apply_anchored_edits()
+    itself walks through as it applies edits in sequence), so line numbers
+    always line up with what the compiler actually reported regardless of how
+    many edits precede this one or whether an earlier edit shifted the line
+    count. Returns the reported line number(s) found unaddressed, empty if
+    none (including the common case where the error has no locatable line at
+    all, or this file isn't the one it names)."""
+    locations = extract_error_source_locations(error_context)
+    reported_lines = {line for fname, line in locations if fname == os.path.basename(filepath)}
+    if not reported_lines:
+        return []
+
+    orig_lines = original_content.splitlines()
+    ignored: List[int] = []
+    for edit in edits:
+        search_block = edit.get("search") or ""
+        search_lines = search_block.splitlines()
+        if not search_lines:
+            continue
+
+        norm_search = normalize_whitespace(search_block)
+        matched_start = -1
+        for i in range(len(orig_lines) - len(search_lines) + 1):
+            window = orig_lines[i:i + len(search_lines)]
+            if normalize_whitespace("\n".join(window)) == norm_search:
+                matched_start = i
+                break
+        if matched_start == -1:
+            # Not this check's job to explain - apply_anchored_edits() itself
+            # already raises a precise "matched 0 times" failure for an edit
+            # whose search block can't be located at all.
+            continue
+
+        replace_lines = (edit.get("replace") or "").splitlines()
+        for line_no in reported_lines:
+            offset = line_no - 1 - matched_start
+            if not (0 <= offset < len(search_lines)):
+                continue
+            old_line = search_lines[offset].strip()
+            new_line = replace_lines[offset].strip() if offset < len(replace_lines) else None
+            # Skip trivially short lines (a lone brace, a blank line) - too
+            # easy to coincidentally "reappear" unchanged to be a meaningful
+            # signal on their own.
+            if len(old_line) >= 8 and old_line == new_line and line_no not in ignored:
+                ignored.append(line_no)
+    return ignored
 
 def extract_target_test(error_context: str, files_written: List[str]) -> Optional[str]:
     for f in files_written:
@@ -3358,6 +3431,53 @@ class WorkflowEngine:
                             )
                             gate_outcomes.append(failure.to_gate_outcome())
                             raise QualityGateFailure(failure) from anchor_ex
+
+                        # Layer 1 pre-flight check (see find_edits_ignoring_reported_line's
+                        # own docstring): only meaningful when this attempt is itself
+                        # responding to a real prior error with a locatable line for this
+                        # file - error_context is "" on a clean first attempt, where
+                        # extract_error_source_locations() would find nothing anyway, but
+                        # the explicit guard avoids the line-matching work entirely there.
+                        if error_context:
+                            ignored_lines = find_edits_ignoring_reported_line(
+                                orig_text, edits, filepath, error_context
+                            )
+                            if ignored_lines:
+                                lines_desc = ", ".join(str(n) for n in sorted(ignored_lines))
+                                # Preserve the ORIGINAL error text (with its javac
+                                # file:[line,col] locator) inside the message, not just a
+                                # paraphrase - error_context becomes the NEXT attempt's
+                                # error_context via `error_context = raw_error_context`
+                                # below, and both extract_error_source_locations() (this
+                                # same check, on a possible next attempt) and
+                                # _build_error_source_context() (the source-snippet shown
+                                # in the prompt) depend on that locator still being present
+                                # verbatim - a paraphrase-only message would silently lose
+                                # source-line grounding from here on.
+                                failure = Failure(
+                                    type="unaddressed_error_location",
+                                    message=(
+                                        f"UNADDRESSED ERROR LOCATION in {filepath}: your previous edit's "
+                                        f"search block included line(s) {lines_desc} of the error below, but "
+                                        f"left that exact line unchanged in its replace text - applying it "
+                                        f"would leave the identical error in place. If your fix genuinely "
+                                        f"doesn't require changing line(s) {lines_desc} itself (e.g. you fixed "
+                                        f"a type declaration elsewhere instead), don't include it in your "
+                                        f"search block at all; otherwise, you MUST change that exact line.\n\n"
+                                        f"Original error:\n{error_context}"
+                                    ),
+                                    raw_output=f"search block ignored reported line(s) {lines_desc}",
+                                    file_locations=[
+                                        FileLocation(filepath=filepath, line=n) for n in sorted(ignored_lines)
+                                    ],
+                                    likely_files=[filepath],
+                                    failed_content={filepath: orig_text},
+                                    attempted_edits=edits,
+                                    attempt=attempt_number,
+                                )
+                                gate_outcomes.append(failure.to_gate_outcome())
+                                raise QualityGateFailure(failure)
+
                         with open(full_path, "w", encoding="utf-8") as f:
                             f.write(new_content)
                     else:
@@ -3997,7 +4117,14 @@ class WorkflowEngine:
                 error_context = raw_error_context
                 if (
                     current_failure_signature == last_failure_signature
-                    and fail_type in ("compile", "run_verification", "run_verification_hung")
+                    # unaddressed_error_location included alongside compile: it's a
+                    # cheaper, earlier-firing variant of the same signal (the model's
+                    # own edit didn't address the reported location) - repeating it
+                    # is just as strong a "this model is stuck" signal as a repeated
+                    # compile failure, and today's repeat-based gate is the only
+                    # thing standing between a first occurrence and live lookup, so
+                    # it should fire on the same schedule, not a slower one.
+                    and fail_type in ("compile", "run_verification", "run_verification_hung", "unaddressed_error_location")
                     and self.kernel.config.autonomy.web_lookup_enabled
                     and self.kernel.config.search.base_url
                     and error_terms

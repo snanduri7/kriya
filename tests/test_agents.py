@@ -611,6 +611,120 @@ def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
         "  public static void main(String[] args) {"
     )
 
+def test_split_fix_analysis_edit_parses_multiple_search_replace_pairs():
+    """Regression test for a real bug found live, 2026-08-07
+    (ignite_qpid_person): despite the prompt saying "include only the lines
+    that actually need to change" (singular), a real response returned THREE
+    separate SEARCH/REPLACE pairs for one file, plus a trailing FILE CONTENT:
+    block it wasn't asked for either. The old implementation only recognized
+    the FIRST search:/replace: pair and took everything up to FILE CONTENT:
+    as one giant replace_block - swallowing pairs 2 and 3 (markers and all)
+    into pair 1's own replacement text. apply_anchored_edits() already
+    applies a LIST of edits in sequence, so the fix is to actually return all
+    three as separate edits instead of corrupting the first one with the
+    other two's raw text."""
+    text = (
+        "FIX ANALYSIS: Multiple related fixes needed across this file.\n"
+        "SEARCH:\n"
+        "Ignite ignite = (Ignite) context.getBean(\"igniteNode\");\n"
+        "REPLACE:\n"
+        "Ignite ignite = (Ignite) context.getBean(\"igniteNode\");\n"
+        "SEARCH:\n"
+        "ConnectionFactory factory = (ConnectionFactory) context.getBean(\"qpidConnectionFactory\");\n"
+        "REPLACE:\n"
+        "ConnectionFactory factory = (ConnectionFactory) context.getBean(\"qpidFactory\");\n"
+        "SEARCH:\n"
+        "IgniteCache<String, Person> cache = ignite.getOrCreateCache(\"person-cache\");\n"
+        "REPLACE:\n"
+        "IgniteCache<String, Person> cache = ignite.getOrCreateCache(\"people-cache\");\n"
+        "\n"
+        "FILE CONTENT:\n"
+        "package com.example;\npublic class App { /* redundant, unasked-for full file */ }"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert content is None
+    assert edits == [
+        {
+            "search": 'Ignite ignite = (Ignite) context.getBean("igniteNode");',
+            "replace": 'Ignite ignite = (Ignite) context.getBean("igniteNode");',
+        },
+        {
+            "search": 'ConnectionFactory factory = (ConnectionFactory) context.getBean("qpidConnectionFactory");',
+            "replace": 'ConnectionFactory factory = (ConnectionFactory) context.getBean("qpidFactory");',
+        },
+        {
+            "search": 'IgniteCache<String, Person> cache = ignite.getOrCreateCache("person-cache");',
+            "replace": 'IgniteCache<String, Person> cache = ignite.getOrCreateCache("people-cache");',
+        },
+    ]
+    # No stray marker text leaked into any replace block - the exact
+    # corruption the real live failure produced.
+    for edit in edits:
+        assert "SEARCH:" not in edit["replace"]
+        assert "REPLACE:" not in edit["replace"]
+
+def test_split_fix_analysis_edit_stops_at_trailing_search_with_no_replace():
+    # A malformed sequence (a dangling SEARCH with no REPLACE after it)
+    # degrades to whatever complete pairs were found, rather than raising or
+    # misparsing the dangling block as part of an earlier pair.
+    text = (
+        "SEARCH:\nfoo();\n"
+        "REPLACE:\nbar();\n"
+        "SEARCH:\nincomplete, no replace follows"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits == [{"search": "foo();", "replace": "bar();"}]
+
+def test_build_incompatible_types_scaffold_names_the_reported_types():
+    """Regression test for a real bug found live, 2026-08-07
+    (ignite_qpid_person): the model's own FIX ANALYSIS correctly said
+    "properly handle the generic types" but the actual diff only renamed a
+    method call, never touching the reported line - the identical
+    "incompatible types: java.lang.Object cannot be converted to
+    com.example.Person" error recurred verbatim on the next attempt. Real
+    captured error text (two identical lines, as javac repeats itself across
+    build phases) - dedup must collapse them to one described pair."""
+    error = (
+        "[ERROR] /Users/.../PersonApp.java:[111,38] incompatible types: "
+        "java.lang.Object cannot be converted to com.example.Person\n"
+        "[ERROR] /Users/.../PersonApp.java:[111,38] incompatible types: "
+        "java.lang.Object cannot be converted to com.example.Person\n"
+    )
+    scaffold = DeveloperAgent._build_incompatible_types_scaffold(error)
+    assert '"java.lang.Object" cannot be converted to "com.example.Person"' in scaffold
+    assert scaffold.count('cannot be converted to "com.example.Person"') == 1  # deduped
+    assert "explicit cast" in scaffold
+    assert "generic type parameters" in scaffold
+
+def test_build_incompatible_types_scaffold_empty_when_no_match():
+    assert DeveloperAgent._build_incompatible_types_scaffold(None) == ""
+    assert DeveloperAgent._build_incompatible_types_scaffold("cannot find symbol: class Foo") == ""
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_prompt_includes_incompatible_types_scaffold():
+    """Integration check: when prior_error_context carries the javac
+    'incompatible types' shape, the actual prompt sent to the model (not just
+    the standalone builder) includes the scaffold - confirms it's really
+    wired into _fill_missing_content, not just unit-tested in isolation."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();"
+    ))
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["PersonApp.java"],
+        prior_error_context=(
+            "PersonApp.java:[111,38] incompatible types: java.lang.Object "
+            "cannot be converted to com.example.Person"
+        ),
+        error_source_context={"PersonApp.java": "\n>> 111: Person p = cache.get(1);\n"},
+    )
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert '"java.lang.Object" cannot be converted to "com.example.Person"' in file_prompt
+    assert "explicit cast" in file_prompt
+
 def test_sanitize_generated_content_none_passthrough():
     assert DeveloperAgent.sanitize_generated_content(None) is None
 

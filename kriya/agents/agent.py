@@ -27,6 +27,23 @@ logger = logging.getLogger(__name__)
 # the leading-space count doesn't silently reopen the identical gap again.
 _GUTTER_PREFIX_RE = re.compile(r"^(?:>>\s*(?:\d+:)?|[ ]{2,}\d+:)\s?", re.MULTILINE)
 
+# javac's "incompatible types: X cannot be converted to Y" is a generic,
+# language-level error shape (raw/erased generics, missing casts) - not tied
+# to any one library - so it's handled as its own scaffold rather than a
+# per-skill rule. Confirmed live, 2026-08-07 (ignite_qpid_person): a targeted
+# retry's own FIX ANALYSIS text correctly said "properly handle the generic
+# types", but the actual SEARCH/REPLACE diff it produced only renamed a
+# method call (cache() -> getOrCreateCache()) and never touched the line the
+# compiler actually reported - the identical error recurred on the very next
+# attempt. Open-ended "explain the fix" framing left the model free to accept
+# a plausible-sounding but incomplete self-diagnosis; this scaffold instead
+# names the two universally-correct fixes for this EXACT error shape (a cast,
+# or explicit generics) and forbids anything else from counting as the fix.
+_INCOMPATIBLE_TYPES_RE = re.compile(
+    r"incompatible types:\s*(\S.*?)\s+cannot be converted to\s+(\S.*?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 
 async def call_with_escalation(
     llm: LLMClient,
@@ -393,12 +410,56 @@ class DeveloperAgent(BaseAgent):
         match (0 or >1 occurrences) raises inside apply_anchored_edits() and is
         caught by the same retry-loop exception handling as any other Quality Gate
         failure - not a new failure mode, just becomes the next attempt's error
-        text, same as a compile failure would."""
-        search_match = re.search(r"search:", text, re.IGNORECASE)
-        replace_match = re.search(r"replace:", text, re.IGNORECASE)
-        if search_match and replace_match and replace_match.start() > search_match.start():
-            analysis = text[:search_match.start()].strip()
-            analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
+        text, same as a compile failure would.
+
+        Parses EVERY SEARCH:/REPLACE: pair in the response, not just the first -
+        found live, 2026-08-07 (ignite_qpid_person): despite the prompt saying
+        "include only the lines that actually need to change" (singular), a real
+        response returned THREE separate SEARCH/REPLACE pairs for one file, plus
+        a trailing FILE CONTENT: block. The old implementation only ever looked
+        for the first "search:"/"replace:" match and took everything after that
+        REPLACE (up to FILE CONTENT:, if any) as ONE replace_block - which meant
+        pairs 2 and 3 got folded verbatim, markers and all, into pair 1's own
+        replacement text: applying that edit spliced the literal strings
+        "SEARCH:"/"REPLACE:" and duplicate code into the middle of the file.
+        apply_anchored_edits() already accepts and applies a LIST of edits in
+        sequence (confirmed via reading it directly, not assumed) - the fix is to
+        actually use that, not to bound the first pair's replace text more
+        tightly and still discard the rest."""
+        file_content_match = re.search(r"file content:", text, re.IGNORECASE)
+        bound = file_content_match.start() if file_content_match else len(text)
+
+        search_matches = list(re.finditer(r"search:", text[:bound], re.IGNORECASE))
+        replace_matches = list(re.finditer(r"replace:", text[:bound], re.IGNORECASE))
+        if not search_matches or not replace_matches:
+            analysis, content = DeveloperAgent._split_fix_analysis(text)
+            return analysis, None, content
+
+        analysis = text[:search_matches[0].start()].strip()
+        analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
+
+        # Walk SEARCH/REPLACE markers in the order they actually appear (not by
+        # assuming strict alternation) so a malformed sequence degrades to
+        # "however many complete pairs were found" instead of raising or
+        # silently misparsing.
+        markers = sorted(
+            [("search", m.start(), m.end()) for m in search_matches]
+            + [("replace", m.start(), m.end()) for m in replace_matches],
+            key=lambda t: t[1],
+        )
+        edits: List[Dict[str, str]] = []
+        i = 0
+        while i < len(markers):
+            kind, _start, end = markers[i]
+            if kind != "search":
+                i += 1
+                continue
+            j = i + 1
+            while j < len(markers) and markers[j][0] != "replace":
+                j += 1
+            if j >= len(markers):
+                break  # a trailing SEARCH with no REPLACE after it - stop here
+            _r_kind, r_start, r_end = markers[j]
             # Trim ONLY the leading/trailing newline(s) that slicing right after a
             # "SEARCH:"/"REPLACE:" marker structurally introduces (the marker is
             # always followed by a newline before the real block starts) - NOT a
@@ -409,8 +470,9 @@ class DeveloperAgent(BaseAgent):
             # than inside sanitize_generated_content below, which must also handle
             # plain full-file content where a genuine trailing newline is real,
             # not an artifact.
-            search_block = text[search_match.end():replace_match.start()].strip("\n")
-            replace_block = text[replace_match.end():].strip("\n")
+            search_block = text[end:r_start].strip("\n")
+            replace_end_bound = markers[j + 1][1] if j + 1 < len(markers) else bound
+            replace_block = text[r_end:replace_end_bound].strip("\n")
             # Both real, observed model habits this used to hand-patch here alone
             # (a redundant trailing FILE CONTENT: over-delivery, and this module's
             # own display gutter getting echoed back verbatim) are now handled by
@@ -419,7 +481,11 @@ class DeveloperAgent(BaseAgent):
             search_block = DeveloperAgent.sanitize_generated_content(search_block)
             replace_block = DeveloperAgent.sanitize_generated_content(replace_block)
             if search_block:
-                return (analysis or None), [{"search": search_block, "replace": replace_block}], None
+                edits.append({"search": search_block, "replace": replace_block})
+            i = j + 1
+
+        if edits:
+            return (analysis or None), edits, None
         analysis, content = DeveloperAgent._split_fix_analysis(text)
         return analysis, None, content
 
@@ -459,6 +525,41 @@ class DeveloperAgent(BaseAgent):
             return entries or None
 
         return None
+
+    @staticmethod
+    def _build_incompatible_types_scaffold(prior_error_context: Optional[str]) -> str:
+        """Returns an additive prompt block naming the two universally-correct
+        fixes for a javac "incompatible types: X cannot be converted to Y" error
+        (see _INCOMPATIBLE_TYPES_RE's own docstring for the live failure this is
+        a direct response to), or "" if the error text doesn't contain that
+        shape. Deliberately generic across whatever X/Y the compiler actually
+        reported - not hardcoded to any one library - since raw/erased generics
+        and missing casts are a language-level Java footgun, not specific to
+        Ignite or any other skill this happened to be found through."""
+        if not prior_error_context:
+            return ""
+        pairs = []
+        for match in _INCOMPATIBLE_TYPES_RE.finditer(prior_error_context):
+            pair = (match.group(1).strip(), match.group(2).strip())
+            if pair not in pairs:
+                pairs.append(pair)
+        if not pairs:
+            return ""
+        described = "\n".join(f'- "{frm}" cannot be converted to "{to}"' for frm, to in pairs)
+        return (
+            "\nThe error above includes an 'incompatible types' compile error:\n"
+            f"{described}\n"
+            "This exact error shape has exactly two universally-correct fixes - you MUST do ONE of "
+            "them, AT THE EXACT LINE the error reports, not somewhere else nearby:\n"
+            "1) Add an explicit cast to the target type at the exact assignment/return site, e.g. "
+            "`TargetType value = (TargetType) someExpression;`, or\n"
+            "2) Declare the source (a collection, cache, or generic method call) with explicit "
+            "generic type parameters instead of `var` or a raw/unparameterized type, so the compiler "
+            "infers the correct type without needing a cast.\n"
+            "A change that does anything else (e.g. renaming a method call, adjusting an unrelated "
+            "import) WITHOUT doing one of these two things at the reported line will NOT resolve this "
+            "error - the identical 'incompatible types' error will simply recur on the next attempt.\n"
+        )
 
     async def _fill_missing_content(
         self,
@@ -592,6 +693,9 @@ class DeveloperAgent(BaseAgent):
                 )
             else:
                 fix_analysis_instruction = ""
+
+            if apply_fix_analysis:
+                fix_analysis_instruction += DeveloperAgent._build_incompatible_types_scaffold(prior_error_context)
 
             # Stable, large blocks first (existing code context, then architecture design) so
             # same-model retries can reuse the inference server's KV-cache prefix; the task
