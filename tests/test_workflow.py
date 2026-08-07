@@ -5,7 +5,7 @@ import os
 import sqlite3
 import subprocess
 import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -32,15 +32,20 @@ from kriya.workflow.workflow import (
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
     _check_java_toolchain_mismatch,
+    _detect_missing_build_manifest,
     _filter_misattributed_extraction,
     _get_or_start_jdtls_client,
+    _goal_or_repo_targets_java,
     _is_near_duplicate_rule,
     _java_toolchain_fact,
     _likely_misattributed_sibling,
     _normalize_error_for_repeat_detection,
     _resolve_file_paths_from_design,
+    _resolve_java_home_override,
+    _resolve_jdk_home_for_version,
     _resolve_run_command,
     _scoped_skill_gap_description,
+    _strip_jdk_incompatible_jvm_flags,
     classify_environment_failure,
     extract_error_search_terms,
     extract_error_source_locations,
@@ -1178,17 +1183,31 @@ async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
         mock_compile.return_value = {"success": True, "output": "Maven compilation succeeded."}
 
         res = await we.run_generation_workflow(
-            goal="Create pom",
+            # Goal text must itself evidence Java - _java_toolchain_fact() is
+            # now gated by _goal_or_repo_targets_java() (2026-08-06 fix), so a
+            # stack-neutral goal like "Create pom" would never reach the
+            # toolchain check at all before this test's real target behavior
+            # (the mismatch check, once stack resolves to java) gets a chance
+            # to run.
+            goal="Create a Java pom",
             workspace_path=str(tmp_path)
         )
 
     assert res["quality_gates_passed"] is True
     assert res["toolchain_warning"] is not None
     assert "JDK 17" in res["toolchain_warning"] and "JDK 26" in res["toolchain_warning"]
-    # Called twice total: once early/unconditionally for the "Target JVM" fact
-    # (before stack is even known), once more from the retry loop's own
-    # mismatch check once stack resolves to java - not once per retry attempt.
-    assert mock_toolchain.call_count == 2
+    # Called three times total, still just once per generation run (not once
+    # per retry attempt, the property this test actually guards): once early
+    # for the "Target JVM" fact (goal text evidences Java, so
+    # _goal_or_repo_targets_java() allows it even before stack is confirmed
+    # from real files), once more from the retry loop's own mismatch check
+    # once stack resolves to java, and once more from
+    # _resolve_java_home_override() (2026-08-07) checking whether this same
+    # mismatch is also something the goal cares about correcting - this
+    # goal's text ("Create a Java pom") names no specific version, so that
+    # third call returns None without needing anything beyond the mismatch
+    # flag already fetched.
+    assert mock_toolchain.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -1225,14 +1244,19 @@ async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
         ]
 
         res = await we.run_generation_workflow(
-            goal="Create pom",
+            # Goal text must evidence Java - see the comment in
+            # test_workflow_surfaces_toolchain_warning_even_on_success above.
+            goal="Create a Java pom",
             workspace_path=str(tmp_path)
         )
 
     assert res["quality_gates_passed"] is True
-    # Called twice total (fact + mismatch-check), not once per retry attempt -
-    # the "only once across retries" property this test is really guarding.
-    assert mock_toolchain.call_count == 2
+    # Called three times total (fact + mismatch-check + _resolve_java_home_
+    # override()'s own check, added 2026-08-07 - this run has no mismatch at
+    # all, so that third call returns None immediately), not once per retry
+    # attempt - the "only once across retries" property this test is really
+    # guarding.
+    assert mock_toolchain.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -1251,24 +1275,27 @@ async def test_workflow_skips_toolchain_check_for_non_java_stack(tmp_path):
 
     we = WorkflowEngine(kernel, llm)
 
-    # check_java_toolchain() IS called once, early and unconditionally, to
-    # surface the "Target JVM" fact (see test_java_toolchain_fact_* and
-    # test_workflow_injects_target_jvm_fact_into_planner_prompt) - stack isn't
-    # knowable that early. What must NOT happen is a second call once the
-    # retry loop confirms this run's actual stack is python, not java.
+    # check_java_toolchain() must NOT be called at all: _java_toolchain_fact()
+    # is gated by _goal_or_repo_targets_java() (2026-08-06 fix) and this
+    # goal's text has no Java/Maven/Gradle/Spring/JVM evidence, so the early
+    # fact-lookup is skipped outright - and once the retry loop confirms this
+    # run's actual stack is python, not java, the mismatch check is skipped
+    # too. A real subprocess pair (java -version, mvn -version) is now never
+    # spent on a goal that was never going to be Java, closing a real,
+    # previously-unconditional cost this test used to accept as normal.
     with patch("kriya.tools.validate.check_java_toolchain", return_value={
         "java_found": False, "java_version": None,
         "mvn_found": False, "mvn_java_version": None,
         "mismatch": False,
     }) as mock_toolchain:
         res = await we.run_generation_workflow(
-            goal="Create app",
+            goal="Create a Python app",
             workspace_path=str(tmp_path)
         )
 
     assert res["quality_gates_passed"] is True
     assert res["toolchain_warning"] is None
-    assert mock_toolchain.call_count == 1
+    assert mock_toolchain.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -1276,7 +1303,15 @@ async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
     """A JDK-version-conditional skill rule (e.g. a JVM startup flag required on
     one JDK range, fatal on another) is unverifiable at generation time unless
     the model has a concrete resolved JDK number to reason against - the fact
-    must reach the Planner prompt itself, not just be logged."""
+    must reach the Planner prompt itself, not just be logged. Goal text must
+    itself evidence Java (_goal_or_repo_targets_java(), 2026-08-06 fix) for
+    the fact to be looked up at all - a stack-neutral goal no longer gets it
+    just because Java happens to be installed on the machine running this.
+    Kept the generated file itself as plain Python (real, unmocked compile
+    via Python's own compile() builtin, no external tool dependency) -
+    _java_toolchain_fact() is gated purely on goal text/workspace markers,
+    resolved before any file exists, so what actually gets generated
+    afterward doesn't matter for what this test is checking."""
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -1297,7 +1332,7 @@ async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
         "mismatch": True,
     }):
         res = await we.run_generation_workflow(
-            goal="Create app",
+            goal="Create a Java app",
             workspace_path=str(tmp_path)
         )
 
@@ -1376,6 +1411,108 @@ async def test_workflow_run_verification_goal_explicit_passes_without_confirmati
 
     assert res["quality_gates_passed"] is True
     assert "app.py" in res["files"]
+
+@pytest.mark.asyncio
+async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path):
+    """Workflow-level regression test: the forbidden flag must actually be
+    gone from the worktree's pom.xml before run_app_sequence executes (not
+    just correct at the _strip_jdk_incompatible_jvm_flags unit level), and
+    the correction must be visible via toolchain_warning regardless of the
+    run's own outcome - same reporting path _check_java_toolchain_mismatch's
+    warning already uses."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "pom.xml", "content": _POM_WITH_SECURITY_MANAGER_FLAG}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["mvn", "-e", "exec:exec"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={
+        "passed": True, "reasoning": "Output contains the expected [SUCCESS] line.",
+    })
+
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "26",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": False,
+    }), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "Maven compilation succeeded."},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "[SUCCESS] it worked"},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Create a Java app using Maven; run mvn exec:exec, it should print [SUCCESS]",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert res["toolchain_warning"] is not None
+    assert "java.security.manager" in res["toolchain_warning"]
+    final_pom = (tmp_path / "pom.xml").read_text()
+    assert "-Djava.security.manager=allow" not in final_pom
+
+@pytest.mark.asyncio
+async def test_workflow_recovers_missing_build_manifest_never_requested_by_architect(tmp_path):
+    """Workflow-level regression test for the real bug (2026-08-07,
+    kriya-protocol-parser-app): even when the Architect's design never
+    mentions pom.xml at all (so IncompleteGenerationError never fires,
+    since it only recovers a file the design DID list), a compile failure
+    shaped like a missing-dependency error with no pom.xml/build.gradle
+    present must redirect the NEXT attempt at generating pom.xml
+    specifically - not keep re-targeting Main.java, which already
+    correctly declined to fix an out-of-scope dependency problem on every
+    prior attempt."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write Main.java",  # deliberately never mentions pom.xml
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{
+            "filepath": "src/main/java/com/example/Main.java",
+            "content": "import org.springframework.context.ApplicationContext;\npublic class Main {}",
+        }],
+        [{"filepath": "pom.xml", "content": "<project></project>"}],
+    ])
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
+        mock_compile.side_effect = [
+            {
+                "success": False,
+                "output": (
+                    "Java compilation failed:\n"
+                    "Main.java:1: error: package org.springframework.context does not exist"
+                ),
+            },
+            {"success": True, "output": "Maven compilation succeeded."},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert second_call_kwargs["known_target_files"] == ["pom.xml"]
 
 @pytest.mark.asyncio
 async def test_workflow_run_verification_judgment_cached_across_retry_attempts(tmp_path):
@@ -3096,6 +3233,23 @@ def test_extract_error_search_terms_ignores_plain_symbols_and_paths():
     )
     assert extract_error_search_terms(error) == []
 
+def test_extract_error_search_terms_ignores_junit_stack_trace_even_though_source_locations_now_recognizes_it():
+    """Explicit egress-safety regression test: extract_error_source_locations()
+    was just extended (2026-08-07) to recognize a JUnit/JVM stack trace's
+    file:line locator shape, purely to show real source lines to the LOCAL
+    model. This confirms that extension has zero effect on the separate,
+    narrowly-scoped live-lookup term extractor - a full real stack trace
+    (class/method/file names, the exact kind of project-specific content
+    that must never reach an external search query) still yields no terms
+    at all, the same as before the source-locations fix."""
+    error = (
+        "java.nio.BufferUnderflowException\n"
+        "\tat java.base/java.nio.HeapByteBuffer.get(HeapByteBuffer.java:194)\n"
+        "\tat com.example.protocol.ProtocolParser.decode(ProtocolParser.java:60)\n"
+        "\tat com.example.ProtocolTest.testNormalRoundTrip(ProtocolTest.java:26)\n"
+    )
+    assert extract_error_search_terms(error) == []
+
 def test_extract_error_search_terms_excludes_projects_own_coordinate():
     # Regression test for a real bug found live during golden-use-case
     # validation: Maven's own build banner prints the PROJECT'S OWN
@@ -3184,6 +3338,39 @@ def test_extract_error_source_locations_dedups_and_finds_multiple():
 
 def test_extract_error_source_locations_no_match_returns_empty():
     assert extract_error_source_locations("Process exited with code 1.") == []
+
+def test_extract_error_source_locations_finds_junit_stack_trace_shape():
+    """Regression test for a real bug found live (2026-08-07,
+    kriya-protocol-parser-app): a JUnit/JVM stack trace's own file:line
+    locator ('at pkg.Class.method(File.java:60)') carries the identical
+    precision a compile error's 'File.java:[line,col]' shape does, but the
+    compile-error-only regex never recognized it - so a test failure with a
+    real stack trace got zero source-line grounding and no anchored-edit
+    preference, unlike a compile error. The model's own fix-analysis
+    correctly diagnosed a BufferUnderflowException's root cause but, with
+    no precise anchor, fell back to full-file regeneration and
+    reintroduced an equivalent bug."""
+    error = (
+        "java.nio.BufferUnderflowException\n"
+        "\tat java.base/java.nio.HeapByteBuffer.get(HeapByteBuffer.java:194)\n"
+        "\tat com.example.protocol.ProtocolParser.decode(ProtocolParser.java:60)\n"
+        "\tat com.example.ProtocolTest.testNormalRoundTrip(ProtocolTest.java:26)\n"
+    )
+    assert extract_error_source_locations(error) == [
+        ("HeapByteBuffer.java", 194),
+        ("ProtocolParser.java", 60),
+        ("ProtocolTest.java", 26),
+    ]
+
+def test_extract_error_source_locations_handles_both_shapes_together():
+    # A single retry attempt can plausibly carry both shapes if a compile
+    # warning and a runtime stack trace both appear in the same captured
+    # output - both must resolve correctly, not just whichever comes first.
+    error = (
+        "[ERROR] .../App.java:[10,5] incompatible types\n"
+        "\tat com.example.Worker.run(Worker.java:42)\n"
+    )
+    assert extract_error_source_locations(error) == [("App.java", 10), ("Worker.java", 42)]
 
 def test_build_error_source_context_extracts_real_source_window(tmp_path):
     (tmp_path / "IntegrationApp.java").write_text(
@@ -3483,6 +3670,27 @@ def test_classify_environment_failure_detects_jvm_startup_error():
     assert result is not None
     assert "JVM failed during its own startup" in result
 
+def test_classify_environment_failure_detects_qpid_jdk24_security_manager_api_crash():
+    """Regression test for a real bug found live, 2026-08-07
+    (ignite_qpid_person): immediately after _strip_jdk_incompatible_jvm_flags
+    started correctly removing the now-forbidden -Djava.security.manager=allow
+    flag on a resolved JDK 26 target, the broker crashed on a DIFFERENT,
+    previously-unseen error instead - Qpid Broker-J's own internal logging
+    calls Subject.getSubject(), an API tied to the Security Manager JEP 486
+    permanently removed in JDK 24+. Without this classification, the retry
+    loop burned two full attempts trying to code-fix a genuine library/JDK
+    incompatibility no code regeneration could ever resolve."""
+    error = (
+        "Exception in thread \"main\" java.lang.UnsupportedOperationException: getSubject is not supported\n"
+        "\tat java.base/javax.security.auth.Subject.getSubject(Subject.java:277)\n"
+        "\tat org.apache.qpid.server.logging.AbstractMessageLogger.getLogActor(AbstractMessageLogger.java:105)\n"
+        "\tat org.apache.qpid.server.SystemLauncher.startup(SystemLauncher.java:198)\n"
+    )
+    result = classify_environment_failure(error)
+    assert result is not None
+    assert "Qpid Broker-J" in result
+    assert "JDK 24+" in result
+
 def test_classify_environment_failure_detects_missing_executable():
     error = "Failed to invoke mvn compile: [Errno 2] No such file or directory: 'mvn'"
     result = classify_environment_failure(error)
@@ -3532,15 +3740,15 @@ def test_check_java_toolchain_mismatch_returns_message_on_mismatch():
     assert result is not None
     assert "JDK 17" in result and "JDK 26" in result
 
-def test_java_toolchain_fact_none_when_neither_tool_found():
+def test_java_toolchain_fact_none_when_neither_tool_found(tmp_path):
     with patch("kriya.tools.validate.check_java_toolchain", return_value={
         "java_found": False, "java_version": None,
         "mvn_found": False, "mvn_java_version": None,
         "mismatch": False,
     }):
-        assert _java_toolchain_fact() is None
+        assert _java_toolchain_fact("Create a Java Maven app", str(tmp_path)) is None
 
-def test_java_toolchain_fact_prefers_mvn_version_over_java():
+def test_java_toolchain_fact_prefers_mvn_version_over_java(tmp_path):
     # mvn is what a generated app's exec:java/exec:exec invocation actually
     # executes under - that's the number a JDK-version-conditional skill rule
     # needs, even if it differs from plain 'java'.
@@ -3549,20 +3757,374 @@ def test_java_toolchain_fact_prefers_mvn_version_over_java():
         "mvn_found": True, "mvn_java_version": "26",
         "mismatch": True,
     }):
-        result = _java_toolchain_fact()
+        result = _java_toolchain_fact("Create a Java Maven app", str(tmp_path))
     assert result is not None
     assert "JDK 26" in result
     assert "JDK 17" not in result
 
-def test_java_toolchain_fact_falls_back_to_java_version_when_mvn_absent():
+def test_java_toolchain_fact_falls_back_to_java_version_when_mvn_absent(tmp_path):
     with patch("kriya.tools.validate.check_java_toolchain", return_value={
         "java_found": True, "java_version": "17",
         "mvn_found": False, "mvn_java_version": None,
         "mismatch": False,
     }):
-        result = _java_toolchain_fact()
+        result = _java_toolchain_fact("Create a Java Maven app", str(tmp_path))
     assert result is not None
     assert "JDK 17" in result
+
+def test_java_toolchain_fact_none_for_non_java_goal_even_when_tools_found(tmp_path):
+    """Regression test for a real bug found live (2026-08-06 eval harness):
+    _java_toolchain_fact() used to fire whenever Maven/Java were found
+    ANYWHERE ON THE MACHINE, regardless of whether the current goal had
+    anything to do with Java - so a Django goal's prompt got an unrelated
+    "Target JVM: JDK 26" fact injected, directly contradicting the
+    ecosystem-preservation invariant telling the model not to write Java in
+    the very same prompt. The likely real root cause of the long-open
+    "Django goal produced Java/Spring code" mystery from 2026-08-04."""
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "17",
+        "mismatch": False,
+    }):
+        result = _java_toolchain_fact(
+            "Using Django 5.2, add a minimal view at /healthz", str(tmp_path)
+        )
+    assert result is None
+
+def test_goal_or_repo_targets_java_true_for_existing_pom(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project/>")
+    assert _goal_or_repo_targets_java("Add a new endpoint", str(tmp_path)) is True
+
+def test_goal_or_repo_targets_java_true_for_existing_gradle(tmp_path):
+    (tmp_path / "build.gradle").write_text("")
+    assert _goal_or_repo_targets_java("Add a new endpoint", str(tmp_path)) is True
+
+def test_goal_or_repo_targets_java_true_for_goal_text_mention(tmp_path):
+    assert _goal_or_repo_targets_java("Create a Spring Boot REST endpoint", str(tmp_path)) is True
+
+def test_goal_or_repo_targets_java_false_for_unrelated_goal_and_fresh_workspace(tmp_path):
+    assert _goal_or_repo_targets_java("Using Django 5.2, add a minimal view", str(tmp_path)) is False
+
+_POM_WITH_SECURITY_MANAGER_FLAG = """<project>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <configuration>
+          <executable>java</executable>
+          <arguments>
+            <argument>-Djava.security.manager=allow</argument>
+            <argument>-classpath</argument>
+            <classpath/>
+            <argument>${exec.mainClass}</argument>
+          </arguments>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+
+def test_strip_jdk_incompatible_jvm_flags_strips_on_forbidden_jdk(tmp_path):
+    """Regression test for a real bug found live (2026-08-07 eval harness):
+    skills/qpid/rules.txt already states the correct JDK-version-conditional
+    rule, and _java_toolchain_fact() already surfaces the correct JDK fact -
+    active_skills confirmed both reached the model, which still added the
+    forbidden flag on every attempt anyway. Deterministic correction, not
+    more prompting, is the fix."""
+    (tmp_path / "pom.xml").write_text(_POM_WITH_SECURITY_MANAGER_FLAG)
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "26",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": False,
+    }):
+        note = _strip_jdk_incompatible_jvm_flags(str(tmp_path))
+    assert note is not None
+    assert "java.security.manager" in note
+    assert "JDK 26" in note
+    new_content = (tmp_path / "pom.xml").read_text()
+    assert "-Djava.security.manager=allow" not in new_content
+    # The rest of the arguments must survive untouched.
+    assert "-classpath" in new_content
+    assert "${exec.mainClass}" in new_content
+
+def test_strip_jdk_incompatible_jvm_flags_leaves_flag_on_supported_jdk(tmp_path):
+    # On JDK 17-23 this flag is REQUIRED (see skills/qpid/rules.txt) - must
+    # not be stripped just because it's in the known-flags table.
+    (tmp_path / "pom.xml").write_text(_POM_WITH_SECURITY_MANAGER_FLAG)
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "17",
+        "mismatch": False,
+    }):
+        note = _strip_jdk_incompatible_jvm_flags(str(tmp_path))
+    assert note is None
+    assert "-Djava.security.manager=allow" in (tmp_path / "pom.xml").read_text()
+
+def test_strip_jdk_incompatible_jvm_flags_none_when_flag_absent(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "26",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": False,
+    }):
+        assert _strip_jdk_incompatible_jvm_flags(str(tmp_path)) is None
+
+def test_strip_jdk_incompatible_jvm_flags_none_when_no_pom(tmp_path):
+    assert _strip_jdk_incompatible_jvm_flags(str(tmp_path)) is None
+
+def test_resolve_jdk_home_for_version_uses_java_home_tool_on_macos():
+    """Regression test for a real, live bug (2026-08-07): the ORIGINAL
+    single-heuristic design derived a JDK home by walking up from 'java' on
+    PATH, which on macOS is ALWAYS Apple's own dispatcher stub
+    (/usr/bin/java - a real, non-symlinked, root-owned file, never a
+    symlink into an actual JDK). That silently produced '/usr' as the
+    "JDK home" - a directory that happened to satisfy the '.../bin/java'
+    layout check but obviously isn't one - and set as JAVA_HOME, hung a
+    real `mvn clean compile` subprocess indefinitely (confirmed live via
+    `ps` showing it stuck with near-zero CPU time). macOS must instead use
+    `/usr/libexec/java_home -v <version>`, the platform's own correct tool
+    for this, which this test confirms actually gets called and its output
+    used - not the fallback heuristic at all."""
+    with patch("sys.platform", "darwin"), \
+         patch("os.path.exists", return_value=True), \
+         patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home\n",
+        )
+        with patch("os.path.isdir", return_value=True):
+            result = _resolve_jdk_home_for_version("17")
+    assert result == "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home"
+    assert mock_run.call_args.args[0] == ["/usr/libexec/java_home", "-v", "17"]
+
+def test_resolve_jdk_home_for_version_none_when_java_home_tool_fails_on_macos():
+    with patch("sys.platform", "darwin"), \
+         patch("os.path.exists", return_value=True), \
+         patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert _resolve_jdk_home_for_version("17") is None
+
+def test_resolve_jdk_home_for_version_falls_back_to_bin_java_heuristic_on_linux(tmp_path):
+    jdk_home = tmp_path / "jdk-17.0.10"
+    bin_dir = jdk_home / "bin"
+    bin_dir.mkdir(parents=True)
+    java_bin = bin_dir / "java"
+    java_bin.write_text("")
+    with patch("sys.platform", "linux"), patch("shutil.which", return_value=str(java_bin)):
+        assert _resolve_jdk_home_for_version("17") == str(jdk_home)
+
+def test_resolve_jdk_home_for_version_none_when_java_not_found_on_linux():
+    with patch("sys.platform", "linux"), patch("shutil.which", return_value=None):
+        assert _resolve_jdk_home_for_version("17") is None
+
+def test_resolve_jdk_home_for_version_none_for_unexpected_layout_on_linux(tmp_path):
+    # 'java' not sitting directly under a 'bin/' directory - don't guess at
+    # a JDK home from a layout that doesn't match the standard convention.
+    weird_dir = tmp_path / "not_bin"
+    weird_dir.mkdir()
+    java_bin = weird_dir / "java"
+    java_bin.write_text("")
+    with patch("sys.platform", "linux"), patch("shutil.which", return_value=str(java_bin)):
+        assert _resolve_jdk_home_for_version("17") is None
+
+def test_resolve_java_home_override_none_when_no_mismatch():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "17",
+        "mismatch": False,
+    }):
+        assert _resolve_java_home_override("Using Java 17") is None
+
+def test_resolve_java_home_override_none_when_goal_states_no_version():
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        assert _resolve_java_home_override("Create a Java Maven app") is None
+
+def test_resolve_java_home_override_none_when_goal_matches_the_wrong_side():
+    # The goal wants what 'mvn' already resolves to, not 'java' - nothing to
+    # correct toward; overriding here would make things worse, not better.
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }):
+        assert _resolve_java_home_override("Targeting Java 26") is None
+
+def test_resolve_java_home_override_resolves_when_goal_matches_java_side():
+    """Regression test for a real, live-diagnosed gap: pom.xml's
+    maven.compiler.source/target controls the Java LANGUAGE version javac
+    targets, not which JDK 'mvn' itself runs under - a goal explicitly
+    stating "targeting Java 17" had no way to make Maven actually honor
+    that when 'mvn' defaults to a different JDK on the machine (confirmed
+    live: JDK 26 broke a Qpid Broker-J API call unrelated to anything the
+    generated code controls)."""
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }), patch(
+        "kriya.workflow.workflow._resolve_jdk_home_for_version",
+        return_value="/opt/jdk-17",
+    ) as mock_resolve:
+        assert _resolve_java_home_override("In a Maven project targeting Java 17") == "/opt/jdk-17"
+    mock_resolve.assert_called_once_with("17")
+
+def test_detect_missing_build_manifest_finds_pom_gap(tmp_path):
+    """Regression test for a real bug found live (2026-08-07,
+    kriya-protocol-parser-app): pom.xml was never created across two
+    separate full runs, and nothing in the retry loop could ever recover
+    it - extract_implicated_files() can't implicate a file the error text
+    never names, and IncompleteGenerationError only fires for a file the
+    Architect's design DID list but the Developer dropped, not one never
+    requested at all."""
+    error = (
+        "Java compilation failed:\n"
+        "/workspace/src/main/java/com/example/Main.java:5: error: package "
+        "org.springframework.context does not exist\n"
+        "import org.springframework.context.ApplicationContext;\n"
+    )
+    assert _detect_missing_build_manifest(str(tmp_path), error) == "pom.xml"
+
+def test_detect_missing_build_manifest_none_when_pom_exists(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    error = "error: package org.junit does not exist"
+    assert _detect_missing_build_manifest(str(tmp_path), error) is None
+
+def test_detect_missing_build_manifest_none_when_gradle_exists(tmp_path):
+    (tmp_path / "build.gradle").write_text("")
+    error = "error: package org.junit does not exist"
+    assert _detect_missing_build_manifest(str(tmp_path), error) is None
+
+def test_detect_missing_build_manifest_none_for_unrelated_compile_error(tmp_path):
+    # A real code bug (wrong type), not a missing-dependency shape - must
+    # not misfire and redirect the retry loop at pom.xml for an unrelated
+    # problem.
+    error = "error: incompatible types: java.lang.Object cannot be converted to com.example.Person"
+    assert _detect_missing_build_manifest(str(tmp_path), error) is None
+
+@pytest.mark.asyncio
+async def test_workflow_non_java_goal_prompt_omits_java_toolchain_fact_even_when_tools_found(tmp_path):
+    """End-to-end regression test for the same real bug, at the point it
+    actually reaches a prompt: even with real Java/Maven found on this
+    machine (unmocked - relies on _java_toolchain_fact's own gating, not on
+    check_java_toolchain returning nothing), a Django goal's Developer
+    prompt must never contain the Environment Fact block. Confirms the fix
+    holds all the way through convention_prompt -> skills_prompt ->
+    existing_code_context, not just at the unit level."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write views.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "views.py", "content": "def healthz(request):\n    return {}\n"}
+    ])
+    res = await we.run_generation_workflow(
+        goal="Using Django 5.2, add a minimal view at /healthz", workspace_path=str(tmp_path)
+    )
+    assert res["quality_gates_passed"] is True
+    first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
+    assert "Environment Fact" not in first_call_kwargs["existing_code_context"]
+    assert "Target JVM" not in first_call_kwargs["existing_code_context"]
+
+@pytest.mark.asyncio
+async def test_workflow_java_goal_prompt_includes_java_toolchain_fact_when_tools_found(tmp_path):
+    """Complementary case: a goal that genuinely does mention Java must still
+    get the fact when the toolchain is actually found - the fix scopes the
+    fact to real evidence, it doesn't just disable it outright."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "App.java", "content": "public class App {}\n"}
+    ])
+    with patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "17",
+        "mismatch": False,
+    }):
+        res = await we.run_generation_workflow(
+            goal="Create a Java app using Maven", workspace_path=str(tmp_path)
+        )
+    assert res["quality_gates_passed"] is True
+    first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
+    assert "Environment Fact" in first_call_kwargs["existing_code_context"]
+    assert "JDK 17" in first_call_kwargs["existing_code_context"]
+
+@pytest.mark.asyncio
+async def test_workflow_applies_java_home_override_to_maven_subprocess(tmp_path):
+    """End-to-end regression test for the real, live-diagnosed gap:
+    maven.compiler.source/target controls the Java LANGUAGE version javac
+    targets, not which JDK 'mvn' itself runs under - a goal explicitly
+    stating "targeting Java 17" had no way to make Maven actually honor
+    that when 'mvn' defaults to a different JDK. Confirms
+    _resolve_java_home_override()'s result actually reaches the real Maven
+    subprocess call (via PolymorphicValidator.java_home_override), not just
+    the decision logic in isolation - the wiring gap that would make the
+    whole feature a no-op even with correct decision logic."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "pom.xml", "content": "<project></project>"}
+    ])
+    with patch(
+        "kriya.workflow.workflow._resolve_java_home_override", return_value="/opt/jdk-17",
+    ), patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("BUILD SUCCESS", "")
+        mock_popen.return_value = mock_process
+        res = await we.run_generation_workflow(
+            goal="Create a Java app using Maven, targeting Java 17", workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+    # subprocess.Popen is patched process-wide, so this also catches several
+    # OTHER real internal subprocess calls beyond the one this test actually
+    # cares about: create_git_worktree()'s own git commands (why the worktree
+    # gracefully falls back to workspace_path in this test's log output - its
+    # real output never matches this mock's generic response, a known-fine
+    # degrade-not-crash path), and check_java_toolchain()'s own unmocked
+    # `subprocess.run(["mvn", "-version"], ...)` preflight check (which never
+    # explicitly passes env=, unlike _run_cmd_with_timeout's real compile-check
+    # call, so it has no "env" key in its kwargs at all - filtering on cmd[0]
+    # == "mvn" alone isn't enough to land on the right call). Filter to a real
+    # mvn invocation that also explicitly passed env=, i.e. one that actually
+    # went through _run_cmd_with_timeout.
+    mvn_calls = [
+        c for c in mock_popen.call_args_list
+        if c.args and c.args[0] and c.args[0][0] == "mvn" and "env" in c.kwargs
+    ]
+    assert mvn_calls, mock_popen.call_args_list
+    _, kwargs = mvn_calls[0]
+    assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
 
 @pytest.mark.asyncio
 async def test_approve_web_lookup_true_when_auto_approve_set():
@@ -4161,15 +4723,93 @@ async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tm
     assert "App.java" in source_context
     assert ">> 3:" in source_context["App.java"]
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
-    conn.close()
-    gate_outcomes = json.loads(row["gate_outcomes"])
-    compile_failures = [o for o in gate_outcomes if o.get("type") == "compile" and not o["success"]]
-    assert len(compile_failures) == 1, gate_outcomes
-    assert compile_failures[0]["file_locations"] == [{"filepath": "App.java", "line": 3, "col": None}]
+@pytest.mark.asyncio
+async def test_workflow_passes_error_source_context_for_junit_stack_trace_test_failure(tmp_path):
+    """Regression test for a real bug found live (2026-08-07,
+    kriya-protocol-parser-app): unlike a compile error, a JUnit/JVM stack
+    trace's own file:line locator wasn't recognized at all before this
+    fix, so a targeted-test failure with a real stack trace got zero
+    source-line grounding threaded to the retry - confirms it now does,
+    the same way a compile failure already did. Writes a CalcTest.java
+    alongside Calc.java so extract_target_test() finds a real target and
+    this exercises the same TARGETED-test gate the live bug hit (not the
+    separate full-regression gate, which fires when no test file can be
+    identified at all)."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write Calc.java and CalcTest.java",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    stack_trace_error = (
+        "java.lang.ArithmeticException: / by zero\n"
+        "\tat com.example.Calc.divide(Calc.java:8)\n"
+        "\tat com.example.CalcTest.testDivide(CalcTest.java:12)\n"
+    )
+    # Line 8 must actually BE the divide statement, matching the stack
+    # trace's claimed location - _build_error_source_context() requires
+    # the reported line number to exist in the real file.
+    calc_java = "\n".join([
+        "package com.example;",
+        "",
+        "public class Calc {",
+        "",
+        "  int divide(int a, int b) {",
+        "",
+        "",
+        "    return a / b;",
+        "  }",
+        "}",
+    ])
+    calc_test_java = "\n".join([
+        "package com.example;",
+        "",
+        "public class CalcTest {",
+        "",
+        "  void testDivide() {",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "    Calc.divide(1, 0);",
+        "  }",
+        "}",
+    ])
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch("kriya.tools.validate.PolymorphicValidator.run_tests") as mock_tests:
+        mock_tests.side_effect = [
+            {"success": False, "output": stack_trace_error},  # attempt 1: targeted test fails
+            {"success": True, "output": ""},                  # attempt 2: targeted test passes
+            {"success": True, "output": ""},                  # attempt 2: full regression suite (always runs after)
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [
+                {"filepath": "Calc.java", "content": calc_java},
+                {"filepath": "CalcTest.java", "content": calc_test_java},
+            ],
+            [
+                {"filepath": "Calc.java", "content": calc_java.replace("return a / b;", "return b == 0 ? 0 : a / b;")},
+                {"filepath": "CalcTest.java", "content": calc_test_java},
+            ],
+        ])
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    source_context = second_call_kwargs["error_source_context"]
+    assert source_context is not None
+    assert "Calc.java" in source_context
+    assert ">> 8:" in source_context["Calc.java"]
 
 
 @pytest.mark.asyncio
@@ -4231,6 +4871,15 @@ async def test_workflow_anchored_edit_failure_captures_filepath(tmp_path):
     assert anchor_failures[0]["likely_files"] == ["App.java"]
     assert anchor_failures[0]["file_locations"] == [{"filepath": "App.java", "line": None, "col": None}]
     assert anchor_failures[0]["success"] is False
+    # Forensics gap closed 2026-08-07: the real pre-edit file content and the
+    # exact search/replace text that failed to match must both actually
+    # reach traces.db, not just be captured in memory and dropped before
+    # persistence - found live as undiagnosable via a real
+    # kriya-protocol-parser-app anchor-match failure.
+    assert anchor_failures[0]["failed_content"] == {"App.java": "class App {\n  Object x;\n}"}
+    assert anchor_failures[0]["attempted_edits"] == [
+        {"search": "this text does not appear anywhere in App.java", "replace": "class App {}"}
+    ]
 
 
 def test_incomplete_generation_error_carries_missing_files():

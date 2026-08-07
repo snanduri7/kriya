@@ -10,10 +10,21 @@ from kriya.core.llm import LLMClient
 logger = logging.getLogger(__name__)
 
 # Matches _build_error_source_context()'s own display gutter (">> N: " for
-# the reported line, "  N: " for surrounding context lines) - see
+# the reported line, "   N: " for surrounding context lines - the format
+# string there is f"{'>>' if ... else '  '} {i+1}: ...", so a NON-highlighted
+# line actually gets THREE leading spaces: the two-space placeholder plus the
+# f-string's own literal space before {i+1}, not two) - see
 # DeveloperAgent._split_fix_analysis_edit for why this needs stripping from
-# a model's SEARCH/REPLACE blocks before anchor matching.
-_GUTTER_PREFIX_RE = re.compile(r"^(?:>>\s*(?:\d+:)?|[ ]{2}\d+:)\s?", re.MULTILINE)
+# a model's SEARCH/REPLACE blocks before anchor matching. Confirmed live,
+# 2026-08-07 (kriya-protocol-parser-app, diagnosed directly from
+# Failure.attempted_edits once that started being persisted): a real SEARCH
+# block had the gutter copied verbatim and unstripped ("   58: // Extract
+# body...") because this pattern only ever matched an EXACT 2-space prefix,
+# never the real 3-space one - guaranteeing "matched 0 times" regardless of
+# whether the model's intended edit was otherwise correct. [ ]{2,} (2 OR
+# MORE) instead of a hardcoded exact count, so a future formatting tweak to
+# the leading-space count doesn't silently reopen the identical gap again.
+_GUTTER_PREFIX_RE = re.compile(r"^(?:>>\s*(?:\d+:)?|[ ]{2,}\d+:)\s?", re.MULTILINE)
 
 
 async def call_with_escalation(
@@ -161,7 +172,18 @@ class ArchitectAgent(BaseAgent):
             "already-existing Spring XML context. Check the Workspace Context above for what already exists before "
             "assuming a file only needs to be created. This list is the authoritative, complete set of files the "
             "Developer Agent must produce - do not mention any additional file path later in the design that is not "
-            "already in this list, and do not list a file here that you don't actually design."
+            "already in this list, and do not list a file here that you don't actually design.\n"
+            "\n"
+            "BUILD MANIFEST IS NOT IMPLICIT: if the goal or existing repository establishes Maven "
+            "(a 'Maven project', or any mention of pom.xml/Maven dependencies) or Gradle (a 'Gradle "
+            "project', or any mention of build.gradle), the corresponding pom.xml or build.gradle "
+            "MUST be its own explicit bullet in the Files to Create or Modify list, even though the "
+            "goal never asked for that file by name - the goal describing a Maven/Gradle project is "
+            "itself the request, since neither build tool can compile anything without its own "
+            "manifest declaring every external dependency the code needs. Confirmed live as a real, "
+            "repeated failure: a goal saying 'In a Maven project...' never mentioned pom.xml "
+            "explicitly, no attempt across an entire generation run ever created one, and every "
+            "single retry failed on the exact same missing-dependency compile errors as a result."
         )
 
 

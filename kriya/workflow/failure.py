@@ -54,10 +54,22 @@ class Failure:
     # overwritten it yet). Closes a real forensics gap found live
     # (2026-08-04 eval harness batch): a failed attempt's actual generated
     # content was otherwise never persisted anywhere, only the tool's error
-    # text - impossible to root-cause after the fact. In-memory only for
-    # this run (available to prompt-building and gate_outcomes/trace
-    # logging); persisting it past process exit is a separate follow-up.
+    # text - impossible to root-cause after the fact. Now persisted into
+    # gate_outcomes/traces.db by to_gate_outcome() below (2026-08-07) - a
+    # real anchor-match failure (kriya-protocol-parser-app) turned out to
+    # be undiagnosable after the fact precisely because this was captured
+    # in memory but silently dropped before persistence, the exact gap
+    # this field's own docstring used to flag as a deferred follow-up.
     failed_content: Dict[str, str] = field(default_factory=dict)
+    # The exact search/replace text an anchored edit attempted, captured at
+    # the anchored_edit raise site alongside failed_content (the original
+    # content the search block was supposed to match against) - together
+    # they're exactly what's needed to see WHY a "matched 0 times" anchor
+    # failure happened (whitespace drift, a gutter/fence artifact that
+    # slipped past sanitize_generated_content, a stale search target)
+    # without needing to reproduce the failure with debug logging enabled.
+    # Empty for every failure type other than anchored_edit.
+    attempted_edits: List[Dict[str, str]] = field(default_factory=list)
     attempt: int = 0
     mode: Optional[str] = None
 
@@ -78,6 +90,8 @@ class Failure:
                 {"filepath": loc.filepath, "line": loc.line, "col": loc.col}
                 for loc in self.file_locations
             ],
+            "failed_content": dict(self.failed_content),
+            "attempted_edits": list(self.attempted_edits),
         }
 
 

@@ -950,6 +950,23 @@ _JVM_STARTUP_FAILURE_MARKERS = (
     "Could not create the Java Virtual Machine",
 )
 
+# Qpid Broker-J's own internal logging (AbstractMessageLogger.getLogActor())
+# unconditionally calls the JDK's Subject.getSubject() - an API tied to the
+# Security Manager, which JEP 486 permanently removed in JDK 24+. Confirmed
+# live, 2026-08-07 (ignite_qpid_person, immediately after the
+# _strip_jdk_incompatible_jvm_flags fix started correctly removing the now-
+# forbidden -Djava.security.manager=allow flag on a resolved JDK 26 target):
+# the broker then crashes on this instead, regardless of whether that flag is
+# present or absent - a genuine Qpid-Broker-J-version-vs-JDK-24+
+# incompatibility, not a code defect either way, and distinct enough from a
+# plain VM-startup-flag crash (_JVM_STARTUP_FAILURE_MARKERS above) to warrant
+# its own, more specific message rather than the generic "JVM flag
+# unsupported" one. Without this, the retry loop burned two full attempts
+# trying to code-fix it - both correctly concluding (per skill rule) that the
+# flag shouldn't be re-added, both still hitting the identical crash anyway -
+# before ever escalating past it.
+_QPID_JDK24_SECURITY_MANAGER_API_MARKER = "getSubject is not supported"
+
 # Only matches the specific "Failed to invoke/execute ...: [Errno 2] No such
 # file or directory: '<name>'" wrapper PolymorphicValidator itself produces
 # when a subprocess.run() call can't find the launched executable at all
@@ -984,7 +1001,133 @@ def _check_java_toolchain_mismatch(stack: str) -> Optional[str]:
     )
 
 
-def _java_toolchain_fact() -> Optional[str]:
+_JAVA_VERSION_MENTION_PATTERN = re.compile(r"\bjava\s+(\d{1,2})\b", re.IGNORECASE)
+
+
+def _resolve_jdk_home_for_version(version: str) -> Optional[str]:
+    """Resolves the real JDK home directory for a SPECIFIC major version
+    number, using whichever mechanism is actually reliable on this platform
+    - not one "portable" heuristic, since what 'java' on PATH even points to
+    differs fundamentally by OS.
+
+    Confirmed live, 2026-08-07, as a real, damaging bug in the original
+    single-heuristic design: on macOS, 'java' on PATH is ALWAYS Apple's own
+    dispatcher stub (`/usr/bin/java`) - a real, non-symlinked, root-owned
+    file, never a symlink into an actual JDK. Deriving a JDK home by walking
+    up from it (dirname(dirname(realpath('java')))) silently produced
+    '/usr' - a directory that happened to satisfy the '.../bin/java' layout
+    check but obviously isn't a JDK home. Set as JAVA_HOME, it hung a real
+    `mvn clean compile` subprocess indefinitely rather than erroring
+    cleanly, discovered live via `ps` showing the process stuck with near-
+    zero CPU time. macOS ships exactly the right tool for this instead:
+    `/usr/libexec/java_home -v <version>`, which resolves a SPECIFIC
+    registered JDK version directly - more precise than deriving from
+    whatever 'java' happens to point to, and unaffected by 'java' being a
+    stub at all.
+
+    On non-macOS platforms (Linux, where 'java' on PATH is typically a real
+    symlink chain into an actual JDK install via update-alternatives or
+    similar - no equivalent stub layer), falls back to resolving 'java' on
+    PATH through any symlinks and relying on the standard
+    '<JDK home>/bin/java' layout convention; the caller has already
+    confirmed via check_java_toolchain() that 'java' resolves to the wanted
+    version before this is ever called, so no version re-validation is
+    needed on that path.
+
+    Best-effort and defensive throughout - returns None (never raises) if
+    the version can't actually be resolved this way."""
+    if sys.platform == "darwin" and os.path.exists("/usr/libexec/java_home"):
+        try:
+            result = subprocess.run(
+                ["/usr/libexec/java_home", "-v", version],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                home = result.stdout.strip()
+                return home if home and os.path.isdir(home) else None
+        except Exception as e:
+            logger.debug(f"Failed to resolve JDK {version} home via /usr/libexec/java_home: {e}")
+        return None
+
+    java_path = shutil.which("java")
+    if not java_path:
+        return None
+    try:
+        real_path = os.path.realpath(java_path)
+        bin_dir = os.path.dirname(real_path)
+        if os.path.basename(bin_dir) != "bin":
+            return None
+        jdk_home = os.path.dirname(bin_dir)
+        return jdk_home if os.path.isdir(jdk_home) else None
+    except Exception as e:
+        logger.debug(f"Failed to resolve JDK home from 'java' on PATH: {e}")
+        return None
+
+
+def _resolve_java_home_override(goal: str) -> Optional[str]:
+    """When 'java' and 'mvn' resolve to different JDK major versions AND the
+    goal explicitly states a target Java version matching the 'java' side of
+    that mismatch (not 'mvn's), derives that JDK's real home directory so
+    PolymorphicValidator can force every Maven subprocess call to actually
+    build/run under it via JAVA_HOME - the same mechanism Maven's own
+    launcher script already uses to decide which JDK to run itself under.
+
+    Motivated by a real, live-confirmed gap: 'maven.compiler.source/target'
+    in pom.xml controls what Java LANGUAGE version javac targets, not which
+    JDK 'mvn' itself actually runs under - those are independent, and a
+    goal explicitly saying "targeting Java 17" has no way to make Maven
+    actually honor that if the machine's 'mvn' defaults to a different,
+    genuinely incompatible JDK (confirmed live: JDK 26 permanently removed
+    the Security Manager, breaking a Qpid Broker-J API call with no
+    connection to anything the generated code controls).
+
+    Deliberately narrow, matching this session's own established pattern for
+    fixes like this: only activates for a real, detected mismatch where the
+    goal names a version matching the SIDE OF THE MISMATCH THAT'S ALREADY
+    CORRECT ('java', confirmed to already resolve to what's wanted) - never
+    guesses at a version the goal doesn't state, never overrides a mismatch
+    the goal doesn't actually care about, and does nothing at all on a
+    single-JDK machine (nothing to reconcile)."""
+    from kriya.tools.validate import check_java_toolchain
+    toolchain = check_java_toolchain()
+    if not toolchain["mismatch"]:
+        return None
+    m = _JAVA_VERSION_MENTION_PATTERN.search(goal)
+    if not m or m.group(1) != toolchain["java_version"]:
+        return None
+    return _resolve_jdk_home_for_version(toolchain["java_version"])
+
+
+def _goal_or_repo_targets_java(goal: str, workspace_path: str) -> bool:
+    """Whether there's real evidence THIS generation is actually about Java -
+    either the workspace already has Java markers (an existing/extended
+    project - mirrors PolymorphicValidator._detect_stack()'s own marker set,
+    checked directly since no PolymorphicValidator instance exists yet this
+    early), or the goal text itself names Java/the JVM/a JVM build tool
+    explicitly (covers a brand-new Java goal, where no pom.xml/build.gradle
+    exists on disk yet at prompt-build time - before ANY file Kriya writes).
+
+    Gates _java_toolchain_fact() below. Confirmed live (2026-08-06 eval
+    harness) as the likely real root cause of the long-open "Django goal
+    produced Java/Spring code" ecosystem-drift mystery (2026-08-04, never
+    fully explained): _java_toolchain_fact() used to fire unconditionally
+    whenever Maven/Java were found anywhere ON THE MACHINE, regardless of
+    the current goal - so on a machine with Java tooling installed (needed
+    for OTHER goals), a pure Django prompt got an unrelated "Target JVM:
+    JDK 26" fact injected right next to the ecosystem-preservation
+    invariant telling the model NOT to write Java, directly contradicting
+    it in the same prompt. Not exhaustive by design (a Java goal that never
+    says "Java"/"Maven"/"Gradle"/"Spring"/"JVM" and isn't extending an
+    existing Java project would miss this fact) - that's a narrower,
+    rarer miss than the false-positive-on-every-non-Java-goal bug it
+    replaces."""
+    if (os.path.exists(os.path.join(workspace_path, "pom.xml")) or
+            os.path.exists(os.path.join(workspace_path, "build.gradle"))):
+        return True
+    return bool(re.search(r"\b(java|jvm|maven|gradle|spring(?:\s*boot)?)\b", goal, re.IGNORECASE))
+
+
+def _java_toolchain_fact(goal: str, workspace_path: str) -> Optional[str]:
     """Surfaces the actual, resolved target JVM as a concrete fact for the
     Planner/Architect/Developer prompts - not a warning like
     _check_java_toolchain_mismatch(), just ground truth. Skill rules that are
@@ -998,14 +1141,142 @@ def _java_toolchain_fact() -> Optional[str]:
     the model what JDK it was actually generating for. Prefers the JDK 'mvn'
     itself will build/run against (what a generated app's exec:java/exec:exec
     invocation actually executes under) over plain 'java', falling back to
-    'java' if mvn isn't present. Returns None if neither tool is found - a
-    non-Java project never pays for or sees this."""
+    'java' if mvn isn't present. Returns None if neither tool is found, OR if
+    _goal_or_repo_targets_java() finds no real evidence this generation is
+    actually about Java - a non-Java project never pays for or sees this
+    (the check this docstring always claimed, but didn't actually enforce
+    until the fix documented on _goal_or_repo_targets_java above)."""
+    if not _goal_or_repo_targets_java(goal, workspace_path):
+        return None
     from kriya.tools.validate import check_java_toolchain
     toolchain = check_java_toolchain()
     version = toolchain["mvn_java_version"] or toolchain["java_version"]
     if not version:
         return None
     return f"Target JVM (resolved on this machine via 'mvn'/'java'): JDK {version}."
+
+
+# Small, extensible table of (JVM flag substring, min JDK major version it's
+# forbidden on, human reason) - deliberately NOT a generic "flag
+# compatibility" subsystem, since only one real instance of this problem
+# class has ever been found. Add the next one here as its own tuple if/when
+# it's found; this stays a plain list either way, not new infrastructure.
+_JDK_INCOMPATIBLE_JVM_FLAGS: List[Tuple[str, int, str]] = [
+    (
+        "-Djava.security.manager=allow", 24,
+        "JEP 486 removed the Security Manager entirely in JDK 24 - passing "
+        "this flag now itself crashes VM startup with \"Enabling a Security "
+        "Manager is not supported.\"",
+    ),
+]
+
+
+def _strip_jdk_incompatible_jvm_flags(worktree_path: str) -> Optional[str]:
+    """Deterministically strips a JVM flag from the worktree's pom.xml
+    exec-maven-plugin <argument> list when it's known to be fatal on the
+    actually-resolved target JDK, right before the run-verification gate
+    actually executes the app - the correction of last resort for a mistake
+    the model keeps making even with everything it needs to avoid it.
+
+    Confirmed live, 2026-08-07: skills/qpid/rules.txt already states this
+    exact JDK-version-conditional rule correctly ("on JDK 24+, DO NOT pass
+    this flag... check the Target JVM fact given in this prompt"), and
+    _java_toolchain_fact() (above) already correctly surfaces that exact
+    fact in the prompt - `active_skills` confirmed both were active, the
+    fact was present, and the model still added the forbidden flag on every
+    attempt of a real batch run. A case where deterministic tooling is the
+    right lever, not more prompting (see the durable lesson on file about
+    this) - mirrors _resolve_run_command()'s existing pattern of
+    deterministically correcting a known-wrong invocation detail rather
+    than asking the model to get it right.
+
+    Best-effort and silent on any I/O problem - this is a defensive
+    correction, not a required step, and must never itself break a run that
+    would otherwise be fine. Returns a human-readable note describing what
+    was stripped (for logging/toolchain_warning), or None if nothing
+    needed correcting."""
+    pom_path = os.path.join(worktree_path, "pom.xml")
+    if not os.path.exists(pom_path):
+        return None
+    try:
+        from kriya.tools.validate import check_java_toolchain
+        toolchain = check_java_toolchain()
+        version_str = toolchain["mvn_java_version"] or toolchain["java_version"]
+        if not version_str:
+            return None
+        resolved_major = int(version_str)
+
+        with open(pom_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        notes = []
+        for flag, min_forbidden_jdk, reason in _JDK_INCOMPATIBLE_JVM_FLAGS:
+            if resolved_major < min_forbidden_jdk or flag not in content:
+                continue
+            pattern = re.compile(rf"[ \t]*<argument>\s*{re.escape(flag)}\s*</argument>[ \t]*\n?")
+            new_content, count = pattern.subn("", content)
+            if count:
+                content = new_content
+                notes.append(
+                    f"Stripped '{flag}' from pom.xml before running - {reason} "
+                    f"(resolved target: JDK {resolved_major})."
+                )
+
+        if not notes:
+            return None
+        with open(pom_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return " ".join(notes)
+    except Exception as e:
+        logger.debug(f"_strip_jdk_incompatible_jvm_flags failed (non-fatal, skipping): {e}")
+        return None
+
+
+_UNRESOLVED_PACKAGE_PATTERN = re.compile(r"package [\w.]+ does not exist")
+
+
+def _detect_missing_build_manifest(worktree_path: str, raw_error_text: str) -> Optional[str]:
+    """Deterministically detects a Java compile failure caused by a build
+    manifest the Architect never explicitly asked the Developer to create -
+    not one the Developer merely dropped after being asked (that's
+    IncompleteGenerationError's job, and it already works).
+
+    Confirmed live, 2026-08-07 (kriya-protocol-parser-app): pom.xml was
+    never written across two separate full runs, three days apart. Every
+    retry's own fix-analysis correctly diagnosed "the dependencies aren't
+    declared in pom.xml" and explicitly declined to fix it, since a
+    per-file targeted retry is told (correctly, in every other case) to
+    stay in scope. extract_implicated_files()'s basename-in-text matching
+    can never implicate pom.xml either, since a "package X does not exist"
+    error never names the missing manifest file that's the real cause -
+    so nothing in the retry loop could ever recover it, no matter how many
+    attempts ran, because it was never requested in the first place, not
+    because it was requested and lost.
+
+    Fires purely from the error shape and the worktree's own current state,
+    independent of whether the Architect's design ever listed the file at
+    all - closes that structural blind spot as its own detection path,
+    parallel to (not replacing) IncompleteGenerationError. A "package X does
+    not exist" error can only happen for a genuinely external dependency (a
+    JDK-standard java.*/javax.* package always resolves regardless of any
+    build manifest), so requiring BOTH "no pom.xml/build.gradle exists" AND
+    this specific error shape is a low-false-positive combination - a
+    stdlib-only Java goal that never needed a manifest at all will simply
+    never produce this error shape to begin with.
+
+    Deliberately Maven-specific (returns "pom.xml", never "build.gradle") -
+    only one real instance of this problem class has been found, and it was
+    a Maven goal; a Gradle instance would need its own detection (different
+    error shape) rather than being guessed at here. Mirrors
+    _JDK_INCOMPATIBLE_JVM_FLAGS' philosophy: fix the confirmed instance
+    precisely, don't build generality for one that hasn't happened yet."""
+    if os.path.exists(os.path.join(worktree_path, "pom.xml")):
+        return None
+    if os.path.exists(os.path.join(worktree_path, "build.gradle")):
+        return None
+    if _UNRESOLVED_PACKAGE_PATTERN.search(raw_error_text):
+        return "pom.xml"
+    return None
 
 
 def classify_environment_failure(error_text: str) -> Optional[str]:
@@ -1027,6 +1298,17 @@ def classify_environment_failure(error_text: str) -> Optional[str]:
                 "defect, most likely a JVM flag unsupported by the actually-"
                 "resolved Java version (see `kriya doctor`)."
             )
+    if _QPID_JDK24_SECURITY_MANAGER_API_MARKER in error_text:
+        return (
+            "Qpid Broker-J's own internal logging calls a JDK Security-Manager-era "
+            "API (Subject.getSubject()) that throws UnsupportedOperationException "
+            "once the Security Manager is permanently removed (JEP 486, JDK 24+) - "
+            "not a code defect, and not fixable by adding or omitting "
+            "-Djava.security.manager=allow either way (that flag is itself "
+            "forbidden on this JDK range). A genuine Qpid Broker-J version vs. "
+            "JDK 24+ incompatibility - resolve with a newer Qpid Broker-J release "
+            "known to support JDK 24+, or by targeting an older JDK."
+        )
     m = _MISSING_EXECUTABLE_PATTERN.search(error_text)
     if m:
         return (
@@ -1114,7 +1396,10 @@ def extract_error_search_terms(
     return terms
 
 
-_ERROR_LOCATION_PATTERN = re.compile(r"([\w./\\-]+\.java):\[(\d+),\d+\]")
+_ERROR_LOCATION_PATTERN = re.compile(
+    r"([\w./\\-]+\.java):\[(\d+),\d+\]"    # javac compile-error shape: File.java:[line,col]
+    r"|\(([\w.-]+\.java):(\d+)\)"          # Java stack-trace shape: (File.java:line)
+)
 
 
 def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
@@ -1129,11 +1414,34 @@ def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
     anticipate each message shape in advance. Returns the bare basename
     referenced in the error text (which may be an absolute worktree path,
     e.g. '.../worktree/src/main/java/com/example/Foo.java:[91,79]') - callers
-    resolve it against the known written-files list."""
+    resolve it against the known written-files list.
+
+    ALSO recognizes a JUnit/JVM stack trace's own locator shape
+    ('at pkg.Class.method(File.java:60)') - confirmed live, 2026-08-07
+    (kriya-protocol-parser-app): a real test failure (BufferUnderflowException
+    in a hand-rolled binary parser's decode()) carried this exact file:line
+    precision, but the compile-error-only regex never recognized it, so this
+    failure class got zero source-line grounding and no anchored-edit
+    preference - unlike a compile error with the identical kind of precision,
+    just a different textual shape. The model's own fix-analysis correctly
+    diagnosed the bug but, with no precise anchor to patch against, fell back
+    to full-file regeneration and reintroduced an equivalent bug - the exact
+    failure mode _build_error_source_context/anchored-edit preference exists
+    to prevent, just never wired up for this shape. Purely local: reads real
+    source lines from the worktree to show the LOCAL model, in the SAME
+    prompt-building path a compile error already uses - not related to, and
+    does not touch, extract_error_search_terms()'s separate, narrowly-scoped
+    live-lookup mechanism (a hard-coded Maven/Gradle-coordinate-only regex
+    that never sees raw error/stack-trace text at all, by design - see its
+    own docstring). Both location shapes share this one function/return
+    contract; a match's file/line comes from whichever alternative matched
+    (group 1/2 for the compile shape, group 3/4 for the stack-trace shape)."""
     seen = set()
     locations: List[Tuple[str, int]] = []
     for m in _ERROR_LOCATION_PATTERN.finditer(error_text):
-        key = (os.path.basename(m.group(1)), int(m.group(2)))
+        filepath = m.group(1) or m.group(3)
+        line = m.group(2) or m.group(4)
+        key = (os.path.basename(filepath), int(line))
         if key not in seen:
             seen.add(key)
             locations.append(key)
@@ -1853,7 +2161,7 @@ class WorkflowEngine:
         se.discover_and_load()
         
         convention_prompt = ""
-        java_toolchain_fact = _java_toolchain_fact()
+        java_toolchain_fact = _java_toolchain_fact(goal, workspace_path)
         if java_toolchain_fact:
             convention_prompt += f"\n\n=== Environment Fact ===\n{java_toolchain_fact}\n"
         if gap_report.has_gaps:
@@ -2684,6 +2992,12 @@ class WorkflowEngine:
         # persists into the final result regardless of pass/fail.
         toolchain_checked = False
         toolchain_warning: Optional[str] = None
+        # Computed alongside the toolchain check above (same one-shot gate) -
+        # see _resolve_java_home_override for when this actually gets set to
+        # something. Threaded into every PolymorphicValidator construction
+        # below so a detected, goal-relevant JDK mismatch actually gets
+        # corrected for real subprocess calls, not just warned about.
+        java_home_override: Optional[str] = None
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -2974,6 +3288,10 @@ class WorkflowEngine:
                             # orig_text (the real pre-edit content the SEARCH block was
                             # supposed to match against) is already in memory - exactly what's
                             # needed to debug an anchor mismatch, no disk re-read needed.
+                            # edits (the actual search/replace text that was attempted, already
+                            # sanitized) is captured alongside it as attempted_edits - together
+                            # both halves of "why didn't this match" are now persisted, not just
+                            # the generic "matched 0 times" message.
                             failure = Failure(
                                 type="anchored_edit",
                                 message=f"ANCHORED EDIT FAILURE in {filepath}: {anchor_ex}",
@@ -2981,6 +3299,7 @@ class WorkflowEngine:
                                 file_locations=[FileLocation(filepath=filepath)],
                                 likely_files=[filepath],
                                 failed_content={filepath: orig_text},
+                                attempted_edits=edits,
                                 attempt=attempt_number,
                             )
                             gate_outcomes.append(failure.to_gate_outcome())
@@ -3025,6 +3344,18 @@ class WorkflowEngine:
                         toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
                         if toolchain_warning:
                             logger.warning(f"Toolchain preflight: {toolchain_warning}")
+                        if validator.stack == "java":
+                            java_home_override = _resolve_java_home_override(goal)
+                            if java_home_override:
+                                logger.warning(
+                                    "JVM toolchain enforcement: forcing Maven subprocess calls to "
+                                    f"run under JAVA_HOME={java_home_override} - the goal-stated Java "
+                                    "version doesn't match what 'mvn' resolves to by default here."
+                                )
+                    # Constructed fresh above (a new validator every attempt) - re-apply
+                    # the one-time-resolved override every time, not just when it was
+                    # just computed.
+                    validator.java_home_override = java_home_override
 
                     compile_res = validator.run_compile_check(list(all_files_written))
                     if not compile_res["success"]:
@@ -3130,6 +3461,13 @@ class WorkflowEngine:
                                     logger.info(
                                         "One or more inferred run commands aren't resolvable as given here - "
                                         "substituted Kriya's own interpreter/PATH-resolved equivalents."
+                                    )
+                                jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(worktree_path)
+                                if jvm_flag_correction:
+                                    logger.warning(f"JVM flag preflight: {jvm_flag_correction}")
+                                    toolchain_warning = (
+                                        f"{toolchain_warning} {jvm_flag_correction}"
+                                        if toolchain_warning else jvm_flag_correction
                                     )
                                 logger.info(
                                     "Quality Gates: Running runtime verification: "
@@ -3499,6 +3837,15 @@ class WorkflowEngine:
                     toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
                     if toolchain_warning:
                         logger.warning(f"Toolchain preflight: {toolchain_warning}")
+                    if validator.stack == "java":
+                        java_home_override = _resolve_java_home_override(goal)
+                        if java_home_override:
+                            logger.warning(
+                                "JVM toolchain enforcement: forcing Maven subprocess calls to "
+                                f"run under JAVA_HOME={java_home_override} - the goal-stated Java "
+                                "version doesn't match what 'mvn' resolves to by default here."
+                            )
+                validator.java_home_override = java_home_override
 
                 full_test_res = validator.run_tests()
                 if not full_test_res["success"]:
@@ -3626,8 +3973,25 @@ class WorkflowEngine:
                     # to the legacy regex scan only for the general_error case (a bare,
                     # unexpected Exception with no Failure of its own).
                     implicated = failure.likely_files or extract_implicated_files(raw_error_context, all_files_written)
-                    last_implicated_files = implicated if implicated else None
-                    last_missing_files = None
+                    # A missing build manifest the Architect never asked for at all
+                    # (see _detect_missing_build_manifest) takes priority over normal
+                    # implication scoping - extract_implicated_files() can never name
+                    # a file that was never written and never mentioned in the error
+                    # text, so without this check a "package X does not exist" error
+                    # would keep re-targeting the files that DO exist (which already
+                    # correctly declined to fix a dependency problem outside their
+                    # own scope) forever, rather than ever generating the one file
+                    # that would actually fix it.
+                    missing_manifest = (
+                        _detect_missing_build_manifest(worktree_path, raw_error_context)
+                        if fail_type == "compile" else None
+                    )
+                    if missing_manifest:
+                        last_missing_files = [missing_manifest]
+                        last_implicated_files = None
+                    else:
+                        last_implicated_files = implicated if implicated else None
+                        last_missing_files = None
 
                 # Generic across ANY compile error shape (see
                 # extract_error_source_locations) - the exact broken source

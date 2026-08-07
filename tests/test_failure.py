@@ -20,7 +20,32 @@ def test_failure_to_gate_outcome_shape():
         "mode": "targeted",
         "likely_files": ["App.java"],
         "file_locations": [{"filepath": "App.java", "line": 12, "col": None}],
+        "failed_content": {},
+        "attempted_edits": [],
     }
+
+
+def test_failure_to_gate_outcome_persists_failed_content_and_attempted_edits():
+    """Regression test for a real forensics gap found live, 2026-08-07
+    (kriya-protocol-parser-app): failed_content was captured on the Failure
+    object at the moment of failure but to_gate_outcome() silently dropped
+    it before persistence - a real anchor-match failure ("matched 0 times")
+    was undiagnosable after the fact because neither the original file
+    content nor the actual attempted search/replace text ever reached
+    traces.db, only the generic error message. Both are now persisted
+    together, since diagnosing an anchor mismatch needs both halves."""
+    failure = Failure(
+        type="anchored_edit",
+        message="ANCHORED EDIT FAILURE in ProtocolParser.java: matched 0 times",
+        raw_output="matched 0 times",
+        likely_files=["ProtocolParser.java"],
+        failed_content={"ProtocolParser.java": "class ProtocolParser {\n  void decode() {}\n}"},
+        attempted_edits=[{"search": ">> 58: old line", "replace": "new line"}],
+        attempt=3,
+    )
+    outcome = failure.to_gate_outcome()
+    assert outcome["failed_content"] == {"ProtocolParser.java": "class ProtocolParser {\n  void decode() {}\n}"}
+    assert outcome["attempted_edits"] == [{"search": ">> 58: old line", "replace": "new line"}]
 
 
 def test_failure_to_gate_outcome_falls_back_to_message_when_raw_output_empty():
@@ -48,4 +73,5 @@ def test_failure_defaults_are_empty_not_none():
     assert failure.file_locations == []
     assert failure.likely_files == []
     assert failure.failed_content == {}
+    assert failure.attempted_edits == []
     assert failure.diagnostics is None

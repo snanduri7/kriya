@@ -39,10 +39,20 @@ building it.
 ## Running it
 
 Needs a live LLM/embedding endpoint reachable at the model(s) you pass (or
-the `KRIYA_LIVE_LLM_MODEL`/`KRIYA_LIVE_EMBED_MODEL`/`KRIYA_LIVE_BASE_URL`
-env vars, defaulting to a local Ollama instance) - **and, only for the
-`django_healthcheck_gap` goal, real internet access**, since KnowledgeGuard
-looks up real PyPI release dates.
+the `KRIYA_LIVE_LLM_MODEL`/`KRIYA_LIVE_EMBED_MODEL`/`KRIYA_LIVE_BASE_URL`/
+`KRIYA_LIVE_FALLBACK_MODEL` env vars, defaulting to a local Ollama instance)
+- **and, only for the `django_healthcheck_gap` goal, real internet access**,
+since KnowledgeGuard looks up real PyPI release dates.
+
+Each goal's generated `kriya.yaml` sets an explicit, fast, non-reasoning
+`llm_chain` fallback (`--fallback-model`, default `deepseek-coder-v2:16b`) -
+deliberately NOT left to inherit Kriya's own packaged `default_config.yaml`
+chain (`deepseek-r1:32b`, a reasoning model). Confirmed live, 2026-08-06/07:
+escalating to that reasoning model can single-handedly burn the whole
+`--timeout-per-goal` budget on its own (individual completions took 2-5+
+minutes each, on `python_task_tracker` and `ignite_qpid_person`), consistent
+with the separately-cited finding that a reasoning model gave zero
+correctness benefit for a fact-recall-class retry while being 13x slower.
 
 ```bash
 .venv/bin/python spikes/eval_harness/run_harness.py \

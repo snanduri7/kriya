@@ -554,6 +554,45 @@ def test_split_fix_analysis_edit_strips_gutter_with_line_number_preserved():
         "import org.apache.ignite.cache.IgniteCache;"
     )
 
+def test_split_fix_analysis_edit_strips_the_real_three_space_gutter_format(tmp_path):
+    """Regression test for a real bug found live, 2026-08-07
+    (kriya-protocol-parser-app), diagnosed directly from
+    Failure.attempted_edits once that started being persisted:
+    _build_error_source_context()'s actual non-highlighted gutter format is
+    THREE leading spaces ("   N: "), not two - the format string is
+    f"{'>>' if ... else '  '} {i+1}: ...", so the two-space placeholder plus
+    the f-string's own literal separator space adds up to three. The gutter
+    regex only ever matched an exact two-space prefix, so a real SEARCH
+    block that copied this exact format verbatim went unstripped,
+    guaranteeing "matched 0 times" regardless of whether the model's
+    intended edit was otherwise correct. Generates the gutter via the REAL
+    _build_error_source_context() (not a hand-typed guess at its format,
+    which is exactly how the original 2-vs-3-space mismatch went unnoticed)
+    so this test breaks immediately if the two ever drift apart again."""
+    from kriya.workflow.workflow import _build_error_source_context
+
+    (tmp_path / "Calc.java").write_text(
+        "\n".join(f"line {i}" for i in range(1, 10))
+    )
+    error = "at com.example.Calc.divide(Calc.java:5)"
+    context = _build_error_source_context(str(tmp_path), error, known_files=["Calc.java"])
+    real_gutter_snippet = context["Calc.java"].strip()
+    assert real_gutter_snippet.startswith("=== Source context")
+    # Pull just the gutter-formatted lines (skip the header line above) to
+    # use as a real SEARCH block, exactly as a model copying them verbatim
+    # would produce.
+    gutter_lines = "\n".join(real_gutter_snippet.splitlines()[1:])
+    assert "   4: line 4" in gutter_lines  # confirms the real format IS 3 spaces, not 2
+
+    text = f"SEARCH:\n{gutter_lines}\nREPLACE:\nreplacement"
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits is not None
+    search_block = edits[0]["search"]
+    for line_no in range(2, 9):
+        assert f"line {line_no}" in search_block
+    assert "   " not in search_block  # no unstripped 3-space gutter survives
+    assert ">>" not in search_block   # the highlighted-line marker is also gone
+
 def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
     # Must NOT strip legitimate 2-space (or deeper) indentation on real code
     # that has no line-number gutter - only the exact ">>"/"  N:" shapes
@@ -1308,3 +1347,17 @@ def test_architect_prompt_requires_listing_files_that_need_modification_too():
     prompt = ArchitectAgent("architect", None).system_prompt
     assert "Files to Create or Modify" in prompt
     assert "already-existing" in prompt.lower() or "existing files" in prompt.lower()
+
+def test_architect_agent_requires_explicit_build_manifest():
+    """Regression test for a real bug found live (2026-08-07,
+    kriya-protocol-parser-app): a goal saying 'In a Maven project...' never
+    explicitly asked for pom.xml, the Architect's design never listed it
+    either, and no attempt across an entire generation run ever created
+    one - every retry failed on the same missing-dependency compile errors
+    since nothing in the retry loop could recover a file that was never
+    requested in the first place (see _detect_missing_build_manifest's
+    structural fix for the other half of this)."""
+    prompt = ArchitectAgent("architect", None).system_prompt
+    assert "pom.xml" in prompt
+    assert "build.gradle" in prompt
+    assert "not implicit" in prompt.lower()

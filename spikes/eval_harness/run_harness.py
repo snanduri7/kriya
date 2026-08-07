@@ -30,6 +30,20 @@ from goals import GOALS
 LIVE_LLM_MODEL = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b")
 LIVE_EMBED_MODEL = os.environ.get("KRIYA_LIVE_EMBED_MODEL", "embeddinggemma:latest")
 LIVE_BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")
+# Kriya's own packaged default_config.yaml ships deepseek-r1:32b (reasoning: true)
+# as the sole llm_chain fallback - a reasonable default for a project's OWN
+# config to pick deliberately, but a real problem for an UNATTENDED harness
+# that never overrode it: confirmed live, 2026-08-06/07 (python_task_tracker,
+# ignite_qpid_person), that escalating to a reasoning model can single-handedly
+# burn the harness's --timeout-per-goal budget - individual completions took
+# 2-5+ minutes each, consistent with the already-cited spike finding
+# (spikes/tool_call_developer/run_spike_reasoning_on_retry.py) that a reasoning
+# model was 13x slower for zero correctness benefit on a fact-recall-class
+# retry. deepseek-coder-v2:16b is the same fast, non-reasoning fallback
+# kriya-protocol-parser-app's own kriya.yaml independently chose and never hit
+# this problem with - not a guess, a model already validated live in this
+# exact fallback role.
+LIVE_FALLBACK_MODEL = os.environ.get("KRIYA_LIVE_FALLBACK_MODEL", "deepseek-coder-v2:16b")
 
 HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -43,7 +57,7 @@ def _init_git_repo(path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
-def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url):
+def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model):
     # paths.skills/memory stay relative (resolved against this config file's own
     # directory, i.e. per-goal-isolated - see CLAUDE.md's config-resolution note)
     # so one goal's skill/RAG state can never leak into another's. paths.logs is
@@ -54,6 +68,15 @@ def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url)
             "provider": "openai", "model": model, "base_url": base_url,
             "temperature": 0.2, "api_key": "local-key",
         },
+        # Explicit, fast, non-reasoning fallback - see LIVE_FALLBACK_MODEL's own
+        # comment for why this can't be left to inherit Kriya's packaged
+        # default_config.yaml chain (deepseek-r1:32b, reasoning: true) here.
+        "llm_chain": [
+            {
+                "model": fallback_model, "base_url": base_url,
+                "reasoning": False, "context_window": 16384, "temperature": 0.2,
+            },
+        ],
         "embedding": {"model": embed_model, "base_url": base_url},
         "autonomy": {
             "mode": "guardrails",
@@ -103,6 +126,11 @@ def main():
     parser.add_argument("--model", default=LIVE_LLM_MODEL)
     parser.add_argument("--embed-model", default=LIVE_EMBED_MODEL)
     parser.add_argument("--base-url", default=LIVE_BASE_URL)
+    parser.add_argument("--fallback-model", default=LIVE_FALLBACK_MODEL,
+                         help="Non-reasoning llm_chain fallback for every goal's kriya.yaml - "
+                              "deliberately explicit, not inherited from Kriya's own packaged "
+                              "default (a reasoning model), which was confirmed live to burn "
+                              "--timeout-per-goal on its own.")
     parser.add_argument("--goal-id", action="append", default=None,
                          help="Run only these goal id(s) instead of the full set. Repeatable.")
     parser.add_argument("--timeout-per-goal", type=int, default=1200,
@@ -123,12 +151,12 @@ def main():
     os.makedirs(logs_dir, exist_ok=True)
 
     print(f"Eval harness batch: {batch_dir}")
-    print(f"Model: {args.model} | Embed: {args.embed_model} | Base URL: {args.base_url}")
+    print(f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}")
     print(f"Goals: {[g.id for g in goals]}\n")
 
     summary_lines = [
         f"Eval harness batch {batch_ts}",
-        f"Model: {args.model} | Embed: {args.embed_model} | Base URL: {args.base_url}",
+        f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}",
         f"traces.db: {os.path.join(logs_dir, 'traces.db')}",
         "",
     ]
@@ -137,7 +165,7 @@ def main():
         goal_dir = Path(os.path.join(batch_dir, "workspaces", goal.id))
         goal_dir.mkdir(parents=True, exist_ok=True)
         _init_git_repo(goal_dir)
-        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url)
+        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model)
 
         print(f"--- Running goal '{goal.id}' (timeout {args.timeout_per_goal}s) ---")
         start = time.time()

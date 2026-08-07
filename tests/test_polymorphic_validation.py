@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 from unittest.mock import MagicMock, patch
@@ -304,6 +305,65 @@ def test_ruby_run_tests_installs_gems_before_rspec(tmp_path):
     assert second_cmd[:3] == ["bundle", "exec", "rspec"]
 
 
+def test_java_run_tests_converts_test_file_path_to_class_name_for_maven(tmp_path):
+    """Regression test for a real bug found live (2026-08-07,
+    kriya-protocol-parser-app): extract_target_test() returns a raw file
+    path (e.g. "src/test/java/com/example/ProtocolTest.java"), and that
+    used to be passed straight into Maven's -Dtest= verbatim - which
+    expects a class name, not a path, and matches nothing. Confirmed live:
+    "No tests matching pattern ... were executed!" burned the entire retry
+    budget on a Kriya-side invocation bug the generated code had no way to
+    fix, since the model's own test file was correct the whole time."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "java"
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("Tests run: 1", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests(target_test="src/test/java/com/example/ProtocolTest.java")
+
+    assert res["success"] is True
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert "-Dtest=ProtocolTest" in cmd
+    assert not any("src/test/java" in arg for arg in cmd)
+
+def test_java_run_tests_converts_test_file_path_to_class_name_for_gradle(tmp_path):
+    (tmp_path / "build.gradle").write_text("")
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "java"
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("BUILD SUCCESSFUL", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests(target_test="src/test/java/com/example/ProtocolTest.java")
+
+    assert res["success"] is True
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-2:] == ["--tests", "ProtocolTest"]
+
+def test_java_run_tests_no_target_test_omits_dtest_flag(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("Tests run: 3", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests()
+
+    assert res["success"] is True
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd == ["mvn", "test"]
+
 def test_ruby_run_tests_reports_bundle_install_failure_without_running_rspec(tmp_path):
     (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
 
@@ -604,4 +664,58 @@ def test_sandbox_execution_disabled_uses_full_env(tmp_path, monkeypatch):
         _, kwargs = mock_popen.call_args
         assert kwargs["env"] is None
         assert kwargs["preexec_fn"] is None
+
+def test_java_home_override_forces_subprocess_to_the_specified_jdk(tmp_path, monkeypatch):
+    """Regression test for a real, live-diagnosed gap: pom.xml's
+    maven.compiler.source/target controls what Java LANGUAGE version javac
+    targets, not which JDK 'mvn' itself actually runs under - a goal saying
+    "targeting Java 17" has no way to make Maven honor that if 'mvn'
+    defaults to a different, genuinely incompatible JDK on this machine
+    (confirmed live: JDK 26 broke a Qpid Broker-J API call with no
+    connection to anything the generated code controls). java_home_override
+    must force every subprocess this validator launches onto the specified
+    JDK via JAVA_HOME (the same mechanism Maven's own launcher script uses)
+    and PATH, on top of whatever env would otherwise apply."""
+    monkeypatch.setenv("KRIYA_TEST_MARKER", "still-here")
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "UserService.java").write_text("class UserService {}")
+
+    cfg = AppConfig()
+    cfg.autonomy.sandbox_execution = False
+    validator = PolymorphicValidator(
+        str(tmp_path), autonomy_cfg=cfg.autonomy,
+        java_home_override="/opt/jdk-17",
+    )
+
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
+        validator.run_compile_check(["UserService.java"])
+
+        _, kwargs = mock_popen.call_args
+        assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
+        assert kwargs["env"]["PATH"].startswith("/opt/jdk-17/bin" + os.pathsep)
+        # The rest of the inherited environment must survive untouched.
+        assert kwargs["env"]["KRIYA_TEST_MARKER"] == "still-here"
+
+def test_java_home_override_also_applies_under_sandbox_execution(tmp_path):
+    # Must layer on top of (not bypass) the sandbox-restricted env, same as
+    # the unsandboxed case above.
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "UserService.java").write_text("class UserService {}")
+
+    validator = PolymorphicValidator(str(tmp_path), java_home_override="/opt/jdk-17")
+
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("", "")
+        mock_popen.return_value = mock_process
+        validator.run_compile_check(["UserService.java"])
+
+        _, kwargs = mock_popen.call_args
+        assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
+        assert kwargs["preexec_fn"] is not None  # sandboxing still applied too
 

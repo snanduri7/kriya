@@ -77,11 +77,25 @@ class PolymorphicValidator:
         workspace_path: str,
         original_workspace_path: Optional[str] = None,
         autonomy_cfg: Optional[AutonomyConfig] = None,
+        java_home_override: Optional[str] = None,
     ) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
+        # When set (kriya/workflow/workflow.py's _resolve_java_home_override),
+        # forces every subprocess this validator launches (mvn compile/test/exec,
+        # javac fallback) to run under this specific JDK home via the JAVA_HOME
+        # env var - the same mechanism Maven's own launcher script already uses
+        # to decide which JDK to run itself under. Closes a real gap: the
+        # 'maven.compiler.source/target' pom.xml settings control what Java
+        # LANGUAGE version javac targets, not which actual JDK 'mvn' runs under
+        # - those are independent, and a machine with more than one JDK
+        # installed can easily have 'mvn' default to a different, genuinely
+        # incompatible one (confirmed live: JDK 26 removed the Security Manager
+        # entirely, breaking a Qpid Broker-J API call no goal-stated Java
+        # version could have anticipated).
+        self.java_home_override = java_home_override
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
@@ -138,6 +152,19 @@ class PolymorphicValidator:
             preexec_fn = posix_resource_limits_preexec_fn(
                 self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
             )
+        if self.java_home_override:
+            # env is None here means "inherit the parent process's environment
+            # unchanged" (subprocess.Popen's own default) - that's no longer
+            # correct once we need to ADD one override on top of it, so make
+            # the inheritance explicit before overriding just the two JDK-
+            # selection variables. Setting both JAVA_HOME (what mvn's own
+            # launcher script checks first) and PATH (so a plain 'java'/'javac'
+            # invocation resolves the same way, in case anything downstream
+            # doesn't consult JAVA_HOME) covers both real mechanisms a JDK
+            # gets selected by.
+            env = dict(env) if env is not None else dict(os.environ)
+            env["JAVA_HOME"] = self.java_home_override
+            env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
         # start_new_session=True (POSIX setsid) puts the child in its own
         # process group - required for the timeout-kill below to actually
         # work for a command like `mvn exec:exec`, which forks its own
@@ -353,17 +380,37 @@ class PolymorphicValidator:
                 return {"success": res["returncode"] in (0, 5), "output": res["stdout"] + "\n" + res["stderr"]}
  
             elif self.stack == "java":
+                # target_test comes from extract_target_test() as a raw file path
+                # (e.g. "src/test/java/com/example/ProtocolTest.java") - Maven's
+                # -Dtest= and Gradle's --tests both expect a class name, not a
+                # path, and silently match nothing if given one. Confirmed live,
+                # 2026-08-07 (kriya-protocol-parser-app): passing the raw path
+                # verbatim made the targeted-test gate structurally unable to
+                # ever pass ("No tests matching pattern ... were executed!"),
+                # burning the entire retry budget on a Kriya-side invocation bug
+                # the generated code had no way to fix - the model's own fix-
+                # analysis correctly noticed the pattern was wrong every time but
+                # could only ever regenerate ITS OWN files, not Kriya's command
+                # construction. The bare (unqualified) class name is enough -
+                # both Surefire and Gradle's test filter resolve it via classpath
+                # scanning regardless of package, avoiding any need to guess the
+                # src-root convention (which isn't always the same layout - see
+                # the src/main/python vs flat layout drift documented elsewhere
+                # in this project).
+                java_test_class = (
+                    os.path.splitext(os.path.basename(target_test))[0] if target_test else None
+                )
                 if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                     cmd = ["mvn", "test"]
-                    if target_test:
-                        cmd.append(f"-Dtest={target_test}")
+                    if java_test_class:
+                        cmd.append(f"-Dtest={java_test_class}")
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                     return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
                     cmd = [gradle_cmd, "test"]
-                    if target_test:
-                        cmd.extend(["--tests", target_test])
+                    if java_test_class:
+                        cmd.extend(["--tests", java_test_class])
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                     return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
