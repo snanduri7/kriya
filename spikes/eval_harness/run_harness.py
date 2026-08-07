@@ -44,6 +44,25 @@ LIVE_BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1
 # this problem with - not a guess, a model already validated live in this
 # exact fallback role.
 LIVE_FALLBACK_MODEL = os.environ.get("KRIYA_LIVE_FALLBACK_MODEL", "deepseek-coder-v2:16b")
+# Kriya's own kriya/config/config.py::SearchConfig deliberately makes
+# autonomy.web_lookup_enabled and search.base_url two SEPARATE switches - "so
+# a config merge/copy-paste can't silently enable outbound search" - but
+# _write_config() below was only ever setting the first one. Confirmed live,
+# 2026-08-07: every eval-harness run to date had web_lookup_enabled=true and
+# web_lookup_auto_approve=true (both already hardcoded below) with NO
+# search.base_url anywhere in this file or any root kriya.yaml, so the
+# retry-loop live-lookup gate (`and self.kernel.config.search.base_url`) was
+# always false and live lookup was silently inert the entire time, despite
+# looking "on." http://localhost:8080 matches docs/user_guide.md Section
+# 4.6's own documented convention for a self-hosted SearXNG instance - not a
+# guess, the same address that section's own live testing was run against.
+# Empty base_url (or no SearXNG actually reachable there) still degrades
+# safely: search_web() no-ops on an empty base_url, and logs a WARNING and
+# returns [] on a connection failure rather than raising - so setting this
+# default never breaks a run that doesn't have SearXNG running, it just means
+# live lookup won't find anything, the same as before this fix, just visibly
+# (a WARNING in the log) instead of silently (the gate never firing at all).
+LIVE_SEARCH_BASE_URL = os.environ.get("KRIYA_LIVE_SEARCH_BASE_URL", "http://localhost:8080")
 
 HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -57,7 +76,7 @@ def _init_git_repo(path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
-def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model):
+def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url):
     # paths.skills/memory stay relative (resolved against this config file's own
     # directory, i.e. per-goal-isolated - see CLAUDE.md's config-resolution note)
     # so one goal's skill/RAG state can never leak into another's. paths.logs is
@@ -84,6 +103,10 @@ def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url,
             "web_lookup_enabled": True,
             "web_lookup_auto_approve": True,
         },
+        # The second, separate switch web_lookup_enabled alone doesn't turn on -
+        # see LIVE_SEARCH_BASE_URL's own comment above for why this was missing
+        # entirely until now.
+        "search": {"base_url": search_base_url, "top_k": 3},
         "paths": {"skills": "./skills", "memory": "./memory", "logs": shared_logs_dir},
     }
     (workspace_path / "kriya.yaml").write_text(yaml.dump(config))
@@ -130,6 +153,11 @@ def main():
                               "deliberately explicit, not inherited from Kriya's own packaged "
                               "default (a reasoning model), which was confirmed live to burn "
                               "--timeout-per-goal on its own.")
+    parser.add_argument("--search-base-url", default=LIVE_SEARCH_BASE_URL,
+                         help="SearXNG-compatible endpoint for autonomy.web_lookup_enabled's "
+                              "error-triggered/skill-gap live lookup (kriya/tools/search.py). "
+                              "Pass an empty string to leave live lookup configured-but-inert, "
+                              "the same as every prior batch before this flag existed.")
     parser.add_argument("--goal-id", action="append", default=None,
                          help="Run only these goal id(s) instead of the full set. Repeatable.")
     parser.add_argument("--timeout-per-goal", type=int, default=1200,
@@ -151,11 +179,13 @@ def main():
 
     print(f"Eval harness batch: {batch_dir}")
     print(f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}")
+    print(f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}")
     print(f"Goals: {[g.id for g in goals]}\n")
 
     summary_lines = [
         f"Eval harness batch {batch_ts}",
         f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}",
+        f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}",
         f"traces.db: {os.path.join(logs_dir, 'traces.db')}",
         "",
     ]
@@ -164,7 +194,7 @@ def main():
         goal_dir = Path(os.path.join(batch_dir, "workspaces", goal.id))
         goal_dir.mkdir(parents=True, exist_ok=True)
         _init_git_repo(goal_dir)
-        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model)
+        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model, args.search_base_url)
 
         print(f"--- Running goal '{goal.id}' (timeout {args.timeout_per_goal}s) ---")
         start = time.time()

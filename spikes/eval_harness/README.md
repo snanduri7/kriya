@@ -130,6 +130,26 @@ unnecessary pre-creation here too - a genuinely fresh `kriya generate` run
 outside this harness would never have hit this specific case in the first
 place, since the directory wouldn't have existed at all.
 
+A third, found 2026-08-07: `_write_config()` set `autonomy.web_lookup_enabled`
+and `web_lookup_auto_approve` in every generated `kriya.yaml` from the very
+first version of this file, but never `search.base_url` -
+`kriya/config/config.py::SearchConfig` deliberately makes the two separate
+switches (the intent, per that class's own docstring, is that flipping only
+one "does nothing" - so a copy-paste can't silently enable outbound search),
+so the retry-loop's error-triggered live-lookup gate
+(`self.kernel.config.search.base_url`, `kriya/workflow/workflow.py`) was
+false on every single harness run to date - `web_lookup_enabled: true` LOOKED
+on but never actually fired. Fixed: a new `--search-base-url` flag
+(`KRIYA_LIVE_SEARCH_BASE_URL` env override), defaulting to
+`http://localhost:8080` - the same self-hosted SearXNG convention
+`docs/user_guide.md` Section 4.6 already documents and was live-tested
+against. Pass `--search-base-url ""` to go back to the old (inert)
+configured-but-off behavior if you don't have a SearXNG instance running -
+`search_web()` degrades safely either way (a no-op on an empty base_url, a
+logged WARNING + empty results on a connection failure), so this default
+never breaks a run without SearXNG running, it just makes the absence
+visible in the log instead of silent.
+
 ## Known, deliberate limitations (not bugs)
 
 - **`human_rejected` can never appear in harness data.** `-y` auto-approves
