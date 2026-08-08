@@ -787,6 +787,41 @@ async def test_fill_missing_content_prompt_includes_buffer_capacity_scaffold():
     assert "BufferOverflowException" in file_prompt
     assert "bit-shifting" in file_prompt
 
+@pytest.mark.asyncio
+async def test_extra_fix_instruction_is_a_backward_compatible_noop_by_default():
+    """extra_fix_instruction exists for spikes/fix_alignment/ (a real-LLM-call
+    test measuring how often a correct FIX ANALYSIS fails to produce a
+    correct edit) - must have zero effect on every existing caller unless
+    explicitly passed."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();")
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["X.java"],
+        prior_error_context="some generic error",
+        error_source_context={"X.java": "\n>> 1: foo();\n"},
+    )
+    prompt_without_override = llm.complete.call_args_list[0][0][1]
+    assert "RE-READ" not in prompt_without_override.upper()
+
+@pytest.mark.asyncio
+async def test_extra_fix_instruction_reaches_the_real_prompt_when_set():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();")
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["X.java"],
+        prior_error_context="some generic error",
+        error_source_context={"X.java": "\n>> 1: foo();\n"},
+        extra_fix_instruction="\nRE-READ your own FIX ANALYSIS before writing the edit.\n",
+    )
+    prompt_with_override = llm.complete.call_args_list[0][0][1]
+    assert "RE-READ your own FIX ANALYSIS" in prompt_with_override
+
 def test_sanitize_generated_content_none_passthrough():
     assert DeveloperAgent.sanitize_generated_content(None) is None
 

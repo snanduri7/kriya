@@ -157,3 +157,7 @@ scratch_generate/
 # Per-stage eval harness output (e.g. architect_eval.py) - same reasoning, scratch
 # regenerated on every run.
 /spikes/eval_harness/stage_runs/
+
+# Fix-alignment spike output (JSON results per batch) - same reasoning, scratch
+# regenerated on every run.
+/spikes/fix_alignment/runs/

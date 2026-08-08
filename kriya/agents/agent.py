@@ -640,11 +640,24 @@ class DeveloperAgent(BaseAgent):
         implicated_files: Optional[List[str]] = None,
         error_source_context: Optional[Dict[str, str]] = None,
         retry_temperature: Optional[float] = None,
+        extra_fix_instruction: str = "",
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
         so a model that only fills in some files in its file-list response doesn't
         silently end up with empty or missing files.
+
+        extra_fix_instruction: appended verbatim to fix_analysis_instruction (only
+        when apply_fix_analysis is true, same scope as the incompatible-types/
+        buffer-capacity scaffolds). Exists for spikes/fix_alignment/ - a small,
+        real-LLM-call test measuring how often a model's own FIX ANALYSIS
+        correctly diagnoses a bug but the accompanying SEARCH/REPLACE edit doesn't
+        implement it (found live, repeatedly, 2026-08-07/08 - see that spike's
+        README for the full writeup). Left "" by default, which is a no-op
+        appended to a possibly-empty string - zero behavior change for every
+        existing caller. Not wired to any config flag; promoting a specific nudge
+        text to always-on, if the spike's measurements support it, is a deliberate
+        follow-up decision, not a side effect of adding this parameter.
 
         retry_temperature, when set (config-driven, see LLMConfig.retry_temperature),
         overrides the completion temperature ONLY for a file this call is actually
@@ -762,6 +775,7 @@ class DeveloperAgent(BaseAgent):
             if apply_fix_analysis:
                 fix_analysis_instruction += DeveloperAgent._build_incompatible_types_scaffold(prior_error_context)
                 fix_analysis_instruction += DeveloperAgent._build_buffer_capacity_scaffold(prior_error_context)
+                fix_analysis_instruction += extra_fix_instruction
 
             # Stable, large blocks first (existing code context, then architecture design) so
             # same-model retries can reuse the inference server's KV-cache prefix; the task
@@ -891,6 +905,7 @@ class DeveloperAgent(BaseAgent):
         implicated_files: Optional[List[str]] = None,
         error_source_context: Optional[Dict[str, str]] = None,
         retry_temperature: Optional[float] = None,
+        extra_fix_instruction: str = "",
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -926,6 +941,7 @@ class DeveloperAgent(BaseAgent):
                 file_entries, task_description, design_context, existing_code_context,
                 stream_callback, model_override, base_url_override, api_key_override,
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
+                extra_fix_instruction,
             )
 
         try:
@@ -937,6 +953,7 @@ class DeveloperAgent(BaseAgent):
                     file_entries, task_description, design_context, existing_code_context,
                     stream_callback, model_override, base_url_override, api_key_override,
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
+                    extra_fix_instruction,
                 )
 
         except Exception as e:
