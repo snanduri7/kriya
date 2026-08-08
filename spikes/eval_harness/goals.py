@@ -62,6 +62,46 @@ GOALS: List[Goal] = [
         ),
     ),
     Goal(
+        id="ignite_qpid_protocol",
+        text=(
+            "In a Maven project targeting Java 17, using an embedded Apache "
+            "Ignite 2.18 node and an embedded Apache Qpid Broker-J AMQP "
+            "broker (both started in the same Spring XML-configured main "
+            "method), define a Protocol class with fields protocolVersion "
+            "(int), softwareVersion (int), dataLength (int), time (long), "
+            "and body (byte[]), plus a ProtocolParser with "
+            "encode(Protocol)->byte[] and decode(byte[])->Protocol "
+            "implementing this exact wire format: a 9-byte header - "
+            "protocolVersion (1 byte), softwareVersion (1 byte), dataLength "
+            "(3 bytes, big-endian), time (4 bytes, big-endian) - followed "
+            "by the raw body bytes. On startup: start the Qpid broker, "
+            "create a sample Protocol (small representative field values, "
+            "a body of a few dozen bytes), encode it, and send the encoded "
+            "bytes as a JMS BytesMessage to a queue. Synchronously consume "
+            "that same message back via a MessageConsumer, decode the "
+            "received bytes into a Protocol object, store the decoded "
+            "Protocol in the Ignite cache using an explicitly-typed "
+            "IgniteCache<Integer, Protocol> reference (never a raw or "
+            "var-inferred cache handle), then read it back from the cache "
+            "and print all its field values (protocolVersion, "
+            "softwareVersion, dataLength, time, body length) to stdout "
+            "with a [RESULT] marker."
+        ),
+        hypothesis=(
+            "Combines two independently-proven components - the Ignite+"
+            "Qpid+Spring orchestration from ignite_qpid_person, and the "
+            "hand-rolled binary protocol format from the closed "
+            "kriya-protocol-parser-app effort - in a combination never "
+            "tested together. Stresses a genuinely different JMS code path "
+            "(BytesMessage + raw byte[] handling, not TextMessage+JSON like "
+            "the Person goal) and a different Ignite cache value type - "
+            "directly tests whether this session's raw-generics/"
+            "incompatible-types fixes (the prompt scaffold, Layer 1) "
+            "generalize beyond the one goal that surfaced them, not just "
+            "happened to fix that one specific case."
+        ),
+    ),
+    Goal(
         id="ruby_word_count",
         text=(
             "Create a Ruby project with a lib/word_count.rb (pure Ruby "

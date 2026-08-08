@@ -44,6 +44,27 @@ _INCOMPATIBLE_TYPES_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# java.nio.Buffer{Overflow,Underflow}Exception is a generic, language-level shape
+# for hand-rolled binary wire-format code (put/get past the buffer's remaining
+# capacity) - not tied to any one library, so handled as its own scaffold rather
+# than a per-skill rule. Confirmed live twice, independently, in unrelated code:
+# a BufferUnderflowException in a hand-rolled protocol decode() (kriya-protocol-
+# parser-app, 2026-08-07) and a BufferOverflowException in a hand-rolled protocol
+# encode() (ignite_qpid_protocol, 2026-08-08). In the second case, the model's own
+# FIX ANALYSIS correctly diagnosed the root cause in words ("the dataLength field
+# ... is being written as a 4-byte int but only the first 3 bytes are meaningful")
+# but the produced diff never actually changed the reported line (caught by
+# Layer 1 - see find_edits_ignoring_reported_line in kriya/workflow/workflow.py -
+# itself only possible here because extract_error_source_locations() already
+# recognizes a JVM stack trace's "(File.java:line)" shape, not just javac's
+# compile-error locator). The recurring root cause across both incidents: a wire
+# format field with a non-standard byte width (3, 5, 6, 7 bytes) has no matching
+# ByteBuffer primitive (put/get=1, putShort/getShort=2, putInt/getInt=4,
+# putLong/getLong=8) - using a fixed-width primitive for it writes/reads more
+# bytes than that field should occupy, corrupting every subsequent field and
+# eventually over/underrunning the buffer.
+_BUFFER_CAPACITY_RE = re.compile(r"java\.nio\.Buffer(Overflow|Underflow)Exception")
+
 
 async def call_with_escalation(
     llm: LLMClient,
@@ -561,6 +582,50 @@ class DeveloperAgent(BaseAgent):
             "error - the identical 'incompatible types' error will simply recur on the next attempt.\n"
         )
 
+    @staticmethod
+    def _build_buffer_capacity_scaffold(prior_error_context: Optional[str]) -> str:
+        """Returns an additive prompt block naming the two things that must BOTH be
+        checked for a java.nio.Buffer{Overflow,Underflow}Exception (see
+        _BUFFER_CAPACITY_RE's own docstring for the two independent live failures
+        this is a direct response to), or "" if the error text doesn't contain that
+        shape. Deliberately generic across any hand-rolled binary/wire-format code -
+        not hardcoded to Ignite, Qpid, or any specific protocol, since the root
+        cause (a non-standard field width with no matching ByteBuffer primitive) is
+        a language-level Java footgun independent of what the bytes represent."""
+        if not prior_error_context:
+            return ""
+        match = _BUFFER_CAPACITY_RE.search(prior_error_context)
+        if not match:
+            return ""
+        kind = match.group(1)
+        direction = (
+            "writing (put) more bytes than the buffer has remaining capacity for"
+            if kind == "Overflow"
+            else "reading (get) more bytes than the buffer has remaining data for"
+        )
+        return (
+            f"\nThe error above includes a java.nio.Buffer{kind}Exception - {direction}.\n"
+            "This shape in hand-rolled binary wire-format code is almost always caused by ONE "
+            "or BOTH of the following - you MUST check both, not just the first one you spot:\n"
+            "1) A field's specified byte width does not match one of ByteBuffer's fixed-width "
+            "primitives (put/get=1 byte, putShort/getShort=2, putInt/getInt=4, putLong/getLong=8). "
+            "If the wire format specifies a non-standard width (e.g. 3, 5, 6, or 7 bytes), you "
+            "CANNOT use putInt/getInt or any other fixed-width primitive for it - doing so "
+            "writes or reads MORE bytes than that field is supposed to occupy, corrupting every "
+            "byte position after it. You MUST pack/unpack it manually, one byte at a time, via "
+            "bit-shifting: to WRITE an N-byte big-endian field, call "
+            "buffer.put((byte)((value >> (8*(N-1-i))) & 0xFF)) for i = 0..N-1 in order; to READ "
+            "it back, accumulate each byte with ((buffer.get() & 0xFF) << shift) at the matching "
+            "shift for each position.\n"
+            "2) The buffer's allocated total size does not exactly equal the sum of every field's "
+            "ACTUAL wire width plus the body/payload length. Recompute this sum explicitly from "
+            "the wire format specification given in the task - do not assume a size, and do not "
+            "reuse a field-count shortcut that doesn't account for a non-standard-width field's "
+            "real byte count.\n"
+            "A fix that changes only one of these two things, or that changes an unrelated line, "
+            "will leave this exact exception in place on the next attempt.\n"
+        )
+
     async def _fill_missing_content(
         self,
         file_entries: List[Dict[str, Any]],
@@ -696,6 +761,7 @@ class DeveloperAgent(BaseAgent):
 
             if apply_fix_analysis:
                 fix_analysis_instruction += DeveloperAgent._build_incompatible_types_scaffold(prior_error_context)
+                fix_analysis_instruction += DeveloperAgent._build_buffer_capacity_scaffold(prior_error_context)
 
             # Stable, large blocks first (existing code context, then architecture design) so
             # same-model retries can reuse the inference server's KV-cache prefix; the task

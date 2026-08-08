@@ -725,6 +725,68 @@ async def test_fill_missing_content_prompt_includes_incompatible_types_scaffold(
     assert '"java.lang.Object" cannot be converted to "com.example.Person"' in file_prompt
     assert "explicit cast" in file_prompt
 
+def test_build_buffer_capacity_scaffold_names_overflow_direction():
+    """Regression test for a real bug found live, 2026-08-08
+    (ignite_qpid_protocol): the model's own FIX ANALYSIS correctly diagnosed
+    "the dataLength field ... is being written as a 4-byte int but only the
+    first 3 bytes are meaningful" but the produced diff never actually changed
+    the reported line (line 23) - the identical BufferOverflowException
+    recurred. Real captured stack trace from that exact run."""
+    error = (
+        'Exception in thread "main" java.nio.BufferOverflowException\n'
+        "\tat java.base/java.nio.HeapByteBuffer.put(HeapByteBuffer.java:231)\n"
+        "\tat java.base/java.nio.ByteBuffer.put(ByteBuffer.java:1210)\n"
+        "\tat com.example.ProtocolParser.encode(ProtocolParser.java:23)\n"
+        "\tat com.example.ProtocolApp.main(ProtocolApp.java:40)\n"
+    )
+    scaffold = DeveloperAgent._build_buffer_capacity_scaffold(error)
+    assert "BufferOverflowException" in scaffold
+    assert "writing (put)" in scaffold
+    assert "non-standard width" in scaffold
+    assert "allocated total size" in scaffold
+
+def test_build_buffer_capacity_scaffold_names_underflow_direction():
+    """The sibling exception (BufferUnderflowException, the read-path version of
+    the same root cause) was also found live, independently, 2026-08-07
+    (kriya-protocol-parser-app's hand-rolled protocol decode())."""
+    error = (
+        'Exception in thread "main" java.nio.BufferUnderflowException\n'
+        "\tat java.base/java.nio.Buffer.nextGetIndex(Buffer.java:640)\n"
+        "\tat com.example.ProtocolParser.decode(ProtocolParser.java:45)\n"
+    )
+    scaffold = DeveloperAgent._build_buffer_capacity_scaffold(error)
+    assert "BufferUnderflowException" in scaffold
+    assert "reading (get)" in scaffold
+
+def test_build_buffer_capacity_scaffold_empty_when_no_match():
+    assert DeveloperAgent._build_buffer_capacity_scaffold(None) == ""
+    assert DeveloperAgent._build_buffer_capacity_scaffold("cannot find symbol: class Foo") == ""
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_prompt_includes_buffer_capacity_scaffold():
+    """Integration check: when prior_error_context carries a
+    java.nio.BufferOverflowException, the actual prompt sent to the model
+    includes the scaffold - confirms it's wired into _fill_missing_content,
+    not just unit-tested in isolation."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();"
+    ))
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["ProtocolParser.java"],
+        prior_error_context=(
+            'Exception in thread "main" java.nio.BufferOverflowException\n'
+            "\tat com.example.ProtocolParser.encode(ProtocolParser.java:23)\n"
+        ),
+        error_source_context={"ProtocolParser.java": "\n>> 23: buffer.putInt(dataLength);\n"},
+    )
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "BufferOverflowException" in file_prompt
+    assert "bit-shifting" in file_prompt
+
 def test_sanitize_generated_content_none_passthrough():
     assert DeveloperAgent.sanitize_generated_content(None) is None
 

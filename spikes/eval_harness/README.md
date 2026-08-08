@@ -527,3 +527,24 @@ CLI-persistence bug above. Fixed by rewording the goal, not the pipeline:
 "no external gems" now explicitly scopes to the library implementation
 only, and the Gemfile is explicitly told to declare `rspec` for the test
 suite. Not yet re-validated live.
+
+### `ignite_qpid_protocol` added (2026-08-07) - a new combination, not a repeat
+
+After three consecutive clean 5/5 batches on the existing goal set, added a
+new goal specifically to avoid over-reading a streak on the same fixed set
+(see `docs/kriya_backlog_and_lessons.md`'s "an identical goal intermittently
+passing/failing is not evidence of a regression" lesson - the inverse
+applies too: identical goals passing repeatedly isn't full evidence of
+robustness either, just evidence for that specific shape). Combines two
+previously, independently-proven components in a combination never tested
+together: `ignite_qpid_person`'s Ignite+Qpid+Spring orchestration, and the
+hand-rolled binary `Protocol`/`ProtocolParser` from the closed
+`kriya-protocol-parser-app` effort (`/Users/.../ClaudeCode/kriya-protocol-parser-app`,
+a sibling project, not part of this repo). Deliberately stresses a
+different JMS code path (`BytesMessage` + raw `byte[]`, not
+`TextMessage`+JSON like the Person goal) and a different Ignite cache
+value type - the goal text explicitly requires `IgniteCache<Integer,
+Protocol>` (never a raw/`var`-inferred handle) specifically to test
+whether this session's raw-generics fixes (the incompatible-types prompt
+scaffold, Layer 1's locator-touch check) generalize beyond the one goal
+that surfaced them.
