@@ -1405,6 +1405,39 @@ async def test_run_verifier_grade_passed():
     assert "SUCCESS" in grade["reasoning"]
 
 @pytest.mark.asyncio
+async def test_run_verifier_grade_prompt_prefers_program_self_check_over_recomputation():
+    """Regression test for a real live bug, 2026-08-10 (staged ignite_qpid_
+    protocol build, stage 1): the grader independently recomputed "Hello,
+    Protocol".getBytes()'s expected length as 13 (wrong - it's actually 15,
+    confirmed via len("Hello, Protocol".encode("utf-8"))) and rejected a
+    genuinely correct run whose OWN self-check (dataLength=15, bodyLength=15,
+    equals=true - a real comparison against real decoded data) had already
+    passed. Worse: the Developer model's own fix-analysis nearly caught this
+    ("I think there's a misunderstanding in my analysis... the issue is not
+    in my code") before deferring to the (wrong) grader's authority and
+    "fixing" already-correct code across several subsequent attempts. The
+    grader system prompt must instruct treating a program's own printed
+    self-verification result as primary evidence over the grader's own
+    recomputation of an expected value."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": True,
+        "reasoning": "equals=true confirms the round-trip comparison the program itself performed."
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.grade(
+        goal="round trip test", success_criteria="prints decoded values matching the original",
+        output="[RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=123, bodyLength=15, equals=true",
+        returncode=0,
+    )
+
+    system_prompt_sent = llm.complete.call_args_list[0][0][0]
+    assert "OWN explicit self-" in system_prompt_sent
+    assert "Do NOT independently recompute" in system_prompt_sent
+
+@pytest.mark.asyncio
 async def test_run_verifier_grade_unparseable_response_defaults_to_failure():
     # A grader response that can't be parsed must fail closed, not silently pass.
     cfg = AppConfig()
