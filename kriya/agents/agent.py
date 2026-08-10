@@ -91,6 +91,32 @@ _BUFFER_CAPACITY_RE = re.compile(r"java\.nio\.Buffer(Overflow|Underflow)Exceptio
 # on the same line.
 _TRAILING_FILE_CONTENT_RE = re.compile(r"^[^\n]*?file content[^\n:]{0,60}:", re.IGNORECASE | re.MULTILINE)
 
+# Opt-out marker for a retry that legitimately implicates a file which doesn't
+# itself need any code change - found live, 2026-08-10 (ignite_qpid_protocol,
+# run 20260810-111517): a java.nio.BufferOverflowException's stack trace gave
+# BOTH ProtocolParser.java:21 (where the bug lives) and ProtocolApp.java:37
+# (its caller) a real locator, so extract_implicated_files() correctly scoped
+# a targeted retry to both files - each gets its own separate per-file
+# completion. But the fix-analysis instruction had no way for the model to say
+# "this file is fine as-is" for ProtocolApp.java, whose real problem was
+# entirely inside ProtocolParser.encode() - confirmed directly from the raw
+# captured completion: ProtocolApp.java's own response wrote a correct FIX
+# ANALYSIS describing ProtocolParser.encode()'s bug, then a SEARCH block that
+# was actually ProtocolParser.java's encode() method body verbatim, which can
+# never match ProtocolApp.java's real content ("Anchor matching failed... The
+# search block matched 0 times"), burning a whole wasted retry attempt.
+# Without this marker, a model volunteering "no change needed" prose with no
+# other markers would ALSO have been treated as the file's new literal
+# content by _split_fix_analysis's own fallback (the entire response becomes
+# "content" when no FILE CONTENT: marker is found either) - silently
+# overwriting real source with an explanation sentence. Both parsing
+# functions check this FIRST, before any SEARCH/REPLACE or FILE CONTENT
+# extraction, and return content=None (not "", not the raw text) - the
+# write loop's existing `if content is None: continue` (kriya/workflow/
+# workflow.py) already treats that as "leave this file exactly as it is",
+# no new write-path plumbing needed.
+_NO_CHANGE_NEEDED_RE = re.compile(r"^[^\n]*?no change(?:s)? needed[^\n]*", re.IGNORECASE | re.MULTILINE)
+
 
 async def call_with_escalation(
     llm: LLMClient,
@@ -403,12 +429,18 @@ class DeveloperAgent(BaseAgent):
             raise e
 
     @staticmethod
-    def _split_fix_analysis(text: str) -> Tuple[Optional[str], str]:
+    def _split_fix_analysis(text: str) -> Tuple[Optional[str], Optional[str]]:
         """Splits a per-file retry completion into (fix_analysis, file_content) when
         the model complied with the MANDATORY FIX ANALYSIS instruction added to the
         prompt whenever a real prior error exists (see _fill_missing_content) - a
         case-insensitive search for a literal "FILE CONTENT:" marker line, everything
         before it is the analysis, everything after is the actual file content.
+
+        Checks _NO_CHANGE_NEEDED_RE FIRST, before any FILE CONTENT: extraction -
+        see that constant's own docstring for the live incident this exists for.
+        Returns (analysis, None) in that case; None here is a real, meaningful
+        "write nothing" signal, distinct from every other return path, which
+        always yields a content string (even if empty).
 
         Found live as a real, generalizable root cause during golden-use-case
         validation, not guessed: single-shot, non-reasoning completion (this repo's
@@ -430,6 +462,11 @@ class DeveloperAgent(BaseAgent):
         so a non-compliant response degrades to the pre-existing plain-content
         behavior rather than corrupting it - this is a prompt-level nudge, not a hard
         parsing requirement."""
+        no_change_match = _NO_CHANGE_NEEDED_RE.search(text)
+        if no_change_match:
+            analysis = text[:no_change_match.start()].strip()
+            analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
+            return (analysis or None), None
         match = _TRAILING_FILE_CONTENT_RE.search(text)
         if not match:
             return None, text
@@ -472,7 +509,19 @@ class DeveloperAgent(BaseAgent):
         apply_anchored_edits() already accepts and applies a LIST of edits in
         sequence (confirmed via reading it directly, not assumed) - the fix is to
         actually use that, not to bound the first pair's replace text more
-        tightly and still discard the rest."""
+        tightly and still discard the rest.
+
+        Checks _NO_CHANGE_NEEDED_RE FIRST, before any SEARCH:/REPLACE:/FILE
+        CONTENT: extraction - see that constant's own docstring for the live
+        incident this exists for (a file legitimately implicated by a shared
+        error, e.g. a caller of the actual buggy method, with no fix of its
+        own to make). Returns (analysis, None, None) in that case."""
+        no_change_match = _NO_CHANGE_NEEDED_RE.search(text)
+        if no_change_match:
+            analysis = text[:no_change_match.start()].strip()
+            analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
+            return (analysis or None), None, None
+
         file_content_match = _TRAILING_FILE_CONTENT_RE.search(text)
         bound = file_content_match.start() if file_content_match else len(text)
 
@@ -784,7 +833,12 @@ class DeveloperAgent(BaseAgent):
                     "\"REPLACE:\" followed by the corrected code - include only the lines that actually "
                     "need to change plus the minimum surrounding context needed to uniquely identify them, "
                     "not the whole file. Only if the fix genuinely requires broader restructuring beyond a "
-                    "small patch, instead write \"FILE CONTENT:\" followed by the complete corrected file.\n"
+                    "small patch, instead write \"FILE CONTENT:\" followed by the complete corrected file. "
+                    "If, after your analysis, THIS SPECIFIC FILE genuinely requires no code change to "
+                    "address the error (for example, this file only calls into or references another file "
+                    "where the actual bug lives), instead write the line \"NO CHANGE NEEDED:\" followed by "
+                    "one sentence explaining why, and do NOT write a SEARCH:/REPLACE:/FILE CONTENT: block "
+                    "at all - do not invent an edit just to have one.\n"
                 )
             elif apply_fix_analysis:
                 fix_analysis_instruction = (
@@ -793,7 +847,11 @@ class DeveloperAgent(BaseAgent):
                     "\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of that "
                     "error and exactly what you are changing to address it. Only after that analysis, "
                     "write the line \"FILE CONTENT:\" on its own line, followed by the complete file "
-                    "content and nothing else after it.\n"
+                    "content and nothing else after it. If, after your analysis, THIS SPECIFIC FILE "
+                    "genuinely requires no code change to address the error (for example, this file only "
+                    "calls into or references another file where the actual bug lives), instead write the "
+                    "line \"NO CHANGE NEEDED:\" followed by one sentence explaining why, and do NOT write "
+                    "a FILE CONTENT: block at all - do not invent an edit just to have one.\n"
                 )
             else:
                 fix_analysis_instruction = ""

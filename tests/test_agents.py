@@ -991,6 +991,88 @@ async def test_fill_missing_content_no_anchored_edit_preference_without_source_c
     assert files[0]["content"] == "class App {}"
 
 @pytest.mark.asyncio
+async def test_fill_missing_content_no_change_needed_leaves_file_untouched_anchored_path():
+    """Regression test for a real live bug, 2026-08-10 (ignite_qpid_protocol,
+    run 20260810-111517): a java.nio.BufferOverflowException's stack trace
+    gave BOTH ProtocolParser.java (where the bug lives) and ProtocolApp.java
+    (its caller) a real file:line locator, so extract_implicated_files()
+    correctly scoped a targeted retry to both - each got its own separate
+    per-file completion. But the fix-analysis instruction gave the model no
+    way to say "this file is fine as-is" for ProtocolApp.java, whose real
+    problem was entirely inside ProtocolParser.encode() - confirmed directly
+    from the raw captured completion: ProtocolApp.java's own response wrote
+    a correct FIX ANALYSIS describing ProtocolParser.encode()'s bug, then a
+    SEARCH block that was actually ProtocolParser.java's encode() method body
+    verbatim, which could never match ProtocolApp.java's real content
+    ("Anchor matching failed... matched 0 times"), burning a whole wasted
+    retry attempt. The prompt now offers a NO CHANGE NEEDED: escape hatch,
+    and a compliant response must come back as content=None (the write
+    loop's existing "if content is None: continue" already means leave this
+    file exactly as it is - no new write-path plumbing needed), not an
+    invented edit."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value=(
+            "FIX ANALYSIS: The BufferOverflowException occurs because ProtocolParser.encode() "
+            "incorrectly uses putInt() for a 3-byte dataLength field.\n"
+            "NO CHANGE NEEDED: this file only calls ProtocolParser.encode() - the fix belongs "
+            "entirely in ProtocolParser.java, not here.\n"
+        )
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["ProtocolApp.java"],
+        prior_error_context=(
+            "java.nio.BufferOverflowException\n"
+            "\tat com.example.ProtocolParser.encode(ProtocolParser.java:21)\n"
+            "\tat com.example.ProtocolApp.main(ProtocolApp.java:37)\n"
+        ),
+        error_source_context={"ProtocolApp.java": "\n>> 37: byte[] encodedData = ProtocolParser.encode(sampleProtocol);\n"},
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "NO CHANGE NEEDED" in file_prompt
+    assert files == [{"filepath": "ProtocolApp.java", "content": None}]
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_change_needed_leaves_file_untouched_plain_path():
+    # Same escape hatch, exercised via the plain FIX ANALYSIS/FILE CONTENT:
+    # path (no known source location, so no anchored-edit preference).
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value="FIX ANALYSIS: the bug is in a different file.\nNO CHANGE NEEDED: nothing to fix here.\n"
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="some error located entirely in a different file",
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "NO CHANGE NEEDED" in file_prompt
+    assert files == [{"filepath": "App.java", "content": None}]
+
+def test_split_fix_analysis_edit_no_change_needed_takes_priority_over_search_replace():
+    # If the model contradicts itself (declares no change needed but also
+    # emits a SEARCH/REPLACE pair), NO CHANGE NEEDED wins - trust the
+    # explicit declaration over a possibly-stray leftover edit.
+    text = (
+        "FIX ANALYSIS: reason.\n"
+        "NO CHANGE NEEDED: nothing to do here.\n"
+        "SEARCH:\nfoo\nREPLACE:\nbar\n"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits is None
+    assert content is None
+    assert analysis == "reason."
+
+@pytest.mark.asyncio
 async def test_fill_missing_content_applies_retry_temperature_only_to_implicated_file():
     """retry_temperature (LLMConfig.retry_temperature) must only override the
     completion temperature for a file the fix-analysis instruction actually
