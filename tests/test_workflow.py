@@ -654,10 +654,19 @@ async def test_workflow_fallback_chain(tmp_path):
             # plain per-file text completion, not a JSON file-list response.
             return "def add(a,b)\n    return a+b"
         elif n == 7:
-            # Targeted budget now exhausted - back to the full-set path, which
-            # escalates to fallback-1 as retry_count > 0. Fixed this time.
-            return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
+            # Targeted budget now exhausted - a one-shot fallback-targeted fix
+            # (fallback-1, still scoped to just math.py, no file-list call
+            # needed) gets tried before the expensive full-set path. Also
+            # broken here, so the run falls through to a real full-set
+            # escalation next.
+            return "def add(a,b)\n    return a+b"
         elif n == 8:
+            # Full-set path, still escalated to fallback-1 (retry_count is
+            # still only 1 - only attempt 1 ever incremented it; the
+            # fallback-targeted attempt deliberately doesn't touch retry_count).
+            # Fixed this time - Step 1 + content in one shot.
+            return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
+        elif n == 9:
             return "Avoid missing colon in function definition."
         else:
             return "Review: Approved"
@@ -674,11 +683,13 @@ async def test_workflow_fallback_chain(tmp_path):
 
     assert res["quality_gates_passed"] is True
     # The 3 targeted retries (attempts 2-4) must never escalate - only once that
-    # budget is exhausted does the full-set path's fallback chain kick in.
+    # budget is exhausted does the one-shot fallback-targeted fix, then the
+    # full-set path's own fallback chain, kick in.
     assert model_overrides[3] is None
     assert model_overrides[4] is None
     assert model_overrides[5] is None
-    assert model_overrides[6] == "fallback-1"
+    assert model_overrides[6] == "fallback-1"  # one-shot fallback-targeted fix
+    assert model_overrides[7] == "fallback-1"  # full-set escalation
     assert "fallback-1" in model_overrides
     
     repo_slug = os.path.basename(tmp_path).lower().strip(".")
@@ -689,6 +700,100 @@ async def test_workflow_fallback_chain(tmp_path):
     with open(rules_file, "r", encoding="utf-8") as f:
         rules_content = f.read()
     assert "Avoid missing colon in function definition." in rules_content
+
+@pytest.mark.asyncio
+async def test_workflow_fallback_targeted_fix_succeeds_before_full_set_regeneration(tmp_path):
+    """Regression test for the fallback-targeted-fix step (2026-08-10): once the
+    primary-model targeted budget is exhausted, a ONE-SHOT targeted fix on the
+    first fallback model must be tried BEFORE any full-set regeneration -
+    found live (ignite_qpid_protocol) that jumping straight to a full-set
+    regeneration rewrote 6 files (~13 minutes) when only 2 actually needed
+    fixing. If this fallback-targeted attempt itself succeeds, the run must
+    never reach a full-set regeneration at all."""
+    from kriya.config import FallbackModelConfig
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        # A genuine fallback-model success triggers lesson extraction
+        # (model_override is truthy and a chain is configured).
+        "Always double-check byte widths before writing binary fields.",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},  # attempt 1, full-set
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},  # attempt 2, targeted
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},  # attempt 3, targeted
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},  # attempt 4, targeted
+            {"success": True, "output": ""},  # attempt 5, fallback-targeted - fixed
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  Object x2;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  Object x3;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  Object x4;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  String x5;\n}"}],
+        ])
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 5  # never reached a 6th, full-set attempt
+    fifth_call_kwargs = we.developer.run_generation.call_args_list[4].kwargs
+    assert fifth_call_kwargs["model_override"] == "fallback-1"
+    assert fifth_call_kwargs["known_target_files"] == ["App.java"]  # scoped, not a full-set file-list re-derivation
+    assert fifth_call_kwargs["extra_fix_instruction"] == DeveloperAgent.SELF_CONSISTENCY_NUDGE
+
+@pytest.mark.asyncio
+async def test_workflow_fallback_targeted_fix_skipped_without_fallback_chain(tmp_path):
+    """Without a configured fallback chain, exhausting the targeted budget must
+    fall straight through to a plain, primary-model full-set retry - exactly
+    today's behavior. use_fallback_targeted requires a non-empty chain, so
+    this is a pure regression check, not new behavior."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    # No llm_chain configured - the common/default case.
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '{"files": ["App.java"]}',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  Object x2;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  Object x3;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  Object x4;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  String x5;\n}"}],
+        ])
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 5
+    fifth_call_kwargs = we.developer.run_generation.call_args_list[4].kwargs
+    assert fifth_call_kwargs.get("model_override") is None
+    assert fifth_call_kwargs.get("known_target_files") is None  # full-set: re-derives the file list
 
 
 @pytest.mark.asyncio

@@ -3121,6 +3121,27 @@ class WorkflowEngine:
         # through to the full-set path's own budget/escalation, unchanged.
         TARGETED_MAX_RETRIES = 3
         targeted_retry_count = 0
+        # A single, one-shot opportunity to try a TARGETED fix on the fallback
+        # model before escalating all the way to a full-set regeneration - found
+        # live, 2026-08-10 (ignite_qpid_protocol): once the primary-model
+        # targeted budget exhausts, the retry loop's only remaining option was
+        # a full-set regeneration (every file rewritten, a fresh Step 1 file-
+        # list call, the most expensive path available) - confirmed live to
+        # take ~13 minutes rewriting 6 files when only 2 actually needed
+        # fixing. A full-set escalation ALREADY pays a model-swap cost (the
+        # reason targeted retries stay primary-model-only per the comment
+        # above - a measured 19-43s Ollama swap, not worth paying 3 times);
+        # trying ONE targeted fix on that same fallback model first, before
+        # falling through to the expensive full-set path, spends that same
+        # swap cost on a much cheaper shot instead of skipping straight to
+        # the most expensive one. Deliberately its OWN one-shot flag, not
+        # folded into targeted_retry_count (that budget's whole point is
+        # "primary model only, never escalate") or retry_count (that's the
+        # full-set path's own counter) - see use_fallback_targeted below.
+        # Scoped to implicated-file retries only, not missing-file recovery
+        # ("the model forgot to write a file" isn't a diagnosis problem a
+        # smarter model is likely to solve differently).
+        fallback_targeted_attempted = False
         # The file(s) extract_implicated_files() found in the MOST RECENT failure
         # - re-evaluated after every failure, not fixed at the first one, so a
         # targeted attempt against a different file (a new error surfaced by
@@ -3302,11 +3323,22 @@ class WorkflowEngine:
 
         while retry_count < max_retries or (
             (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+        ) or (
+            bool(last_implicated_files) and bool(chain) and not fallback_targeted_attempted
         ):
             attempt_number += 1
             use_targeted = bool(last_implicated_files) and targeted_retry_count < TARGETED_MAX_RETRIES
             use_missing_files = (
                 not use_targeted and bool(last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+            )
+            # One-shot fallback-model targeted fix (see fallback_targeted_attempted's
+            # own docstring above) - only eligible once the primary-model targeted
+            # budget is exhausted (never competes with use_targeted/use_missing_files
+            # for the same attempt) and only when there's still a real implicated-file
+            # set and a fallback model to try it on.
+            use_fallback_targeted = (
+                not use_targeted and not use_missing_files
+                and bool(last_implicated_files) and bool(chain) and not fallback_targeted_attempted
             )
             try:
                 # Needed unconditionally below (both the normal compile/test gate
@@ -3362,6 +3394,61 @@ class WorkflowEngine:
                     logger.info(f"Targeted retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: focusing on {', '.join(last_implicated_files)}.")
 
                     model_hops.append(self.kernel.config.llm.model)
+
+                    dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
+                    files = await self.developer.run_generation(
+                        task_description=task_desc,
+                        design_context=design,
+                        existing_code_context=active_code_context,
+                        stream_callback=dev_stream,
+                        model_override=model_override,
+                        base_url_override=base_url_override,
+                        api_key_override=api_key_override,
+                        known_target_files=last_implicated_files,
+                        prior_error_context=error_context or None,
+                        implicated_files=last_implicated_files,
+                        error_source_context=last_error_source_context or None,
+                        retry_temperature=self.kernel.config.llm.retry_temperature,
+                        extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+                    )
+                elif use_fallback_targeted:
+                    # One-shot targeted fix on the first fallback model (see
+                    # fallback_targeted_attempted's own docstring above) - same
+                    # narrow scope as a primary-model targeted retry (just the
+                    # implicated files, fix-analysis/anchored-edit preference),
+                    # just on a different model, before paying for a full-set
+                    # regeneration. Set the one-shot flag immediately, not after
+                    # a result is known, so a crash/exception mid-attempt can
+                    # never cause this to be retried in a loop.
+                    fallback_targeted_attempted = True
+                    fallback = chain[0]
+                    current_limit = _reserve_graph_context_budget(
+                        fallback.context_window, skills_prompt, learned_rag_context
+                    )
+                    model_override = fallback.model
+                    base_url_override = fallback.base_url
+                    api_key_override = fallback.api_key
+                    logger.info(
+                        f"Primary-model targeted retries exhausted - trying ONE targeted fix on "
+                        f"fallback model {model_override} before falling back to full-set regeneration."
+                    )
+
+                    current_graph_context = build_code_context(matched_files, related_files, workspace_path, current_limit)
+                    base_code_context = skills_prompt
+                    if current_graph_context:
+                        base_code_context += current_graph_context
+                    if learned_rag_context:
+                        base_code_context += learned_rag_context
+
+                    task_desc, active_code_context = _build_targeted_retry_prompt(
+                        goal, plan, error_context, last_implicated_files,
+                        all_files_written, worktree_path, base_code_context,
+                        ecosystem_invariant_block=ecosystem_invariant_block,
+                        resource_lifecycle_block=resource_lifecycle_block,
+                    )
+                    logger.info(f"Fallback-targeted retry: focusing on {', '.join(last_implicated_files)}.")
+
+                    model_hops.append(model_override)
 
                     dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
                     files = await self.developer.run_generation(
@@ -4165,8 +4252,19 @@ class WorkflowEngine:
                                 except Exception as ex:
                                     logger.warning(f"Failed to auto-accrue skill for dependency: {ex}")
 
-                # Autonomous Skill Accrual / Lesson extraction
-                if retry_count > 0 and chain:
+                # Autonomous Skill Accrual / Lesson extraction. Gated on model_override
+                # (this SPECIFIC successful attempt used a non-primary model), not
+                # retry_count > 0 (some full-set attempt failed at SOME earlier point in
+                # this run) - the two aren't equivalent: a plain targeted retry on the
+                # PRIMARY model (model_override=None) can succeed after an earlier,
+                # unrelated full-set failure already ticked retry_count up, which isn't
+                # an "escalation model" success at all. Found live while adding the
+                # fallback-targeted retry step below, which made this distinction matter
+                # for the first time in a common case (a genuine fallback-model success
+                # that deliberately does NOT touch retry_count) - but the old condition's
+                # imprecision predates that change and could already misfire for a
+                # primary-model targeted success under the same circumstances.
+                if model_override and chain:
                     try:
                         error_kind = (
                             "runtime verification" if "RUNTIME VERIFICATION" in error_context
@@ -4271,7 +4369,12 @@ class WorkflowEngine:
 
             except Exception as e:
                 raw_error_context = str(e)
-                attempt_mode = "targeted" if use_targeted else "missing_files" if use_missing_files else "full-set"
+                attempt_mode = (
+                    "targeted" if use_targeted
+                    else "fallback_targeted" if use_fallback_targeted
+                    else "missing_files" if use_missing_files
+                    else "full-set"
+                )
                 logger.warning(
                     f"Quality Gates FAILED (Attempt {attempt_number}, "
                     f"{attempt_mode}, full-set {retry_count}/{max_retries} + "
@@ -4442,6 +4545,13 @@ class WorkflowEngine:
 
                 if use_targeted or use_missing_files:
                     targeted_retry_count += 1
+                elif use_fallback_targeted:
+                    # Deliberately counts against NEITHER budget - it's a genuinely
+                    # separate, one-shot step (fallback_targeted_attempted, already
+                    # set True at the branch entry above, is what prevents this from
+                    # ever firing twice), not a full-set attempt or an extension of
+                    # the primary-model-only targeted budget.
+                    pass
                 else:
                     retry_count += 1
 
