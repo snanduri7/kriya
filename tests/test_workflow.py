@@ -55,6 +55,7 @@ from kriya.workflow.workflow import (
     extract_implicated_files,
     find_edits_ignoring_reported_line,
     find_missing_expected_files,
+    find_structural_corruption,
     normalize_written_filepath,
 )
 
@@ -5310,6 +5311,165 @@ def test_reserve_graph_context_budget_barely_affects_a_large_primary_window():
     skills_text = "word " * 5000
     budget = _reserve_graph_context_budget(32768, skills_text, "")
     assert budget > int(32768 * 0.75) * 0.5
+
+
+def test_find_structural_corruption_catches_the_real_duplicate_class_shape():
+    """Regression test for a real live corruption, 2026-08-08
+    (ignite_qpid_protocol, run 20260808-053604): a model's SEARCH/REPLACE
+    edit folded an entire redundant, unasked-for full-file dump (its own
+    "package"/"public class" declaration included) into the replace text,
+    because the old truncation regex only recognized the literal
+    "FILE CONTENT:" marker and this response phrased it as "Corrected file
+    content for '...':" instead. Applying that edit produced a file with two
+    package statements and two class declarations - a real 23-error
+    "illegal start of expression"/"class expected" javac cascade.
+
+    Note a *complete*, self-closed duplicate class is brace-count-balanced
+    by construction (each fragment sums to zero net braces regardless of
+    ordering), so this best-effort heuristic can't catch that variant on its
+    own - that's what the regex fix in kriya/agents/agent.py is for. What
+    this safety net does catch is the equally-real variant below, where the
+    redundant dump gets cut off mid-generation (token budget) before its own
+    duplicate class closes."""
+    orig = (
+        "package com.example;\n\n"
+        "public class ProtocolParser {\n"
+        "    public static byte[] encode(Protocol protocol) {\n"
+        "        buffer.putInt(protocol.getDataLength());\n"
+        "        return buffer.array();\n"
+        "    }\n"
+        "}\n"
+    )
+    edit = {
+        "search": "        buffer.putInt(protocol.getDataLength());",
+        "replace": (
+            "        buffer.putInt(protocol.getDataLength()); // corrected\n"
+            "\n"
+            "Corrected file content for 'ProtocolParser.java':\n"
+            "```java\n"
+            "package com.example;\n"
+            "\n"
+            "public class ProtocolParser {\n"
+            "    public static byte[] encode(Protocol protocol) {\n"
+        ),
+    }
+    from kriya.workflow.workflow import apply_anchored_edits
+    corrupted = apply_anchored_edits(orig, [edit], orig)
+    problem = find_structural_corruption("ProtocolParser.java", corrupted)
+    assert problem is not None
+    assert "brace" in problem
+
+
+def test_find_structural_corruption_none_for_balanced_java():
+    valid = (
+        "package com.example;\n\n"
+        "public class Foo {\n"
+        "    void bar() {\n"
+        "        if (true) { System.out.println(\"{ not a real brace }\"); }\n"
+        "        // a comment with a { stray brace }\n"
+        "        /* a block comment with { another } */\n"
+        "    }\n"
+        "}\n"
+    )
+    assert find_structural_corruption("Foo.java", valid) is None
+
+
+def test_find_structural_corruption_detects_unclosed_and_extra_braces():
+    unclosed = "public class Foo {\n    void bar() {\n"
+    problem = find_structural_corruption("Foo.java", unclosed)
+    assert problem is not None
+    assert "unclosed" in problem
+
+    extra = "public class Foo {\n    void bar() {}\n}\n}\n"
+    problem2 = find_structural_corruption("Foo.java", extra)
+    assert problem2 is not None
+    assert "extra closing" in problem2
+
+
+def test_find_structural_corruption_xml_well_formed_vs_malformed():
+    valid_xml = "<beans><bean id=\"x\" class=\"Y\"/></beans>"
+    assert find_structural_corruption("applicationContext.xml", valid_xml) is None
+
+    malformed_xml = "<beans><bean id=\"x\" class=\"Y\"></beans>"  # unclosed <bean>
+    problem = find_structural_corruption("applicationContext.xml", malformed_xml)
+    assert problem is not None
+    assert "malformed XML" in problem
+
+
+def test_find_structural_corruption_ignores_other_extensions():
+    # Deliberately not extended to Python/Ruby/JSON/etc. without a real
+    # incident to justify it - brace-counting is much less informative for
+    # indentation-based languages.
+    assert find_structural_corruption("app.py", "def f(:\n    pass") is None
+    assert find_structural_corruption("app.rb", "def f(\n  end") is None
+
+
+@pytest.mark.asyncio
+async def test_workflow_structural_corruption_rejects_before_compiling(tmp_path):
+    """End-to-end regression test for find_structural_corruption() as a
+    defense-in-depth safety net, independent of the "Corrected file
+    content for '...':" regex fix in kriya/agents/agent.py (workflow.py
+    already runs every edit's search/replace through
+    DeveloperAgent.sanitize_generated_content() before applying it, so that
+    fix alone already neutralizes the exact "duplicate file dump" shape
+    before it reaches this check - confirmed directly while building this
+    test). This test instead uses a malformed-but-unrelated edit (a
+    dangling, unclosed appended method - no "file content" phrase in it, so
+    sanitization passes it through untouched) to prove the structural check
+    still catches a corrupted write on its own. Confirmed here by asserting
+    PolymorphicValidator's compile check is called exactly twice (attempt
+    1's real failure, and the eventual real fix's success) - never for the
+    rejected, structurally-corrupted attempt."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {\\n  int x = 1;\\n}"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,11] some compile error"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                # Attempt 1: full content, fails compile above.
+                [{"filepath": "App.java", "content": "class App {\n  int x = 1;\n}"}],
+                # Attempt 2: an edit that applies cleanly (no anchor-match
+                # failure) but its replace text is malformed - a dangling,
+                # unclosed appended method - producing an unbalanced file.
+                [{"filepath": "App.java", "edits": [{
+                    "search": "  int x = 1;",
+                    "replace": "  int x = 2;\n\n  public void extra() {\n",
+                }]}],
+                # Attempt 3: a real, clean fix.
+                [{"filepath": "App.java", "content": "class App {\n  int x = 2;\n}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert mock_compile.call_count == 2  # attempt 2's rejection never reached compile
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+
+    corruption_failures = [o for o in gate_outcomes if o.get("type") == "structural_corruption"]
+    assert len(corruption_failures) == 1, gate_outcomes
+    assert corruption_failures[0]["likely_files"] == ["App.java"]
+    assert corruption_failures[0]["success"] is False
 
 
 def test_incomplete_generation_error_carries_missing_files():

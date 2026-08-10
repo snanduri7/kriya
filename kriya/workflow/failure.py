@@ -45,7 +45,10 @@ class Failure:
     failure - but its own search block spanned the exact line a prior
     compile error reported, then left that line byte-identical in its
     replace text; see find_edits_ignoring_reported_line() in
-    kriya/workflow/workflow.py), or "general_error" (fallback for a bare,
+    kriya/workflow/workflow.py), "structural_corruption" (the edit/content
+    applied cleanly but the resulting file is obviously, mechanically broken -
+    unbalanced Java braces or malformed XML; see find_structural_corruption()
+    in kriya/workflow/workflow.py), or "general_error" (fallback for a bare,
     non-QualityGateFailure Exception).
     """
     type: str

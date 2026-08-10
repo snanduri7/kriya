@@ -333,6 +333,17 @@ def test_split_fix_analysis_is_case_insensitive():
     assert analysis == "short reason"
     assert content == "class X {}"
 
+def test_split_fix_analysis_truncates_prose_phrased_marker():
+    # Same real 2026-08-08 phrasing as
+    # test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content,
+    # exercised directly against _split_fix_analysis (the fallback path
+    # _split_fix_analysis_edit itself defers to when no SEARCH:/REPLACE:
+    # markers are present).
+    text = "FIX ANALYSIS: reason here.\nCorrected file content for 'App.java':\npublic class App {}"
+    analysis, content = DeveloperAgent._split_fix_analysis(text)
+    assert analysis == "reason here."
+    assert content == "public class App {}"
+
 def test_split_fix_analysis_falls_back_when_marker_missing():
     # A non-compliant response (no marker at all) must degrade to the plain
     # pre-existing behavior - the whole text treated as content, not corrupted
@@ -490,6 +501,42 @@ def test_split_fix_analysis_edit_truncates_redundant_trailing_file_content():
     assert edits == [{
         "search": "import org.apache.ignite.cache.IgniteCache;",
         "replace": "import org.apache.ignite.IgniteCache;",
+    }]
+    assert content is None
+
+def test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content():
+    """Regression test for a real bug found live, 2026-08-08
+    (ignite_qpid_protocol, run 20260808-053604): the truncation above only
+    ever recognized the literal marker line "FILE CONTENT:" - this response
+    instead phrased its redundant trailing dump as "Corrected file content
+    for '...':", no colon immediately after "content", so the old exact-
+    marker regex didn't match it at all and the entire duplicate
+    package/class declaration got folded verbatim into the applied edit's
+    replace text. Confirmed live via direct replay of the real captured
+    model response: applying that edit produced a file with two package
+    statements and two class declarations, a real 23-error "illegal start
+    of expression"/"class expected" javac cascade."""
+    text = (
+        "FIX ANALYSIS: buffer overflow on write.\n"
+        "SEARCH:\n"
+        "        buffer.putInt(protocol.getDataLength());\n"
+        "REPLACE:\n"
+        "        buffer.put((byte)(protocol.getDataLength() >> 16));\n"
+        "\n"
+        "Corrected file content for 'src/main/java/com/example/ProtocolParser.java':\n"
+        "```java\n"
+        "package com.example;\n"
+        "\n"
+        "public class ProtocolParser {\n"
+        "    // duplicated, unasked-for full file dump\n"
+        "}\n"
+        "```\n"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert analysis == "buffer overflow on write."
+    assert edits == [{
+        "search": "        buffer.putInt(protocol.getDataLength());",
+        "replace": "        buffer.put((byte)(protocol.getDataLength() >> 16));",
     }]
     assert content is None
 
@@ -838,6 +885,14 @@ def test_sanitize_generated_content_strips_gutter_and_fence():
 
 def test_sanitize_generated_content_truncates_redundant_trailing_marker():
     text = "public class App {}\n\nFILE CONTENT:\npublic class App { /* duplicated */ }"
+    assert DeveloperAgent.sanitize_generated_content(text) == "public class App {}"
+
+def test_sanitize_generated_content_truncates_prose_phrased_marker():
+    # Same real 2026-08-08 phrasing as
+    # test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content -
+    # the old regex only matched the literal "FILE CONTENT:" marker line,
+    # not a prose lead-in like "Corrected file content for '...':".
+    text = "public class App {}\n\nCorrected file content for 'App.java':\npublic class App { /* dup */ }"
     assert DeveloperAgent.sanitize_generated_content(text) == "public class App {}"
 
 def test_sanitize_generated_content_plain_text_passthrough():

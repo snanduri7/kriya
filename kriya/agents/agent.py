@@ -65,6 +65,32 @@ _INCOMPATIBLE_TYPES_RE = re.compile(
 # eventually over/underrunning the buffer.
 _BUFFER_CAPACITY_RE = re.compile(r"java\.nio\.Buffer(Overflow|Underflow)Exception")
 
+# Marks a redundant, unasked-for full-file dump appended after a SEARCH/REPLACE
+# edit (or, in _split_fix_analysis's case, the REQUIRED marker introducing a
+# full-file FIX ANALYSIS response). Originally just the literal "file content:"
+# (matching the "FILE CONTENT:" instruction text verbatim) - broadened
+# 2026-08-08 after a real, live corruption traced directly to this being too
+# narrow: a real response phrased its trailing full-file dump as "Corrected
+# file content for 'ProtocolParser.java':" instead - no colon immediately
+# after "content", so the old exact-match regex never fired, and the entire
+# duplicate class (its own package statement and class declaration included)
+# got folded verbatim into the SEARCH/REPLACE edit's replace text, producing
+# a file with two `package` statements and two `public class` declarations -
+# a 23-error "illegal start of expression"/"class expected" cascade,
+# confirmed by replaying the exact real captured response through this
+# module's own parsing functions, not assumed. Broadened to "file content"
+# followed by up to 60 non-newline characters then a colon, on the same
+# line - covers "file content:", "file content for 'X.java':", "file
+# content for the corrected version:", etc., while still requiring an
+# eventual colon so a stray, unrelated mention of the phrase elsewhere in a
+# response doesn't trigger a false truncation. Anchored to the START of
+# whatever line "file content" appears on (not just the phrase itself) so a
+# lead-in like "Corrected " isn't left dangling in the truncated text - every
+# real observed instance of this marker is the entire content of its own
+# announcement line, never embedded mid-sentence with real content before it
+# on the same line.
+_TRAILING_FILE_CONTENT_RE = re.compile(r"^[^\n]*?file content[^\n:]{0,60}:", re.IGNORECASE | re.MULTILINE)
+
 
 async def call_with_escalation(
     llm: LLMClient,
@@ -337,7 +363,7 @@ class DeveloperAgent(BaseAgent):
         absent (e.g. a file entry still awaiting generation)."""
         if text is None:
             return None
-        trailing_file_content = re.search(r"file content:", text, re.IGNORECASE)
+        trailing_file_content = _TRAILING_FILE_CONTENT_RE.search(text)
         if trailing_file_content:
             text = text[:trailing_file_content.start()].rstrip("\n")
         text = _GUTTER_PREFIX_RE.sub("", text)
@@ -404,7 +430,7 @@ class DeveloperAgent(BaseAgent):
         so a non-compliant response degrades to the pre-existing plain-content
         behavior rather than corrupting it - this is a prompt-level nudge, not a hard
         parsing requirement."""
-        match = re.search(r"file content:", text, re.IGNORECASE)
+        match = _TRAILING_FILE_CONTENT_RE.search(text)
         if not match:
             return None, text
         analysis = text[:match.start()].strip()
@@ -447,7 +473,7 @@ class DeveloperAgent(BaseAgent):
         sequence (confirmed via reading it directly, not assumed) - the fix is to
         actually use that, not to bound the first pair's replace text more
         tightly and still discard the rest."""
-        file_content_match = re.search(r"file content:", text, re.IGNORECASE)
+        file_content_match = _TRAILING_FILE_CONTENT_RE.search(text)
         bound = file_content_match.start() if file_content_match else len(text)
 
         search_matches = list(re.finditer(r"search:", text[:bound], re.IGNORECASE))

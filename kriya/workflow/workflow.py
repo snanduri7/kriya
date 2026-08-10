@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.agents.agent import (
@@ -526,6 +527,89 @@ def find_edits_ignoring_reported_line(
             if len(old_line) >= 8 and old_line == new_line and line_no not in ignored:
                 ignored.append(line_no)
     return ignored
+
+def _strip_java_comments_and_strings(code: str) -> str:
+    """Best-effort removal of Java string/char literals and // and /* */
+    comments, replacing each with equal-length whitespace (blank, not deleted,
+    so a caller relying on absolute character positions for anything else
+    isn't affected). Deliberately NOT a real lexer - doesn't understand Java
+    17 text blocks (\"\"\"...\"\"\") or unicode escapes. Good enough for a
+    cheap, best-effort structural pre-check (find_structural_corruption
+    below); a false negative here just means that check degrades to "found
+    nothing wrong" the same as if the check didn't exist, never a false
+    rejection of valid code."""
+    out = []
+    i, n = 0, len(code)
+    while i < n:
+        c = code[i]
+        if c == "/" and i + 1 < n and code[i + 1] == "/":
+            j = code.find("\n", i)
+            j = n if j == -1 else j
+            out.append(" " * (j - i))
+            i = j
+        elif c == "/" and i + 1 < n and code[i + 1] == "*":
+            j = code.find("*/", i + 2)
+            j = n if j == -1 else j + 2
+            out.append("".join(ch if ch == "\n" else " " for ch in code[i:j]))
+            i = j
+        elif c in ("\"", "'"):
+            quote = c
+            j = i + 1
+            while j < n and code[j] != quote:
+                j += 2 if code[j] == "\\" else 1
+            j = min(j + 1, n)
+            out.append("".join(ch if ch == "\n" else " " for ch in code[i:j]))
+            i = j
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+def find_structural_corruption(filepath: str, content: str) -> Optional[str]:
+    """Cheap, deterministic, best-effort structural sanity check on a file
+    about to be written to the sandbox - catches the exact corruption class
+    found live TWICE this session: a duplicated package/class declaration
+    from a swallowed FILE CONTENT: block (2026-08-04, see
+    _split_fix_analysis_edit's own docstring) and a 23-error "illegal start
+    of expression"/"class, interface, enum, or record expected" cascade from
+    a fallback model's full-file rewrite (2026-08-08, ignite_qpid_protocol) -
+    BEFORE the expensive compile gate spends a full Maven invocation
+    discovering the same thing. Neither prior incident was caught by Layer 1
+    (find_edits_ignoring_reported_line) or any scaffold, since both checks
+    something about a REPORTED error's location/shape - a corrupted file from
+    a clean-looking edit or a fresh full-file generation has no prior error
+    to check against at all.
+
+    Deliberately NOT a real parser - a full AST/tree-sitter integration would
+    catch more, but at real added complexity and a new dependency; this
+    targets specifically the cheap, unambiguous "obviously broken" shape a
+    human would spot on sight (unbalanced braces, malformed XML), the same
+    shape both real incidents actually were. Returns a human-readable
+    description of the problem, or None if the file looks structurally sound
+    - never a guarantee of correctness (a real compiler remains the source of
+    truth for that), only a cheap, low-false-positive earlier tripwire for
+    the specific way these two real corruptions were shaped.
+
+    Scoped to .java (brace balance, comment/string-aware so a stray brace
+    inside a string literal or comment doesn't produce a false positive) and
+    .xml (real well-formedness via the stdlib's own XML parser, not a
+    heuristic - zero false positives by construction). Every other extension
+    returns None unconditionally - deliberately not extended to Python/Ruby
+    (indentation/block-keyword-based, not brace-delimited - a brace count is
+    much less informative there) without a second real incident to justify it."""
+    if filepath.endswith(".java"):
+        stripped = _strip_java_comments_and_strings(content)
+        balance = stripped.count("{") - stripped.count("}")
+        if balance > 0:
+            return f"{balance} unclosed '{{' brace(s) - more opening braces than closing ones."
+        if balance < 0:
+            return f"{-balance} extra closing '}}' brace(s) - more closing braces than opening ones."
+    elif filepath.endswith(".xml"):
+        try:
+            ET.fromstring(content)
+        except ET.ParseError as ex:
+            return f"malformed XML: {ex}"
+    return None
 
 def extract_target_test(error_context: str, files_written: List[str]) -> Optional[str]:
     for f in files_written:
@@ -3544,11 +3628,53 @@ class WorkflowEngine:
                                 gate_outcomes.append(failure.to_gate_outcome())
                                 raise QualityGateFailure(failure)
 
+                        # Structural corruption pre-flight check (see
+                        # find_structural_corruption's own docstring) - a cheap,
+                        # deterministic tripwire for the "obviously broken" shape
+                        # BOTH real corruption incidents this session actually had
+                        # (unbalanced braces from a folded-in duplicate class),
+                        # before the expensive compile gate spends itself
+                        # discovering the same thing.
+                        structural_problem = find_structural_corruption(filepath, new_content)
+                        if structural_problem:
+                            failure = Failure(
+                                type="structural_corruption",
+                                message=(
+                                    f"STRUCTURAL CORRUPTION in {filepath}: {structural_problem} "
+                                    f"This usually means an edit's replace text accidentally folded in "
+                                    f"extra, unrelated content (e.g. a redundant full-file dump appended "
+                                    f"after the intended change). Re-check your SEARCH/REPLACE blocks - "
+                                    f"the replace text for each pair should contain ONLY the corrected "
+                                    f"version of that pair's search text, nothing else."
+                                ),
+                                raw_output=structural_problem,
+                                file_locations=[FileLocation(filepath=filepath)],
+                                likely_files=[filepath],
+                                failed_content={filepath: orig_text},
+                                attempted_edits=edits,
+                                attempt=attempt_number,
+                            )
+                            gate_outcomes.append(failure.to_gate_outcome())
+                            raise QualityGateFailure(failure)
+
                         with open(full_path, "w", encoding="utf-8") as f:
                             f.write(new_content)
                     else:
                         if content is None:
                             continue
+                        structural_problem = find_structural_corruption(filepath, content)
+                        if structural_problem:
+                            failure = Failure(
+                                type="structural_corruption",
+                                message=f"STRUCTURAL CORRUPTION in {filepath}: {structural_problem}",
+                                raw_output=structural_problem,
+                                file_locations=[FileLocation(filepath=filepath)],
+                                likely_files=[filepath],
+                                failed_content={filepath: content},
+                                attempt=attempt_number,
+                            )
+                            gate_outcomes.append(failure.to_gate_outcome())
+                            raise QualityGateFailure(failure)
                         with open(full_path, "w", encoding="utf-8") as f:
                             f.write(content)
                             
