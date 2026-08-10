@@ -100,4 +100,48 @@ when just watching it finish.
 
 ## Findings
 
-(Not yet run. This section gets filled in after the first real batch.)
+**First real batch, 2026-08-10** (`qwen3-coder:30b`, 10 reps/condition, 40 calls total, raw results in `runs/20260810-132832.json`):
+
+| Fixture | Condition | Diagnosis correct | Execution correct | diag-ok/exec-no |
+|---|---|---|---|---|
+| `buffer_capacity` | baseline | 10/10 | 0/10 | 10/10 |
+| `buffer_capacity` | nudge | 10/10 | 0/10 | 10/10 |
+| `incompatible_types` | baseline | 10/10 | 7/10 | 3/10 |
+| `incompatible_types` | nudge | 10/10 | 9/10 | 1/10 |
+
+The nudge is not one general fix - it splits the diagnosis-execution gap into two
+qualitatively different problems:
+
+- **`incompatible_types`** (a one-line fix: add a cast or a generic type
+  parameter): the nudge measurably helped, closing the gap from 3/10 to 1/10.
+  This is the "carelessness" half of the gap - the model already reliably
+  knows the correct fix, restating "make sure your edit implements your own
+  diagnosis" is enough to catch most of the remaining slips.
+- **`buffer_capacity`** (rewriting buffer-packing logic with manual
+  bit-shifting across multiple lines): the nudge did nothing measurable - 0/10
+  in both conditions, not one successful execution across 20 attempts, even
+  with the explicit self-consistency instruction. This is a genuine execution
+  *capability* gap, not a self-consistency one - no amount of "double-check
+  your own diagnosis" phrasing closes it.
+
+This converges precisely with live evidence from `spikes/eval_harness/` runs
+this same session: across every real `ignite_qpid_protocol` run,
+`qwen3-coder:30b` never once fixed the buffer bug via a successful anchored
+edit - it either got the byte-packing right on a clean first attempt (no edit
+needed at all), or it took escalation to a different model doing a full-file
+regeneration to finally land it. This spike isolates that exact pattern in a
+controlled, single-file, single-error setting and reproduces the same 0%
+result. One mechanistic difference from the live runs is worth noting too:
+here the failures are almost entirely `fix-no` (the edit applies cleanly, it
+just doesn't fix the bug), not `apply-fail` (anchor mismatch) - so in a clean
+single-shot setting, anchor-matching mechanics aren't the bottleneck; the
+model just doesn't reliably know how to write correct bit-shifting code, full
+stop.
+
+**Not yet decided**: whether to promote `extra_fix_instruction`'s nudge text
+to always-on in the production retry loop. The data supports it as a
+low-risk, sometimes-helpful addition (never hurt either fixture here) - but
+it should not be expected to move the needle on buffer-capacity-class bugs,
+which need the existing `_build_buffer_capacity_scaffold()` (or, per the live
+evidence, sometimes nothing short of a full regeneration by a different
+model) rather than a self-consistency nudge.
