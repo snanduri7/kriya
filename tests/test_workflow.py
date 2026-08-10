@@ -4685,6 +4685,53 @@ def test_extract_implicated_files_matches_full_relative_path_too():
     known = ["src/main/py/app.py"]
     assert extract_implicated_files(error, known) == ["src/main/py/app.py"]
 
+def test_extract_implicated_files_prefers_locator_over_boilerplate_pom_mention():
+    """Regression test for a real live bug, 2026-08-10 (ignite_qpid_protocol,
+    run 20260810-111517): Maven's OWN reactor startup banner
+    ("[INFO]   from pom.xml") appears in the captured output of EVERY Maven
+    build, success or failure, regardless of what actually broke - so the old
+    plain-substring check unconditionally implicated pom.xml on every retry
+    for any Maven Java goal. Confirmed live: a targeted retry burned a full
+    extra per-file completion call on "Developer fix analysis for 'pom.xml'"
+    correctly diagnosing an unrelated compile error in a completely different
+    file, then regenerating pom.xml with nothing useful to change. A file
+    named alongside a real file:line locator (ProtocolApp.java here) is now
+    preferred over a bare filename mention with no locator (pom.xml, whose
+    only appearance is Maven's own banner line, never a locator)."""
+    error = (
+        "[INFO] Building ignite-qpid-protocol 1.0-SNAPSHOT\n"
+        "[INFO]   from pom.xml\n"
+        "[ERROR] /worktree/src/main/java/com/example/ProtocolApp.java:[5,31] cannot find symbol\n"
+        "  symbol:   class IgniteCache\n"
+        "  location: package org.apache.ignite.cache\n"
+    )
+    known = ["src/main/java/com/example/ProtocolApp.java", "src/main/java/com/example/ProtocolParser.java", "pom.xml"]
+    assert extract_implicated_files(error, known) == ["src/main/java/com/example/ProtocolApp.java"]
+
+def test_extract_implicated_files_locator_preference_keeps_multiple_real_matches():
+    # Same real run, a different attempt: a JVM stack trace gives BOTH
+    # ProtocolParser.java and ProtocolApp.java their own real locators
+    # alongside pom.xml's same boilerplate banner mention - both genuinely
+    # implicated files must still both be returned, only pom.xml dropped.
+    error = (
+        "[INFO]   from pom.xml\n"
+        "Exception in thread \"main\" java.nio.BufferOverflowException\n"
+        "\tat com.example.ProtocolParser.encode(ProtocolParser.java:21)\n"
+        "\tat com.example.ProtocolApp.main(ProtocolApp.java:37)\n"
+    )
+    known = ["src/main/java/com/example/ProtocolApp.java", "src/main/java/com/example/ProtocolParser.java", "pom.xml"]
+    result = extract_implicated_files(error, known)
+    assert set(result) == {"src/main/java/com/example/ProtocolApp.java", "src/main/java/com/example/ProtocolParser.java"}
+    assert "pom.xml" not in result
+
+def test_extract_implicated_files_still_implicates_pom_xml_when_genuinely_the_cause():
+    # A real pom.xml-specific failure (no other file's locator competing)
+    # must still correctly implicate pom.xml - this fix narrows the result
+    # only when locator evidence points elsewhere, it never blanket-excludes
+    # pom.xml.
+    error = "Non-resolvable parent POM: Could not find artifact ... in pom.xml"
+    known = ["src/App.java", "pom.xml"]
+    assert extract_implicated_files(error, known) == ["pom.xml"]
 
 def test_build_targeted_retry_prompt_frames_target_and_reference_files(tmp_path):
     (tmp_path / "App.java").write_text("class App { /* broken */ }")

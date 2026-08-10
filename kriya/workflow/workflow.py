@@ -1893,7 +1893,37 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
     that attempt falls back to a full-file-set retry instead, exactly as if this
     function didn't exist. Best-effort/heuristic by design: a false-positive match
     is low-cost since targeted retries are soft-scoped (the model may still touch
-    other files if a fix genuinely needs it), not a hard restriction."""
+    other files if a fix genuinely needs it), not a hard restriction.
+
+    Prefers a precise file:line locator (extract_error_source_locations - javac's
+    `File.java:[line,col]`, or a JVM stack trace's `(File.java:line)`) over a bare
+    substring match when at least one known file has one. Found live, 2026-08-10
+    (ignite_qpid_protocol): Maven's OWN reactor startup banner
+    ("[INFO]   from pom.xml") appears verbatim in the captured output of every
+    single Maven build, success or failure, regardless of what actually broke -
+    so the old plain-substring check unconditionally implicated pom.xml on
+    effectively every retry for any Maven Java goal. Confirmed live: a targeted
+    retry burned a full extra per-file completion call on "Developer fix analysis
+    for 'pom.xml'" correctly diagnosing an unrelated `BufferOverflowException` in
+    ProtocolParser.java, then regenerating pom.xml with nothing useful to change -
+    real wall-clock cost (one extra multi-minute completion per retry attempt) for
+    a file a build-manifest edit could never plausibly have fixed. A file named
+    alongside a real, precise line locator is much stronger evidence of genuine
+    involvement than a filename appearing anywhere in a noisy multi-line build-tool
+    banner - deliberately reuses the SAME general locator mechanism
+    _resolve_file_locations()/_build_error_source_context() already rely on,
+    rather than special-casing pom.xml/Maven by name. When no known file has a
+    locator at all (a bare exit code, a non-Java stack, a dependency-resolution
+    error with no file:line info), falls back to today's plain substring
+    behavior unchanged - this only narrows the result when locator evidence is
+    actually available, never adds a new failure-to-match case."""
+    known_files = list(known_files)
+    located_basenames = {basename for basename, _line in extract_error_source_locations(error_text)}
+    if located_basenames:
+        located = [f for f in known_files if os.path.basename(f) in located_basenames]
+        if located:
+            return located
+
     implicated = []
     for filepath in known_files:
         basename = os.path.basename(filepath)
