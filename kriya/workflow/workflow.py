@@ -3377,6 +3377,7 @@ class WorkflowEngine:
                         implicated_files=last_implicated_files,
                         error_source_context=last_error_source_context or None,
                         retry_temperature=self.kernel.config.llm.retry_temperature,
+                        extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                     )
                 elif use_missing_files:
                     # Missing-file recovery: same primary-model-only, non-escalating
@@ -3509,6 +3510,7 @@ class WorkflowEngine:
                         implicated_files=last_implicated_files,
                         error_source_context=last_error_source_context or None,
                         retry_temperature=self.kernel.config.llm.retry_temperature,
+                        extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                     )
 
                 # Normalize filepaths before anything downstream uses them - the

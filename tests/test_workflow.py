@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from kriya.agents.agent import DeveloperAgent
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -879,6 +880,11 @@ async def test_workflow_prompt_includes_ecosystem_invariant_on_targeted_retry(tm
     assert res["quality_gates_passed"] is True
     second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
     assert "Ecosystem Preservation" in second_call_kwargs["task_description"]
+    # extra_fix_instruction wired to always-on 2026-08-10 (spikes/fix_alignment/'s
+    # first real batch: closed the diagnosis-execution gap 3/10 -> 1/10 for a
+    # simple fix, did nothing for a complex one, never hurt either) - a
+    # targeted retry is exactly where a fix-analysis-driven edit happens.
+    assert second_call_kwargs["extra_fix_instruction"] == DeveloperAgent.SELF_CONSISTENCY_NUDGE
 
 @pytest.mark.asyncio
 async def test_workflow_prompt_includes_ecosystem_invariant_on_missing_files_retry(tmp_path):
@@ -901,6 +907,11 @@ async def test_workflow_prompt_includes_ecosystem_invariant_on_missing_files_ret
     assert res["quality_gates_passed"] is True
     second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
     assert "Ecosystem Preservation" in second_call_kwargs["task_description"]
+    # Missing-file recovery never passes prior_error_context at all (there's no
+    # error to analyze - the file was simply never written), so the
+    # fix-analysis-driven nudge is structurally irrelevant here and is
+    # deliberately NOT wired at this call site.
+    assert "extra_fix_instruction" not in second_call_kwargs
 
 
 def test_resource_lifecycle_header_names_the_core_pattern():
@@ -4850,6 +4861,38 @@ async def test_workflow_no_targeted_retry_when_error_names_no_known_file(tmp_pat
     # Attempt 2 must escalate to the fallback chain (full-set path), never a
     # targeted (primary-model) attempt, since no file was implicated.
     assert model_overrides[3] == "fallback-1"
+
+@pytest.mark.asyncio
+async def test_workflow_prompt_includes_self_consistency_nudge_on_full_set_retry(tmp_path):
+    """extra_fix_instruction (DeveloperAgent.SELF_CONSISTENCY_NUDGE) must reach
+    a full-set retry too, not just a targeted one - the retry loop's third
+    run_generation() call site (kriya/workflow/workflow.py), used whenever no
+    known file is implicated by the error text. Wired to always-on 2026-08-10
+    once spikes/fix_alignment/'s first real batch supported it."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "Process exited with code 1. No file information available."},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.py", "content": "def main():\n    pass\n"}],
+            [{"filepath": "App.py", "content": "def main():\n    return 0\n"}],
+        ])
+        res = await we.run_generation_workflow(goal="Write a script", workspace_path=str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert second_call_kwargs["extra_fix_instruction"] == DeveloperAgent.SELF_CONSISTENCY_NUDGE
 
 @pytest.mark.asyncio
 async def test_workflow_success_via_targeted_attempt_after_full_set_budget_exhausted(tmp_path):

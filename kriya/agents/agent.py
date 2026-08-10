@@ -701,6 +701,26 @@ class DeveloperAgent(BaseAgent):
             "will leave this exact exception in place on the next attempt.\n"
         )
 
+    # Self-consistency nudge for the "correct diagnosis, failed execution" gap
+    # (see extra_fix_instruction below) - wired to always-on in
+    # kriya/workflow/workflow.py's two retry-loop call sites where a fix
+    # analysis is meaningful (targeted retry, full-set retry), 2026-08-10,
+    # after spikes/fix_alignment/'s first real batch (40 calls, qwen3-coder:30b)
+    # measured a real, non-hypothetical effect: this exact text closed the
+    # diagnosis-execution gap from 3/10 to 1/10 for a one-line fix
+    # (incompatible_types) and did NOTHING for a multi-line manual-bit-shifting
+    # fix (buffer_capacity - 0/10 in both the baseline AND nudge conditions).
+    # Kept as this literal string, not re-derived, so production behavior
+    # matches exactly what was measured - the spike itself imports this same
+    # constant rather than keeping its own copy, so the two can't drift apart.
+    SELF_CONSISTENCY_NUDGE = (
+        "\nBefore writing SEARCH/REPLACE, re-read your own FIX ANALYSIS above. Your "
+        "REPLACE text MUST implement exactly what you just diagnosed - if your "
+        "analysis names a specific line, field, or mechanism, your edit must change "
+        "that exact thing, not something else. A diagnosis that isn't reflected in "
+        "the edit is worse than no diagnosis at all.\n"
+    )
+
     async def _fill_missing_content(
         self,
         file_entries: List[Dict[str, Any]],
@@ -724,15 +744,18 @@ class DeveloperAgent(BaseAgent):
 
         extra_fix_instruction: appended verbatim to fix_analysis_instruction (only
         when apply_fix_analysis is true, same scope as the incompatible-types/
-        buffer-capacity scaffolds). Exists for spikes/fix_alignment/ - a small,
-        real-LLM-call test measuring how often a model's own FIX ANALYSIS
+        buffer-capacity scaffolds). Originally built for spikes/fix_alignment/ - a
+        small, real-LLM-call test measuring how often a model's own FIX ANALYSIS
         correctly diagnoses a bug but the accompanying SEARCH/REPLACE edit doesn't
         implement it (found live, repeatedly, 2026-08-07/08 - see that spike's
-        README for the full writeup). Left "" by default, which is a no-op
-        appended to a possibly-empty string - zero behavior change for every
-        existing caller. Not wired to any config flag; promoting a specific nudge
-        text to always-on, if the spike's measurements support it, is a deliberate
-        follow-up decision, not a side effect of adding this parameter.
+        README for the full writeup). Left "" by default here, which is a no-op
+        appended to a possibly-empty string - a caller that doesn't pass it gets
+        zero behavior change. kriya/workflow/workflow.py's two retry-loop call
+        sites now explicitly pass DeveloperAgent.SELF_CONSISTENCY_NUDGE, wired to
+        always-on 2026-08-10 once the spike's first real batch supported it (see
+        that constant's own docstring for the actual numbers) - not gated behind
+        a config flag, since the data showed no downside case across either
+        fixture tested.
 
         retry_temperature, when set (config-driven, see LLMConfig.retry_temperature),
         overrides the completion temperature ONLY for a file this call is actually

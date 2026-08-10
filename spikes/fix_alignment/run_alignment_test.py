@@ -31,20 +31,13 @@ from kriya.config import AppConfig  # noqa: E402
 from kriya.core.llm import LLMClient  # noqa: E402
 from kriya.workflow.workflow import apply_anchored_edits, _build_error_source_context  # noqa: E402
 
-# Same self-consistency nudge discussed with the user - appended verbatim to
-# fix_analysis_instruction via DeveloperAgent.run_generation()'s
-# extra_fix_instruction parameter (new, purely additive - see its own
-# docstring). This IS the independent variable this spike measures; the
-# baseline condition passes "" (no-op, today's exact production behavior).
-NUDGE_TEXT = (
-    "\nBefore writing SEARCH/REPLACE, re-read your own FIX ANALYSIS above. Your "
-    "REPLACE text MUST implement exactly what you just diagnosed - if your "
-    "analysis names a specific line, field, or mechanism, your edit must change "
-    "that exact thing, not something else. A diagnosis that isn't reflected in "
-    "the edit is worse than no diagnosis at all.\n"
-)
-
-CONDITIONS = {"baseline": "", "nudge": NUDGE_TEXT}
+# Imports the exact same text now wired to always-on in
+# kriya/workflow/workflow.py's retry loop (2026-08-10, once this spike's first
+# real batch supported it) rather than keeping a separate copy - so a future
+# re-run of this spike always measures whatever text production actually
+# ships, not a stale snapshot of it. This IS the independent variable this
+# spike measures; the baseline condition passes "" (no-op).
+CONDITIONS = {"baseline": "", "nudge": DeveloperAgent.SELF_CONSISTENCY_NUDGE}
 
 
 def _build_existing_code_context(fixture) -> str:

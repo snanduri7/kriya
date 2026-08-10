@@ -138,10 +138,15 @@ single-shot setting, anchor-matching mechanics aren't the bottleneck; the
 model just doesn't reliably know how to write correct bit-shifting code, full
 stop.
 
-**Not yet decided**: whether to promote `extra_fix_instruction`'s nudge text
-to always-on in the production retry loop. The data supports it as a
-low-risk, sometimes-helpful addition (never hurt either fixture here) - but
-it should not be expected to move the needle on buffer-capacity-class bugs,
-which need the existing `_build_buffer_capacity_scaffold()` (or, per the live
-evidence, sometimes nothing short of a full regeneration by a different
+**Decided, 2026-08-10, same day**: promoted to always-on. `DeveloperAgent.SELF_CONSISTENCY_NUDGE`
+(`kriya/agents/agent.py`) now holds this exact text, and `kriya/workflow/workflow.py`'s
+two retry-loop call sites where a fix-analysis is meaningful (targeted retry, full-set
+retry) pass it as `extra_fix_instruction` unconditionally - not gated behind a config
+flag, since the data showed no downside case across either fixture. The missing-file-recovery
+call site deliberately does NOT pass it (it never sets `prior_error_context`, so the
+nudge would be a structural no-op there). This script now imports `DeveloperAgent.SELF_CONSISTENCY_NUDGE`
+directly instead of keeping its own copy of the text, so a future re-run always measures
+whatever text production actually ships. As always, it should not be expected to move the
+needle on buffer-capacity-class bugs, which need the existing `_build_buffer_capacity_scaffold()`
+(or, per the live evidence, sometimes nothing short of a full regeneration by a different
 model) rather than a self-consistency nudge.
