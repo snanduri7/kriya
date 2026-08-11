@@ -133,6 +133,29 @@ def version() -> None:
     click.echo(f"Kriya version: {__version__}")
 
 @main.command()
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
+def completion(shell: str) -> None:
+    """Print shell completion setup instructions for SHELL (bash/zsh/fish).
+
+    Click (this CLI's underlying framework) already generates a working
+    completion script for free via a magic env var - `kriya` itself needs no
+    completion-specific code at all. This command exists purely for
+    discoverability, since nothing else in the CLI surfaces that the
+    capability is already there. Architectural add-on from a 2026-08-12 SME
+    review."""
+    if shell == "fish":
+        eval_line = "_KRIYA_COMPLETE=fish_source kriya | source"
+        rc_file = "~/.config/fish/completions/kriya.fish"
+        install_cmd = f"_KRIYA_COMPLETE=fish_source kriya > {rc_file}"
+    else:
+        eval_line = f'eval "$(_KRIYA_COMPLETE={shell}_source kriya)"'
+        rc_file = "~/.bashrc" if shell == "bash" else "~/.zshrc"
+        install_cmd = f"echo '{eval_line}' >> {rc_file}"
+
+    click.echo(f"# Run this once in your current shell to enable completion immediately:\n{eval_line}\n")
+    click.echo(f"# To make it permanent, add it to {rc_file}:\n{install_cmd}")
+
+@main.command()
 @click.pass_context
 def config(ctx: click.Context) -> None:
     """Display current Kriya configuration."""

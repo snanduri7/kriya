@@ -11,7 +11,7 @@ from kriya.cli import main
 
 TOP_LEVEL_COMMANDS = [
     "version", "config", "doctor", "repl", "plugins", "analyze",
-    "generate", "review", "ask", "learn", "fix", "traces",
+    "generate", "review", "ask", "learn", "fix", "traces", "completion",
 ]
 SUBCOMMAND_GROUPS = {
     "prompt": ["render", "generate"],
@@ -91,6 +91,26 @@ def test_version_command_runs_end_to_end(runner):
     result = runner.invoke(main, ["version"])
     assert result.exit_code == 0, result.output
     assert "Kriya version" in result.output
+
+
+@pytest.mark.parametrize("shell,expected_snippet", [
+    ("bash", 'eval "$(_KRIYA_COMPLETE=bash_source kriya)"'),
+    ("zsh", 'eval "$(_KRIYA_COMPLETE=zsh_source kriya)"'),
+    ("fish", "_KRIYA_COMPLETE=fish_source kriya | source"),
+])
+def test_completion_command_prints_setup_instructions(runner, shell, expected_snippet):
+    """Architectural add-on from a 2026-08-12 SME review: Click already
+    generates a working completion script for free via a magic env var
+    (confirmed live: `_KRIYA_COMPLETE=bash_source kriya` works with zero
+    kriya-side code) - this command exists purely for discoverability."""
+    result = runner.invoke(main, ["completion", shell])
+    assert result.exit_code == 0, result.output
+    assert expected_snippet in result.output
+
+
+def test_completion_command_rejects_unknown_shell(runner):
+    result = runner.invoke(main, ["completion", "powershell"])
+    assert result.exit_code != 0
 
 
 def test_tools_execute_shell_requires_confirmation_without_yes(runner):
