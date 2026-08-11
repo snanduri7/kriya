@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kriya.config import AppConfig
-from kriya.core.llm import LLMClient
+from kriya.core.llm import LLMClient, is_local_url
 
 
 @pytest.mark.asyncio
@@ -154,3 +154,25 @@ async def test_reasoning_model_retry_failure_propagates_original_style_error():
         with pytest.raises(Exception, match="second failure"):
             await llm.complete("system", "user", json_mode=True)
         assert mock_create.call_count == 2
+
+
+def test_is_local_url_fails_closed_on_hostname_less_url():
+    """Regression test for a real bug found live, 2026-08-12 (SME architecture
+    review): a URL with no parseable hostname (e.g. a malformed/typo'd
+    base_url missing "http://") used to return True (treated as local/
+    allowed) - the opposite of the fail-closed behavior this function's own
+    except block already implements for every other failure mode, and a
+    direct contradiction of its role as a hard egress safety boundary."""
+    assert is_local_url("not-a-valid-url-at-all") is False
+    assert is_local_url("") is False
+    assert is_local_url("localhost:11434/v1") is False  # missing scheme -> no hostname parsed
+
+
+def test_is_local_url_still_allows_real_local_hosts():
+    assert is_local_url("http://localhost:11434/v1") is True
+    assert is_local_url("http://127.0.0.1:11434/v1") is True
+    assert is_local_url("http://my-machine.local:11434/v1") is True
+
+
+def test_is_local_url_still_rejects_real_remote_hosts():
+    assert is_local_url("http://api.openai.com/v1") is False

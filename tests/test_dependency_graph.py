@@ -107,7 +107,7 @@ def test_xml_bean_indexing(tmp_path):
 </beans>
 """
     graph.index_file("beans.xml", xml_content, 400.0)
-    
+
     import sqlite3
     c = sqlite3.connect(graph.db_path)
     cursor = c.cursor()
@@ -115,3 +115,78 @@ def test_xml_bean_indexing(tmp_path):
     syms = cursor.fetchall()
     assert ("myService", "spring_bean") in syms
     c.close()
+
+
+def test_clear_file_does_not_delete_a_different_files_relations(tmp_path):
+    """Regression test for a real bug found live, 2026-08-12 (SME
+    architecture review): relations.source/target are bare, unqualified
+    symbol names with no file scoping - clear_file() used to delete ANY
+    relation matching a symbol name defined in the file being cleared, even
+    one that actually belongs to a DIFFERENT file's same-named symbol (e.g.
+    two Java files each defining a method called "handle"). Re-indexing (or
+    clearing) one file silently corrupted the other, untouched file's
+    relations too, with no error surfaced. Fixed by tracking which file's
+    parse produced each relation row (source_file) and deleting by that
+    instead of by name.
+
+    Constructed directly at the data layer (not through a language parser)
+    so the test is precise about exactly which collision it's proving fixed,
+    independent of any one parser's symbol-naming quirks."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("A.java", "handle", "function", 1, 5),
+    )
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("B.java", "handle", "function", 1, 5),
+    )
+    # B's own relation, referencing "handle" as a call target - correctly
+    # attributed to B via source_file.
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+        ("B.trigger", "handle", "calls", "B.java"),
+    )
+    cursor.execute("INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", ("A.java", 100.0, "h1"))
+    cursor.execute("INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", ("B.java", 200.0, "h2"))
+    graph.conn.commit()
+
+    graph.clear_file("A.java")
+
+    callers = graph.get_callers("handle")
+    assert len(callers) == 1
+    assert callers[0]["source"] == "B.trigger"
+
+    # A's own symbols/file row are still correctly gone.
+    cursor.execute("SELECT COUNT(*) FROM symbols WHERE filepath = 'A.java'")
+    assert cursor.fetchone()[0] == 0
+    cursor.execute("SELECT COUNT(*) FROM files WHERE filepath = 'A.java'")
+    assert cursor.fetchone()[0] == 0
+
+
+def test_clear_file_still_removes_a_legacy_pre_migration_relation_by_name(tmp_path):
+    """A relation row inserted before the source_file column existed
+    (source_file IS NULL) must still be cleaned up by clear_file() via the
+    name-based fallback - not left as a permanent orphan."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("A.java", "handle", "function", 1, 5),
+    )
+    # Simulates a row from before the source_file migration.
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, NULL)",
+        ("A.trigger", "handle", "calls"),
+    )
+    cursor.execute("INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", ("A.java", 100.0, "h1"))
+    graph.conn.commit()
+
+    graph.clear_file("A.java")
+
+    assert graph.get_callers("handle") == []

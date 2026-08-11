@@ -289,25 +289,36 @@ class SkillEngine:
 
     def __init__(self, skills_dir: str, load_global: bool = True) -> None:
         self.skills_dirs = []
-        
+
         # 1. Determine Kriya Installation Directory
         KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         global_skills = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, "skills"))
-        
+
         # 2. Add global skills first (lowest precedence) if load_global is True
         if load_global and os.path.exists(global_skills):
             self.skills_dirs.append(global_skills)
-            
-        # 3. Add local/supplied skills directory
-        supplied_dir = os.path.abspath(skills_dir)
-        if supplied_dir not in self.skills_dirs:
-            self.skills_dirs.append(supplied_dir)
-            
-        # 4. Add CWD-based skills directory if present and different (only if load_global is True)
+
+        # 3. Add the CWD-based skills directory (an IMPLICIT guess, used when
+        # a project's config doesn't set paths.skills explicitly) before the
+        # explicitly supplied directory, not after - found live, 2026-08-12
+        # (SME architecture review): discover_and_load() below documents
+        # "later paths override earlier ones" as deliberate precedence, but
+        # this method previously added supplied_dir BEFORE local_cwd_skills,
+        # so a same-named skill present in both silently let the implicit
+        # CWD guess win over an explicitly configured paths.skills - the
+        # opposite of expected precedence whenever supplied_dir differs from
+        # CWD/skills (e.g. an absolute path elsewhere).
         local_cwd_skills = os.path.abspath(os.path.join(os.getcwd(), "skills"))
         if load_global and os.path.exists(local_cwd_skills) and local_cwd_skills not in self.skills_dirs:
             self.skills_dirs.append(local_cwd_skills)
-            
+
+        # 4. Add the explicitly supplied skills directory LAST (highest
+        # precedence) - an explicit configuration should always win over an
+        # implicit guess.
+        supplied_dir = os.path.abspath(skills_dir)
+        if supplied_dir not in self.skills_dirs:
+            self.skills_dirs.append(supplied_dir)
+
         self.skills_dir = supplied_dir
         self._skills: Dict[str, Skill] = {}
 

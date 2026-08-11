@@ -56,7 +56,22 @@ class DependencyGraph:
                 type TEXT
             )
         """)
-        
+        # source_file: which file's parse produced this relation row - added
+        # after clear_file() (below) was found live to delete a DIFFERENT
+        # file's relations whenever two files happen to define a
+        # same-named symbol, since source/target are bare, unqualified
+        # names with no file scoping. Same defensive ALTER-TABLE pattern
+        # already used for files.hash above (SQLite has no "ADD COLUMN IF
+        # NOT EXISTS"). Pre-existing rows from before this migration have
+        # source_file=NULL - clear_file()'s fallback clause still handles
+        # those with the old (imprecise) name-based match, so a real
+        # re-index migrates them to the precise, file-scoped match.
+        try:
+            cursor.execute("ALTER TABLE relations ADD COLUMN source_file TEXT")
+        except Exception:
+            pass
+
+
         # Create indexes for blazing-fast lookup speeds
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbols_filepath ON symbols(filepath)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name)")
@@ -80,14 +95,30 @@ class DependencyGraph:
         return row[0] if row and row[0] else None
 
     def clear_file(self, filepath: str) -> None:
-        """Delete old symbols and relationships associated with a file."""
+        """Delete old symbols and relationships associated with a file.
+
+        Relations are deleted by source_file when it's populated (precise -
+        only this file's own relation rows) - found live, 2026-08-12 (SME
+        architecture review): the previous NAME-based match (still applied
+        below as a fallback for pre-migration rows) deletes ANY relation row
+        whose source/target matches a symbol name defined in this file, even
+        one that actually belongs to a DIFFERENT file's same-named symbol
+        (e.g. two Java files each defining a method called "handle") -
+        re-indexing one file silently corrupted the other's dependency-graph
+        relations, with no error surfaced."""
         cursor = self.conn.cursor()
         # Delete relations first (while symbols still exist in the database!)
         cursor.execute("""
-            DELETE FROM relations 
-            WHERE source IN (SELECT name FROM symbols WHERE filepath = ?)
-               OR target IN (SELECT name FROM symbols WHERE filepath = ?)
-        """, (filepath, filepath))
+            DELETE FROM relations
+            WHERE source_file = ?
+               OR (
+                    source_file IS NULL
+                    AND (
+                        source IN (SELECT name FROM symbols WHERE filepath = ?)
+                        OR target IN (SELECT name FROM symbols WHERE filepath = ?)
+                    )
+                  )
+        """, (filepath, filepath, filepath))
         cursor.execute("DELETE FROM symbols WHERE filepath = ?", (filepath,))
         cursor.execute("DELETE FROM files WHERE filepath = ?", (filepath,))
         self.conn.commit()
@@ -131,9 +162,9 @@ class DependencyGraph:
             
         for rel in relations:
             cursor.execute("""
-                INSERT INTO relations (source, target, type)
-                VALUES (?, ?, ?)
-            """, (rel["source"], rel["target"], rel["type"]))
+                INSERT INTO relations (source, target, type, source_file)
+                VALUES (?, ?, ?, ?)
+            """, (rel["source"], rel["target"], rel["type"], rel_path))
             
         self.conn.commit()
 

@@ -20,8 +20,19 @@ def is_local_url(url: str) -> bool:
         parsed = urlparse(url)
         hostname = parsed.hostname
         if not hostname:
-            return True
-            
+            # Fail CLOSED, not open - found live, 2026-08-12 (SME architecture
+            # review): a malformed/typo'd base_url (e.g. missing "http://" in
+            # a config file) parses with hostname=None via urlparse, and this
+            # branch was previously treating that as local/allowed - the
+            # opposite of the fail-closed behavior the except block below
+            # already implements for every OTHER failure mode. This function
+            # is a hard safety boundary (see kriya/core/llm.py's egress
+            # enforcement, and CLAUDE.md's "Egress control" section) - an
+            # unparseable hostname is exactly the kind of ambiguous input
+            # that should never be treated as "safe."
+            logger.debug(f"is_local_url check found no hostname for '{url}', treating as non-local (fail closed)")
+            return False
+
         if hostname.lower() in {"localhost", "127.0.0.1", "[::1]"}:
             return True
         if hostname.lower().endswith(".local"):

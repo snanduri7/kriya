@@ -717,11 +717,22 @@ class RepositoryAnalyzer:
                     chunks = chunk_file_with_metadata_headers(content, rel_path)
                     
                     chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
+                    embedding_failed = False
                     if chunk_texts:
                         # Generate all embeddings concurrently
                         embs = await client.get_embeddings(chunk_texts)
-                        
+
                         for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs, strict=True)):
+                            # get_embeddings() silently substitutes an all-zero
+                            # "dummy" vector on any failure (embedding server
+                            # unreachable, malformed response) to degrade
+                            # gracefully - reasonable for a query-time caller,
+                            # where a dummy query vector naturally scores
+                            # near-zero and gets filtered out, but not here: a
+                            # zero-vector chunk is genuinely unsearchable
+                            # forever once written.
+                            if not any(v != 0.0 for v in emb):
+                                embedding_failed = True
                             store.add_document(
                                 filepath=rel_path,
                                 text=chunk_text,
@@ -730,8 +741,33 @@ class RepositoryAnalyzer:
                                 model_name=cfg.embedding.model,
                                 dimensions=len(emb)
                             )
-                    # Store new cache metadata (including hash and mtime)
-                    store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
+                    # Store new cache metadata (including hash and mtime) -
+                    # but NOT when any chunk's embedding silently degraded to
+                    # a zero-vector above. Found live, 2026-08-12 (SME
+                    # architecture review): a transient embedding-API failure
+                    # during indexing previously got cached as a normal
+                    # successful mtime/hash match, so a later non-`--force`
+                    # `kriya analyze` would see the file as already
+                    # up-to-date (per the fast-path skip check above) and
+                    # never retry it - permanent, silent corruption of that
+                    # file's RAG entries, recoverable only via `--force`.
+                    # Deliberately leaving file_metadata unset here (the
+                    # dependency graph's own cached mtime/hash, written
+                    # above via graph.index_file, is NOT similarly gated -
+                    # graph indexing has no embedding step to fail) means
+                    # the fast-path skip's `cached_mtime == mtime` check
+                    # will not match on the next run, so it naturally
+                    # retries this file instead of skipping it forever.
+                    if embedding_failed:
+                        logger.warning(
+                            f"Embedding generation failed for one or more chunks of '{rel_path}' "
+                            "(embedding server unreachable or returned an error) - indexed with a "
+                            "placeholder vector for those chunks, which will NOT be findable via "
+                            "similarity search. This file's cache metadata was deliberately not "
+                            "updated, so the next 'kriya analyze' run will retry it automatically."
+                        )
+                    else:
+                        store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
             except Exception as e:
                 logger.error(f"Failed to index file {rel_path}: {e}")
                 

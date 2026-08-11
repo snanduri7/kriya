@@ -7,6 +7,40 @@ from kriya.cli import main
 from kriya.skills.skill import Skill, SkillEngine
 
 
+def test_skill_engine_prefers_explicit_supplied_dir_over_cwd_guess(tmp_path, monkeypatch):
+    """Regression test for a real bug found live, 2026-08-12 (SME architecture
+    review): discover_and_load() documents "later paths override earlier
+    ones" as its precedence model, but SkillEngine.__init__ previously added
+    the explicitly supplied skills directory BEFORE the implicit CWD-guess
+    directory (os.getcwd()/skills) - so a same-named skill present in both
+    silently let the implicit guess win over an explicitly configured
+    paths.skills, the opposite of expected precedence whenever the two
+    differ (e.g. supplied_dir is an absolute path elsewhere)."""
+    cwd_dir = tmp_path / "cwd_root"
+    cwd_dir.mkdir()
+    monkeypatch.chdir(cwd_dir)
+
+    # The implicit CWD-guess directory (os.getcwd()/skills).
+    cwd_skill_folder = cwd_dir / "skills" / "widgetlib"
+    cwd_skill_folder.mkdir(parents=True)
+    (cwd_skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: CWD guess version\n")
+    (cwd_skill_folder / "rules.txt").write_text("CWD guess rule.\n")
+
+    # The explicitly configured (supplied) skills directory - a different
+    # absolute path, matching a project that sets paths.skills explicitly.
+    explicit_skill_folder = tmp_path / "explicit_config_skills" / "widgetlib"
+    explicit_skill_folder.mkdir(parents=True)
+    (explicit_skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Explicit config version\n")
+    (explicit_skill_folder / "rules.txt").write_text("Explicit config rule.\n")
+
+    se = SkillEngine(str(tmp_path / "explicit_config_skills"), load_global=True)
+    se.discover_and_load()
+
+    skill = se.get_skill("widgetlib")
+    assert skill.description == "Explicit config version"
+    assert skill.rules == ["Explicit config rule."]
+
+
 def test_skills_lifecycle(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
