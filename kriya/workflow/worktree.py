@@ -1,0 +1,162 @@
+"""Git worktree sandbox lifecycle for the Developer + Quality Gates retry loop - create/reset/sync/remove. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
+
+import asyncio
+import difflib
+import hashlib
+import logging
+import os
+import re
+import shutil
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) -> None:
+    """After create_git_worktree resets the sandbox to a clean git HEAD checkout, copy
+    over any uncommitted changes (modified tracked files, new untracked files) from the
+    real workspace so the Developer's sandbox reflects what's actually on disk, not just
+    git history. Without this, a project with any uncommitted work - the normal state of
+    an in-progress feature branch - looks to the sandbox exactly like a completely fresh
+    checkout of HEAD: every uncommitted file the goal expects to already exist (and any
+    goal asking to "preserve"/"extend" existing work) silently vanishes from compilation,
+    producing confusing "package does not exist" failures that have nothing to do with
+    the actual generated code. Confirmed live: an additive goal building on a previous
+    run's uncommitted output failed every retry attempt this way, with pom.xml (never
+    touched by the Developer, since the goal said to leave it as-is) simply absent from
+    the sandbox because it was never git-committed.
+
+    Excludes .kriya/ (checkpoints, this very worktree) via the same pathspec already used
+    for workspace-fingerprint dirty checks, and deleted-in-working-tree files are removed
+    from the worktree rather than left as a stale HEAD-only copy."""
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", ".", ":!.kriya"],
+            cwd=repo_path, capture_output=True, text=True,
+        )
+        if status.returncode != 0 or not status.stdout.strip():
+            return
+        for line in status.stdout.splitlines():
+            if len(line) < 4:
+                continue
+            code, rest = line[:2], line[3:]
+            # Renames: "R  old -> new" - treat as delete-old + copy-new.
+            if code.startswith("R") and " -> " in rest:
+                old_rel, rest = rest.split(" -> ", 1)
+                old_abs = os.path.join(worktree_path, old_rel.strip().strip('"'))
+                if os.path.exists(old_abs):
+                    os.remove(old_abs)
+            rel = rest.strip().strip('"')
+            if not rel or rel.startswith(".kriya"):
+                continue
+            src = os.path.join(repo_path, rel)
+            dst = os.path.join(worktree_path, rel)
+            if code.strip() == "D" or not os.path.exists(src):
+                if os.path.exists(dst):
+                    try:
+                        os.remove(dst)
+                    except IsADirectoryError:
+                        shutil.rmtree(dst, ignore_errors=True)
+                continue
+            if os.path.isdir(src):
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+    except Exception as e:
+        logger.warning(f"Failed to sync uncommitted changes into worktree sandbox (non-fatal, sandbox may be missing uncommitted work): {e}")
+
+
+def _resolve_repo_head(repo_path: str) -> Optional[str]:
+    """Resolves repo_path's actual current HEAD commit SHA. Needed because a
+    worktree created with `git worktree add --detach` gets its own fixed HEAD
+    pointer at creation time, not a moving ref to repo_path's branch - so
+    `git checkout -f HEAD` run *inside* that worktree resolves against its own
+    frozen pointer and is a no-op, never advancing to match new commits landed
+    on repo_path since. Returns None if resolution fails (e.g. an empty repo
+    with no commits yet), in which case callers fall back to the old "HEAD"
+    behavior rather than crash."""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_path, capture_output=True, text=True,
+        )
+        if res.returncode == 0:
+            return res.stdout.strip()
+    except Exception as e:
+        logger.debug(f"Failed to resolve HEAD for '{repo_path}': {e}")
+    return None
+
+
+def create_git_worktree(repo_path: str) -> str:
+    # 1. Quick pre-check: Is this a git repository?
+    try:
+        res = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo_path, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise ValueError("Not a git repository")
+    except Exception as e:
+        raise ValueError(f"Directory is not a git repository: {e}") from e
+
+    worktree_path = os.path.join(repo_path, ".kriya", "worktree")
+    os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
+    
+    # 2. Prune any stale/orphaned worktree records in git administrative data
+    try:
+        subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
+    except Exception as e:
+        logger.debug(f"git worktree prune failed (non-fatal): {e}")
+
+    worktree_registered = False
+    try:
+        res = subprocess.run(["git", "worktree", "list"], cwd=repo_path, capture_output=True, text=True)
+        if worktree_path in res.stdout:
+            worktree_registered = True
+    except Exception as e:
+        logger.debug(f"git worktree list failed, assuming worktree is not registered: {e}")
+
+    if not worktree_registered:
+        if os.path.exists(worktree_path):
+            shutil.rmtree(worktree_path, ignore_errors=True)
+        subprocess.run(["git", "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
+    else:
+        # Recreate the directory physically if it was deleted but still registered
+        if not os.path.exists(worktree_path):
+            try:
+                subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
+            except Exception as e:
+                logger.debug(f"git worktree prune failed (non-fatal): {e}")
+            subprocess.run(["git", "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
+        else:
+            # Reset but preserve target/ and other build directories. "HEAD" here
+            # must be resolved against repo_path, not checked out literally inside
+            # the worktree - see _resolve_repo_head for why.
+            target = _resolve_repo_head(repo_path)
+            subprocess.run(["git", "checkout", "-f", target or "HEAD"], cwd=worktree_path, check=True, capture_output=True)
+            subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, check=True, capture_output=True)
+
+    # A worktree only ever reflects git HEAD - it knows nothing about uncommitted
+    # changes in the real workspace, which is the normal state of an in-progress
+    # project. Copy those over now so the sandbox matches what's actually on disk.
+    _sync_uncommitted_changes_into_worktree(repo_path, worktree_path)
+
+    return worktree_path
+
+
+def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
+    """Despite the name, this resets the worktree back to repo_path's current
+    commit rather than truly deleting it - the worktree is deliberately reused
+    across runs so compile caches inside it (target/, node_modules/, etc.)
+    survive between retries and between separate generate/fix invocations. See
+    _resolve_repo_head for why "HEAD" can't be checked out literally here -
+    without it, this "cleanup" was a no-op that left the worktree permanently
+    frozen at whatever commit existed the first time it was ever created,
+    silently hiding every commit made since from any future run that doesn't
+    itself rewrite the affected files."""
+    if os.path.exists(worktree_path):
+        try:
+            target = _resolve_repo_head(repo_path)
+            subprocess.run(["git", "checkout", "-f", target or "HEAD"], cwd=worktree_path, capture_output=True)
+            subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, capture_output=True)
+        except Exception as e:
+            logger.debug(f"Failed to clean up worktree at '{worktree_path}' (non-fatal): {e}")

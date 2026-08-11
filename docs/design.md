@@ -457,6 +457,23 @@ If every candidate in a role's chain is exhausted, `call_with_escalation()` re-r
 
 **Lifecycle**: a checkpoint is deleted the moment its run reaches a normal terminal outcome - full success, or an explicit human rejection at the approval gate - via `delete_checkpoint()`. If Quality Gates exhaust all retries without ever passing, the last-saved checkpoint (typically `plan` or `design`) is deliberately left on disk so a later `--resume-id` attempt can skip re-planning and go straight to a fresh Developer attempt; strict drift detection (workspace becomes dirty once files are actually applied) prevents this from being misused against stale, already-superseded content. A checkpoint therefore only ever survives on disk after a process kill or crash - it is not a general run-history log (that's `kriya traces`, §4.4).
 
+### 2.10 `kriya/workflow/` Module Layout
+
+`kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:
+
+*   `worktree.py` - git worktree sandbox lifecycle (create/reset/sync/remove).
+*   `context_budget.py` - skeletonization tiers, token estimation, the Graph RAG context budget allocator (§2.5).
+*   `edit_safety.py` - anchored search/replace application, whitespace normalization, structural-corruption detection (§2.4).
+*   `file_resolution.py` - expected/missing-file tracking, run-command/filepath resolution, `IncompleteGenerationError`.
+*   `skill_extraction.py` - skill-gap rule dedup/identity matching, misattribution filtering, per-rule verification provenance (§2.3.5).
+*   `live_lookup.py` - error-triggered live web lookup (§2.3.4a).
+*   `failure_grounding.py` - the unified `Failure`/`QualityGateFailure` abstraction's supporting extraction functions (error locators, source context, environment-failure classification; §2.3.4j).
+*   `toolchain.py` - Java/JDK toolchain mismatch detection and correction (§2.3.4g).
+*   `lsp_integration.py` - jdtls (Java LSP) client lifecycle and diagnostics context.
+*   `retry_prompts.py` - the standing invariant checklists (`ECOSYSTEM_INVARIANT_HEADER`, `RESOURCE_LIFECYCLE_HEADER`; §2.3.4k) and the three retry-prompt builders (targeted, full-set, missing-files).
+
+Verified behavior-preserving without any downstream code changes: `tests/test_workflow.py`, `tests/test_agents.py`, `kriya/cli.py`, and `spikes/fix_alignment/run_alignment_test.py` all compile and import cleanly against the new layout with zero edits, confirmed via direct Python import checks. A handful of rationale comments describing module-level constants (e.g. why `_MIN_GRAPH_CONTEXT_BUDGET` is 1000 tokens) needed manual re-attachment to their new file, since Python's `ast` module - used to script the bulk of the extraction by exact function/statement line ranges - captures a node's own span but not preceding standalone comment lines describing it.
+
 ---
 
 ## 3. Workflows & Pipelines
