@@ -59,6 +59,53 @@ def normalize_written_filepath(filepath: str, workspace_path: str) -> Optional[s
     return filepath
 
 
+_MAIN_METHOD_PATTERN = re.compile(r"public\s+static\s+void\s+main\s*\(\s*String(?:\s*\[\s*\]|\.\.\.)\s+\w+\s*\)")
+_PACKAGE_DECL_PATTERN = re.compile(r"^\s*package\s+([\w.]+)\s*;", re.MULTILINE)
+
+
+def _resolve_maven_main_class(worktree_path: str) -> Optional[str]:
+    """Scans src/main/java for a class with a real `public static void
+    main(String[] args)` method and returns its fully-qualified name (package
+    + filename) - deterministic ground truth for exec-maven-plugin's
+    mainClass, confirmed live as a recurring gap (2026-08-11, staged-build
+    validation): RunVerifierAgent.judge() infers `mvn exec:java` correctly
+    per the pom's own shape, but has no way to verify the pom's mainClass
+    VALUE actually names a real class - seen twice, once as a completely
+    missing mainClass (PluginParameterException: "mainClass ... missing or
+    invalid", pom.xml never configured exec-maven-plugin at all) and once as
+    a stale/wrong one (ClassNotFoundException: com.example.MainApp - pom.xml
+    named a class that was never actually generated that attempt). Both are
+    the same underlying gap: the pom's own mainClass claim was never checked
+    against the real, generated source tree.
+
+    Deliberately returns None (no correction applied, existing behavior
+    unchanged) when zero or MORE THAN ONE class has a main method - a
+    genuine multi-entry-point project is a real, if rare, possibility this
+    function should never guess about; only an unambiguous single candidate
+    is trustworthy enough to override what the model wrote."""
+    src_root = os.path.join(worktree_path, "src", "main", "java")
+    if not os.path.isdir(src_root):
+        return None
+    candidates = []
+    for dirpath, _dirnames, filenames in os.walk(src_root):
+        for fname in filenames:
+            if not fname.endswith(".java"):
+                continue
+            try:
+                with open(os.path.join(dirpath, fname), "r", encoding="utf-8", errors="replace") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+            if not _MAIN_METHOD_PATTERN.search(content):
+                continue
+            class_name = fname[: -len(".java")]
+            pkg_match = _PACKAGE_DECL_PATTERN.search(content)
+            candidates.append(f"{pkg_match.group(1)}.{class_name}" if pkg_match else class_name)
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
 def _resolve_run_command(command: List[str], workspace_path: Optional[str] = None) -> List[str]:
     """Substitutes Kriya's own interpreter for a bare 'python' the Runtime
     Verification judge inferred, if 'python' isn't actually resolvable on PATH - a
@@ -112,6 +159,25 @@ def _resolve_run_command(command: List[str], workspace_path: Optional[str] = Non
             pom_content = ""
         if re.search(r"<classpath\s*/>", pom_content):
             command = [tok if tok != "exec:java" else "exec:exec" for tok in command]
+    # Deterministically override exec:java's mainClass with ground truth from
+    # the real generated source tree, rather than trusting whatever pom.xml
+    # happens to say - see _resolve_maven_main_class's own docstring for the
+    # two confirmed-live failure modes this closes (a completely missing
+    # mainClass, and a stale one pointing at a class that was never actually
+    # generated that attempt). -Dexec.mainClass on the command line takes
+    # precedence over pom.xml's <configuration><mainClass> per exec-maven-
+    # plugin's own documented user-property binding, so this is a safe,
+    # additive override - never edits pom.xml itself, and is a no-op
+    # (same value) on the common case where the pom's own mainClass was
+    # already correct. Only applied when exactly one real entry point is
+    # found (see the function's own docstring for why an ambiguous result
+    # never guesses); exec:exec is deliberately out of scope here - its
+    # main class is one positional element inside <arguments>, not a
+    # separately overridable parameter the same way.
+    if workspace_path and command and os.path.basename(command[0]) == "mvn" and "exec:java" in command:
+        resolved_main_class = _resolve_maven_main_class(workspace_path)
+        if resolved_main_class and not any(tok.startswith("-Dexec.mainClass=") for tok in command):
+            command = list(command) + [f"-Dexec.mainClass={resolved_main_class}"]
     # Confirmed live (2026-08-04 eval harness batch): RunVerifierAgent.judge() can
     # infer a bare `rspec`/`rake` run command for a Ruby goal - these are Bundler-
     # installed executables, never on a bare system PATH, so the run fails

@@ -49,6 +49,7 @@ from kriya.workflow.workflow import (
     _resolve_file_paths_from_design,
     _resolve_java_home_override,
     _resolve_jdk_home_for_version,
+    _resolve_maven_main_class,
     _resolve_run_command,
     _scoped_skill_gap_description,
     _strip_jdk_incompatible_jvm_flags,
@@ -457,6 +458,70 @@ def test_resolve_run_command_handles_missing_pom_gracefully(tmp_path):
 def test_resolve_run_command_exec_goal_correction_ignores_non_maven_commands(tmp_path):
     (tmp_path / "pom.xml").write_text(_EXEC_EXEC_SHAPED_POM)
     assert _resolve_run_command(["gradle", "exec:java"], str(tmp_path)) == ["gradle", "exec:java"]
+
+def _write_java_class(tmp_path, rel_path, package, class_name, with_main=True, main_signature="String[] args"):
+    full = tmp_path / rel_path
+    full.parent.mkdir(parents=True, exist_ok=True)
+    body = f"public static void main({main_signature}) {{ }}" if with_main else ""
+    full.write_text(f"package {package};\n\npublic class {class_name} {{\n    {body}\n}}\n")
+
+def test_resolve_maven_main_class_finds_unambiguous_entry_point(tmp_path):
+    _write_java_class(tmp_path, "src/main/java/com/example/protocol/Main.java", "com.example.protocol", "Main")
+    assert _resolve_maven_main_class(str(tmp_path)) == "com.example.protocol.Main"
+
+def test_resolve_maven_main_class_accepts_varargs_signature(tmp_path):
+    _write_java_class(
+        tmp_path, "src/main/java/com/example/Main.java", "com.example", "Main",
+        main_signature="String... args",
+    )
+    assert _resolve_maven_main_class(str(tmp_path)) == "com.example.Main"
+
+def test_resolve_maven_main_class_returns_none_when_ambiguous(tmp_path):
+    """Regression test for the real bug this whole fix exists for
+    (2026-08-11, staged-build stage 2): a stale/wrong pom.xml mainClass
+    (ClassNotFoundException: com.example.MainApp) and a completely missing
+    one (PluginParameterException: mainClass missing) were both traced to
+    RunVerifierAgent.judge() never checking the pom's mainClass claim
+    against what was actually generated. But with two real entry points,
+    the function must NOT guess - a genuine multi-entry-point project is a
+    real possibility, not something to silently pick one of at random."""
+    _write_java_class(tmp_path, "src/main/java/com/example/Main.java", "com.example", "Main")
+    _write_java_class(tmp_path, "src/main/java/com/example/Second.java", "com.example", "Second")
+    assert _resolve_maven_main_class(str(tmp_path)) is None
+
+def test_resolve_maven_main_class_returns_none_with_no_candidates(tmp_path):
+    _write_java_class(tmp_path, "src/main/java/com/example/Helper.java", "com.example", "Helper", with_main=False)
+    assert _resolve_maven_main_class(str(tmp_path)) is None
+
+def test_resolve_maven_main_class_returns_none_without_src_main_java(tmp_path):
+    assert _resolve_maven_main_class(str(tmp_path)) is None
+
+def test_resolve_run_command_appends_dexec_mainclass_for_exec_java(tmp_path):
+    """The actual fix: exec:java's mainClass is corrected using ground truth
+    from the real generated source tree, via -Dexec.mainClass= (which takes
+    precedence over pom.xml's own <configuration><mainClass>), rather than
+    trusting whatever the model wrote in pom.xml."""
+    _write_java_class(tmp_path, "src/main/java/com/example/protocol/Main.java", "com.example.protocol", "Main")
+    assert _resolve_run_command(["mvn", "-e", "exec:java"], str(tmp_path)) == [
+        "mvn", "-e", "exec:java", "-Dexec.mainClass=com.example.protocol.Main",
+    ]
+
+def test_resolve_run_command_does_not_override_existing_dexec_mainclass(tmp_path):
+    _write_java_class(tmp_path, "src/main/java/com/example/Main.java", "com.example", "Main")
+    assert _resolve_run_command(
+        ["mvn", "-e", "exec:java", "-Dexec.mainClass=com.example.Other"], str(tmp_path)
+    ) == ["mvn", "-e", "exec:java", "-Dexec.mainClass=com.example.Other"]
+
+def test_resolve_run_command_leaves_exec_java_alone_when_main_class_ambiguous(tmp_path):
+    _write_java_class(tmp_path, "src/main/java/com/example/Main.java", "com.example", "Main")
+    _write_java_class(tmp_path, "src/main/java/com/example/Second.java", "com.example", "Second")
+    assert _resolve_run_command(["mvn", "-e", "exec:java"], str(tmp_path)) == ["mvn", "-e", "exec:java"]
+
+def test_resolve_run_command_mainclass_correction_does_not_apply_to_exec_exec(tmp_path):
+    # Out of scope by design - exec:exec's main class is a positional
+    # <arguments> element, not a separately overridable parameter.
+    _write_java_class(tmp_path, "src/main/java/com/example/Main.java", "com.example", "Main")
+    assert _resolve_run_command(["mvn", "-e", "exec:exec"], str(tmp_path)) == ["mvn", "-e", "exec:exec"]
 
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):

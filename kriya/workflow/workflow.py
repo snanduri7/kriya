@@ -60,6 +60,7 @@ from kriya.workflow.file_resolution import (
     _goal_requests_tests_or_docs,
     _is_test_or_doc_file,
     _resolve_file_paths_from_design,
+    _resolve_maven_main_class,
     _resolve_run_command,
     extract_expected_files,
     extract_target_test,
