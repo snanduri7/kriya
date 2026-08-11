@@ -6408,10 +6408,6 @@ async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degrada
     # always loads Kriya's own global skill library too, which would inflate
     # convention_prompt unpredictably and throw off the tuned budget below.
     cfg.paths.skills = str(tmp_path / "skills")
-    # Small context_window so build_code_context()'s budget (0.75 * this,
-    # minus a small skills-prompt overhead) lands between one-full-one-
-    # signatures (~577 tokens) and two-full (~832 tokens) for the two
-    # 40-line/8-word fixture files below - forcing exactly one to degrade.
     # NOTE: _reserve_graph_context_budget() floors its return value at
     # _MIN_GRAPH_CONTEXT_BUDGET (1000 tokens) regardless of context_window,
     # so the effective budget here is exactly 1000, not 0.75*context_window -
@@ -6590,10 +6586,48 @@ def test_find_structural_corruption_xml_well_formed_vs_malformed():
 
 def test_find_structural_corruption_ignores_other_extensions():
     # Deliberately not extended to Python/Ruby/JSON/etc. without a real
-    # incident to justify it - brace-counting is much less informative for
-    # indentation-based languages.
+    # incident to justify it (see find_structural_corruption's own
+    # docstring for why a real, zero-dependency ast.parse() check for
+    # Python was tried and reverted during the 2026-08-12 SME review:
+    # 100% overlap with the real Python compile gate, so it would silently
+    # downgrade every Python syntax error's targeted retry from
+    # content-shown to error-text-only, for zero cost savings).
     assert find_structural_corruption("app.py", "def f(:\n    pass") is None
     assert find_structural_corruption("app.rb", "def f(\n  end") is None
+
+
+def test_find_structural_corruption_catches_a_complete_brace_balanced_duplicate_class():
+    """Closes the one concretely-named still-open gap from the 2026-08-08
+    incident (see test_find_structural_corruption_catches_the_real_duplicate_class_shape's
+    own docstring): a *complete*, self-closed duplicate top-level class is
+    brace-balanced by construction, so the brace-count check alone can never
+    catch it - this is the variant that check explicitly could not."""
+    duplicated = (
+        "package com.example;\n\n"
+        "public class ProtocolParser {\n"
+        "    void encode() {}\n"
+        "}\n"
+        "\n"
+        "package com.example;\n\n"
+        "public class ProtocolParser {\n"
+        "    void encode() {}\n"
+        "}\n"
+    )
+    problem = find_structural_corruption("ProtocolParser.java", duplicated)
+    assert problem is not None
+    assert "duplicate top-level type" in problem
+    assert "ProtocolParser" in problem
+
+
+def test_find_structural_corruption_does_not_flag_a_legitimately_named_nested_class():
+    valid = (
+        "public class Outer {\n"
+        "    static class Inner {\n"
+        "        void run() {}\n"
+        "    }\n"
+        "}\n"
+    )
+    assert find_structural_corruption("Outer.java", valid) is None
 
 
 @pytest.mark.asyncio

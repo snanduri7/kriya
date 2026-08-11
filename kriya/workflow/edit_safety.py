@@ -225,6 +225,31 @@ def _strip_java_comments_and_strings(code: str) -> str:
     return "".join(out)
 
 
+_TOP_LEVEL_TYPE_RE = re.compile(r'\b(?:class|interface|enum)\s+(\w+)')
+
+
+def _find_duplicate_top_level_type(stripped: str) -> Optional[str]:
+    """Scans (already comment/string-stripped) Java source for two top-level
+    class/interface/enum declarations sharing the same name - the variant a
+    plain brace-balance count can never catch, since a *complete*, self-
+    closed duplicate type is brace-balanced by construction (2026-08-12 SME
+    review; see find_structural_corruption's own docstring for the real
+    incident this closes). "Top-level" is determined by brace depth at the
+    keyword's position (0 = not nested inside another type's body) so a
+    legitimate, differently-named inner/nested class is never flagged -
+    only a second declaration of a name already seen at depth 0 is."""
+    seen = set()
+    for m in _TOP_LEVEL_TYPE_RE.finditer(stripped):
+        depth = stripped.count("{", 0, m.start()) - stripped.count("}", 0, m.start())
+        if depth != 0:
+            continue
+        name = m.group(1)
+        if name in seen:
+            return name
+        seen.add(name)
+    return None
+
+
 def find_structural_corruption(filepath: str, content: str) -> Optional[str]:
     """Cheap, deterministic, best-effort structural sanity check on a file
     about to be written to the sandbox - catches the exact corruption class
@@ -240,23 +265,45 @@ def find_structural_corruption(filepath: str, content: str) -> Optional[str]:
     a clean-looking edit or a fresh full-file generation has no prior error
     to check against at all.
 
-    Deliberately NOT a real parser - a full AST/tree-sitter integration would
-    catch more, but at real added complexity and a new dependency; this
-    targets specifically the cheap, unambiguous "obviously broken" shape a
-    human would spot on sight (unbalanced braces, malformed XML), the same
-    shape both real incidents actually were. Returns a human-readable
-    description of the problem, or None if the file looks structurally sound
-    - never a guarantee of correctness (a real compiler remains the source of
-    truth for that), only a cheap, low-false-positive earlier tripwire for
-    the specific way these two real corruptions were shaped.
+    Deliberately NOT a full AST/tree-sitter integration for every language -
+    that would catch more but at real added complexity and (for Java/Ruby) a
+    new dependency Kriya has repeatedly avoided elsewhere (e.g. the hand-
+    rolled LSP client). This targets specifically the cheap, unambiguous
+    "obviously broken" shape a human would spot on sight (unbalanced braces,
+    a duplicated declaration, malformed XML), the same shape every real
+    corruption incident actually was. Returns a human-readable description
+    of the problem, or None if the file looks structurally sound - never a
+    guarantee of correctness (a real compiler/interpreter remains the source
+    of truth for that), only a cheap, low-false-positive earlier tripwire.
 
     Scoped to .java (brace balance, comment/string-aware so a stray brace
-    inside a string literal or comment doesn't produce a false positive) and
-    .xml (real well-formedness via the stdlib's own XML parser, not a
-    heuristic - zero false positives by construction). Every other extension
-    returns None unconditionally - deliberately not extended to Python/Ruby
-    (indentation/block-keyword-based, not brace-delimited - a brace count is
-    much less informative there) without a second real incident to justify it."""
+    inside a string literal or comment doesn't produce a false positive,
+    PLUS a duplicate-top-level-type check for the one documented gap a brace
+    count alone can't catch - see _find_duplicate_top_level_type) and .xml
+    (real well-formedness via the stdlib's own XML parser, not a heuristic -
+    zero false positives by construction). Every other extension returns
+    None unconditionally.
+
+    Deliberately NOT extended to .py, despite a real stdlib ast.parse()
+    check being zero-cost and zero-new-dependency (tried during the
+    2026-08-12 SME review, reverted after live test-writing surfaced why):
+    unlike Java (where this function's brace check only intercepts ONE
+    narrow shape, leaving most javac syntax errors to reach the real compile
+    gate - which DOES show the model its previous broken content in the
+    retry prompt, since that gate only runs on already-written files),
+    Python's own "compile check" (kriya/tools/validate.py) is JUST
+    `compile(source, f, "exec")` - a pure syntax check with 100% overlap
+    with what ast.parse() would catch. Adding it here would silently
+    redirect EVERY Python syntax error away from the compile gate's richer,
+    content-shown targeted retry (this function runs pre-write, so a
+    rejected file is deliberately never added to all_files_written, and
+    _build_targeted_retry_prompt only shows previous content for files it
+    finds on disk) into this function's leaner error-text-only failure -
+    for zero cost savings, since compile() is already just as free as
+    ast.parse(), with no expensive gate being avoided the way a real Maven
+    invocation is for Java. Not extended to Ruby either, for the original
+    reason: indentation/block-keyword-based, not brace-delimited, and no
+    stdlib parser available - a brace count is much less informative there."""
     if filepath.endswith(".java"):
         stripped = _strip_java_comments_and_strings(content)
         balance = stripped.count("{") - stripped.count("}")
@@ -264,6 +311,9 @@ def find_structural_corruption(filepath: str, content: str) -> Optional[str]:
             return f"{balance} unclosed '{{' brace(s) - more opening braces than closing ones."
         if balance < 0:
             return f"{-balance} extra closing '}}' brace(s) - more closing braces than opening ones."
+        duplicate = _find_duplicate_top_level_type(stripped)
+        if duplicate:
+            return f"duplicate top-level type declaration: '{duplicate}' is declared more than once."
     elif filepath.endswith(".xml"):
         try:
             ET.fromstring(content)
