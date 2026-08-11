@@ -841,6 +841,95 @@ async def test_workflow_fallback_chain(tmp_path):
     assert "Avoid missing colon in function definition." in rules_content
 
 @pytest.mark.asyncio
+async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_full_set_attempts(tmp_path):
+    """Regression test for a real gap found live, 2026-08-11 (the same
+    session's "durable verified project facts" backlog item): lesson
+    extraction used to be gated on `state.last_model_override and chain` -
+    it only ever fired for a fallback-model escalation rescue, never for an
+    ordinary primary-model retry that self-corrected, and never at all for a
+    project with no llm_chain configured (as here). Broadened to ALSO fire
+    when the primary model needed retry_count >= 2 (at least two full
+    FULL-SET rewrites) to converge - a real "this was actually hard" bar, not
+    just any retry (an earlier, too-broad attempt using bare error_context
+    truthiness broke ~20 unrelated tests, each hitting an unplanned extra LLM
+    call on a routine single-retry recovery).
+
+    Compile failures are mocked with output that names no known file, so
+    last_implicated_files stays empty and the retry loop keeps choosing
+    full_set mode (not targeted) both times - the two failures increment
+    retry_count to 2 before the third attempt succeeds."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    cfg.paths.skills = str(tmp_path / "skills")
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "Always resolve the build dependency graph fully before adding an explicit version pin.",  # lesson extraction
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{"filepath": "math.py", "content": "def add(a,b):\n    return a+b\n"}],
+        [{"filepath": "math.py", "content": "def add(a,b):\n    return a+b\n"}],
+        [{"filepath": "math.py", "content": "def add(a,b):\n    return a+b\n"}],
+    ])
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        side_effect=[
+            {"success": False, "output": "Build error: dependency resolution failed."},
+            {"success": False, "output": "Build error: dependency resolution failed."},
+            {"success": True, "output": "Compiled successfully."},
+        ],
+    ):
+        res = await we.run_generation_workflow(
+            goal="Create math library, no fallback chain configured",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    repo_slug = os.path.basename(tmp_path).lower().strip(".") or "root"
+    staged_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_rules.txt")
+    assert os.path.exists(staged_file)
+    with open(staged_file, "r", encoding="utf-8") as f:
+        staged_content = f.read()
+    assert "Always resolve the build dependency graph fully before adding an explicit version pin." in staged_content
+
+@pytest.mark.asyncio
+async def test_workflow_does_not_extract_lesson_from_a_single_targeted_retry(tmp_path):
+    """The narrowed bar (retry_count >= 2 or a fallback-model rescue) must
+    NOT fire for test_workflow_syntax_error_auto_debugging_loop's shape - a
+    single targeted retry on the primary model recovering from one broken
+    attempt - matching the original mechanism's intent (a genuinely hard-won
+    lesson, not routine single-retry noise)."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    cfg.paths.skills = str(tmp_path / "skills")
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "def add(a,b)\n    return a+b",
+        "def add(a,b):\n    return a+b",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create math library with auto-debugging",
+        workspace_path=str(tmp_path),
+    )
+
+    assert res["quality_gates_passed"] is True
+    repo_slug = os.path.basename(tmp_path).lower().strip(".") or "root"
+    staged_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_rules.txt")
+    assert not os.path.exists(staged_file)
+
+@pytest.mark.asyncio
 async def test_workflow_fallback_targeted_fix_succeeds_before_full_set_regeneration(tmp_path):
     """Regression test for the fallback-targeted-fix step (2026-08-10): once the
     primary-model targeted budget is exhausted, a ONE-SHOT targeted fix on the
@@ -3529,6 +3618,7 @@ async def test_workflow_retry_loop_live_lookup_never_fires_without_approval(tmp_
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.search.base_url = "http://fake-search:8080"
+    cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -3543,6 +3633,7 @@ async def test_workflow_retry_loop_live_lookup_never_fires_without_approval(tmp_
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Two full-set retries were needed - lesson extraction.",
         "Review: Approved",
     ])
 
@@ -5266,6 +5357,7 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
     cfg.search.base_url = "http://fake-search:8080"
+    cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -5280,6 +5372,7 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
         '[{"filepath": "App.java", "content": "class App {}"}]',  # attempt 1 - fails
         '[{"filepath": "App.java", "content": "class App {}"}]',  # attempt 2 - fails identically (repeat)
         '[{"filepath": "App.java", "content": "class App {}"}]',  # attempt 3 - succeeds
+        "Two full-set retries were needed - lesson extraction.",
         "Review: Approved",
     ])
 
@@ -5373,6 +5466,7 @@ async def test_workflow_repeated_failure_live_lookup_excludes_own_project_coordi
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True
     cfg.search.base_url = "http://fake-search:8080"
+    cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -5389,6 +5483,7 @@ async def test_workflow_repeated_failure_live_lookup_excludes_own_project_coordi
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Two full-set retries were needed - lesson extraction.",
         "Review: Approved",
     ])
 
@@ -5429,6 +5524,7 @@ async def test_workflow_error_triggered_live_lookup_disabled_by_default_never_se
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
     # web_lookup_enabled left False (default) - no search.base_url either.
+    cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -5440,6 +5536,7 @@ async def test_workflow_error_triggered_live_lookup_disabled_by_default_never_se
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Two full-set retries were needed - lesson extraction.",
         "Review: Approved",
     ])
 

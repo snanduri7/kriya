@@ -1361,19 +1361,41 @@ class WorkflowEngine:
                                 except Exception as ex:
                                     logger.warning(f"Failed to auto-accrue skill for dependency: {ex}")
 
-                # Autonomous Skill Accrual / Lesson extraction. Gated on model_override
-                # (this SPECIFIC successful attempt used a non-primary model), not
-                # retry_count > 0 (some full-set attempt failed at SOME earlier point in
-                # this run) - the two aren't equivalent: a plain targeted retry on the
-                # PRIMARY model (model_override=None) can succeed after an earlier,
-                # unrelated full-set failure already ticked retry_count up, which isn't
-                # an "escalation model" success at all. Found live while adding the
-                # fallback-targeted retry step below, which made this distinction matter
-                # for the first time in a common case (a genuine fallback-model success
-                # that deliberately does NOT touch retry_count) - but the old condition's
-                # imprecision predates that change and could already misfire for a
-                # primary-model targeted success under the same circumstances.
-                if state.last_model_override and chain:
+                # Autonomous Skill Accrual / Lesson extraction. Originally gated on
+                # `state.last_model_override and chain` - fired ONLY for a fallback-
+                # model escalation rescue, never for a primary-model attempt that
+                # self-corrected, and never at all for a project with no llm_chain
+                # configured. Found live, 2026-08-11 (right after the JAVA_HOME-
+                # durability fix above, same session): this is exactly the gap the
+                # "durable verified project facts" backlog item was asking to close -
+                # project-specific lessons learned the hard way ("X resolves
+                # transitively, don't add it explicitly") most often come from an
+                # ordinary primary-model retry converging, not specifically an
+                # escalated fallback model, and plenty of real projects never
+                # configure a fallback chain at all.
+                #
+                # Broadened to ALSO fire when the PRIMARY model needed a genuinely
+                # significant amount of full-set regeneration to converge -
+                # `retry_count >= 2` (at least two full FULL-SET rewrites, not just
+                # one targeted patch) - rather than any retry at all. A first attempt
+                # at this used bare `state.error_context` truthiness (set on ANY
+                # failure, never cleared) as the trigger, reasoning it precisely
+                # captures "this successful attempt was actually informed by a real
+                # failure" - correct in principle, but it fires on essentially EVERY
+                # retry-then-succeed run, including a single trivial one-line
+                # syntax-typo fix (confirmed by the existing test suite: ~20
+                # unrelated tests broke, each hitting an unplanned extra LLM call for
+                # a routine single-retry recovery that has nothing to do with a
+                # durable, project-specific "fact"). That's also the wrong real-world
+                # tradeoff, not just a test inconvenience - it would flood
+                # staged_rules.txt with noise from routine retries instead of
+                # capturing genuinely hard-won lessons, and pay an extra completion
+                # call on nearly every imperfect-but-recoverable run. `retry_count >=
+                # 2` mirrors why fallback-model escalation was originally a decent
+                # proxy in the first place: reaching a SECOND full-set attempt is a
+                # real signal the first fix didn't fully work, not a proxy for
+                # "informed by a real failure" that's true almost always.
+                if state.last_model_override or state.budgets.retry_count >= 2:
                     try:
                         error_kind = (
                             "runtime verification" if "RUNTIME VERIFICATION" in state.error_context
