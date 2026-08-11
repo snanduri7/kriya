@@ -36,8 +36,11 @@ logger = logging.getLogger(__name__)
 class AttemptContext:
     """The retry loop's read-only, loop-invariant closure captures - built
     once before the while loop starts (nothing in this range is reassigned
-    across iterations), passed into run_attempt() alongside the mutable
-    GenerationState."""
+    across iterations), passed into run_attempt() (this module) and
+    kriya.workflow.retry_strategy.handle_attempt_failure() alike - both
+    operate on the same attempt/failure cycle, just its two different
+    halves, so they share one context object rather than each inventing
+    their own overlapping one."""
 
     goal: str
     plan: str
@@ -68,6 +71,15 @@ class AttemptContext:
     run_verifier: Any
     skill_engine: Any
     kernel: Kernel
+    # The next three fields are only read by handle_attempt_failure(), not
+    # run_attempt() itself - kept on the same context object anyway (see the
+    # class docstring) rather than a second, mostly-overlapping dataclass.
+    max_retries: int
+    web_lookup_query_callback: Optional[Callable[[List[str], str], Any]]
+    # A bound method (WorkflowEngine._approve_web_lookup), not a free
+    # function - already carries its own `self` reference, so it's just
+    # another callable from this module's perspective.
+    approve_web_lookup: Callable[..., Any]
 
 
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:

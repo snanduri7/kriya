@@ -14,7 +14,8 @@ from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext, run_attempt
-from kriya.workflow.failure import QualityGateFailure
+from kriya.workflow.failure import Failure, QualityGateFailure
+from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.state import GenerationState
 from kriya.workflow.checkpoint import (
     checkpoint_path,
@@ -1847,6 +1848,9 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         run_verifier=AsyncMock(),
         skill_engine=MagicMock(),
         kernel=Kernel(config=AppConfig()),
+        max_retries=4,
+        web_lookup_query_callback=None,
+        approve_web_lookup=AsyncMock(return_value=False),
     )
     defaults.update(overrides)
     return AttemptContext(**defaults)
@@ -1901,6 +1905,50 @@ async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
         "attempt": 1, "type": "compile", "success": True, "output": "compiled fine",
     }]
     assert state.last_attempt_mode == "full_set"
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_increments_retry_count_and_continues(tmp_path):
+    """The Slice 3 payoff: retry-decision logic (budget accounting, the
+    continue-vs-stop call) can now be tested by calling handle_attempt_failure()
+    directly with a hand-built GenerationState/AttemptContext and a real
+    QualityGateFailure - no WorkflowEngine, no retry loop, no worktree."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = QualityGateFailure(Failure(
+        type="compile", message="COMPILATION FAILURE: cannot find symbol",
+        raw_output="cannot find symbol",
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is False
+    assert state.budgets.retry_count == 1
+    assert state.environment_failure is None
+    assert state.gate_outcomes[-1]["type"] == "compile"
+    assert state.gate_outcomes[-1]["success"] is False
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_stops_immediately_on_environment_failure(tmp_path):
+    """An environment/toolchain failure (a JVM that can't even start) must stop
+    the retry loop on the very first attempt, well before the retry budget is
+    exhausted - no amount of code regeneration can fix it."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = QualityGateFailure(Failure(
+        type="compile",
+        message="Error occurred during initialization of VM\nCould not reserve enough space",
+        raw_output="Error occurred during initialization of VM",
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.environment_failure is not None
+    assert state.budgets.retry_count == 1
 
 @pytest.mark.asyncio
 async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path):
