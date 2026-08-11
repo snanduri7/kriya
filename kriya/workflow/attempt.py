@@ -26,7 +26,7 @@ from kriya.workflow.context_budget import _reserve_graph_context_budget, build_c
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
-from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
+from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict
 
 logger = logging.getLogger(__name__)
@@ -768,6 +768,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         state.toolchain_warning = (
                             f"{state.toolchain_warning} {jvm_flag_correction}"
                             if state.toolchain_warning else jvm_flag_correction
+                        )
+                    exec_pin_correction = _pin_exec_plugin_executable_to_resolved_jdk(ctx.worktree_path, state.java_home_override)
+                    if exec_pin_correction:
+                        logger.warning(f"JVM executable preflight: {exec_pin_correction}")
+                        state.toolchain_warning = (
+                            f"{state.toolchain_warning} {exec_pin_correction}"
+                            if state.toolchain_warning else exec_pin_correction
                         )
                     logger.info(
                         "Quality Gates: Running runtime verification: "

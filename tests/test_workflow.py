@@ -47,6 +47,7 @@ from kriya.workflow.workflow import (
     _normalize_error_for_repeat_detection,
     _reserve_graph_context_budget,
     _resolve_file_paths_from_design,
+    _pin_exec_plugin_executable_to_resolved_jdk,
     _resolve_java_home_override,
     _resolve_jdk_home_for_version,
     _resolve_maven_main_class,
@@ -2341,6 +2342,68 @@ async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(
         assert "java.security.manager" not in res["toolchain_warning"]
     final_pom = (tmp_path / "pom.xml").read_text()
     assert "-Djava.security.manager=allow" in final_pom
+
+@pytest.mark.asyncio
+async def test_workflow_pins_exec_plugin_executable_to_resolved_jdk_in_applied_workspace(tmp_path):
+    """Workflow-level regression test for a real bug found live, 2026-08-11
+    (kriya-staged-protocol-ignite-qpid): Runtime Verification reported
+    PASSED because Kriya forces JAVA_HOME onto the goal-stated target JDK for
+    its OWN subprocess calls only - the delivered pom.xml still had a bare
+    <executable>java</executable>, so a human running the identical command
+    later (on a machine where 'mvn' defaults to a genuinely incompatible JDK)
+    got a crash Kriya's own verification never saw. Confirms the fix reaches
+    the FINAL APPLIED workspace file, not just the worktree copy."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "pom.xml", "content": _POM_WITH_SECURITY_MANAGER_FLAG}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["mvn", "-e", "exec:exec"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={
+        "passed": True, "reasoning": "Output contains the expected [SUCCESS] line.",
+    })
+
+    with patch(
+        "kriya.workflow.attempt._resolve_java_home_override",
+        return_value="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
+    ), patch("kriya.tools.validate.check_java_toolchain", return_value={
+        "java_found": True, "java_version": "17",
+        "mvn_found": True, "mvn_java_version": "26",
+        "mismatch": True,
+    }), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "Maven compilation succeeded."},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "[SUCCESS] it worked"},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Create a Java app using Maven, targeting Java 17; run mvn exec:exec, it should print [SUCCESS]",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    final_pom = (tmp_path / "pom.xml").read_text()
+    assert (
+        "<executable>/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin/java</executable>"
+        in final_pom
+    )
 
 @pytest.mark.asyncio
 async def test_workflow_recovers_missing_build_manifest_never_requested_by_architect(tmp_path):
@@ -4788,6 +4851,73 @@ def test_strip_jdk_incompatible_jvm_flags_still_strips_when_override_target_is_f
     assert note is not None
     assert "JDK 26" in note
     assert "-Djava.security.manager=allow" not in (tmp_path / "pom.xml").read_text()
+
+def test_pin_exec_plugin_executable_pins_when_override_active(tmp_path):
+    """Regression test for a real bug found live, 2026-08-11
+    (kriya-staged-protocol-ignite-qpid): Runtime Verification reported PASSED
+    because Kriya forces JAVA_HOME onto the goal-stated target JDK for its
+    OWN subprocess calls only - that override never reached the delivered
+    pom.xml, which still had a bare <executable>java</executable> resolved
+    via PATH at whatever JDK is default for whoever runs it later. Confirmed
+    live: the exact same pom.xml crashed immediately once run outside
+    Kriya's own JAVA_HOME-overridden environment, on a machine where 'mvn'
+    itself defaults to a JDK the app is genuinely incompatible with."""
+    (tmp_path / "pom.xml").write_text(_POM_WITH_SECURITY_MANAGER_FLAG)
+    note = _pin_exec_plugin_executable_to_resolved_jdk(
+        str(tmp_path),
+        java_home_override="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
+    )
+    assert note is not None
+    new_content = (tmp_path / "pom.xml").read_text()
+    assert (
+        "<executable>/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin/java</executable>"
+        in new_content
+    )
+    # The rest of the config must survive untouched.
+    assert "-Djava.security.manager=allow" in new_content
+    assert "${exec.mainClass}" in new_content
+
+def test_pin_exec_plugin_executable_none_without_override(tmp_path):
+    # Nothing to reconcile without a detected java/mvn mismatch in the first
+    # place - must leave the pom untouched.
+    (tmp_path / "pom.xml").write_text(_POM_WITH_SECURITY_MANAGER_FLAG)
+    assert _pin_exec_plugin_executable_to_resolved_jdk(str(tmp_path), None) is None
+    assert "<executable>java</executable>" in (tmp_path / "pom.xml").read_text()
+
+def test_pin_exec_plugin_executable_none_when_already_pinned(tmp_path):
+    # Never overwrite a value the model or a prior pass already pinned
+    # deliberately.
+    already_pinned = _POM_WITH_SECURITY_MANAGER_FLAG.replace(
+        "<executable>java</executable>",
+        "<executable>/some/other/jdk/bin/java</executable>",
+    )
+    (tmp_path / "pom.xml").write_text(already_pinned)
+    note = _pin_exec_plugin_executable_to_resolved_jdk(str(tmp_path), "/Library/Java/temurin-17")
+    assert note is None
+    assert "/some/other/jdk/bin/java" in (tmp_path / "pom.xml").read_text()
+
+def test_pin_exec_plugin_executable_none_when_no_pom(tmp_path):
+    assert _pin_exec_plugin_executable_to_resolved_jdk(str(tmp_path), "/Library/Java/temurin-17") is None
+
+def test_pin_exec_plugin_executable_none_for_exec_java_shape(tmp_path):
+    # exec:java always runs inside Maven's own already-started JVM and never
+    # reads <executable> at all - a pom shaped for exec:java has no such tag,
+    # and pinning one that isn't there would be meaningless.
+    (tmp_path / "pom.xml").write_text("""<project>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <configuration>
+              <mainClass>${exec.mainClass}</mainClass>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </project>
+    """)
+    assert _pin_exec_plugin_executable_to_resolved_jdk(str(tmp_path), "/Library/Java/temurin-17") is None
 
 def test_resolve_jdk_home_for_version_uses_java_home_tool_on_macos():
     """Regression test for a real, live bug (2026-08-07): the ORIGINAL

@@ -114,6 +114,7 @@ from kriya.workflow.toolchain import (
     _detect_missing_build_manifest,
     _goal_or_repo_targets_java,
     _java_toolchain_fact,
+    _pin_exec_plugin_executable_to_resolved_jdk,
     _resolve_java_home_override,
     _resolve_jdk_home_for_version,
     _strip_jdk_incompatible_jvm_flags,

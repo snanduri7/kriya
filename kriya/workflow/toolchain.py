@@ -286,6 +286,68 @@ def _strip_jdk_incompatible_jvm_flags(worktree_path: str, java_home_override: Op
         return None
 
 
+def _pin_exec_plugin_executable_to_resolved_jdk(worktree_path: str, java_home_override: Optional[str]) -> Optional[str]:
+    """Pins exec-maven-plugin's <executable> (the exec:exec goal only -
+    exec:java always runs inside Maven's own already-started JVM and ignores
+    <executable>/<arguments> entirely, using <mainClass>/systemProperties
+    instead) to the ABSOLUTE path of the JDK Kriya's own verification
+    actually used, whenever a java_home_override is active - without this,
+    the delivered project carries zero record of which JDK it was actually
+    verified under.
+
+    Found live, 2026-08-11 (kriya-staged-protocol-ignite-qpid): Runtime
+    Verification reported PASSED because Kriya forces JAVA_HOME onto the
+    goal-stated target JDK for its OWN subprocess calls only
+    (_resolve_java_home_override) - that override is completely invisible in
+    the delivered pom.xml, which still has a bare <executable>java</executable>
+    (resolved via PATH at whatever JDK is default for WHOEVER runs it later,
+    which has no reason to match what Kriya used). Confirmed live: on a
+    machine where 'mvn' itself defaults to a different, genuinely
+    incompatible JDK (JDK 26, which removed the Security Manager entirely and
+    broke a real Qpid Broker-J API the generated app depends on), the exact
+    same pom.xml Kriya had just verified crashed immediately the moment it was
+    run outside Kriya's own JAVA_HOME-overridden subprocess environment -
+    "Runtime Verification PASSED" was only ever true inside Kriya's own
+    execution context, not for a human re-running the identical command
+    afterward. This is the general, durable fix; stripping the one flag that
+    happened to be the FIRST symptom (_strip_jdk_incompatible_jvm_flags above)
+    would not have caught the SECOND, deeper incompatibility this same drift
+    exposed once the flag was gone.
+
+    Only activates when java_home_override is set (nothing to reconcile
+    without a detected java/mvn mismatch in the first place) and
+    <executable> is still the bare, unpinned "java" - never overwrites a
+    value the model or a prior pass already pinned deliberately. Best-effort
+    and silent on any I/O problem, same discipline as
+    _strip_jdk_incompatible_jvm_flags - a defensive correction, never allowed
+    to break a run that would otherwise be fine."""
+    if not java_home_override:
+        return None
+    pom_path = os.path.join(worktree_path, "pom.xml")
+    if not os.path.exists(pom_path):
+        return None
+    try:
+        with open(pom_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        resolved_java = os.path.join(java_home_override, "bin", "java")
+        pattern = re.compile(r"<executable>\s*java\s*</executable>")
+        new_content, count = pattern.subn(f"<executable>{resolved_java}</executable>", content, count=1)
+        if not count:
+            return None
+
+        with open(pom_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        return (
+            f"Pinned exec-maven-plugin's <executable> to {resolved_java} - the JDK this "
+            "run's verification actually used - so the delivered project runs consistently "
+            "later regardless of the default JDK on whoever runs it."
+        )
+    except Exception as e:
+        logger.debug(f"_pin_exec_plugin_executable_to_resolved_jdk failed (non-fatal, skipping): {e}")
+        return None
+
+
 _UNRESOLVED_PACKAGE_PATTERN = re.compile(r"package [\w.]+ does not exist")
 
 
