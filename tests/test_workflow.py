@@ -3047,6 +3047,55 @@ async def test_workflow_extracted_rule_unverified_then_promoted_by_passing_run(t
 
 
 @pytest.mark.asyncio
+async def test_workflow_surfaces_skill_staleness_warning_on_version_drift(tmp_path):
+    """Architectural add-on from a 2026-08-12 SME review: a skill's
+    verified_context already records what version it was verified against,
+    but nothing ever read it back to check against a later goal's mentioned
+    version. Confirms the end-to-end wiring: a skill verified against Ignite
+    2.18.0, activated for a goal mentioning Ignite 2.20.0, surfaces a
+    staleness warning in the result dict - not just at the unit level."""
+    _init_git_repo(tmp_path)
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "ignite-java17"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text(
+        "name: ignite-java17\n"
+        "description: Ignite skill\n"
+        "tags: [ignite]\n"
+        "verified: true\n"
+        "verified_at: '2026-08-01'\n"
+        "verified_context: 'org.apache.ignite:ignite-core 2.18.0'\n"
+    )
+
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.skills = str(skills_dir)
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "print('hi')\n",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    from kriya.tools.knowledge import GapReport
+    with patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=GapReport()):
+        res = await we.run_generation_workflow(
+            goal="Use Apache Ignite 2.20.0 for caching in this app",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert res["skill_staleness_warnings"] is not None
+    warning = res["skill_staleness_warnings"][0]
+    assert "ignite-java17" in warning
+    assert "2.18.0" in warning
+    assert "2.20.0" in warning
+
+
+@pytest.mark.asyncio
 async def test_workflow_skill_gap_refuses_url_fetch_under_local_only_egress(tmp_path):
     """A supplied URL must not be fetched when autonomy.egress_policy is local_only -
     that's a new outbound-network capability this feature adds, and it should get the

@@ -1211,6 +1211,14 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 "or supplying reference material via a future run.",
                 fg="yellow",
             )
+        if res.get("skill_staleness_warnings"):
+            # A skill CAN be verified and still be stale - verified_context
+            # records what version it was actually proven against, and a
+            # later goal naming a different version of the same library is
+            # exactly the case a passing Runtime Verification run gives no
+            # signal about on its own.
+            for warning in res["skill_staleness_warnings"]:
+                click.secho(f"[SKILL STALENESS] {warning}", fg="yellow")
         if res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
@@ -1747,6 +1755,9 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 f"{', '.join(res['unresolved_skill_gaps'])}.",
                 fg="yellow",
             )
+        if res.get("skill_staleness_warnings"):
+            for warning in res["skill_staleness_warnings"]:
+                click.secho(f"\n[SKILL STALENESS] {warning}", fg="yellow")
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:

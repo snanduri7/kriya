@@ -78,6 +78,7 @@ from kriya.workflow.skill_extraction import (
     _rule_content_words,
     _scoped_skill_gap_description,
     _skill_identity_words,
+    _skill_staleness_warning,
     _skill_verification_context,
     _split_rules_by_verification,
     _stage_skill_conflicts,
@@ -345,6 +346,7 @@ class WorkflowEngine:
         # Initialize trace lists
         active_skills = []
         retrieved_chunks = []
+        skill_staleness_warnings: List[str] = []
 
         # 1. Analyze repository context
         logger.info("Analyzing workspace context...")
@@ -405,17 +407,27 @@ class WorkflowEngine:
                 fact_match
             )
             
-            # Check version-range compatibility
-            if is_relevant and skill.supported_versions != "*":
-                from kriya.skills.skill import is_version_supported
+            # Check version-range compatibility, and (independently of any
+            # range constraint) whether this goal's mentioned version has
+            # drifted from what the skill was last verified against - both
+            # need the goal's extracted library/version, computed once here
+            # rather than gating the extraction behind supported_versions
+            # != "*" the way the range check alone used to.
+            if is_relevant:
                 from kriya.tools.knowledge import extract_library_versions
                 libs = extract_library_versions(goal)
                 for lib, ver in libs:
                     if lib.lower() in skill.name.lower() or any(t.lower() in lib.lower() for t in skill.tags):
-                        if not is_version_supported(ver, skill.supported_versions):
-                            is_relevant = False
-                            logger.info(f"Skipping skill '{skill.name}' because version '{ver}' does not satisfy constraint '{skill.supported_versions}'")
-                            break
+                        if skill.supported_versions != "*":
+                            from kriya.skills.skill import is_version_supported
+                            if not is_version_supported(ver, skill.supported_versions):
+                                is_relevant = False
+                                logger.info(f"Skipping skill '{skill.name}' because version '{ver}' does not satisfy constraint '{skill.supported_versions}'")
+                                break
+                        staleness = _skill_staleness_warning(skill, lib, ver)
+                        if staleness:
+                            skill_staleness_warnings.append(staleness)
+                            logger.info(f"Skill staleness: {staleness}")
 
             if is_relevant:
                 active_skills.append(skill.name)
@@ -1594,6 +1606,7 @@ class WorkflowEngine:
             "toolchain_warning": state.toolchain_warning,
             "lsp_warning": state.lsp_warning,
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
+            "skill_staleness_warnings": sorted(set(skill_staleness_warnings)) or None,
             "review": review,
             "run_id": run_id,
         }

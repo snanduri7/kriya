@@ -5,6 +5,48 @@ from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.skills.skill import Skill, SkillEngine
+from kriya.workflow.skill_extraction import _skill_staleness_warning
+
+
+def _make_skill(**overrides):
+    defaults = dict(name="qpid", description="Qpid broker skill", tags=["qpid"])
+    defaults.update(overrides)
+    return Skill(**defaults)
+
+
+def test_skill_staleness_warning_fires_on_version_drift():
+    """Architectural add-on from a 2026-08-12 SME review: verified_context's
+    own field docstring says "a pinned version gets yanked, a new major
+    version changes the config shape" as the reason it's worth tracking, but
+    nothing read it back to check until now."""
+    skill = _make_skill(verified_context="qpid 9.2.1", verified_at="2026-08-01")
+    warning = _skill_staleness_warning(skill, "qpid", "9.3.0")
+    assert warning is not None
+    assert "9.2.1" in warning
+    assert "9.3.0" in warning
+    assert "2026-08-01" in warning
+
+
+def test_skill_staleness_warning_silent_on_matching_version():
+    skill = _make_skill(verified_context="qpid 9.2.1")
+    assert _skill_staleness_warning(skill, "qpid", "9.2.1") is None
+
+
+def test_skill_staleness_warning_silent_when_never_verified():
+    skill = _make_skill(verified_context=None)
+    assert _skill_staleness_warning(skill, "qpid", "9.3.0") is None
+
+
+def test_skill_staleness_warning_silent_when_verified_context_has_no_version():
+    skill = _make_skill(verified_context="version unspecified")
+    assert _skill_staleness_warning(skill, "qpid", "9.3.0") is None
+
+
+def test_skill_staleness_warning_silent_for_a_different_library():
+    # verified_context is for a DIFFERENT library than the one being checked -
+    # must not be misread as a version mismatch for "qpid".
+    skill = _make_skill(verified_context="ignite-core 2.18.0")
+    assert _skill_staleness_warning(skill, "qpid", "9.3.0") is None
 
 
 def test_skill_engine_prefers_explicit_supplied_dir_over_cwd_guess(tmp_path, monkeypatch):

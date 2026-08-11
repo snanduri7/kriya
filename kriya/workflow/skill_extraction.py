@@ -258,6 +258,33 @@ def _skill_verification_context(skill: Any, goal: str) -> str:
     return "version unspecified"
 
 
+def _skill_staleness_warning(skill: Any, goal_lib: str, goal_ver: str) -> Optional[str]:
+    """Cheap staleness nudge for an active skill whose verified_context names
+    a DIFFERENT version of the same library the current goal mentions -
+    architectural add-on from a 2026-08-12 SME review: verified_context's own
+    field docstring already says "advisory provenance... a pinned version
+    gets yanked, a new major version changes the config shape" but nothing
+    ever read it back to check. Reuses the exact (lib, ver) pair the caller
+    already extracted for supported_versions filtering - no new extraction
+    call. Purely observational: never blocks generation or un-verifies
+    anything, matching that same docstring's "not used to automatically
+    re-trigger anything" - just surfaces what a human would otherwise have
+    to notice themselves via `kriya skills show`."""
+    if not skill.verified_context or skill.verified_context == "version unspecified":
+        return None
+    verified_prefix = f"{goal_lib} "
+    if not skill.verified_context.startswith(verified_prefix):
+        return None
+    verified_ver = skill.verified_context[len(verified_prefix):].strip()
+    if verified_ver and verified_ver != goal_ver:
+        when = f" on {skill.verified_at}" if skill.verified_at else ""
+        return (
+            f"Skill '{skill.name}' was last verified against {goal_lib} {verified_ver}{when}, "
+            f"but this goal mentions {goal_lib} {goal_ver} - its rules may not all still apply."
+        )
+    return None
+
+
 def _split_rules_by_verification(skill: Any) -> Tuple[List[str], List[str]]:
     """Splits a skill's rules into (trusted, unverified) using its per-rule
     provenance file (kriya/skills/skill.py::load_rule_provenance). A rule with no
