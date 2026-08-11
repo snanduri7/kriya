@@ -1,4 +1,5 @@
-from unittest.mock import patch
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -111,6 +112,83 @@ def test_completion_command_prints_setup_instructions(runner, shell, expected_sn
 def test_completion_command_rejects_unknown_shell(runner):
     result = runner.invoke(main, ["completion", "powershell"])
     assert result.exit_code != 0
+
+
+def _mock_workflow_engine(fake_result):
+    mock_we = MagicMock()
+    mock_we.run_generation_workflow = AsyncMock(return_value=fake_result)
+    return mock_we
+
+
+def _mock_kernel():
+    mock_kernel = MagicMock()
+    mock_kernel.start = AsyncMock()
+    mock_kernel.stop = AsyncMock()
+    return mock_kernel
+
+
+_FAKE_GENERATE_RESULT = {
+    "plan": "do the thing",
+    "design": "design text",
+    "files": ["a.py"],
+    "quality_gates_passed": True,
+    "environment_failure": None,
+    "failure_category": None,
+    "toolchain_warning": None,
+    "lsp_warning": None,
+    "unresolved_skill_gaps": None,
+    "skill_staleness_warnings": None,
+    "review": "looks good",
+    "run_id": "abc123",
+}
+
+
+def test_generate_json_flag_prints_only_json_on_stdout(runner, tmp_path):
+    """Architectural add-on from a 2026-08-12 SME review: --json swaps
+    sys.stdout to stderr for the whole run so every existing narrative
+    click.echo/secho call is redirected for free, then restores stdout to
+    print only the final structured result - for CI/scripting use."""
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(_FAKE_GENERATE_RESULT)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y", "--json"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    parsed = json.loads(result.stdout)
+    assert parsed == _FAKE_GENERATE_RESULT
+    # Narrative output (the streamed step banner, the approval/summary text)
+    # must land on stderr instead, never polluting the JSON stdout stream.
+    assert result.stdout.strip().startswith("{")
+    # Narrative summary text (normally on stdout) must land on stderr instead.
+    assert "Generation Workflow Completed" in result.stderr
+    assert "Generation Workflow Completed" not in result.stdout
+
+
+def test_generate_json_flag_exit_code_reflects_quality_gates_failure(runner, tmp_path):
+    failing_result = dict(_FAKE_GENERATE_RESULT, quality_gates_passed=False)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == failing_result
+
+
+def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(_FAKE_GENERATE_RESULT)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    # Default behavior stays human-readable narrative text on stdout, not JSON.
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result.stdout)
+    assert "looks good" in result.stdout
 
 
 def test_tools_execute_shell_requires_confirmation_without_yes(runner):

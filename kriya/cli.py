@@ -965,8 +965,9 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
 @click.option('--ack-knowledge-gap', multiple=True, help="Acknowledge specific coordinates (e.g. org.apache.ignite:ignite-core) to bypass check.")
 @click.option('--resume', is_flag=True, default=False, help="Resume the most recently saved checkpoint for this workspace (only exists if a prior run was interrupted mid-Plan/Design/Developer).")
 @click.option('--resume-id', default=None, help="Resume a specific checkpoint by run_id instead of the latest one.")
+@click.option('--json', 'json_output', is_flag=True, default=False, help="Print only the final result as JSON on stdout - all progress/narrative output goes to stderr instead. For CI/scripting use.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str]) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     if file:
         try:
@@ -983,7 +984,21 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             sys.exit(1)
 
     cfg: AppConfig = ctx.obj['config']
-    
+
+    # --json: swap sys.stdout to stderr for the rest of this command, so
+    # every one of the many existing click.echo/secho calls below (streaming
+    # tokens, approval prompts, warnings, the human-formatted final summary)
+    # is redirected with zero per-call-site changes - click resolves
+    # sys.stdout dynamically at call time (confirmed live), so this one swap
+    # covers all of them. Restored just before printing the final JSON.
+    # Subprocess output (compile/test/run commands) is unaffected -
+    # PolymorphicValidator always captures via pipes into Python strings,
+    # never lets a child process's own stdout flow directly to the terminal.
+    # Architectural add-on from a 2026-08-12 SME review.
+    real_stdout = sys.stdout
+    if json_output:
+        sys.stdout = sys.stderr
+
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
     we = WorkflowEngine(kernel, llm)
@@ -1275,9 +1290,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 click.echo(res.get("review"))
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
-        
+
+        return res
+
     try:
-        asyncio.run(run_workflow())
+        final_res = asyncio.run(run_workflow())
     except Exception as e:
         click.secho(f"Workflow error: {e}", fg="red")
         click.secho(
@@ -1285,7 +1302,20 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             "re-run the same command with --resume to pick up where it left off instead of starting over.",
             fg="yellow"
         )
+        if json_output:
+            sys.stdout = real_stdout
+            click.echo(json.dumps({"error": str(e)}, indent=2))
         sys.exit(1)
+
+    if json_output:
+        sys.stdout = real_stdout
+        click.echo(json.dumps(final_res, indent=2))
+        # Some early-exit paths inside run_workflow() (a strict-mode
+        # knowledge-gap block, or a declined-then-scaffolded one) call
+        # sys.exit() directly and never reach here at all - known,
+        # documented gap for a v1: those paths don't get JSON output,
+        # matching their pre-existing narrower, non-structured signal today.
+        sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
 
 @main.command()
 @click.argument('file_path', type=click.Path(exists=True))
