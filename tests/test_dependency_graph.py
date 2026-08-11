@@ -190,3 +190,68 @@ def test_clear_file_still_removes_a_legacy_pre_migration_relation_by_name(tmp_pa
     graph.clear_file("A.java")
 
     assert graph.get_callers("handle") == []
+
+
+def test_get_symbols_for_file_returns_real_indexed_names(tmp_path):
+    """Architectural add-on from a 2026-08-12 SME review (re-ranking
+    retrieval): Graph RAG seeding used to guess a file's symbol from its
+    filename stem - this is the real lookup that replaced it."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    graph.index_file("my_engine.py", "class MyEngine:\n    def execute(self):\n        pass\n", 100.0)
+
+    symbols = graph.get_symbols_for_file("my_engine.py")
+
+    assert "MyEngine" in symbols
+    assert "execute" in symbols
+
+
+def test_get_symbols_for_file_returns_empty_list_for_unknown_file(tmp_path):
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    assert graph.get_symbols_for_file("nope.py") == []
+
+
+def test_get_neighborhood_scores_direct_import_above_deeper_annotation_hit(tmp_path):
+    """A hop-1 'imports' hit should outscore a hop-2 'annotated_with' hit -
+    the whole point of scoring get_neighborhood()'s output is to let callers
+    tell a strong direct relation apart from a weak, distant one instead of
+    treating every hit identically."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    # Seed --imports--> Direct (hop 1)
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("Direct.java", "Direct", "class", 1, 1),
+    )
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+        ("Seed", "Direct", "imports", "Seed.java"),
+    )
+    # Direct --annotated_with--> Distant (hop 2 from Seed)
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("Distant.java", "Distant", "class", 1, 1),
+    )
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+        ("Direct", "Distant", "annotated_with", "Direct.java"),
+    )
+    graph.conn.commit()
+
+    results = graph.get_neighborhood(["Seed"], max_hops=2)
+
+    # Mirrors how kriya/workflow/workflow.py actually consumes this: the
+    # BEST (max) score seen for a given file across however many neighbor
+    # hits mention it, not "whichever result happened to come last."
+    best_by_file: dict = {}
+    for r in results:
+        fp = r["filepath"]
+        best_by_file[fp] = max(best_by_file.get(fp, 0.0), r["score"])
+
+    assert best_by_file["Direct.java"] > best_by_file["Distant.java"]
+    # Sorted descending by score - the strongest hit comes first.
+    assert results[0]["filepath"] == "Direct.java"
+    assert results[0]["score"] == best_by_file["Direct.java"]

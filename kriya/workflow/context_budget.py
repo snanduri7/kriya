@@ -172,7 +172,10 @@ def _reserve_graph_context_budget(model_context_window: int, *unbounded_texts: s
     return max(_MIN_GRAPH_CONTEXT_BUDGET, base_budget - reserved)
 
 
-def build_code_context(matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int) -> str:
+_TIER_STEPS = ("full", "skeleton", "signatures")
+
+
+def build_code_context(matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int, file_scores: Optional[Dict[str, float]] = None) -> str:
     matched_contents = {}
     for f in matched_files:
         full_p = os.path.join(workspace_path, f)
@@ -193,9 +196,6 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
             except Exception as e:
                 logger.debug(f"Failed to read related file '{full_p}' for RAG context: {e}")
 
-    matched_tier = "full"
-    related_tier = "full"
-    
     # Introduce cache for skeletonized content to optimize performance
     skel_cache = {}
 
@@ -205,35 +205,83 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
             skel_cache[key] = skeletonize_code(content, filepath, tier)
         return skel_cache[key]
 
+    if file_scores is None:
+        # Original categorical degradation: every related file degrades one
+        # tier before any matched file loses its own next tier - no signal
+        # to prefer one specific file over another within a category.
+        matched_tier = "full"
+        related_tier = "full"
+
+        def total_len():
+            total = 0
+            for filepath, content in matched_contents.items():
+                total += estimate_tokens(get_skeletonized(content, filepath, matched_tier))
+            for filepath, content in related_contents.items():
+                total += estimate_tokens(get_skeletonized(content, filepath, related_tier))
+            return total
+
+        while total_len() > budget_limit:
+            if related_tier == "full":
+                related_tier = "skeleton"
+            elif related_tier == "skeleton":
+                related_tier = "signatures"
+            elif matched_tier == "full":
+                matched_tier = "skeleton"
+            elif matched_tier == "skeleton":
+                matched_tier = "signatures"
+            else:
+                break
+
+        graph_rag_context = "\n\n=== Codebase Semantic Reference Context ===\n"
+        for filepath, content in matched_contents.items():
+            skel = get_skeletonized(content, filepath, matched_tier)
+            graph_rag_context += f"\nFile: {filepath} (Tier: {matched_tier})\n{skel}\n"
+
+        if related_contents:
+            graph_rag_context += "\n\n=== Bounded Neighborhood Dependency Context ===\n"
+            for filepath, content in related_contents.items():
+                skel = get_skeletonized(content, filepath, related_tier)
+                graph_rag_context += f"\nFile: {filepath} (Tier: {related_tier})\n{skel}\n"
+
+        return graph_rag_context
+
+    # Score-aware degradation (2026-08-12 SME review, re-ranking retrieval):
+    # each file (matched or related alike) has its own tier, degraded one
+    # step at a time starting from whichever remaining file scores lowest -
+    # a low-relevance matched file can lose detail before a high-relevance
+    # related file does, which the purely categorical path above can never
+    # express. A file missing from file_scores is treated as the lowest
+    # possible priority (degrades first) rather than assumed relevant.
+    file_tiers = {f: "full" for f in list(matched_contents) + list(related_contents)}
+
     def total_len():
         total = 0
         for filepath, content in matched_contents.items():
-            total += estimate_tokens(get_skeletonized(content, filepath, matched_tier))
+            total += estimate_tokens(get_skeletonized(content, filepath, file_tiers[filepath]))
         for filepath, content in related_contents.items():
-            total += estimate_tokens(get_skeletonized(content, filepath, related_tier))
+            total += estimate_tokens(get_skeletonized(content, filepath, file_tiers[filepath]))
         return total
 
     while total_len() > budget_limit:
-        if related_tier == "full":
-            related_tier = "skeleton"
-        elif related_tier == "skeleton":
-            related_tier = "signatures"
-        elif matched_tier == "full":
-            matched_tier = "skeleton"
-        elif matched_tier == "skeleton":
-            matched_tier = "signatures"
-        else:
+        degradable = [f for f in file_tiers if file_tiers[f] != "signatures"]
+        if not degradable:
             break
-            
+        degradable.sort(key=lambda f: file_scores.get(f, 0.0))
+        lowest = degradable[0]
+        next_tier = _TIER_STEPS[_TIER_STEPS.index(file_tiers[lowest]) + 1]
+        file_tiers[lowest] = next_tier
+
     graph_rag_context = "\n\n=== Codebase Semantic Reference Context ===\n"
     for filepath, content in matched_contents.items():
-        skel = get_skeletonized(content, filepath, matched_tier)
-        graph_rag_context += f"\nFile: {filepath} (Tier: {matched_tier})\n{skel}\n"
-        
+        tier = file_tiers[filepath]
+        skel = get_skeletonized(content, filepath, tier)
+        graph_rag_context += f"\nFile: {filepath} (Tier: {tier})\n{skel}\n"
+
     if related_contents:
         graph_rag_context += "\n\n=== Bounded Neighborhood Dependency Context ===\n"
         for filepath, content in related_contents.items():
-            skel = get_skeletonized(content, filepath, related_tier)
-            graph_rag_context += f"\nFile: {filepath} (Tier: {related_tier})\n{skel}\n"
-            
+            tier = file_tiers[filepath]
+            skel = get_skeletonized(content, filepath, tier)
+            graph_rag_context += f"\nFile: {filepath} (Tier: {tier})\n{skel}\n"
+
     return graph_rag_context

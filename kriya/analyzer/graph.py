@@ -9,6 +9,25 @@ from kriya.core.db import get_connection
 
 logger = logging.getLogger(__name__)
 
+# Relative confidence that a relation type reflects genuine relevance for
+# Graph RAG re-ranking (2026-08-12 SME review) - a direct import/inheritance
+# edge is a much stronger relevance signal than a generic call or an
+# annotation reference, so get_neighborhood() weights hits by this table
+# (divided by hop distance) instead of treating every relation type equally.
+_RELATION_WEIGHTS: Dict[str, float] = {
+    "imports": 1.0,
+    "inherits": 1.0,
+    "implements": 1.0,
+    "extends": 1.0,
+    "calls": 0.7,
+    "declares_bean": 0.6,
+    "references_bean": 0.6,
+    "annotated_with": 0.4,
+    "injects": 0.4,
+}
+_DEFAULT_RELATION_WEIGHT = 0.5
+
+
 class DependencyGraph:
     """SQLite-backed AST dependency knowledge graph compiler for multi-language repositories."""
 
@@ -205,8 +224,25 @@ class DependencyGraph:
         rows = cursor.fetchall()
         return [r[0] for r in rows]
 
+    def get_symbols_for_file(self, filepath: str) -> List[str]:
+        """Fetch the real symbol names (classes/methods/functions/beans) this
+        file's own parse produced - the file's actual identity in the graph,
+        rather than a filename-stem guess (2026-08-12 SME review: the
+        previous Graph RAG seeding used `os.path.splitext(basename(f))[0]`,
+        which only happens to match a real symbol for languages/conventions
+        where the public type name equals the filename)."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT name FROM symbols WHERE filepath = ?", (filepath,))
+        return [r[0] for r in cursor.fetchall()]
+
     def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2) -> List[Dict[str, Any]]:
-        """Perform bounded BFS traversal on the symbol relationship graph."""
+        """Perform bounded BFS traversal on the symbol relationship graph.
+
+        Each hit carries a "score" (relation-type weight / hop distance, see
+        _RELATION_WEIGHTS) so callers can prioritize which related files are
+        actually worth keeping when a token budget is tight, instead of
+        treating every hop-2 annotation reference the same as a direct
+        hop-1 import. Results are sorted by score descending."""
         if not seed_symbols:
             return []
             
@@ -247,14 +283,17 @@ class DependencyGraph:
                     queue.append((neighbor, hop + 1))
                     
                 if filepath:
+                    weight = _RELATION_WEIGHTS.get(rel_type, _DEFAULT_RELATION_WEIGHT)
                     results.append({
                         "name": neighbor,
                         "filepath": filepath,
                         "relation_type": rel_type,
                         "symbol_type": sym_type,
-                        "hop": hop + 1
+                        "hop": hop + 1,
+                        "score": weight / (hop + 1)
                     })
-                    
+
+        results.sort(key=lambda r: r["score"], reverse=True)
         return results
 
     def close(self) -> None:

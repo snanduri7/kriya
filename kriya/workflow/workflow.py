@@ -743,26 +743,42 @@ class WorkflowEngine:
                 if good_matches:
                     matched_files_list = list(dict.fromkeys([m["filepath"] for m in good_matches if "filepath" in m]))
                     related_files_set = set()
-                    
+                    # Matched-file relevance: the best (max) hybrid RRF score
+                    # across that file's own matched chunks.
+                    file_scores: Dict[str, float] = {}
+                    for m in good_matches:
+                        fp = m.get("filepath")
+                        if fp:
+                            file_scores[fp] = max(file_scores.get(fp, 0.0), m.get("score", 0.0))
+
                     if os.path.exists(db_path):
                         from kriya.analyzer.graph import DependencyGraph
                         graph = DependencyGraph(db_path)
-                        
-                        seed_symbols = [os.path.splitext(os.path.basename(f))[0] for f in matched_files_list]
+
+                        # Real symbols this file's own parse produced, not a
+                        # filename-stem guess - falls back to the stem only
+                        # when the file has no indexed symbols at all (e.g. a
+                        # matched YAML/config file).
+                        seed_symbols = []
+                        for f in matched_files_list:
+                            symbols = graph.get_symbols_for_file(f)
+                            seed_symbols.extend(symbols or [os.path.splitext(os.path.basename(f))[0]])
                         neighbors = graph.get_neighborhood(seed_symbols, max_hops=2)
                         for n in neighbors:
-                            if n.get("filepath") and n["filepath"] not in matched_files_list:
-                                related_files_set.add(n["filepath"])
-                                
+                            fp = n.get("filepath")
+                            if fp and fp not in matched_files_list:
+                                related_files_set.add(fp)
+                                file_scores[fp] = max(file_scores.get(fp, 0.0), n.get("score", 0.0))
+
                     matched_files = matched_files_list
                     related_files = list(related_files_set)
-                    
+
                     # convention_prompt already holds the active skills' rules/instructions/
                     # examples at this point (built above, before Graph RAG retrieval) - same
                     # unaccounted-overhead gap _reserve_graph_context_budget's own docstring
                     # describes for the retry loop, just on the very first attempt instead.
                     primary_limit = _reserve_graph_context_budget(self.kernel.config.llm.context_window, convention_prompt)
-                    graph_rag_context = build_code_context(matched_files, related_files, workspace_path, primary_limit)
+                    graph_rag_context = build_code_context(matched_files, related_files, workspace_path, primary_limit, file_scores=file_scores)
         except Exception as ex:
             logger.warning(f"Failed to query Graph RAG: {ex}")
             

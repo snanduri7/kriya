@@ -46,6 +46,7 @@ from kriya.workflow.workflow import (
     _likely_misattributed_sibling,
     _normalize_error_for_repeat_detection,
     _reserve_graph_context_budget,
+    build_code_context,
     _resolve_file_paths_from_design,
     _pin_exec_plugin_executable_to_resolved_jdk,
     _resolve_java_home_override,
@@ -6328,6 +6329,135 @@ def test_reserve_graph_context_budget_barely_affects_a_large_primary_window():
     skills_text = "word " * 5000
     budget = _reserve_graph_context_budget(32768, skills_text, "")
     assert budget > int(32768 * 0.75) * 0.5
+
+
+def _write_deterministic_text_file(path, lines=40, words_per_line=8):
+    # Plain .txt content deliberately, not .java/.py: skeletonize_code()'s
+    # fallback branch makes "skeleton" tier a no-op (identical to "full")
+    # and "signatures" tier a deterministic first-15-lines truncation - the
+    # only extension where a test can predict exact token counts without
+    # depending on the Java/Python skeletonizers' own internal heuristics.
+    line = ("word " * words_per_line).strip() + "\n"
+    path.write_text(line * lines)
+
+
+# full: 40 lines * 8 words = 320 words -> int(320*1.3) = 416 tokens.
+# signatures: first 15 lines * 8 words = 120 words (+ a few for the elided
+# suffix) -> ~161 tokens. Budget chosen with wide margin above one-full-one-
+# signatures (~577) and below two-full (832), so token-estimate rounding
+# doesn't make these tests flaky.
+_TEXT_FIXTURE_BUDGET = 700
+
+
+def test_build_code_context_without_scores_keeps_old_categorical_behavior(tmp_path):
+    # file_scores omitted (None) - must behave exactly like before this
+    # feature existed: every related file degrades before any matched file.
+    _write_deterministic_text_file(tmp_path / "Matched.txt")
+    _write_deterministic_text_file(tmp_path / "Related.txt")
+
+    ctx = build_code_context(["Matched.txt"], ["Related.txt"], str(tmp_path), budget_limit=_TEXT_FIXTURE_BUDGET)
+
+    assert "File: Related.txt (Tier: signatures)" in ctx
+    assert "File: Matched.txt (Tier: full)" in ctx
+
+
+def test_build_code_context_degrades_lowest_scored_file_first_regardless_of_category(tmp_path):
+    """Architectural add-on from a 2026-08-12 SME review (re-ranking
+    retrieval): a low-relevance MATCHED file should lose detail before a
+    high-relevance RELATED file does - the old categorical rule (all
+    related degrade before any matched) can never express this."""
+    _write_deterministic_text_file(tmp_path / "WeakMatch.txt")
+    _write_deterministic_text_file(tmp_path / "StrongRelated.txt")
+
+    file_scores = {"WeakMatch.txt": 0.1, "StrongRelated.txt": 0.9}
+    ctx = build_code_context(
+        ["WeakMatch.txt"], ["StrongRelated.txt"], str(tmp_path), budget_limit=_TEXT_FIXTURE_BUDGET,
+        file_scores=file_scores,
+    )
+
+    assert "File: WeakMatch.txt (Tier: signatures)" in ctx
+    assert "File: StrongRelated.txt (Tier: full)" in ctx
+
+
+def test_build_code_context_treats_a_file_missing_from_scores_as_lowest_priority(tmp_path):
+    _write_deterministic_text_file(tmp_path / "Scored.txt")
+    _write_deterministic_text_file(tmp_path / "Unscored.txt")
+
+    ctx = build_code_context(
+        ["Scored.txt"], ["Unscored.txt"], str(tmp_path), budget_limit=_TEXT_FIXTURE_BUDGET,
+        file_scores={"Scored.txt": 0.5},  # "Unscored.txt" absent
+    )
+
+    assert "File: Unscored.txt (Tier: signatures)" in ctx
+    assert "File: Scored.txt (Tier: full)" in ctx
+
+
+@pytest.mark.asyncio
+async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degradation(tmp_path):
+    """Architectural add-on from a 2026-08-12 SME review (re-ranking
+    retrieval): confirms the real wiring inside run_generation_workflow's
+    Graph RAG retrieval block - not just the pure build_code_context()/
+    get_neighborhood() units in isolation - actually threads a matched
+    file's real hybrid-search score through to context assembly, so a
+    weakly-matched file loses detail in the prompt before a strongly-
+    matched one does."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.memory = str(tmp_path / "memory")
+    # Isolate from the real repo's shared skills/ directory - SkillEngine
+    # always loads Kriya's own global skill library too, which would inflate
+    # convention_prompt unpredictably and throw off the tuned budget below.
+    cfg.paths.skills = str(tmp_path / "skills")
+    # Small context_window so build_code_context()'s budget (0.75 * this,
+    # minus a small skills-prompt overhead) lands between one-full-one-
+    # signatures (~577 tokens) and two-full (~832 tokens) for the two
+    # 40-line/8-word fixture files below - forcing exactly one to degrade.
+    # NOTE: _reserve_graph_context_budget() floors its return value at
+    # _MIN_GRAPH_CONTEXT_BUDGET (1000 tokens) regardless of context_window,
+    # so the effective budget here is exactly 1000, not 0.75*context_window -
+    # fixture sizes below (64 lines/8 words -> ~655 tokens full, ~161
+    # signatures) are chosen against THAT floor: two-full (~1310) exceeds it,
+    # one-full-one-signatures (~816) comfortably doesn't.
+    cfg.llm.context_window = 1000
+    os.makedirs(cfg.paths.memory, exist_ok=True)
+
+    _write_deterministic_text_file(tmp_path / "HighRel.txt", lines=64)
+    _write_deterministic_text_file(tmp_path / "LowRel.txt", lines=64)
+
+    from kriya.memory.vector import LocalVectorStore
+    dim = 768
+    high_emb = [1.0] + [0.0] * (dim - 1)
+    low_emb = [0.6, 0.8] + [0.0] * (dim - 2)
+    vs = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+    vs.add_document("HighRel.txt", "chunk one", high_emb, chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
+    vs.add_document("LowRel.txt", "chunk two", low_emb, chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
+    vs.close()
+
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "def add(a,b):\n    return a+b",
+        "Review: Approved"
+    ])
+    we = WorkflowEngine(kernel, llm)
+
+    query_emb = [1.0] + [0.0] * (dim - 1)
+    with patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", new=AsyncMock(return_value=query_emb)):
+        res = await we.run_generation_workflow(
+            goal="Create math library",
+            workspace_path=str(tmp_path)
+        )
+
+    assert res["quality_gates_passed"] is True
+
+    # The Planner's own prompt is the first one built with convention_prompt
+    # (which now carries the score-degraded Graph RAG context) already
+    # folded in.
+    planner_prompt = llm.complete.call_args_list[0].args[1]
+    assert "File: HighRel.txt (Tier: full)" in planner_prompt
+    assert "File: LowRel.txt (Tier: signatures)" in planner_prompt
 
 
 def test_find_structural_corruption_catches_the_real_duplicate_class_shape():
