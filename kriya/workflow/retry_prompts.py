@@ -55,6 +55,35 @@ RESOURCE_LIFECYCLE_HEADER = (
 )
 
 
+# Standing convention letting Runtime Verification trust a deterministic
+# marker instead of re-deriving correctness from raw captured text after the
+# fact - added 2026-08-11 after RunVerifierAgent.grade() twice hallucinated a
+# wrong "expected" value (independently recomputing a UTF-8 byte length as 13
+# when it was actually 15) and rejected code that had been correct since the
+# first attempt, even though the program's own real comparison
+# (original.equals(decoded)) had already passed and printed so. The program
+# has the actual values in memory, computed by real, exact, non-hallucinating
+# arithmetic - Kriya should trust that computation, not ask an LLM to
+# reconstruct it worse from flattened stdout. See
+# kriya.workflow.verification_contract.extract_contract_verdict() for the
+# deterministic scan this convention feeds - a soft, prompt-level convention
+# like every other standing invariant here, not a hard requirement: if the
+# marker isn't present, Runtime Verification falls through to today's
+# LLM-graded behavior unchanged.
+VERIFICATION_CONTRACT_HEADER = (
+    "\n\n=== Verification Contract (required whenever applicable) ===\n"
+    "If this goal describes observable runtime behavior with a checkable outcome "
+    "(e.g. a round-trip encode/decode, a value written then read back, a computed "
+    "result compared against an expected one), your entrypoint must end by printing "
+    "an exact verdict line on its own: \"[VERIFICATION] PASS\" if your own code "
+    "confirms - via a real comparison against real values it computed or observed, "
+    "not just printing intermediate numbers and hoping they look right - that the "
+    "behavior occurred correctly, or \"[VERIFICATION] FAIL: <one-sentence reason>\" "
+    "otherwise. This is in addition to, not instead of, any [RESULT] output the goal "
+    "itself asks for."
+)
+
+
 def _build_ecosystem_invariant_block(repo_model: Any) -> str:
     """A standing, always-present checklist instruction (not conditionally
     triggered) that the goal/existing repo's language and framework must be
@@ -91,6 +120,7 @@ def _build_targeted_retry_prompt(
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
     ecosystem_invariant_block: str = "",
     resource_lifecycle_block: str = "",
+    verification_contract_block: str = "",
 ) -> Tuple[str, str]:
     """Builds the task description and code context for a targeted (single/few-
     file) retry: the target file(s) are framed as the fix, every other already-
@@ -121,6 +151,7 @@ def _build_targeted_retry_prompt(
     task_desc = f"Goal: {goal}\nPlan: {plan}"
     task_desc += ecosystem_invariant_block
     task_desc += resource_lifecycle_block
+    task_desc += verification_contract_block
     task_desc += (
         f"\n\n=== Previous Error to Fix ===\n{error_context}\n\n"
         f"This is a TARGETED fix attempt. Based on the error above, the following file(s) are most "
@@ -138,6 +169,7 @@ def _build_full_set_retry_prompt(
     required_dependencies_prompt_block: str = "",
     ecosystem_invariant_block: str = "",
     resource_lifecycle_block: str = "",
+    verification_contract_block: str = "",
 ) -> Tuple[str, str]:
     """Full-set retries previously never showed the model its own prior attempt's
     content at all, only the abstract error text describing what went wrong -
@@ -177,6 +209,7 @@ def _build_full_set_retry_prompt(
     task_desc = f"Goal: {goal}\nPlan: {plan}"
     task_desc += ecosystem_invariant_block
     task_desc += resource_lifecycle_block
+    task_desc += verification_contract_block
     if error_context:
         task_desc += f"\n\n=== Previous Error to Fix ===\n{error_context}"
     task_desc += required_files_prompt_block
@@ -190,6 +223,7 @@ def _build_missing_files_retry_prompt(
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
     ecosystem_invariant_block: str = "",
     resource_lifecycle_block: str = "",
+    verification_contract_block: str = "",
 ) -> Tuple[str, str]:
     """Builds the task description and code context for a missing-file recovery
     retry, used after an IncompleteGenerationError: the Architect's design called
@@ -214,6 +248,7 @@ def _build_missing_files_retry_prompt(
     task_desc = f"Goal: {goal}\nPlan: {plan}"
     task_desc += ecosystem_invariant_block
     task_desc += resource_lifecycle_block
+    task_desc += verification_contract_block
     task_desc += (
         "\n\nThis is a MISSING-FILE recovery attempt. The Architect's design (below, in the code context) "
         f"calls for the following file(s), which were NOT generated in the previous attempt: "

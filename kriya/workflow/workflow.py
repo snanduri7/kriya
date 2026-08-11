@@ -123,11 +123,13 @@ from kriya.workflow.lsp_integration import (
 from kriya.workflow.retry_prompts import (
     ECOSYSTEM_INVARIANT_HEADER,
     RESOURCE_LIFECYCLE_HEADER,
+    VERIFICATION_CONTRACT_HEADER,
     _build_ecosystem_invariant_block,
     _build_full_set_retry_prompt,
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
 )
+from kriya.workflow.verification_contract import extract_contract_verdict
 
 logger = logging.getLogger(__name__)
 
@@ -1165,6 +1167,11 @@ class WorkflowEngine:
         # a standing invariant present on every attempt, not a reactive one.
         resource_lifecycle_block = RESOURCE_LIFECYCLE_HEADER
 
+        # Threaded through every prompt builder alongside ecosystem_invariant_block/
+        # resource_lifecycle_block - see VERIFICATION_CONTRACT_HEADER's own rationale
+        # comment in kriya/workflow/retry_prompts.py for why this exists.
+        verification_contract_block = VERIFICATION_CONTRACT_HEADER
+
         required_dependencies_prompt_block = ""
         _original_pom_path = os.path.join(workspace_path, "pom.xml")
         if os.path.exists(_original_pom_path):
@@ -1322,6 +1329,7 @@ class WorkflowEngine:
                         all_files_written, worktree_path, base_code_context,
                         ecosystem_invariant_block=ecosystem_invariant_block,
                         resource_lifecycle_block=resource_lifecycle_block,
+                        verification_contract_block=verification_contract_block,
                     )
                     logger.info(f"Targeted retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: focusing on {', '.join(last_implicated_files)}.")
 
@@ -1377,6 +1385,7 @@ class WorkflowEngine:
                         all_files_written, worktree_path, base_code_context,
                         ecosystem_invariant_block=ecosystem_invariant_block,
                         resource_lifecycle_block=resource_lifecycle_block,
+                        verification_contract_block=verification_contract_block,
                     )
                     logger.info(f"Fallback-targeted retry: focusing on {', '.join(last_implicated_files)}.")
 
@@ -1438,6 +1447,7 @@ class WorkflowEngine:
                         all_files_written, worktree_path, base_code_context,
                         ecosystem_invariant_block=ecosystem_invariant_block,
                         resource_lifecycle_block=resource_lifecycle_block,
+                        verification_contract_block=verification_contract_block,
                     )
                     logger.info(f"Missing-file recovery retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: adding {', '.join(resolved_missing_files)}.")
 
@@ -1487,6 +1497,7 @@ class WorkflowEngine:
                         required_dependencies_prompt_block,
                         ecosystem_invariant_block=ecosystem_invariant_block,
                         resource_lifecycle_block=resource_lifecycle_block,
+                        verification_contract_block=verification_contract_block,
                     )
 
                     # Track model hops
@@ -1912,14 +1923,22 @@ class WorkflowEngine:
                                     # trying timeout-tuning fixes that could never fix a genuine
                                     # resource leak, burning the whole retry budget on the wrong
                                     # class of change.
-                                    grade = await self.run_verifier.grade(
-                                        goal=goal,
-                                        success_criteria=judgment["success_criteria"],
-                                        output=run_res["output"],
-                                        returncode=run_res["returncode"],
-                                        files_written=list(all_files_written),
-                                        timed_out=True,
-                                    )
+                                    contract_verdict = extract_contract_verdict(run_res["output"])
+                                    if contract_verdict is not None:
+                                        logger.info(
+                                            "Runtime verification: using deterministic verification-contract "
+                                            "marker instead of LLM grading (timed-out run)."
+                                        )
+                                        grade = contract_verdict
+                                    else:
+                                        grade = await self.run_verifier.grade(
+                                            goal=goal,
+                                            success_criteria=judgment["success_criteria"],
+                                            output=run_res["output"],
+                                            returncode=run_res["returncode"],
+                                            files_written=list(all_files_written),
+                                            timed_out=True,
+                                        )
                                     timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
                                     if grade["passed"]:
                                         # The goal's described behavior WAS genuinely produced -
@@ -1961,13 +1980,21 @@ class WorkflowEngine:
                                     # sequence, not just the last command, so check that instead.
                                     grade = {"passed": False, "reasoning": f"One or more steps failed (final step exit code {run_res['returncode']})."}
                                 else:
-                                    grade = await self.run_verifier.grade(
-                                        goal=goal,
-                                        success_criteria=judgment["success_criteria"],
-                                        output=run_res["output"],
-                                        returncode=run_res["returncode"],
-                                        files_written=list(all_files_written),
-                                    )
+                                    contract_verdict = extract_contract_verdict(run_res["output"])
+                                    if contract_verdict is not None:
+                                        logger.info(
+                                            "Runtime verification: using deterministic verification-contract "
+                                            "marker instead of LLM grading."
+                                        )
+                                        grade = contract_verdict
+                                    else:
+                                        grade = await self.run_verifier.grade(
+                                            goal=goal,
+                                            success_criteria=judgment["success_criteria"],
+                                            output=run_res["output"],
+                                            returncode=run_res["returncode"],
+                                            files_written=list(all_files_written),
+                                        )
                                 if not grade["passed"]:
                                     # A compile error always names its own broken file
                                     # (file:[line,col]) - a runtime failure's captured

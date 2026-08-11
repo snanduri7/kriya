@@ -50,6 +50,7 @@ from kriya.workflow.workflow import (
     _strip_jdk_incompatible_jvm_flags,
     classify_environment_failure,
     estimate_tokens,
+    extract_contract_verdict,
     extract_error_search_terms,
     extract_error_source_locations,
     extract_expected_files,
@@ -1673,6 +1674,139 @@ async def test_workflow_run_verification_goal_explicit_passes_without_confirmati
 
     assert res["quality_gates_passed"] is True
     assert "app.py" in res["files"]
+
+def test_extract_contract_verdict_returns_none_without_marker():
+    """No marker present must fall through to today's LLM-graded behavior
+    unchanged - the whole point of this being a soft, optional convention."""
+    assert extract_contract_verdict("some build output\nno marker here") is None
+
+def test_extract_contract_verdict_single_pass():
+    result = extract_contract_verdict("Starting app...\n[VERIFICATION] PASS\nDone.")
+    assert result["passed"] is True
+    assert result["likely_files"] == []
+
+def test_extract_contract_verdict_single_fail_carries_reason():
+    result = extract_contract_verdict("[VERIFICATION] FAIL: decoded string did not match original")
+    assert result["passed"] is False
+    assert "decoded string did not match original" in result["reasoning"]
+
+def test_extract_contract_verdict_multiple_pass_all_required():
+    """A goal that runs multiple sequential commands (e.g. "add a task, then
+    list it") can legitimately print one verdict line per step - all must
+    pass for the overall contract to pass."""
+    result = extract_contract_verdict("[VERIFICATION] PASS\nsome noise\n[VERIFICATION] PASS")
+    assert result["passed"] is True
+
+def test_extract_contract_verdict_any_fail_fails_whole_sequence():
+    result = extract_contract_verdict("[VERIFICATION] PASS\n[VERIFICATION] FAIL: task not found in list")
+    assert result["passed"] is False
+    assert "task not found in list" in result["reasoning"]
+
+def test_extract_contract_verdict_ignores_marker_not_at_line_start():
+    """Only a real standalone verdict line counts - text that merely mentions
+    the marker mid-line (e.g. echoed goal text, a log message quoting it)
+    must not be mistaken for an actual verdict."""
+    assert extract_contract_verdict("noise [VERIFICATION] PASS trailing junk") is None
+
+@pytest.mark.asyncio
+async def test_workflow_verification_contract_marker_skips_llm_grade_on_pass(tmp_path):
+    """When the generated entrypoint prints the deterministic verification-contract
+    marker (see VERIFICATION_CONTRACT_HEADER / extract_contract_verdict), Runtime
+    Verification must trust it directly and never call RunVerifierAgent.grade() at
+    all. Added 2026-08-11 after grade() twice independently hallucinated a wrong
+    "expected" value and rejected genuinely correct code even though the program's
+    own real comparison had already passed and printed so - see
+    VERIFICATION_CONTRACT_HEADER's rationale comment in
+    kriya/workflow/retry_prompts.py for the full incident."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        "Review: Approved",       # Reviewer
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints a [VERIFICATION] verdict line",
+    })
+    we.run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("grade() must not be called when the verification-contract marker is present")
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should self-verify",
+            workspace_path=str(tmp_path),
+        )
+
+    we.run_verifier.grade.assert_not_called()
+    assert res["quality_gates_passed"] is True
+
+@pytest.mark.asyncio
+async def test_workflow_verification_contract_marker_skips_llm_grade_on_fail(tmp_path):
+    """Same deterministic short-circuit for a FAIL marker: the run_verification gate
+    must fail using the marker's own reason text, still without ever invoking
+    grade() - the contract check runs on every retry attempt, not just the first."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        "Review: Approved",       # Reviewer - still runs after retries are exhausted
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints a [VERIFICATION] verdict line",
+    })
+    we.run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("grade() must not be called when the verification-contract marker is present")
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={
+            "success": True, "timed_out": False, "returncode": 0,
+            "output": "hi\n[VERIFICATION] FAIL: decoded value did not match original",
+        },
+    ):
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should self-verify",
+            workspace_path=str(tmp_path),
+        )
+
+    we.run_verifier.grade.assert_not_called()
+    assert res["quality_gates_passed"] is False
 
 @pytest.mark.asyncio
 async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path):
