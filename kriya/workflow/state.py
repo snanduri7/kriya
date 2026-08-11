@@ -1,0 +1,121 @@
+"""Explicit state for run_generation_workflow()'s Developer + Quality Gates
+retry loop - replaces ~25 mutable local variables previously threaded through
+the loop via closures. Extracted 2026-08-11 (Opportunity 2, Slice 1): the
+loop's control flow and every read/write site are unchanged, only the
+storage moved from bare names to attributes on this object - this is what
+makes the next slices (an isolable attempt executor and retry-decision
+function) possible to unit-test without invoking the whole method.
+"""
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+
+@dataclass
+class RetryBudgets:
+    """The counters that govern which attempt mode comes next - grouped
+    separately because they're read/written together as a unit by the
+    retry-decision logic, unlike the rest of GenerationState's fields."""
+
+    # Full-set retry attempt counter, bounded by max_retries (max(4, 1+len(chain))).
+    retry_count: int = 0
+    # Independent budget for targeted (single/few-file) retries - deliberately
+    # NOT folded into retry_count, which governs the full-file-set path and its
+    # model-escalation chain. Targeted attempts always use the primary model
+    # (never escalate - a measured 19-43s Ollama model-swap cost made "swap on
+    # every targeted attempt" a bad trade). Exhausting this budget falls
+    # through to the full-set path's own budget/escalation, unchanged.
+    targeted_retry_count: int = 0
+    # A single, one-shot opportunity to try a TARGETED fix on the fallback model
+    # before escalating all the way to a full-set regeneration (found live,
+    # 2026-08-10, ignite_qpid_protocol): a full-set escalation already pays a
+    # model-swap cost, so trying one targeted fix on that same fallback model
+    # first spends a swap cost that was coming anyway on a much cheaper shot.
+    # Deliberately its own flag, not folded into targeted_retry_count (primary
+    # model only, never escalate) or retry_count (the full-set path's own
+    # counter).
+    fallback_targeted_attempted: bool = False
+    # (fail_type, signature) of the previous attempt's failure, so a REPEATED
+    # failure (the model isn't self-correcting) can be distinguished from a
+    # normal first-time failure - only a repeat is eligible for error-triggered
+    # live lookup.
+    last_failure_signature: Optional[Tuple[str, Any]] = None
+
+
+@dataclass
+class GenerationState:
+    """Everything the Developer + Quality Gates retry loop reads or writes
+    across iterations. Constructed once per run_generation_workflow() call,
+    right before the loop starts."""
+
+    # Unified attempt counter for gate_outcomes/logging only - retry_count and
+    # targeted_retry_count are the actual budget counters, but a single
+    # chronological attempt number reads far more sensibly in the trace than
+    # two counters that don't both advance on every iteration.
+    attempt_number: int = 0
+    error_context: str = ""
+    files_written: List[Dict[str, str]] = field(default_factory=list)
+    all_files_written: Set[str] = field(default_factory=set)
+    all_original_contents: Dict[str, str] = field(default_factory=dict)
+    # Captures the last attempt's file contents before worktree cleanup, so the
+    # Reviewer stage has something to review even when quality gates never
+    # passed (those files never get copied to workspace_path - only ever lived
+    # in the worktree, which gets git-clean'd on failure).
+    final_attempt_contents: Dict[str, str] = field(default_factory=dict)
+    # The file(s) extract_implicated_files() found in the MOST RECENT failure -
+    # re-evaluated after every failure, not fixed at the first one, so a
+    # targeted attempt against a different file (a new error surfaced by fixing
+    # the last one) is still eligible. None whenever the last failure named no
+    # known file, or scoping is disabled (goes to the full-set path).
+    last_implicated_files: Optional[List[str]] = None
+    # The file(s) the completeness check (extract_expected_files vs. what got
+    # written) found missing after the MOST RECENT attempt. Mutually exclusive
+    # with last_implicated_files - an IncompleteGenerationError sets this and
+    # clears last_implicated_files (nothing to implicate: the file was never
+    # written), any other failure clears this and re-evaluates
+    # last_implicated_files as before.
+    last_missing_files: Optional[List[str]] = None
+    # {filepath: source-line snippet} for the MOST RECENT failure's error
+    # location(s) - empty whenever the last failure's error text named no
+    # javac-style file:[line,col] locator, or before any failure has happened.
+    last_error_source_context: Dict[str, str] = field(default_factory=dict)
+    # Tracks the human-in-the-loop confirmation for judgment-triggered (not
+    # goal-text-explicit) runtime verification, so it's asked at most once per
+    # generation run rather than on every retry attempt.
+    run_verification_confirmed: bool = False
+    run_verification_declined: bool = False
+    # Caches RunVerifierAgent.judge()'s result across retry attempts within
+    # this run - the goal/design driving "should we run this, and how" don't
+    # change between retries, so repeating the LLM call only bought wasted
+    # latency, not a different answer.
+    cached_run_verification_judgment: Optional[Dict[str, Any]] = None
+    # Set True only right before the success-path `break` - retry_count alone
+    # can no longer indicate success/failure now that a run can succeed via a
+    # targeted attempt after the full-set budget was already exhausted.
+    quality_gates_succeeded: bool = False
+    # Set from classify_environment_failure() on the most recent failed
+    # attempt - a non-None value short-circuits the retry loop, since no amount
+    # of code regeneration can ever fix a JVM crashing during its own startup
+    # or a missing build/run tool binary.
+    environment_failure: Optional[str] = None
+    # Toolchain preflight (_check_java_toolchain_mismatch) runs at most once per
+    # generation run, the first time a PolymorphicValidator confirms the stack
+    # is 'java' - toolchain_checked gates that, toolchain_warning persists into
+    # the final result regardless of pass/fail.
+    toolchain_checked: bool = False
+    toolchain_warning: Optional[str] = None
+    # See _resolve_java_home_override for when this gets set - threaded into
+    # every PolymorphicValidator construction so a detected, goal-relevant JDK
+    # mismatch actually gets corrected for real subprocess calls.
+    java_home_override: Optional[str] = None
+    # One jdtls process for this whole generation run (lazily started on first
+    # real need, kept alive across retries, shut down at run end) - None until
+    # first used, and stays None permanently (no repeated start attempts) if
+    # jdtls isn't found or fails to start.
+    jdtls_client: Optional[Any] = None
+    # Set once, the first time jdtls is found on PATH but fails to start -
+    # distinct from jdtls simply not being installed (expected, silent).
+    jdtls_unavailable: bool = False
+    lsp_warning: Optional[str] = None
+    gate_outcomes: List[Dict[str, Any]] = field(default_factory=list)
+    model_hops: List[Dict[str, Any]] = field(default_factory=list)
+    budgets: RetryBudgets = field(default_factory=RetryBudgets)

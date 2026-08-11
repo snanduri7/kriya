@@ -129,6 +129,7 @@ from kriya.workflow.retry_prompts import (
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
 )
+from kriya.workflow.state import GenerationState
 from kriya.workflow.verification_contract import extract_contract_verdict
 
 logger = logging.getLogger(__name__)
@@ -234,6 +235,13 @@ class WorkflowEngine:
         call actually finishes. None (the default) preserves today's exact behavior for
         every other caller - a fresh run_id every time.
         """
+        # Constructed once, right at the top, so every stage of the method -
+        # including the pre-loop checkpoint fingerprinting and Planner prompt
+        # below, not just the retry loop - reads/writes through one consistent
+        # object instead of the bare `error_context` parameter early on and
+        # `state.error_context` later. See kriya/workflow/state.py for the
+        # rationale behind every other field.
+        state = GenerationState(error_context=error_context or "")
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
         run_id = None
@@ -249,7 +257,7 @@ class WorkflowEngine:
                 else:
                     current_ws_fp = compute_workspace_fingerprint(workspace_path)
                     current_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
-                    current_goal_fp = hashlib.sha256(f"{goal}\x00{error_context or ''}".encode("utf-8")).hexdigest()
+                    current_goal_fp = hashlib.sha256(f"{goal}\x00{state.error_context or ''}".encode("utf-8")).hexdigest()
                     drift_reasons = []
                     if current_ws_fp is None:
                         # Not a git repo (or git unavailable) - there's no reliable way to
@@ -331,8 +339,6 @@ class WorkflowEngine:
         # Initialize trace lists
         active_skills = []
         retrieved_chunks = []
-        model_hops = []
-        gate_outcomes = []
 
         # 1. Analyze repository context
         logger.info("Analyzing workspace context...")
@@ -791,7 +797,7 @@ class WorkflowEngine:
         # goal/workspace/config are all fixed for the remainder of the call.
         checkpoint_ws_fp = compute_workspace_fingerprint(workspace_path)
         checkpoint_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
-        checkpoint_goal_fp = hashlib.sha256(f"{goal}\x00{error_context or ''}".encode("utf-8")).hexdigest()
+        checkpoint_goal_fp = hashlib.sha256(f"{goal}\x00{state.error_context or ''}".encode("utf-8")).hexdigest()
 
         def _save_stage_checkpoint(stage: str, **extra: Any) -> None:
             save_checkpoint(workspace_path, run_id, {
@@ -804,8 +810,8 @@ class WorkflowEngine:
 
         # 2. Plan
         plan_prompt = f"Goal: {goal}\n\nWorkspace Context:\n{repo_context}"
-        if error_context:
-            plan_prompt = f"Fix the following compile/test error:\n{error_context}\n\n" + plan_prompt
+        if state.error_context:
+            plan_prompt = f"Fix the following compile/test error:\n{state.error_context}\n\n" + plan_prompt
         plan_prompt += convention_prompt
 
         if resume_state and resume_state.get("plan"):
@@ -1045,75 +1051,11 @@ class WorkflowEngine:
         logger.info("Developer Agent implementing source files...")
         chain = self.kernel.config.llm_chain
         max_retries = max(4, 1 + len(chain)) if chain else 4
-        retry_count = 0
-        # A separate, independent budget for targeted (single/few-file) retries -
-        # deliberately NOT folded into max_retries/retry_count, which governs the
-        # full-file-set path and its model-escalation chain. Targeted attempts
-        # always use the primary model (never escalate) - they're meant to be
-        # fast and cheap, and a model swap on Ollama measured 19-43s in this same
-        # session, which would defeat that. Exhausting the targeted budget falls
-        # through to the full-set path's own budget/escalation, unchanged.
+        # See GenerationState/RetryBudgets in kriya/workflow/state.py for the
+        # rationale behind each of these counters/flags/caches - state itself
+        # was already constructed at the top of this method.
         TARGETED_MAX_RETRIES = 3
-        targeted_retry_count = 0
-        # A single, one-shot opportunity to try a TARGETED fix on the fallback
-        # model before escalating all the way to a full-set regeneration - found
-        # live, 2026-08-10 (ignite_qpid_protocol): once the primary-model
-        # targeted budget exhausts, the retry loop's only remaining option was
-        # a full-set regeneration (every file rewritten, a fresh Step 1 file-
-        # list call, the most expensive path available) - confirmed live to
-        # take ~13 minutes rewriting 6 files when only 2 actually needed
-        # fixing. A full-set escalation ALREADY pays a model-swap cost (the
-        # reason targeted retries stay primary-model-only per the comment
-        # above - a measured 19-43s Ollama swap, not worth paying 3 times);
-        # trying ONE targeted fix on that same fallback model first, before
-        # falling through to the expensive full-set path, spends that same
-        # swap cost on a much cheaper shot instead of skipping straight to
-        # the most expensive one. Deliberately its OWN one-shot flag, not
-        # folded into targeted_retry_count (that budget's whole point is
-        # "primary model only, never escalate") or retry_count (that's the
-        # full-set path's own counter) - see use_fallback_targeted below.
-        # Scoped to implicated-file retries only, not missing-file recovery
-        # ("the model forgot to write a file" isn't a diagnosis problem a
-        # smarter model is likely to solve differently).
-        fallback_targeted_attempted = False
-        # The file(s) extract_implicated_files() found in the MOST RECENT failure
-        # - re-evaluated after every failure, not fixed at the first one, so a
-        # targeted attempt against a different file (a new error surfaced by
-        # fixing the last one) is still eligible. None whenever the last failure
-        # named no known file, or scoping is disabled by mode above (goes to the
-        # full-set path exactly as before this feature existed).
-        last_implicated_files: Optional[List[str]] = None
-        # The file(s) the completeness check (extract_expected_files vs. what got
-        # written) found missing after the MOST RECENT attempt. Mutually exclusive
-        # with last_implicated_files - an IncompleteGenerationError sets this and
-        # clears last_implicated_files (nothing to implicate: the file was never
-        # written, so it can't appear in known_files), any other failure clears this
-        # and re-evaluates last_implicated_files as before. Shares the same
-        # targeted_retry_count/TARGETED_MAX_RETRIES budget and no-escalation
-        # philosophy as the implicated-file targeted retry - this is recovery from
-        # the same class of problem (the model didn't finish the job), not a new
-        # kind of retry that deserves its own budget.
-        last_missing_files: Optional[List[str]] = None
-        # {filepath: source-line snippet} for the MOST RECENT failure's error
-        # location(s) (see _build_error_source_context) - None/empty whenever
-        # the last failure's error text named no javac-style file:[line,col]
-        # locator, or before any failure has happened yet.
-        last_error_source_context: Dict[str, str] = {}
-        # One jdtls process for this whole generation run (lazily started on
-        # first real need, kept alive across retries, shut down at run end) -
-        # None until first used, and stays None permanently (no repeated
-        # start attempts) if jdtls isn't found or fails to start. See
-        # kriya/tools/lsp.py - Java-only, informational grounding merged
-        # directly into last_error_source_context below, never gating.
-        jdtls_client = None
-        jdtls_unavailable = False
-        # Set once, the first time jdtls is found on PATH but fails to start -
-        # distinct from jdtls simply not being installed (expected, silent).
-        # Surfaced in the final result and printed by generate/fix regardless
-        # of pass/fail, same treatment as toolchain_warning below - a run that
-        # silently got no LSP grounding when it should have is worth knowing
-        # about even if the run otherwise succeeded some other way.
-        lsp_warning: Optional[str] = None
+
         # Rendered once (design does not change across retries) and appended to the
         # full-set task description on every attempt, so the Developer sees an
         # explicit, unambiguous checklist of what the design requires BEFORE
@@ -1192,65 +1134,6 @@ class WorkflowEngine:
                     "'javax.jms.*' import that was already compiling successfully via the existing "
                     "qpid-jms-client dependency alone - the addition was both wrong and unnecessary."
                 )
-        # Unified attempt counter for gate_outcomes/logging only - retry_count and
-        # targeted_retry_count are the actual budget counters, but a single
-        # chronological attempt number reads far more sensibly in the trace than
-        # two counters that don't both advance on every iteration.
-        attempt_number = 0
-        error_context = error_context or ""
-        files_written = []
-        all_files_written = set()
-        all_original_contents = {}
-        # Captures the last attempt's file contents before worktree cleanup, so the
-        # Reviewer stage has something to review even when quality gates never passed
-        # (files in that case are never copied to workspace_path - only ever lived in
-        # the worktree, which gets git-clean'd on failure).
-        final_attempt_contents: Dict[str, str] = {}
-        # Tracks the human-in-the-loop confirmation for judgment-triggered (not
-        # goal-text-explicit) runtime verification, so it's asked at most once per
-        # generation run rather than on every retry attempt.
-        run_verification_confirmed = False
-        run_verification_declined = False
-        # Caches RunVerifierAgent.judge()'s result across retry attempts within
-        # this run - previously re-invoked (a real LLM round-trip) on every
-        # single attempt that reached this stage, even though the goal/design
-        # driving "should we run this, and how" don't change between retries.
-        # Confirmed live during golden-use-case validation that once the
-        # judgment was correct (grounded by the real pom.xml content), it
-        # stayed correct and identical across repeated attempts - the only
-        # thing repeating the call bought was wasted latency, not a different
-        # or better answer. _resolve_run_command()'s deterministic pom.xml-
-        # shape correction still runs on every attempt regardless (cheap,
-        # stateless, and the worktree's pom.xml can legitimately change shape
-        # between attempts even when the cached judgment doesn't).
-        cached_run_verification_judgment: Optional[Dict[str, Any]] = None
-        # Tracks (fail_type, signature) of the previous attempt's failure so a
-        # REPEATED failure (the model isn't self-correcting) can be distinguished
-        # from a normal first-time failure - only a repeat is eligible for
-        # error-triggered live lookup (see the except block below).
-        last_failure_signature: Optional[Tuple[str, Any]] = None
-        # Set True only right before the success-path `break` - retry_count alone
-        # can no longer indicate success/failure now that a run can succeed via a
-        # targeted attempt after the full-set budget (retry_count >= max_retries)
-        # was already exhausted.
-        quality_gates_succeeded = False
-        # Set from classify_environment_failure() on the most recent failed
-        # attempt - a non-None value short-circuits the retry loop below (see the
-        # except block), since no amount of code regeneration can ever fix a JVM
-        # crashing during its own startup or a missing build/run tool binary.
-        environment_failure: Optional[str] = None
-        # Toolchain preflight (_check_java_toolchain_mismatch) runs at most once
-        # per generation run, the first time a PolymorphicValidator confirms the
-        # stack is 'java' - toolchain_checked gates that, toolchain_warning
-        # persists into the final result regardless of pass/fail.
-        toolchain_checked = False
-        toolchain_warning: Optional[str] = None
-        # Computed alongside the toolchain check above (same one-shot gate) -
-        # see _resolve_java_home_override for when this actually gets set to
-        # something. Threaded into every PolymorphicValidator construction
-        # below so a detected, goal-relevant JDK mismatch actually gets
-        # corrected for real subprocess calls, not just warned about.
-        java_home_override: Optional[str] = None
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -1260,15 +1143,15 @@ class WorkflowEngine:
         except Exception as e:
             logger.warning(f"Failed to create git worktree sandbox: {e}. Falling back to default workspace.")
 
-        while retry_count < max_retries or (
-            (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+        while state.budgets.retry_count < max_retries or (
+            (state.last_implicated_files or state.last_missing_files) and state.budgets.targeted_retry_count < TARGETED_MAX_RETRIES
         ) or (
-            bool(last_implicated_files) and bool(chain) and not fallback_targeted_attempted
+            bool(state.last_implicated_files) and bool(chain) and not state.budgets.fallback_targeted_attempted
         ):
-            attempt_number += 1
-            use_targeted = bool(last_implicated_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+            state.attempt_number += 1
+            use_targeted = bool(state.last_implicated_files) and state.budgets.targeted_retry_count < TARGETED_MAX_RETRIES
             use_missing_files = (
-                not use_targeted and bool(last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+                not use_targeted and bool(state.last_missing_files) and state.budgets.targeted_retry_count < TARGETED_MAX_RETRIES
             )
             # One-shot fallback-model targeted fix (see fallback_targeted_attempted's
             # own docstring above) - only eligible once the primary-model targeted
@@ -1277,7 +1160,7 @@ class WorkflowEngine:
             # set and a fallback model to try it on.
             use_fallback_targeted = (
                 not use_targeted and not use_missing_files
-                and bool(last_implicated_files) and bool(chain) and not fallback_targeted_attempted
+                and bool(state.last_implicated_files) and bool(chain) and not state.budgets.fallback_targeted_attempted
             )
             try:
                 # Needed unconditionally below (both the normal compile/test gate
@@ -1292,7 +1175,7 @@ class WorkflowEngine:
                 # interrupted - only usable on the very first iteration of a resumed
                 # run; any retry after that needs a real, fresh generation attempt.
                 resuming_developer_stage = bool(
-                    resume_state and resume_state.get("stage") == "developer_success" and attempt_number == 1
+                    resume_state and resume_state.get("stage") == "developer_success" and state.attempt_number == 1
                 )
 
                 if resuming_developer_stage:
@@ -1301,8 +1184,8 @@ class WorkflowEngine:
                         {"filepath": fp, "content": content}
                         for fp, content in resume_state.get("final_files", {}).items()
                     ]
-                    gate_outcomes = resume_state.get("gate_outcomes", gate_outcomes)
-                    model_hops = resume_state.get("model_hops", model_hops)
+                    state.gate_outcomes = resume_state.get("gate_outcomes", state.gate_outcomes)
+                    state.model_hops = resume_state.get("model_hops", state.model_hops)
                     model_override = None
                     base_url_override = None
                     api_key_override = None
@@ -1325,15 +1208,15 @@ class WorkflowEngine:
                         base_code_context += learned_rag_context
 
                     task_desc, active_code_context = _build_targeted_retry_prompt(
-                        goal, plan, error_context, last_implicated_files,
-                        all_files_written, worktree_path, base_code_context,
+                        goal, plan, state.error_context, state.last_implicated_files,
+                        state.all_files_written, worktree_path, base_code_context,
                         ecosystem_invariant_block=ecosystem_invariant_block,
                         resource_lifecycle_block=resource_lifecycle_block,
                         verification_contract_block=verification_contract_block,
                     )
-                    logger.info(f"Targeted retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: focusing on {', '.join(last_implicated_files)}.")
+                    logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: focusing on {', '.join(state.last_implicated_files)}.")
 
-                    model_hops.append(self.kernel.config.llm.model)
+                    state.model_hops.append(self.kernel.config.llm.model)
 
                     dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
                     files = await self.developer.run_generation(
@@ -1344,10 +1227,10 @@ class WorkflowEngine:
                         model_override=model_override,
                         base_url_override=base_url_override,
                         api_key_override=api_key_override,
-                        known_target_files=last_implicated_files,
-                        prior_error_context=error_context or None,
-                        implicated_files=last_implicated_files,
-                        error_source_context=last_error_source_context or None,
+                        known_target_files=state.last_implicated_files,
+                        prior_error_context=state.error_context or None,
+                        implicated_files=state.last_implicated_files,
+                        error_source_context=state.last_error_source_context or None,
                         retry_temperature=self.kernel.config.llm.retry_temperature,
                         extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                     )
@@ -1360,7 +1243,7 @@ class WorkflowEngine:
                     # regeneration. Set the one-shot flag immediately, not after
                     # a result is known, so a crash/exception mid-attempt can
                     # never cause this to be retried in a loop.
-                    fallback_targeted_attempted = True
+                    state.budgets.fallback_targeted_attempted = True
                     fallback = chain[0]
                     current_limit = _reserve_graph_context_budget(
                         fallback.context_window, skills_prompt, learned_rag_context
@@ -1381,15 +1264,15 @@ class WorkflowEngine:
                         base_code_context += learned_rag_context
 
                     task_desc, active_code_context = _build_targeted_retry_prompt(
-                        goal, plan, error_context, last_implicated_files,
-                        all_files_written, worktree_path, base_code_context,
+                        goal, plan, state.error_context, state.last_implicated_files,
+                        state.all_files_written, worktree_path, base_code_context,
                         ecosystem_invariant_block=ecosystem_invariant_block,
                         resource_lifecycle_block=resource_lifecycle_block,
                         verification_contract_block=verification_contract_block,
                     )
-                    logger.info(f"Fallback-targeted retry: focusing on {', '.join(last_implicated_files)}.")
+                    logger.info(f"Fallback-targeted retry: focusing on {', '.join(state.last_implicated_files)}.")
 
-                    model_hops.append(model_override)
+                    state.model_hops.append(model_override)
 
                     dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
                     files = await self.developer.run_generation(
@@ -1400,10 +1283,10 @@ class WorkflowEngine:
                         model_override=model_override,
                         base_url_override=base_url_override,
                         api_key_override=api_key_override,
-                        known_target_files=last_implicated_files,
-                        prior_error_context=error_context or None,
-                        implicated_files=last_implicated_files,
-                        error_source_context=last_error_source_context or None,
+                        known_target_files=state.last_implicated_files,
+                        prior_error_context=state.error_context or None,
+                        implicated_files=state.last_implicated_files,
+                        error_source_context=state.last_error_source_context or None,
                         retry_temperature=self.kernel.config.llm.retry_temperature,
                         extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                     )
@@ -1439,19 +1322,19 @@ class WorkflowEngine:
                     # reliably returns only ONE of them, silently dropping the rest and
                     # burning the whole retry budget without ever recovering them.
                     resolved_missing_files = [
-                        _architect_basename_to_path.get(basename, basename) for basename in last_missing_files
+                        _architect_basename_to_path.get(basename, basename) for basename in state.last_missing_files
                     ]
 
                     task_desc, active_code_context = _build_missing_files_retry_prompt(
                         goal, plan, design, resolved_missing_files,
-                        all_files_written, worktree_path, base_code_context,
+                        state.all_files_written, worktree_path, base_code_context,
                         ecosystem_invariant_block=ecosystem_invariant_block,
                         resource_lifecycle_block=resource_lifecycle_block,
                         verification_contract_block=verification_contract_block,
                     )
-                    logger.info(f"Missing-file recovery retry {targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: adding {', '.join(resolved_missing_files)}.")
+                    logger.info(f"Missing-file recovery retry {state.budgets.targeted_retry_count + 1}/{TARGETED_MAX_RETRIES}: adding {', '.join(resolved_missing_files)}.")
 
-                    model_hops.append(self.kernel.config.llm.model)
+                    state.model_hops.append(self.kernel.config.llm.model)
 
                     dev_stream = (lambda token: stream_callback("Code Generation", token)) if stream_callback else None
                     files = await self.developer.run_generation(
@@ -1473,8 +1356,8 @@ class WorkflowEngine:
                     base_url_override = None
                     api_key_override = None
 
-                    if retry_count > 0 and chain:
-                        fallback_idx = min(retry_count - 1, len(chain) - 1)
+                    if state.budgets.retry_count > 0 and chain:
+                        fallback_idx = min(state.budgets.retry_count - 1, len(chain) - 1)
                         fallback = chain[fallback_idx]
                         model_override = fallback.model
                         base_url_override = fallback.base_url
@@ -1492,8 +1375,8 @@ class WorkflowEngine:
                         active_code_context += learned_rag_context
 
                     task_desc, active_code_context = _build_full_set_retry_prompt(
-                        goal, plan, error_context, required_files_prompt_block,
-                        all_files_written, worktree_path, active_code_context,
+                        goal, plan, state.error_context, required_files_prompt_block,
+                        state.all_files_written, worktree_path, active_code_context,
                         required_dependencies_prompt_block,
                         ecosystem_invariant_block=ecosystem_invariant_block,
                         resource_lifecycle_block=resource_lifecycle_block,
@@ -1501,7 +1384,7 @@ class WorkflowEngine:
                     )
 
                     # Track model hops
-                    model_hops.append(model_override or self.kernel.config.llm.model)
+                    state.model_hops.append(model_override or self.kernel.config.llm.model)
 
                     # On the very first attempt only (never a full-set retry, which
                     # already escalates through the fallback chain above and is
@@ -1522,7 +1405,7 @@ class WorkflowEngine:
                     # case above, from _resolve_file_paths_from_design already) - no
                     # separate resolution step needed here anymore.
                     known_target_files = None
-                    if retry_count == 0 and _expected_files_upfront:
+                    if state.budgets.retry_count == 0 and _expected_files_upfront:
                         known_target_files = _expected_files_upfront
 
                     # Generate code files
@@ -1536,9 +1419,9 @@ class WorkflowEngine:
                         base_url_override=base_url_override,
                         api_key_override=api_key_override,
                         known_target_files=known_target_files,
-                        prior_error_context=error_context or None,
-                        implicated_files=last_implicated_files,
-                        error_source_context=last_error_source_context or None,
+                        prior_error_context=state.error_context or None,
+                        implicated_files=state.last_implicated_files,
+                        error_source_context=state.last_error_source_context or None,
                         retry_temperature=self.kernel.config.llm.retry_temperature,
                         extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                     )
@@ -1565,16 +1448,16 @@ class WorkflowEngine:
                     filepath = file_obj.get("filepath", "")
                     if not filepath:
                         continue
-                    if filepath not in all_original_contents:
+                    if filepath not in state.all_original_contents:
                         actual_file = os.path.join(workspace_path, filepath)
                         if os.path.exists(actual_file):
                             with open(actual_file, "r", encoding="utf-8", errors="replace") as fh:
-                                all_original_contents[filepath] = fh.read()
+                                state.all_original_contents[filepath] = fh.read()
                         else:
-                            all_original_contents[filepath] = ""
+                            state.all_original_contents[filepath] = ""
 
                 # Write files to worktree sandbox
-                files_written = []
+                state.files_written = []
                 for file_obj in files:
                     filepath = file_obj.get("filepath", "")
                     content = file_obj.get("content", "")
@@ -1639,9 +1522,9 @@ class WorkflowEngine:
                                 likely_files=[filepath],
                                 failed_content={filepath: orig_text},
                                 attempted_edits=edits,
-                                attempt=attempt_number,
+                                attempt=state.attempt_number,
                             )
-                            gate_outcomes.append(failure.to_gate_outcome())
+                            state.gate_outcomes.append(failure.to_gate_outcome())
                             raise QualityGateFailure(failure) from anchor_ex
 
                         # Layer 1 pre-flight check (see find_edits_ignoring_reported_line's
@@ -1650,9 +1533,9 @@ class WorkflowEngine:
                         # file - error_context is "" on a clean first attempt, where
                         # extract_error_source_locations() would find nothing anyway, but
                         # the explicit guard avoids the line-matching work entirely there.
-                        if error_context:
+                        if state.error_context:
                             ignored_lines = find_edits_ignoring_reported_line(
-                                orig_text, edits, filepath, error_context
+                                orig_text, edits, filepath, state.error_context
                             )
                             if ignored_lines:
                                 lines_desc = ", ".join(str(n) for n in sorted(ignored_lines))
@@ -1676,7 +1559,7 @@ class WorkflowEngine:
                                         f"doesn't require changing line(s) {lines_desc} itself (e.g. you fixed "
                                         f"a type declaration elsewhere instead), don't include it in your "
                                         f"search block at all; otherwise, you MUST change that exact line.\n\n"
-                                        f"Original error:\n{error_context}"
+                                        f"Original error:\n{state.error_context}"
                                     ),
                                     raw_output=f"search block ignored reported line(s) {lines_desc}",
                                     file_locations=[
@@ -1685,9 +1568,9 @@ class WorkflowEngine:
                                     likely_files=[filepath],
                                     failed_content={filepath: orig_text},
                                     attempted_edits=edits,
-                                    attempt=attempt_number,
+                                    attempt=state.attempt_number,
                                 )
-                                gate_outcomes.append(failure.to_gate_outcome())
+                                state.gate_outcomes.append(failure.to_gate_outcome())
                                 raise QualityGateFailure(failure)
 
                         # Structural corruption pre-flight check (see
@@ -1714,9 +1597,9 @@ class WorkflowEngine:
                                 likely_files=[filepath],
                                 failed_content={filepath: orig_text},
                                 attempted_edits=edits,
-                                attempt=attempt_number,
+                                attempt=state.attempt_number,
                             )
-                            gate_outcomes.append(failure.to_gate_outcome())
+                            state.gate_outcomes.append(failure.to_gate_outcome())
                             raise QualityGateFailure(failure)
 
                         with open(full_path, "w", encoding="utf-8") as f:
@@ -1733,15 +1616,15 @@ class WorkflowEngine:
                                 file_locations=[FileLocation(filepath=filepath)],
                                 likely_files=[filepath],
                                 failed_content={filepath: content},
-                                attempt=attempt_number,
+                                attempt=state.attempt_number,
                             )
-                            gate_outcomes.append(failure.to_gate_outcome())
+                            state.gate_outcomes.append(failure.to_gate_outcome())
                             raise QualityGateFailure(failure)
                         with open(full_path, "w", encoding="utf-8") as f:
                             f.write(content)
                             
-                    files_written.append(filepath)
-                    all_files_written.add(filepath)
+                    state.files_written.append(filepath)
+                    state.all_files_written.add(filepath)
                     logger.info(f"Wrote generated/edited file to sandbox: {filepath}")
 
                 if not resuming_developer_stage:
@@ -1753,7 +1636,7 @@ class WorkflowEngine:
                     # fallback - see the Architect call above) rather than re-deriving via a
                     # second independent regex pass over the design's prose.
                     expected_files = {os.path.basename(f) for f in architect_files}
-                    missing_files = find_missing_expected_files(expected_files, all_files_written, goal=goal)
+                    missing_files = find_missing_expected_files(expected_files, state.all_files_written, goal=goal)
                     if missing_files:
                         raise IncompleteGenerationError(
                             missing_files,
@@ -1770,70 +1653,70 @@ class WorkflowEngine:
                         autonomy_cfg=self.kernel.config.autonomy,
                     )
 
-                    if not toolchain_checked:
-                        toolchain_checked = True
-                        toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
-                        if toolchain_warning:
-                            logger.warning(f"Toolchain preflight: {toolchain_warning}")
+                    if not state.toolchain_checked:
+                        state.toolchain_checked = True
+                        state.toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+                        if state.toolchain_warning:
+                            logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
                         if validator.stack == "java":
-                            java_home_override = _resolve_java_home_override(goal)
-                            if java_home_override:
+                            state.java_home_override = _resolve_java_home_override(goal)
+                            if state.java_home_override:
                                 logger.warning(
                                     "JVM toolchain enforcement: forcing Maven subprocess calls to "
-                                    f"run under JAVA_HOME={java_home_override} - the goal-stated Java "
+                                    f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
                                     "version doesn't match what 'mvn' resolves to by default here."
                                 )
                     # Constructed fresh above (a new validator every attempt) - re-apply
                     # the one-time-resolved override every time, not just when it was
                     # just computed.
-                    validator.java_home_override = java_home_override
+                    validator.java_home_override = state.java_home_override
 
-                    compile_res = validator.run_compile_check(list(all_files_written))
+                    compile_res = validator.run_compile_check(list(state.all_files_written))
                     if not compile_res["success"]:
                         failure = _build_quality_gate_failure(
                             "compile", f"COMPILATION FAILURE:\n{compile_res['output']}",
-                            compile_res.get("output", ""), worktree_path, all_files_written, attempt_number,
+                            compile_res.get("output", ""), worktree_path, state.all_files_written, state.attempt_number,
                         )
-                        gate_outcomes.append(failure.to_gate_outcome())
+                        state.gate_outcomes.append(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
-                    gate_outcomes.append({
-                        "attempt": attempt_number,
+                    state.gate_outcomes.append({
+                        "attempt": state.attempt_number,
                         "type": "compile",
                         "success": True,
                         "output": compile_res.get("output", "")
                     })
 
-                    target_test = extract_target_test(error_context, list(all_files_written))
+                    target_test = extract_target_test(state.error_context, list(state.all_files_written))
                     if target_test:
                         logger.info(f"Quality Gates: Running targeted tests: {target_test}")
                         test_res = validator.run_tests(target_test=target_test)
                         if not test_res["success"]:
                             failure = _build_quality_gate_failure(
                                 "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
-                                test_res.get("output", ""), worktree_path, all_files_written, attempt_number,
+                                test_res.get("output", ""), worktree_path, state.all_files_written, state.attempt_number,
                             )
-                            gate_outcomes.append(failure.to_gate_outcome())
+                            state.gate_outcomes.append(failure.to_gate_outcome())
                             raise QualityGateFailure(failure)
-                        gate_outcomes.append({
-                            "attempt": attempt_number,
+                        state.gate_outcomes.append({
+                            "attempt": state.attempt_number,
                             "type": "targeted_test",
                             "success": True,
                             "output": test_res.get("output", "")
                         })
                     else:
-                        test_written = any("test" in f.lower() or "spec" in f.lower() for f in all_files_written)
+                        test_written = any("test" in f.lower() or "spec" in f.lower() for f in state.all_files_written)
                         if test_written:
                             logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                             test_res = validator.run_tests()
                             if not test_res["success"]:
                                 failure = _build_quality_gate_failure(
                                     "test", f"TEST FAILURE:\n{test_res['output']}",
-                                    test_res.get("output", ""), worktree_path, all_files_written, attempt_number,
+                                    test_res.get("output", ""), worktree_path, state.all_files_written, state.attempt_number,
                                 )
-                                gate_outcomes.append(failure.to_gate_outcome())
+                                state.gate_outcomes.append(failure.to_gate_outcome())
                                 raise QualityGateFailure(failure)
-                            gate_outcomes.append({
-                                "attempt": attempt_number,
+                            state.gate_outcomes.append({
+                                "attempt": state.attempt_number,
                                 "type": "test",
                                 "success": True,
                                 "output": test_res.get("output", "")
@@ -1845,26 +1728,26 @@ class WorkflowEngine:
                     # suite at all. Judgment decides per-attempt whether this goal describes
                     # self-terminating runtime behavior worth actually running and checking.
                     autonomy_cfg_rv = self.kernel.config.autonomy
-                    if autonomy_cfg_rv.run_verification_enabled and not run_verification_declined:
-                        if cached_run_verification_judgment is None:
+                    if autonomy_cfg_rv.run_verification_enabled and not state.run_verification_declined:
+                        if state.cached_run_verification_judgment is None:
                             pom_content_for_judge = None
                             try:
                                 with open(os.path.join(worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
                                     pom_content_for_judge = f.read()
                             except Exception as e:
                                 logger.debug(f"No pom.xml available for run-verification judgment: {e}")
-                            cached_run_verification_judgment = await self.run_verifier.judge(
+                            state.cached_run_verification_judgment = await self.run_verifier.judge(
                                 goal=goal,
                                 design=design,
-                                files_written=list(all_files_written),
+                                files_written=list(state.all_files_written),
                                 build_file_content=pom_content_for_judge,
                             )
                         else:
                             logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
-                        judgment = cached_run_verification_judgment
+                        judgment = state.cached_run_verification_judgment
                         if judgment["should_run"]:
                             proceed_with_run = True
-                            if judgment["command_source"] == "inferred" and not run_verification_confirmed:
+                            if judgment["command_source"] == "inferred" and not state.run_verification_confirmed:
                                 if autonomy_cfg_rv.mode == "human-in-the-loop":
                                     commands_desc = "\n".join(
                                         f"    {i}. {' '.join(cmd)}" for i, cmd in enumerate(judgment["run_commands"], 1)
@@ -1884,21 +1767,21 @@ class WorkflowEngine:
                                     else:
                                         logger.warning("Runtime verification warrants human approval but no approval_callback is available. Proceeding under default policy.")
                                 if not proceed_with_run:
-                                    run_verification_declined = True
+                                    state.run_verification_declined = True
                             if proceed_with_run:
-                                run_verification_confirmed = True
+                                state.run_verification_confirmed = True
                                 resolved_run_commands = [_resolve_run_command(cmd, worktree_path) for cmd in judgment["run_commands"]]
                                 if resolved_run_commands != judgment["run_commands"]:
                                     logger.info(
                                         "One or more inferred run commands aren't resolvable as given here - "
                                         "substituted Kriya's own interpreter/PATH-resolved equivalents."
                                     )
-                                jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(worktree_path, java_home_override)
+                                jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(worktree_path, state.java_home_override)
                                 if jvm_flag_correction:
                                     logger.warning(f"JVM flag preflight: {jvm_flag_correction}")
-                                    toolchain_warning = (
-                                        f"{toolchain_warning} {jvm_flag_correction}"
-                                        if toolchain_warning else jvm_flag_correction
+                                    state.toolchain_warning = (
+                                        f"{state.toolchain_warning} {jvm_flag_correction}"
+                                        if state.toolchain_warning else jvm_flag_correction
                                     )
                                 logger.info(
                                     "Quality Gates: Running runtime verification: "
@@ -1936,7 +1819,7 @@ class WorkflowEngine:
                                             success_criteria=judgment["success_criteria"],
                                             output=run_res["output"],
                                             returncode=run_res["returncode"],
-                                            files_written=list(all_files_written),
+                                            files_written=list(state.all_files_written),
                                             timed_out=True,
                                         )
                                     timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
@@ -1993,7 +1876,7 @@ class WorkflowEngine:
                                             success_criteria=judgment["success_criteria"],
                                             output=run_res["output"],
                                             returncode=run_res["returncode"],
-                                            files_written=list(all_files_written),
+                                            files_written=list(state.all_files_written),
                                         )
                                 if not grade["passed"]:
                                     # A compile error always names its own broken file
@@ -2012,13 +1895,13 @@ class WorkflowEngine:
                                     )
                                     failure = _build_quality_gate_failure(
                                         gate_type, message, run_res["output"],
-                                        worktree_path, all_files_written, attempt_number,
+                                        worktree_path, state.all_files_written, state.attempt_number,
                                         extra_likely_files=grade.get("likely_files") or [],
                                     )
-                                    gate_outcomes.append(failure.to_gate_outcome())
+                                    state.gate_outcomes.append(failure.to_gate_outcome())
                                     raise QualityGateFailure(failure)
-                                gate_outcomes.append({
-                                    "attempt": attempt_number,
+                                state.gate_outcomes.append({
+                                    "attempt": state.attempt_number,
                                     "type": "run_verification",
                                     "success": True,
                                     "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
@@ -2051,7 +1934,7 @@ class WorkflowEngine:
                 # approval - or during the apply/regression steps just below - doesn't
                 # force redoing the expensive Developer generation + Quality Gates work.
                 final_files_for_checkpoint = {}
-                for filepath in all_files_written:
+                for filepath in state.all_files_written:
                     try:
                         with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
                             final_files_for_checkpoint[filepath] = fh.read()
@@ -2062,18 +1945,18 @@ class WorkflowEngine:
                     plan=plan,
                     design=design,
                     final_files=final_files_for_checkpoint,
-                    original_files=all_original_contents,
-                    gate_outcomes=gate_outcomes,
-                    model_hops=model_hops,
-                    retry_count=retry_count,
-                    targeted_retry_count=targeted_retry_count,
+                    original_files=state.all_original_contents,
+                    gate_outcomes=state.gate_outcomes,
+                    model_hops=state.model_hops,
+                    retry_count=state.budgets.retry_count,
+                    targeted_retry_count=state.budgets.targeted_retry_count,
                 )
 
                 # 4.5. Pre-Apply Human Approval Gate
                 diffs_to_show = []
-                for filepath in sorted(all_files_written):
+                for filepath in sorted(state.all_files_written):
                     worktree_file = os.path.join(worktree_path, filepath)
-                    actual_content = all_original_contents.get(filepath, "")
+                    actual_content = state.all_original_contents.get(filepath, "")
                     with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
                         new_content = fh.read()
                         
@@ -2091,7 +1974,7 @@ class WorkflowEngine:
                 # Check sensitive paths matches
                 sensitive_match = False
                 sensitive_reason = ""
-                for filepath in all_files_written:
+                for filepath in state.all_files_written:
                     for pattern in autonomy_cfg.sensitive_paths:
                         try:
                             if re.match(pattern, filepath, re.IGNORECASE):
@@ -2125,7 +2008,7 @@ class WorkflowEngine:
                         if worktree_path != workspace_path:
                             remove_git_worktree(workspace_path, worktree_path)
                         else:
-                            for filepath, orig_content in all_original_contents.items():
+                            for filepath, orig_content in state.all_original_contents.items():
                                 actual_file = os.path.join(workspace_path, filepath)
                                 if orig_content:
                                     with open(actual_file, "w", encoding="utf-8") as fh:
@@ -2141,7 +2024,7 @@ class WorkflowEngine:
                                 run_id=trace_id,
                                 goal=goal,
                                 duration_sec=time.time() - start_time,
-                                attempts=retry_count,
+                                attempts=state.budgets.retry_count,
                                 status="human_rejected",
                                 files_modified=[],
                                 failure_category="human_rejected"
@@ -2159,7 +2042,7 @@ class WorkflowEngine:
                         
                 # If approved, write files to the actual workspace
                 if worktree_path != workspace_path:
-                    for filepath in all_files_written:
+                    for filepath in state.all_files_written:
                         worktree_file = os.path.join(worktree_path, filepath)
                         actual_file = os.path.join(workspace_path, filepath)
                         os.makedirs(os.path.dirname(actual_file), exist_ok=True)
@@ -2180,15 +2063,15 @@ class WorkflowEngine:
                 # unrelated later goal's skill-gap detection. Only accrue a
                 # coordinate that actually appears in the FINAL applied file content -
                 # real evidence it was used, not just suggested at some point.
-                if retry_count > 0:
+                if state.budgets.retry_count > 0:
                     final_contents_combined = ""
-                    for filepath in all_files_written:
+                    for filepath in state.all_files_written:
                         try:
                             with open(os.path.join(workspace_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
                                 final_contents_combined += fh.read()
                         except Exception as e:
                             logger.debug(f"Failed to read '{filepath}' for auto-accrual verification: {e}")
-                    for outcome in gate_outcomes:
+                    for outcome in state.gate_outcomes:
                         output_str = outcome.get("output", "")
                         if output_str and "=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===" in output_str:
                             deps = re.findall(
@@ -2226,15 +2109,15 @@ class WorkflowEngine:
                 if model_override and chain:
                     try:
                         error_kind = (
-                            "runtime verification" if "RUNTIME VERIFICATION" in error_context
+                            "runtime verification" if "RUNTIME VERIFICATION" in state.error_context
                             else "compilation/test"
                         )
                         logger.info(f"Escalation model successfully resolved the {error_kind} issue! Extracting lessons learned...")
                         extract_prompt = (
-                            f"A {error_kind} error occurred:\n{error_context}\n\n"
+                            f"A {error_kind} error occurred:\n{state.error_context}\n\n"
                             f"The files were successfully fixed with this final content:\n"
                         )
-                        for filepath in all_files_written:
+                        for filepath in state.all_files_written:
                             full_path = os.path.join(workspace_path, filepath)
                             try:
                                 with open(full_path, "r", encoding="utf-8") as fh:
@@ -2290,20 +2173,20 @@ class WorkflowEngine:
                     autonomy_cfg=self.kernel.config.autonomy,
                 )
 
-                if not toolchain_checked:
-                    toolchain_checked = True
-                    toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
-                    if toolchain_warning:
-                        logger.warning(f"Toolchain preflight: {toolchain_warning}")
+                if not state.toolchain_checked:
+                    state.toolchain_checked = True
+                    state.toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+                    if state.toolchain_warning:
+                        logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
                     if validator.stack == "java":
-                        java_home_override = _resolve_java_home_override(goal)
-                        if java_home_override:
+                        state.java_home_override = _resolve_java_home_override(goal)
+                        if state.java_home_override:
                             logger.warning(
                                 "JVM toolchain enforcement: forcing Maven subprocess calls to "
-                                f"run under JAVA_HOME={java_home_override} - the goal-stated Java "
+                                f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
                                 "version doesn't match what 'mvn' resolves to by default here."
                             )
-                validator.java_home_override = java_home_override
+                validator.java_home_override = state.java_home_override
 
                 full_test_res = validator.run_tests()
                 if not full_test_res["success"]:
@@ -2312,18 +2195,18 @@ class WorkflowEngine:
                     # workspace_path or they'd read stale pre-change content.
                     failure = _build_quality_gate_failure(
                         "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}",
-                        full_test_res.get("output", ""), workspace_path, all_files_written, attempt_number,
+                        full_test_res.get("output", ""), workspace_path, state.all_files_written, state.attempt_number,
                     )
-                    gate_outcomes.append(failure.to_gate_outcome())
+                    state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
-                gate_outcomes.append({
-                    "attempt": attempt_number,
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
                     "type": "regression_test",
                     "success": True,
                     "output": full_test_res.get("output", "")
                 })
 
-                quality_gates_succeeded = True
+                state.quality_gates_succeeded = True
                 break
 
             except Exception as e:
@@ -2335,9 +2218,9 @@ class WorkflowEngine:
                     else "full-set"
                 )
                 logger.warning(
-                    f"Quality Gates FAILED (Attempt {attempt_number}, "
-                    f"{attempt_mode}, full-set {retry_count}/{max_retries} + "
-                    f"targeted {targeted_retry_count}/{TARGETED_MAX_RETRIES}): {e}"
+                    f"Quality Gates FAILED (Attempt {state.attempt_number}, "
+                    f"{attempt_mode}, full-set {state.budgets.retry_count}/{max_retries} + "
+                    f"targeted {state.budgets.targeted_retry_count}/{TARGETED_MAX_RETRIES}): {e}"
                 )
 
                 # Every failure source now raises with a real Failure object attached
@@ -2349,7 +2232,7 @@ class WorkflowEngine:
                 failure: Failure = getattr(e, "failure", None) or Failure(
                     type="general_error", message=raw_error_context, raw_output=raw_error_context,
                 )
-                failure.attempt = attempt_number
+                failure.attempt = state.attempt_number
                 failure.mode = attempt_mode
                 fail_type = failure.type
                 is_incomplete_generation = isinstance(e, IncompleteGenerationError)
@@ -2373,7 +2256,7 @@ class WorkflowEngine:
                 # is the fallback signature - normalized first to strip Maven's
                 # own always-different build-timing lines, or two occurrences
                 # of the exact same failure would never compare equal.
-                environment_failure = classify_environment_failure(raw_error_context)
+                state.environment_failure = classify_environment_failure(raw_error_context)
 
                 # Read fresh from the worktree's CURRENT pom.xml each attempt,
                 # not cached once before the loop - the project's own
@@ -2400,9 +2283,9 @@ class WorkflowEngine:
                     fail_type,
                     tuple(sorted(error_terms)) if error_terms else _normalize_error_for_repeat_detection(raw_error_context),
                 )
-                error_context = raw_error_context
+                state.error_context = raw_error_context
                 if (
-                    current_failure_signature == last_failure_signature
+                    current_failure_signature == state.budgets.last_failure_signature
                     # unaddressed_error_location included alongside compile: it's a
                     # cheaper, earlier-firing variant of the same signal (the model's
                     # own edit didn't address the reported location) - repeating it
@@ -2416,11 +2299,11 @@ class WorkflowEngine:
                     and error_terms
                     and await self._approve_web_lookup(error_terms, self.kernel.config.search.base_url, web_lookup_query_callback)
                 ):
-                    error_context = await _augment_error_with_live_lookup(
+                    state.error_context = await _augment_error_with_live_lookup(
                         raw_error_context, error_terms,
                         self.kernel.config.search.base_url, self.kernel.config.search.top_k
                     )
-                last_failure_signature = current_failure_signature
+                state.budgets.last_failure_signature = current_failure_signature
 
                 # Re-evaluate which file(s) THIS failure implicates/is missing -
                 # independent of whether this attempt was itself targeted, missing-
@@ -2433,8 +2316,8 @@ class WorkflowEngine:
                 # exclusive per attempt, matching that they route to different,
                 # differently-built retry prompts.
                 if is_incomplete_generation:
-                    last_missing_files = e.missing_files
-                    last_implicated_files = None
+                    state.last_missing_files = e.missing_files
+                    state.last_implicated_files = None
                 else:
                     # failure.likely_files is already populated at the raise site for
                     # every QualityGateFailure (compile/test/run_verification/
@@ -2442,7 +2325,7 @@ class WorkflowEngine:
                     # directly) - no more re-deriving it here from raw text. Falls back
                     # to the legacy regex scan only for the general_error case (a bare,
                     # unexpected Exception with no Failure of its own).
-                    implicated = failure.likely_files or extract_implicated_files(raw_error_context, all_files_written)
+                    implicated = failure.likely_files or extract_implicated_files(raw_error_context, state.all_files_written)
                     # A missing build manifest the Architect never asked for at all
                     # (see _detect_missing_build_manifest) takes priority over normal
                     # implication scoping - extract_implicated_files() can never name
@@ -2457,11 +2340,11 @@ class WorkflowEngine:
                         if fail_type == "compile" else None
                     )
                     if missing_manifest:
-                        last_missing_files = [missing_manifest]
-                        last_implicated_files = None
+                        state.last_missing_files = [missing_manifest]
+                        state.last_implicated_files = None
                     else:
-                        last_implicated_files = implicated if implicated else None
-                        last_missing_files = None
+                        state.last_implicated_files = implicated if implicated else None
+                        state.last_missing_files = None
 
                 # Generic across ANY compile error shape (see
                 # extract_error_source_locations) - the exact broken source
@@ -2470,8 +2353,8 @@ class WorkflowEngine:
                 # actually implicated, not broadcast to every file in a
                 # full-set batch (same scoping fix as prior_error_context
                 # below).
-                last_error_source_context = _build_error_source_context(
-                    worktree_path, raw_error_context, all_files_written
+                state.last_error_source_context = _build_error_source_context(
+                    worktree_path, raw_error_context, state.all_files_written
                 )
 
                 # LSP grounding (Java only, silently skipped if jdtls isn't
@@ -2480,30 +2363,30 @@ class WorkflowEngine:
                 # merged directly into the existing error_source_context dict
                 # so it reaches the retry prompt through the same, already-
                 # scoped injection point rather than needing new plumbing.
-                if not jdtls_unavailable and os.path.exists(os.path.join(worktree_path, "pom.xml")):
-                    jdtls_client = await _get_or_start_jdtls_client(jdtls_client, worktree_path)
-                    if jdtls_client is None:
-                        jdtls_unavailable = True
-                        if lsp_warning is None:
+                if not state.jdtls_unavailable and os.path.exists(os.path.join(worktree_path, "pom.xml")):
+                    state.jdtls_client = await _get_or_start_jdtls_client(state.jdtls_client, worktree_path)
+                    if state.jdtls_client is None:
+                        state.jdtls_unavailable = True
+                        if state.lsp_warning is None:
                             from kriya.tools.lsp import find_jdtls as _find_jdtls_for_warning
                             if _find_jdtls_for_warning():
-                                lsp_warning = (
+                                state.lsp_warning = (
                                     "jdtls was found on PATH but failed to start - LSP grounding was "
                                     "unavailable for the rest of this run (see logs for the startup error)."
                                 )
-                                logger.warning(f"LSP preflight: {lsp_warning}")
+                                logger.warning(f"LSP preflight: {state.lsp_warning}")
                     else:
                         lsp_context = await _build_lsp_diagnostics_context(
-                            jdtls_client, worktree_path,
-                            last_implicated_files if last_implicated_files else all_files_written,
+                            state.jdtls_client, worktree_path,
+                            state.last_implicated_files if state.last_implicated_files else state.all_files_written,
                         )
                         for lsp_filepath, lsp_text in lsp_context.items():
-                            last_error_source_context[lsp_filepath] = (
-                                last_error_source_context.get(lsp_filepath, "") + lsp_text
+                            state.last_error_source_context[lsp_filepath] = (
+                                state.last_error_source_context.get(lsp_filepath, "") + lsp_text
                             )
 
                 if use_targeted or use_missing_files:
-                    targeted_retry_count += 1
+                    state.budgets.targeted_retry_count += 1
                 elif use_fallback_targeted:
                     # Deliberately counts against NEITHER budget - it's a genuinely
                     # separate, one-shot step (fallback_targeted_attempted, already
@@ -2512,32 +2395,32 @@ class WorkflowEngine:
                     # the primary-model-only targeted budget.
                     pass
                 else:
-                    retry_count += 1
+                    state.budgets.retry_count += 1
 
                 # De-dup fallback: a QualityGateFailure-sourced failure already appended
                 # its own gate_outcome at the raise site (via failure.to_gate_outcome()),
                 # so this only ever fires for a source that never reaches a try-block
                 # append - chiefly IncompleteGenerationError, plus the general_error
                 # defensive path.
-                if not any(o.get("attempt") == attempt_number and o.get("type") == fail_type for o in gate_outcomes):
-                    gate_outcomes.append(failure.to_gate_outcome())
+                if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
+                    state.gate_outcomes.append(failure.to_gate_outcome())
 
-                budgets_exhausted = environment_failure is not None or (
-                    retry_count >= max_retries and not (
-                        (last_implicated_files or last_missing_files) and targeted_retry_count < TARGETED_MAX_RETRIES
+                budgets_exhausted = state.environment_failure is not None or (
+                    state.budgets.retry_count >= max_retries and not (
+                        (state.last_implicated_files or state.last_missing_files) and state.budgets.targeted_retry_count < TARGETED_MAX_RETRIES
                     )
                 )
                 if budgets_exhausted:
-                    if environment_failure:
-                        logger.error(f"Quality Gates stopped early - {environment_failure}")
+                    if state.environment_failure:
+                        logger.error(f"Quality Gates stopped early - {state.environment_failure}")
                     else:
                         logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
                     if worktree_path != workspace_path:
-                        for filepath in all_files_written:
+                        for filepath in state.all_files_written:
                             worktree_file = os.path.join(worktree_path, filepath)
                             try:
                                 with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
-                                    final_attempt_contents[filepath] = fh.read()
+                                    state.final_attempt_contents[filepath] = fh.read()
                             except Exception as e:
                                 logger.debug(f"Failed to capture final content of '{worktree_file}' before worktree cleanup: {e}")
                         remove_git_worktree(workspace_path, worktree_path)
@@ -2547,23 +2430,23 @@ class WorkflowEngine:
                     # check), this can fire on the very first attempt, well before
                     # retry_count reaches max_retries, and the loop would otherwise
                     # continue straight into another pointless Developer retry.
-                    if environment_failure:
+                    if state.environment_failure:
                         break
 
         # 5. Reviewer
         logger.info("Reviewer Agent evaluating results...")
-        if final_attempt_contents:
+        if state.final_attempt_contents:
             review_prompt = (
                 f"Goal: {goal}\n\n"
                 "NOTE: Quality gates did not pass within the retry budget - these files were "
                 "NOT applied to the workspace and only reflect the last (failing) attempt.\n"
-                f"Last quality gate error:\n{error_context}\n\nFiles from the failing attempt:\n"
+                f"Last quality gate error:\n{state.error_context}\n\nFiles from the failing attempt:\n"
             )
         else:
             review_prompt = f"Goal: {goal}\n\nFiles generated:\n"
-        for filepath in sorted(all_files_written):
-            if filepath in final_attempt_contents:
-                review_prompt += f"\n=== File: {filepath} ===\n{final_attempt_contents[filepath]}\n"
+        for filepath in sorted(state.all_files_written):
+            if filepath in state.final_attempt_contents:
+                review_prompt += f"\n=== File: {filepath} ===\n{state.final_attempt_contents[filepath]}\n"
                 continue
             full_path = os.path.join(workspace_path, filepath)
             try:
@@ -2578,7 +2461,7 @@ class WorkflowEngine:
         if step_callback:
             step_callback("Review", review)
 
-        quality_passed = quality_gates_succeeded
+        quality_passed = state.quality_gates_succeeded
         # A stable, short string identifying WHY this run failed, so a caller
         # (human or script) can always ask "why did this fail" the same way
         # rather than having to know which of several differently-shaped
@@ -2591,7 +2474,7 @@ class WorkflowEngine:
         # log their own failure_category directly at their own return site.
         failure_category: Optional[str] = None
         if not quality_passed:
-            failure_category = "environment_failure" if environment_failure else "quality_gates_exhausted"
+            failure_category = "environment_failure" if state.environment_failure else "quality_gates_exhausted"
 
         # Write persistent trace log
         try:
@@ -2603,14 +2486,14 @@ class WorkflowEngine:
                 run_id=trace_id,
                 goal=goal,
                 duration_sec=duration,
-                attempts=retry_count,
+                attempts=state.budgets.retry_count,
                 status="success" if quality_passed else "failure",
-                files_modified=list(all_files_written),
+                files_modified=list(state.all_files_written),
                 retrieved_chunks=retrieved_chunks,
                 active_skills=active_skills,
                 prompt_rendered=plan_prompt,
-                gate_outcomes=gate_outcomes,
-                model_hops=model_hops,
+                gate_outcomes=state.gate_outcomes,
+                model_hops=state.model_hops,
                 failure_category=failure_category
             )
             logger.info(f"Persistent run trace recorded: {trace_id}")
@@ -2622,25 +2505,25 @@ class WorkflowEngine:
             delete_checkpoint(workspace_path, run_id)
         else:
             logger.info(
-                f"Quality Gates never passed after {retry_count} attempt(s) - checkpoint '{run_id}' "
+                f"Quality Gates never passed after {state.budgets.retry_count} attempt(s) - checkpoint '{run_id}' "
                 "left on disk in case a later `--resume-id` run wants to skip Plan/Design and retry Developer."
             )
 
-        if jdtls_client is not None:
+        if state.jdtls_client is not None:
             try:
-                await jdtls_client.shutdown()
+                await state.jdtls_client.shutdown()
             except Exception as ex:
                 logger.debug(f"jdtls shutdown failed (non-fatal): {ex}")
 
         return {
             "plan": plan,
             "design": design,
-            "files": list(all_files_written),
+            "files": list(state.all_files_written),
             "quality_gates_passed": quality_passed,
-            "environment_failure": environment_failure if not quality_passed else None,
+            "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
-            "toolchain_warning": toolchain_warning,
-            "lsp_warning": lsp_warning,
+            "toolchain_warning": state.toolchain_warning,
+            "lsp_warning": state.lsp_warning,
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
             "review": review,
             "run_id": run_id,
