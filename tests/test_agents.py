@@ -586,10 +586,11 @@ def test_split_fix_analysis_edit_strips_copied_error_source_gutter():
 
 def test_split_fix_analysis_edit_strips_gutter_with_line_number_preserved():
     # The other real gutter shape (surrounding, non-highlighted context
-    # lines): "  N: <line>", also emitted by _build_error_source_context.
+    # lines): "   N: <line>" (three leading spaces), also emitted by
+    # _build_error_source_context.
     text = (
         "SEARCH:\n"
-        "  9: import org.apache.ignite.Ignite;\n"
+        "   9: import org.apache.ignite.Ignite;\n"
         ">> 10: import org.apache.ignite.cache.IgniteCache;\n"
         "REPLACE:\n"
         "import org.apache.ignite.Ignite;\n"
@@ -873,10 +874,16 @@ def test_sanitize_generated_content_none_passthrough():
     assert DeveloperAgent.sanitize_generated_content(None) is None
 
 def test_sanitize_generated_content_strips_gutter_and_fence():
+    # "   4: " (three leading spaces) is the REAL non-highlighted gutter
+    # format _build_error_source_context() emits - confirmed by generating
+    # this exact snippet via the real function, not a hand-typed guess (a
+    # 2-space version of this fixture was a latent inaccuracy, silently
+    # inconsistent with the real format, until fixed 2026-08-11 alongside
+    # the audit that narrowed _GUTTER_CONTEXT_RE to require exactly this).
     text = (
         "```java\n"
         ">> 3: import org.apache.ignite.cache.IgniteCache;\n"
-        "  4: public class App {\n"
+        "   4: public class App {\n"
         "```"
     )
     assert DeveloperAgent.sanitize_generated_content(text) == (
@@ -900,6 +907,51 @@ def test_sanitize_generated_content_plain_text_passthrough():
     text = "public class App {\n    public static void main(String[] args) {}\n}"
     assert DeveloperAgent.sanitize_generated_content(text) == text
 
+def test_sanitize_generated_content_does_not_truncate_real_code_mentioning_the_phrase():
+    """Regression test for a real bug found live, 2026-08-11
+    (kriya-oneshot-protocol-ignite-qpid audit): the old _TRAILING_FILE_CONTENT_RE
+    matched ANY line containing "file content" followed by a colon within 60
+    chars, anywhere in the file - including a perfectly ordinary log statement,
+    not just Kriya's own marker line - and silently deleted everything after
+    it. A real marker (literal or prose-phrased) always has nothing but the
+    colon left on its own line; this log statement has real code after its
+    colon, so it must survive untouched."""
+    text = (
+        "public class FileReader {\n"
+        "    public String read(String path) throws IOException {\n"
+        "        String data = Files.readString(Path.of(path));\n"
+        "        logger.info(\"Loaded file content: {} bytes\", data.length());\n"
+        "        return data;\n"
+        "    }\n"
+        "\n"
+        "    public void validate(String data) {\n"
+        "        if (data.isEmpty()) throw new IllegalArgumentException(\"empty\");\n"
+        "    }\n"
+        "}\n"
+    )
+    assert DeveloperAgent.sanitize_generated_content(text) == text
+
+def test_sanitize_generated_content_does_not_strip_yaml_numeric_keys():
+    """Regression test for a real bug found live, 2026-08-11: the old gutter
+    regex's "  N:" branch matched ANY 2-OR-MORE-space-indented "digit:" line
+    unconditionally - identical in shape to a legitimate YAML/properties
+    entry, and with no way to tell the two apart, silently deleted the key
+    and colon, leaving only the value. Narrowed to require the REAL, exact
+    format _build_error_source_context() emits (three leading spaces, not
+    "two or more") - ordinary 2-space YAML indentation no longer collides."""
+    text = "retry:\n  1: first-attempt-config\n  2: second-attempt-config\n"
+    assert DeveloperAgent.sanitize_generated_content(text) == text
+
+def test_sanitize_generated_content_still_strips_context_gutter_at_the_real_space_count():
+    # Mirrors test_sanitize_generated_content_strips_gutter_and_fence above
+    # but without a fence, isolating that the narrowed three-space
+    # requirement still correctly strips a REAL gutter-shaped context line
+    # (not just rejecting the too-loose 2-space YAML shape).
+    text = ">> 3: import org.apache.ignite.cache.IgniteCache;\n   4: public class App {"
+    assert DeveloperAgent.sanitize_generated_content(text) == (
+        "import org.apache.ignite.cache.IgniteCache;\npublic class App {"
+    )
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_full_content_retry_strips_copied_gutter():
     """Regression test: unlike the anchored-edit SEARCH/REPLACE path (already
@@ -916,7 +968,7 @@ async def test_fill_missing_content_full_content_retry_strips_copied_gutter():
         "FIX ANALYSIS: wrong import package.\n"
         "FILE CONTENT:\n"
         ">> 1: import org.apache.ignite.cache.IgniteCache;\n"
-        "  2: public class App {}\n"
+        "   2: public class App {}\n"
     ))
     dev = DeveloperAgent("developer", llm)
     files = await dev.run_generation(

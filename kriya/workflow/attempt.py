@@ -879,8 +879,23 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             f"RUNTIME VERIFICATION FAILURE: {grade['reasoning']}"
                             f"\n\nCaptured output:\n{run_res['output']}"
                         )
+                        # Append the grader's reasoning to what gets PERSISTED
+                        # (Failure.raw_output -> to_gate_outcome()'s "output"
+                        # field), mirroring the PASSED path a few lines below
+                        # (which already does this) - found live, 2026-08-11
+                        # (kriya-oneshot-protocol-ignite-qpid audit): without
+                        # this, to_gate_outcome() prefers raw_output over
+                        # message whenever raw_output is non-empty, so the
+                        # grader's diagnosis (embedded in message, used only
+                        # for the in-memory retry prompt) was silently absent
+                        # from every persisted FAILED run_verification
+                        # gate_outcome/traces.db record, even though it was
+                        # computed and even though the identical PASSED case
+                        # persists it - a real debugging/forensics asymmetry,
+                        # confirmed directly against a real trace.
+                        enriched_output = run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
                         failure = _build_quality_gate_failure(
-                            gate_type, message, run_res["output"],
+                            gate_type, message, enriched_output,
                             ctx.worktree_path, state.all_files_written, state.attempt_number,
                             extra_likely_files=grade.get("likely_files") or [],
                         )

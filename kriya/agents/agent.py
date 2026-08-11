@@ -25,7 +25,47 @@ logger = logging.getLogger(__name__)
 # whether the model's intended edit was otherwise correct. [ ]{2,} (2 OR
 # MORE) instead of a hardcoded exact count, so a future formatting tweak to
 # the leading-space count doesn't silently reopen the identical gap again.
-_GUTTER_PREFIX_RE = re.compile(r"^(?:>>\s*(?:\d+:)?|[ ]{2,}\d+:)\s?", re.MULTILINE)
+#
+# Split into two patterns - found live, 2026-08-11 (kriya-oneshot-protocol-
+# ignite-qpid audit). The original single combined pattern had two
+# independent false-positive gaps, since sanitize_generated_content() applies
+# it to ALL generated content, not just text that was ever shown gutter-
+# formatted (gutter context is only ever built for Java compile/stack-trace
+# locations in the first place): (1) the ">>" branch's digit+colon group was
+# optional, so it matched ANY line starting with bare ">>" - a real risk in
+# exactly this project's own domain, which generates plenty of byte-shifting
+# protocol-parser code (">> 8) & 0xFF;" on its own line had its operator
+# silently stripped); (2) the "  N:" branch matched ANY 2-OR-MORE-space-
+# indented "digit:" line - identical in shape to a legitimate YAML/properties
+# entry ("  1: first-attempt-config" had its key and colon silently deleted,
+# only the value surviving).
+#
+# (1) turned out NOT to be safely fixable: making the digit+colon group
+# mandatory for the ">>" branch was tried first, but
+# test_split_fix_analysis_edit_strips_copied_error_source_gutter is a real,
+# already-confirmed incident (2026-08-04) where a model echoed back ONLY the
+# bare ">>" marker with the line number DROPPED ("'>> import
+# org.apache.ignite.cache.IgniteCache;' - kept the '>>' marker, dropped the
+# line number") - structurally indistinguishable from a genuine bit-shift
+# continuation line by pattern alone, since both are "line starts with '>>'
+# then a space then arbitrary text." Requiring digits closes the bit-shift
+# false positive but reopens this confirmed real one; left optional, since
+# the historically-observed failure mode is the one with actual evidence
+# behind it - the bit-shift risk remains open, undocumented false-positive
+# territory this pattern can't distinguish without more context than a pure
+# text-in/text-out function has available.
+#
+# (2) IS safely fixable: narrowed the "  N:" branch's space count to the
+# REAL, exact format _build_error_source_context() emits (THREE spaces, not
+# "two or more") - still forward-hedged against a future increase past
+# three, but no longer collides with the much more common 2-space
+# YAML/properties indentation convention. No historical test or incident
+# relies on exactly two spaces specifically (several existing test fixtures
+# turned out to hand-type "two spaces" as a guess at the format without ever
+# checking it against the real function's own output - a latent inaccuracy,
+# corrected alongside this narrowing, not evidence of real 2-space usage).
+_GUTTER_HIGHLIGHT_RE = re.compile(r"^>>\s*(?:\d+:)?\s?", re.MULTILINE)
+_GUTTER_CONTEXT_RE = re.compile(r"^[ ]{3,}\d+:\s?", re.MULTILINE)
 
 # javac's "incompatible types: X cannot be converted to Y" is a generic,
 # language-level error shape (raw/erased generics, missing casts) - not tied
@@ -89,7 +129,19 @@ _BUFFER_CAPACITY_RE = re.compile(r"java\.nio\.Buffer(Overflow|Underflow)Exceptio
 # real observed instance of this marker is the entire content of its own
 # announcement line, never embedded mid-sentence with real content before it
 # on the same line.
-_TRAILING_FILE_CONTENT_RE = re.compile(r"^[^\n]*?file content[^\n:]{0,60}:", re.IGNORECASE | re.MULTILINE)
+#
+# `[ \t]*$` at the end is required, not decorative - found live, 2026-08-11
+# (kriya-oneshot-protocol-ignite-qpid audit): without it, this also matched
+# perfectly ordinary generated code that happens to mention the phrase inline,
+# e.g. `logger.info("Loaded file content: {} bytes", data.length());` - the
+# colon in that log message satisfied "file content" + up to 60 chars + ":"
+# just as well as a real marker line does, and truncated everything after it,
+# silently deleting the rest of the file with no error raised. Every real
+# marker occurrence (the literal form and the prose-phrased form both) has
+# nothing but the colon (and the line's own trailing whitespace) after it -
+# requiring that closes the false-positive without narrowing the prose-phrased
+# match this regex was broadened for in the first place.
+_TRAILING_FILE_CONTENT_RE = re.compile(r"^[^\n]*?file content[^\n:]{0,60}:[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 # Opt-out marker for a retry that legitimately implicates a file which doesn't
 # itself need any code change - found live, 2026-08-10 (ignite_qpid_protocol,
@@ -392,7 +444,8 @@ class DeveloperAgent(BaseAgent):
         trailing_file_content = _TRAILING_FILE_CONTENT_RE.search(text)
         if trailing_file_content:
             text = text[:trailing_file_content.start()].rstrip("\n")
-        text = _GUTTER_PREFIX_RE.sub("", text)
+        text = _GUTTER_CONTEXT_RE.sub("", text)
+        text = _GUTTER_HIGHLIGHT_RE.sub("", text)
         return DeveloperAgent._strip_markdown_fences(text)
 
     @staticmethod

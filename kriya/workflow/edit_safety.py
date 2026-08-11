@@ -26,25 +26,12 @@ def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], sho
     for idx, edit in enumerate(edits, 1):
         search_block = edit.get("search", "")
         replace_block = edit.get("replace", "")
-        
+
         if not search_block:
             continue
-            
+
         norm_search = normalize_whitespace(search_block)
-        norm_content = normalize_whitespace(current_content)
-        
-        match_count = norm_content.count(norm_search)
-        if match_count == 0:
-            raise ValueError(
-                f"Anchor matching failed for edit #{idx}: The search block matched 0 times. "
-                f"Please ensure whitespace and contents match exactly."
-            )
-        elif match_count > 1:
-            raise ValueError(
-                f"Anchor matching failed for edit #{idx}: The search block matched {match_count} times (must match exactly once). "
-                f"Provide more context surrounding the search block."
-            )
-            
+
         if shown_context:
             norm_shown = normalize_whitespace(shown_context)
             if norm_search not in norm_shown:
@@ -52,27 +39,76 @@ def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], sho
                     f"Anchor matching failed for edit #{idx}: The search block contains code segments "
                     f"that were elided in the skeletonized context and not shown to the model."
                 )
-                
-        if search_block in current_content:
-            current_content = current_content.replace(search_block, replace_block, 1)
-        else:
-            search_lines = search_block.splitlines()
-            content_lines = current_content.splitlines()
-            
-            matched_start = -1
-            for i in range(len(content_lines) - len(search_lines) + 1):
-                window = content_lines[i : i + len(search_lines)]
-                if normalize_whitespace("\n".join(window)) == norm_search:
-                    matched_start = i
-                    break
-            
-            if matched_start != -1:
-                content_lines[matched_start : matched_start + len(search_lines)] = replace_block.splitlines()
-                current_content = "\n".join(content_lines)
-            else:
+
+        exact_count = current_content.count(search_block)
+        if exact_count >= 1:
+            # An exact (unnormalized) match exists - the strictest, most-
+            # preferred match shape, so its own count is the uniqueness
+            # signal here, not a whitespace-normalized count over the whole
+            # file (see the window branch below for why that can disagree
+            # with what's actually being matched).
+            if exact_count > 1:
                 raise ValueError(
-                    f"Anchor matching failed for edit #{idx}: Could not find formatted match inside target content."
+                    f"Anchor matching failed for edit #{idx}: The search block matched {exact_count} times (must match exactly once). "
+                    f"Provide more context surrounding the search block."
                 )
+            current_content = current_content.replace(search_block, replace_block, 1)
+            continue
+
+        # No exact match - fall back to a whitespace-tolerant search that
+        # also tolerates a DIFFERENT number of blank lines between content
+        # and search block, not just different indentation - consistent with
+        # normalize_whitespace's own blank-line-discarding philosophy used
+        # everywhere else in this function (the shown_context check above,
+        # for instance). A prior version used a FIXED-size raw-line window
+        # (exactly len(search_block.splitlines()) raw lines) for both the
+        # uniqueness check and the actual splice - found live, 2026-08-11
+        # (kriya-oneshot-protocol-ignite-qpid audit): a search block with one
+        # blank line between two statements, matched against content with
+        # TWO blank lines at the same location, made the OLD whole-file
+        # blank-line-collapsed uniqueness check report "exactly 1 match" (it
+        # discards all blank lines before counting) while the fixed-size
+        # window could never actually find it (the real match needs one more
+        # raw line than the search block has) - the check said "found,
+        # unique" while application then failed with "could not find match",
+        # a self-contradictory outcome that burned a retry on Kriya's own
+        # matching inconsistency, not a real problem with the edit.
+        #
+        # Matches the search block's own non-blank, stripped lines as a
+        # contiguous subsequence against the content's non-blank, stripped
+        # lines - the count of subsequence matches IS the uniqueness check
+        # (no separate, disagreeing mechanism), and the actual RAW splice
+        # range spans from the first to the last matched non-blank line's
+        # real index, so any blank lines interspersed between them in the
+        # original file are naturally included in (and replaced by) the
+        # spliced-in replace_block, regardless of how many there are.
+        search_norm_lines = [ln.strip() for ln in search_block.splitlines() if ln.strip()]
+        content_lines = current_content.splitlines()
+        content_nonblank = [(i, ln.strip()) for i, ln in enumerate(content_lines) if ln.strip()]
+        content_norm_lines = [ln for _, ln in content_nonblank]
+
+        n = len(search_norm_lines)
+        matched_starts = (
+            [i for i in range(len(content_norm_lines) - n + 1) if content_norm_lines[i:i + n] == search_norm_lines]
+            if n > 0 else []
+        )
+
+        if not matched_starts:
+            raise ValueError(
+                f"Anchor matching failed for edit #{idx}: The search block matched 0 times. "
+                f"Please ensure whitespace and contents match exactly."
+            )
+        elif len(matched_starts) > 1:
+            raise ValueError(
+                f"Anchor matching failed for edit #{idx}: The search block matched {len(matched_starts)} times (must match exactly once). "
+                f"Provide more context surrounding the search block."
+            )
+
+        match_pos = matched_starts[0]
+        raw_start = content_nonblank[match_pos][0]
+        raw_end = content_nonblank[match_pos + n - 1][0] + 1
+        content_lines[raw_start:raw_end] = replace_block.splitlines()
+        current_content = "\n".join(content_lines)
 
     return current_content
 

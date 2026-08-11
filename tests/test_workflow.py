@@ -1298,11 +1298,12 @@ async def test_workflow_sanitizes_batch_json_edits_before_applying(tmp_path):
         "Review: Approved",
     ])
     we = WorkflowEngine(kernel, llm)
-    # "  1: " is Kriya's own non-highlighted context-line gutter (see
-    # _build_error_source_context) prepended to the real, unmarked source
-    # line "    old()" - exactly the shape a model echoing the gutter back
-    # would produce.
-    gutter_prefixed_search = "  1: " + "    old()"
+    # "   1: " (three leading spaces) is Kriya's own non-highlighted
+    # context-line gutter (see _build_error_source_context's format string:
+    # the two-space placeholder plus its own literal space before {i+1})
+    # prepended to the real, unmarked source line "    old()" - exactly the
+    # shape a model echoing the gutter back would produce.
+    gutter_prefixed_search = "   1: " + "    old()"
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
         mock_compile.side_effect = [
             {"success": False, "output": "App.py: SyntaxError near old()"},
@@ -2129,6 +2130,51 @@ async def test_run_attempt_does_not_reuse_planner_code_on_retry(tmp_path):
 
     developer.run_generation.assert_called_once()
     assert (tmp_path / "app.py").read_text() == "print('from developer')\n"
+
+@pytest.mark.asyncio
+async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure(tmp_path):
+    """Regression test for a real bug found live, 2026-08-11
+    (kriya-oneshot-protocol-ignite-qpid audit): Failure.to_gate_outcome()'s
+    "output" field always preferred raw_output over message, so the grader's
+    own synthesized reasoning - explicitly appended to the persisted output
+    on the PASSED path (a few lines below in attempt.py) - was silently
+    absent from the persisted gate_outcome whenever run_verification FAILED,
+    even though it was computed. A human (or a future debugging session)
+    inspecting a failed run_verification gate_outcome in traces.db would see
+    only the raw captured output, never the grader's diagnosis of what
+    actually went wrong - confirmed directly against a real trace."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["python3", "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints hi",
+    })
+    run_verifier.grade = AsyncMock(return_value={
+        "passed": False,
+        "reasoning": "The output shows a real defect: the app crashed instead of printing hi.",
+    })
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        architect_files=["app.py"], expected_files_upfront=["app.py"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled fine"},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 1, "output": "Traceback: crashed"},
+    ):
+        with pytest.raises(QualityGateFailure):
+            await run_attempt(state, ctx)
+
+    run_verification_outcome = next(g for g in state.gate_outcomes if g["type"] == "run_verification")
+    assert "[Grader reasoning]" in run_verification_outcome["output"]
+    assert "crashed instead of printing hi" in run_verification_outcome["output"]
 
 @pytest.mark.asyncio
 async def test_handle_attempt_failure_increments_retry_count_and_continues(tmp_path):
@@ -6074,6 +6120,51 @@ def test_find_structural_corruption_detects_unclosed_and_extra_braces():
     problem = find_structural_corruption("Foo.java", unclosed)
     assert problem is not None
     assert "unclosed" in problem
+
+
+def test_apply_anchored_edits_handles_search_block_with_different_blank_line_count_than_content():
+    """Regression test for a real bug found live, 2026-08-11
+    (kriya-oneshot-protocol-ignite-qpid audit): the OLD uniqueness check
+    counted matches against a whole-file, ALL-blank-lines-collapsed flatten
+    (normalize_whitespace(current_content).count(normalize_whitespace(search))),
+    while actual application either needed an exact substring match or a
+    window of EXACTLY len(search_block.splitlines()) raw lines. A search
+    block with one blank line matched against content with two blank lines at
+    the same location passed the old uniqueness check (it reported exactly 1
+    match) but then failed application with "Could not find formatted match
+    inside target content" - a self-contradictory outcome, confirmed by
+    reproducing it against the pre-fix function. The fix computes uniqueness
+    and location with the SAME window algorithm, so this must now succeed."""
+    from kriya.workflow.workflow import apply_anchored_edits
+
+    search_block = "int a = 1;\n\nint b = 2;"
+    content = "class X {\n    int a = 1;\n\n\n    int b = 2;\n}"
+    edits = [{"search": search_block, "replace": "int a = 99;\n\nint b = 2;"}]
+
+    result = apply_anchored_edits(content, edits, "")
+
+    assert "int a = 99;" in result
+    assert "int b = 2;" in result
+
+
+def test_apply_anchored_edits_still_rejects_genuinely_ambiguous_window_match():
+    from kriya.workflow.workflow import apply_anchored_edits
+
+    search_block = "return x;"
+    content = "int a() { return x; }\nint b() { return x; }"
+    edits = [{"search": search_block, "replace": "return y;"}]
+
+    with pytest.raises(ValueError, match="matched 2 times"):
+        apply_anchored_edits(content, edits, "")
+
+
+def test_apply_anchored_edits_still_rejects_zero_matches():
+    from kriya.workflow.workflow import apply_anchored_edits
+
+    edits = [{"search": "does not exist anywhere", "replace": "x"}]
+
+    with pytest.raises(ValueError, match="matched 0 times"):
+        apply_anchored_edits("class X {}", edits, "")
 
     extra = "public class Foo {\n    void bar() {}\n}\n}\n"
     problem2 = find_structural_corruption("Foo.java", extra)
