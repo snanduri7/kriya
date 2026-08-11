@@ -61,6 +61,22 @@ class GenerationState:
     # passed (those files never get copied to workspace_path - only ever lived
     # in the worktree, which gets git-clean'd on failure).
     final_attempt_contents: Dict[str, str] = field(default_factory=dict)
+    # Which retry mode the most recent run_attempt() call actually used -
+    # "targeted"/"missing_files"/"fallback_targeted"/"full_set". Set at the
+    # very start of run_attempt(), from the same derivation the caller needs
+    # afterward (for logging and retry-budget accounting) - recomputing the
+    # same booleans from state AFTER the attempt returns/raises would be
+    # wrong, since fallback_targeted_attempted is deliberately flipped True
+    # as the first action inside the fallback_targeted branch itself.
+    last_attempt_mode: Optional[str] = None
+    # The model/endpoint override the most recent run_attempt() call actually
+    # used (None means the primary model) - the caller needs these afterward
+    # to gate lesson extraction on "this successful attempt used a non-primary
+    # model" and to run that extraction on the SAME model that resolved the
+    # issue, not whatever the primary model is.
+    last_model_override: Optional[str] = None
+    last_base_url_override: Optional[str] = None
+    last_api_key_override: Optional[str] = None
     # The file(s) extract_implicated_files() found in the MOST RECENT failure -
     # re-evaluated after every failure, not fixed at the first one, so a
     # targeted attempt against a different file (a new error surfaced by fixing

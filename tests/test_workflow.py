@@ -13,6 +13,9 @@ from kriya.agents.agent import DeveloperAgent
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.workflow.attempt import AttemptContext, run_attempt
+from kriya.workflow.failure import QualityGateFailure
+from kriya.workflow.state import GenerationState
 from kriya.workflow.checkpoint import (
     checkpoint_path,
     compute_config_fingerprint,
@@ -1808,6 +1811,97 @@ async def test_workflow_verification_contract_marker_skips_llm_grade_on_fail(tmp
     we.run_verifier.grade.assert_not_called()
     assert res["quality_gates_passed"] is False
 
+def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
+    """Builds an AttemptContext with sensible fake/mocked defaults for testing
+    run_attempt() in true isolation - no WorkflowEngine, no Planner/Architect/
+    Graph RAG, no worktree. This is the whole point of Opportunity 2 Slice 2:
+    a targeted fix to Quality Gates logic no longer needs the full pipeline's
+    mock chain to write a test against."""
+    defaults = dict(
+        goal="Write a small app",
+        plan="Step 1: write it",
+        design="Design: one file",
+        workspace_path=str(tmp_path),
+        worktree_path=str(tmp_path),
+        architect_files=["app.py"],
+        resume_state=None,
+        run_id="test-run-id",
+        skills_prompt="",
+        learned_rag_context="",
+        matched_files=[],
+        related_files=[],
+        ecosystem_invariant_block="",
+        resource_lifecycle_block="",
+        verification_contract_block="",
+        required_files_prompt_block="",
+        required_dependencies_prompt_block="",
+        expected_files_upfront=["app.py"],
+        architect_basename_to_path={"app.py": "app.py"},
+        chain=[],
+        targeted_max_retries=3,
+        stream_callback=None,
+        approval_callback=None,
+        active_skills=[],
+        active_skill_rules_snapshot={},
+        developer=AsyncMock(),
+        run_verifier=AsyncMock(),
+        skill_engine=MagicMock(),
+        kernel=Kernel(config=AppConfig()),
+    )
+    defaults.update(overrides)
+    return AttemptContext(**defaults)
+
+@pytest.mark.asyncio
+async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(tmp_path):
+    """The actual payoff of Slice 2: a targeted fix to Quality Gates logic can
+    now be tested by calling run_attempt() directly with a hand-built
+    GenerationState/AttemptContext and a mocked Developer/validator - no full
+    WorkflowEngine, no Planner/Architect/Graph RAG mocks, no worktree setup."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "this is not valid python("}
+    ])
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": False, "output": "SyntaxError: invalid syntax"},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "compile"
+    assert "app.py" in state.all_files_written
+    assert state.gate_outcomes[-1]["type"] == "compile"
+    assert state.gate_outcomes[-1]["success"] is False
+
+@pytest.mark.asyncio
+async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
+    """Mirror of the failure-path test above: a clean compile with no tests
+    and Runtime Verification disabled returns normally (no exception), having
+    recorded exactly one passing compile gate outcome - proving the isolated
+    call path works for the success case too, not just failures."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+    kernel = Kernel(config=AppConfig())
+    kernel.config.autonomy.run_verification_enabled = False
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer, kernel=kernel)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled fine"},
+    ):
+        await run_attempt(state, ctx)  # must not raise
+
+    assert state.gate_outcomes == [{
+        "attempt": 1, "type": "compile", "success": True, "output": "compiled fine",
+    }]
+    assert state.last_attempt_mode == "full_set"
+
 @pytest.mark.asyncio
 async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path):
     """Workflow-level regression test: the forbidden flag must actually be
@@ -1900,7 +1994,7 @@ async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(
     })
 
     with patch(
-        "kriya.workflow.workflow._resolve_java_home_override",
+        "kriya.workflow.attempt._resolve_java_home_override",
         return_value="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
     ), patch("kriya.tools.validate.check_java_toolchain", return_value={
         "java_found": True, "java_version": "17",
@@ -4598,7 +4692,7 @@ async def test_workflow_applies_java_home_override_to_maven_subprocess(tmp_path)
         {"filepath": "pom.xml", "content": "<project></project>"}
     ])
     with patch(
-        "kriya.workflow.workflow._resolve_java_home_override", return_value="/opt/jdk-17",
+        "kriya.workflow.attempt._resolve_java_home_override", return_value="/opt/jdk-17",
     ), patch("subprocess.Popen") as mock_popen:
         mock_process = MagicMock()
         mock_process.returncode = 0
@@ -5962,7 +6056,7 @@ async def test_workflow_missing_file_recovery_does_not_escalate_or_consume_fulls
         return real_normalize_written_filepath(filepath, workspace_path)
 
     we = WorkflowEngine(kernel, llm)
-    with patch("kriya.workflow.workflow.normalize_written_filepath", side_effect=flaky_normalize):
+    with patch("kriya.workflow.attempt.normalize_written_filepath", side_effect=flaky_normalize):
         res = await we.run_generation_workflow(
             goal="Create math library with a helper module", workspace_path=str(tmp_path)
         )
