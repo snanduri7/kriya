@@ -21,7 +21,7 @@ from kriya.core.kernel import Kernel
 from kriya.workflow.edit_safety import apply_anchored_edits, find_edits_ignoring_reported_line, find_structural_corruption
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, extract_target_test, find_missing_expected_files, normalize_written_filepath
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
 from kriya.workflow.context_budget import _reserve_graph_context_budget, build_code_context
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.skill_extraction import _skill_verification_context
@@ -355,23 +355,55 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if state.budgets.retry_count == 0 and ctx.expected_files_upfront:
             known_target_files = ctx.expected_files_upfront
 
-        # Generate code files
-        dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
-            task_description=task_desc,
-            design_context=ctx.design,
-            existing_code_context=active_code_context,
-            stream_callback=dev_stream,
-            model_override=model_override,
-            base_url_override=base_url_override,
-            api_key_override=api_key_override,
-            known_target_files=known_target_files,
-            prior_error_context=state.error_context or None,
-            implicated_files=state.last_implicated_files,
-            error_source_context=state.last_error_source_context or None,
-            retry_temperature=ctx.kernel.config.llm.retry_temperature,
-            extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
-        )
+        # PlannerAgent's own prompt never asks for full code, but models
+        # routinely over-deliver it anyway in fenced blocks inside the plan
+        # text - Architect explicitly discards it, and Developer previously
+        # always regenerated every file from scratch regardless, paying a
+        # full completion per file for work already done. On attempt 1 only
+        # (never a retry - a plan that already led to a failure isn't a
+        # trustworthy source for a fresh attempt), if the Planner's own text
+        # already has usable code for EVERY expected file, use it directly
+        # instead of asking Developer to redo it - still subject to the
+        # exact same compile/test/Runtime-Verification gates as any other
+        # attempt, so a wrong or incomplete Planner draft costs at most one
+        # gate cycle before falling through to a real Developer generation
+        # on the next attempt, the same downside a bad first Developer
+        # attempt would already have. Deliberately all-or-nothing: a partial
+        # match (some but not all expected files present) is NOT reused, to
+        # avoid a third, harder-to-verify code path that mixes Planner and
+        # Developer output for the same attempt.
+        reused_files = None
+        if state.budgets.retry_count == 0 and ctx.expected_files_upfront:
+            planner_blocks = extract_planner_code_blocks(ctx.plan, ctx.expected_files_upfront)
+            if set(planner_blocks.keys()) == set(ctx.expected_files_upfront):
+                reused_files = [{"filepath": fp, "content": content} for fp, content in planner_blocks.items()]
+                logger.info(
+                    f"Planner's own plan already contains complete code for all "
+                    f"{len(reused_files)} expected file(s) - reusing it directly instead of "
+                    "a fresh Developer generation call, subject to the same Quality Gates "
+                    "as any other attempt."
+                )
+
+        if reused_files is not None:
+            files = reused_files
+        else:
+            # Generate code files
+            dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
+            files = await ctx.developer.run_generation(
+                task_description=task_desc,
+                design_context=ctx.design,
+                existing_code_context=active_code_context,
+                stream_callback=dev_stream,
+                model_override=model_override,
+                base_url_override=base_url_override,
+                api_key_override=api_key_override,
+                known_target_files=known_target_files,
+                prior_error_context=state.error_context or None,
+                implicated_files=state.last_implicated_files,
+                error_source_context=state.last_error_source_context or None,
+                retry_temperature=ctx.kernel.config.llm.retry_temperature,
+                extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+            )
 
     # Recorded now, not derived by the caller afterward - see the fields'
     # own docstring in kriya/workflow/state.py. Every branch above sets all

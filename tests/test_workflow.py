@@ -51,6 +51,7 @@ from kriya.workflow.workflow import (
     _resolve_jdk_home_for_version,
     _resolve_maven_main_class,
     _resolve_run_command,
+    extract_planner_code_blocks,
     _scoped_skill_gap_description,
     _strip_jdk_incompatible_jvm_flags,
     classify_environment_failure,
@@ -522,6 +523,73 @@ def test_resolve_run_command_mainclass_correction_does_not_apply_to_exec_exec(tm
     # <arguments> element, not a separately overridable parameter.
     _write_java_class(tmp_path, "src/main/java/com/example/Main.java", "com.example", "Main")
     assert _resolve_run_command(["mvn", "-e", "exec:exec"], str(tmp_path)) == ["mvn", "-e", "exec:exec"]
+
+def test_extract_planner_code_blocks_matches_full_paths():
+    plan = (
+        "### pom.xml\n```xml\n<project>pom content</project>\n```\n\n"
+        "### src/main/java/com/example/protocol/Protocol.java\n"
+        "```java\npackage com.example.protocol;\npublic class Protocol {}\n```\n\n"
+        "### src/main/java/com/example/protocol/ProtocolParser.java\n"
+        "```java\npackage com.example.protocol;\npublic class ProtocolParser {}\n```\n"
+    )
+    expected = [
+        "pom.xml",
+        "src/main/java/com/example/protocol/Protocol.java",
+        "src/main/java/com/example/protocol/ProtocolParser.java",
+    ]
+    result = extract_planner_code_blocks(plan, expected)
+    assert set(result.keys()) == set(expected)
+    assert "public class ProtocolParser {}" in result["src/main/java/com/example/protocol/ProtocolParser.java"]
+
+def test_extract_planner_code_blocks_resolves_closest_match_not_first_found():
+    """Regression test for a real bug caught before this feature ever shipped:
+    matching against an unordered set and stopping at the first substring hit
+    let an EARLIER file's own heading (still within the lookback window once
+    2+ files are shown close together) steal a LATER block's match - e.g.
+    Protocol.java's heading, mentioned before ProtocolParser.java's own
+    heading+fence, could silently claim ProtocolParser's content instead.
+    Fixed by always preferring whichever candidate's mention sits closest
+    (rightmost) to the fence, checked with a 3-file fixture where a naive
+    first-match approach demonstrably picks the wrong file."""
+    plan = (
+        "### src/main/java/com/example/protocol/Protocol.java\n"
+        "```java\npublic class Protocol {}\n```\n\n"
+        "### src/main/java/com/example/protocol/ProtocolParser.java\n"
+        "```java\npublic class ProtocolParser {}\n```\n"
+    )
+    expected = [
+        "src/main/java/com/example/protocol/Protocol.java",
+        "src/main/java/com/example/protocol/ProtocolParser.java",
+    ]
+    result = extract_planner_code_blocks(plan, expected)
+    assert result["src/main/java/com/example/protocol/Protocol.java"].strip() == "public class Protocol {}"
+    assert result["src/main/java/com/example/protocol/ProtocolParser.java"].strip() == "public class ProtocolParser {}"
+
+def test_extract_planner_code_blocks_basename_fallback():
+    plan = "### Main.java\n```java\npublic class Main {}\n```\n"
+    result = extract_planner_code_blocks(plan, ["src/main/java/com/example/Main.java"])
+    assert result == {"src/main/java/com/example/Main.java": "public class Main {}\n"}
+
+def test_extract_planner_code_blocks_skips_empty_fences():
+    plan = "### Foo.java\n```java\n```\n"
+    assert extract_planner_code_blocks(plan, ["Foo.java"]) == {}
+
+def test_extract_planner_code_blocks_ignores_fences_matching_no_expected_file():
+    plan = (
+        "Here is an example JMS message payload:\n```json\n{\"foo\": \"bar\"}\n```\n\n"
+        "### Foo.java\n```java\npublic class Foo {}\n```\n"
+    )
+    result = extract_planner_code_blocks(plan, ["Foo.java"])
+    assert list(result.keys()) == ["Foo.java"]
+
+def test_extract_planner_code_blocks_partial_coverage_returns_only_matched_files():
+    plan = "### Foo.java\n```java\npublic class Foo {}\n```\n"
+    result = extract_planner_code_blocks(plan, ["Foo.java", "Bar.java"])
+    assert list(result.keys()) == ["Foo.java"]
+
+def test_extract_planner_code_blocks_empty_inputs():
+    assert extract_planner_code_blocks("", ["Foo.java"]) == {}
+    assert extract_planner_code_blocks("some plan text", []) == {}
 
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):
@@ -1970,6 +2038,97 @@ async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
         "attempt": 1, "type": "compile", "success": True, "output": "compiled fine",
     }]
     assert state.last_attempt_mode == "full_set"
+
+@pytest.mark.asyncio
+async def test_run_attempt_reuses_planner_code_when_full_coverage(tmp_path):
+    """The actual payoff: when the Planner's own plan text already has
+    complete code for every expected file, run_attempt() must use it
+    directly - developer.run_generation() should never be called at all -
+    while still going through the exact same compile gate as any other
+    attempt."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("developer.run_generation() must not be called when Planner coverage is complete")
+    )
+    plan = (
+        "### app.py\n```python\nprint('hi')\n```\n"
+    )
+    kernel = Kernel(config=AppConfig())
+    kernel.config.autonomy.run_verification_enabled = False
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, plan=plan, kernel=kernel,
+        architect_files=["app.py"], expected_files_upfront=["app.py"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled fine"},
+    ):
+        await run_attempt(state, ctx)
+
+    developer.run_generation.assert_not_called()
+    assert (tmp_path / "app.py").read_text() == "print('hi')\n"
+    assert state.gate_outcomes[-1] == {
+        "attempt": 1, "type": "compile", "success": True, "output": "compiled fine",
+    }
+
+@pytest.mark.asyncio
+async def test_run_attempt_falls_back_to_developer_when_planner_coverage_partial(tmp_path):
+    """A Planner plan covering only SOME of the expected files must not be
+    used at all (deliberately all-or-nothing) - falls through to the normal
+    Developer generation path unchanged."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('from developer')\n"},
+        {"filepath": "helper.py", "content": "print('helper from developer')\n"},
+    ])
+    plan = "### app.py\n```python\nprint('from planner')\n```\n"  # missing helper.py
+    kernel = Kernel(config=AppConfig())
+    kernel.config.autonomy.run_verification_enabled = False
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, plan=plan, kernel=kernel,
+        architect_files=["app.py", "helper.py"], expected_files_upfront=["app.py", "helper.py"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled fine"},
+    ):
+        await run_attempt(state, ctx)
+
+    developer.run_generation.assert_called_once()
+    assert (tmp_path / "app.py").read_text() == "print('from developer')\n"
+
+@pytest.mark.asyncio
+async def test_run_attempt_does_not_reuse_planner_code_on_retry(tmp_path):
+    """Planner-code reuse is scoped to attempt 1 only (retry_count == 0) -
+    a plan that already led to a failed attempt isn't a trustworthy source
+    for a fresh one, matching the same scoping the known_target_files
+    shortcut already uses."""
+    state = GenerationState()
+    state.budgets.retry_count = 1
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('from developer')\n"}
+    ])
+    plan = "### app.py\n```python\nprint('from planner')\n```\n"
+    kernel = Kernel(config=AppConfig())
+    kernel.config.autonomy.run_verification_enabled = False
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, plan=plan, kernel=kernel,
+        architect_files=["app.py"], expected_files_upfront=["app.py"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled fine"},
+    ):
+        await run_attempt(state, ctx)
+
+    developer.run_generation.assert_called_once()
+    assert (tmp_path / "app.py").read_text() == "print('from developer')\n"
 
 @pytest.mark.asyncio
 async def test_handle_attempt_failure_increments_retry_count_and_continues(tmp_path):

@@ -63,6 +63,7 @@ from kriya.workflow.file_resolution import (
     _resolve_maven_main_class,
     _resolve_run_command,
     extract_expected_files,
+    extract_planner_code_blocks,
     extract_target_test,
     find_missing_expected_files,
     normalize_written_filepath,

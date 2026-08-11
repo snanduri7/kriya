@@ -193,6 +193,73 @@ def _resolve_run_command(command: List[str], workspace_path: Optional[str] = Non
     return command
 
 
+_FENCED_CODE_BLOCK_PATTERN = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
+_PLANNER_CODE_REUSE_LOOKBACK_CHARS = 300
+
+
+def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -> Dict[str, str]:
+    """PlannerAgent's own system prompt only ever asks for a step-by-step plan
+    ("outline what files need to be created... Format your plan clearly in
+    Markdown") - never full code - but qwen3-coder:30b and others routinely
+    over-deliver complete, plausible-looking file content in fenced code
+    blocks anyway (confirmed live, 2026-08-11: a real Planner response wrote
+    out full, syntactically valid pom.xml/Protocol.java/ProtocolParser.java/
+    Main.java content under "### path/to/File.java" headings). Architect then
+    explicitly discards it (its own prompt: "DO NOT write or output the full
+    implementation code"), and Developer regenerates every file from scratch
+    regardless of whether the Planner's own draft was already correct -
+    confirmed via direct code read this session that nothing anywhere reuses
+    it. This function is the first step of closing that gap: given the raw
+    plan text and the Architect's own resolved expected-file list, finds
+    every fenced code block whose PRECEDING text names one of those specific
+    files (by full path or basename) - not any code-looking fence, only ones
+    matching a file Kriya ALREADY knows it needs, the same safety scoping
+    extract_expected_files() uses elsewhere. Uses the LAST fence found for a
+    given file if it's mentioned more than once (a plan that shows a file,
+    then a corrected/final version of it later, should yield the final one).
+
+    Deliberately does nothing more than this extraction - whether/how the
+    result gets used (and re-verified through the exact same Quality Gates
+    any Developer-generated content goes through) is the caller's decision,
+    not this function's."""
+    expected_files = list(expected_files)
+    if not expected_files or not plan_text:
+        return {}
+    basename_to_path: Dict[str, str] = {}
+    for f in expected_files:
+        basename_to_path.setdefault(os.path.basename(f), f)
+
+    results: Dict[str, str] = {}
+    for match in _FENCED_CODE_BLOCK_PATTERN.finditer(plan_text):
+        content = match.group(1)
+        if not content.strip():
+            continue
+        preceding = plan_text[max(0, match.start() - _PLANNER_CODE_REUSE_LOOKBACK_CHARS):match.start()]
+        # Full paths and basenames are both candidates; whichever mention sits
+        # CLOSEST to the fence (the largest rfind position) wins - not just
+        # whichever candidate happens to be checked first. An earlier file's
+        # own heading is still within the lookback window once the plan has
+        # shown 2+ files close together, so "first substring match found"
+        # (via an unordered set, no less) would silently steal a later
+        # block's match - confirmed as a real bug via a 3-file test fixture
+        # before this rfind-based fix.
+        best_pos = -1
+        found_path = None
+        for path in expected_files:
+            pos = preceding.rfind(path)
+            if pos > best_pos:
+                best_pos = pos
+                found_path = path
+        for basename, path in basename_to_path.items():
+            pos = preceding.rfind(basename)
+            if pos > best_pos:
+                best_pos = pos
+                found_path = path
+        if found_path:
+            results[found_path] = content
+    return results
+
+
 EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")
 
 
