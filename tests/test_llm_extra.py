@@ -156,6 +156,51 @@ async def test_reasoning_model_retry_failure_propagates_original_style_error():
         assert mock_create.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_reasoning_model_does_not_retry_on_a_connection_or_auth_error():
+    """Regression test for a finding from the 2026-08-12 SME review: the
+    retry-without-response_format path previously triggered on ANY exception
+    from the first request, not just one that plausibly indicates
+    response_format/reasoning incompatibility - a connection-refused or
+    auth error got silently "retried" too, adding latency and reporting a
+    misleading root cause (the retry's own log message claims "may not
+    support JSON mode with reasoning", which isn't what actually failed)."""
+    import openai
+
+    cfg = AppConfig()
+    cfg.llm.reasoning = True
+    llm = LLMClient(cfg)
+
+    connection_error = openai.APIConnectionError(request=MagicMock())
+    mock_create = AsyncMock(side_effect=connection_error)
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        with pytest.raises(openai.APIConnectionError):
+            await llm.complete("system", "user", json_mode=True)
+        assert mock_create.call_count == 1  # no retry attempted
+
+
+@pytest.mark.asyncio
+async def test_reasoning_model_still_retries_on_an_unrecognized_exception():
+    """The exclusion list only rules out exception types clearly unrelated to
+    response_format (connection/timeout/auth/rate-limit/server errors) - an
+    unrecognized exception (e.g. a genuine backend rejection of the
+    combination) still gets the benefit of the doubt and retries, matching
+    test_reasoning_model_retries_once_without_response_format_on_failure
+    above but confirming this explicitly survives the new exclusion logic."""
+    cfg = AppConfig()
+    cfg.llm.reasoning = True
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(side_effect=[
+        ValueError("some other unexpected failure shape"),
+        _mock_response('["a.txt"]'),
+    ])
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete("system", "user", json_mode=True)
+        assert res == '["a.txt"]'
+        assert mock_create.call_count == 2
+
+
 def test_is_local_url_fails_closed_on_hostname_less_url():
     """Regression test for a real bug found live, 2026-08-12 (SME architecture
     review): a URL with no parseable hostname (e.g. a malformed/typo'd

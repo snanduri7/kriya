@@ -5,11 +5,33 @@ import socket
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    AuthenticationError,
+    InternalServerError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 
 from kriya.config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+# Exception types that are clearly NOT about response_format/reasoning
+# compatibility - a connection refused, an expired API key, or a rate limit
+# has nothing to do with whether this backend supports JSON mode together
+# with reasoning, so retrying identically for these just adds latency while
+# reporting a misleading root cause (2026-08-12 SME review). Deliberately an
+# exclusion list, not an allowlist restricted to e.g. just BadRequestError -
+# the retry exists for real, previously-observed backend quirks whose exact
+# error shape isn't guaranteed across every OpenAI-compatible server, so an
+# unrecognized exception still gets the benefit of the doubt and retries.
+_LLM_RETRY_EXCLUDED_EXCEPTIONS = (
+    APIConnectionError, APITimeoutError, AuthenticationError,
+    PermissionDeniedError, RateLimitError, InternalServerError,
+)
 
 class EgressViolationError(ValueError):
     """Raised when an LLM completion request violates local_only egress policy."""
@@ -141,8 +163,11 @@ class LLMClient:
             except Exception as e:
                 # Only reasoning models risk this combination being unsupported by some
                 # backend - a plain json_mode call already worked fine unconditionally
-                # before this change, so there's no need to retry that case.
-                if response_format is not None and is_reasoning:
+                # before this change, so there's no need to retry that case. Also
+                # excludes exception types that are clearly unrelated to response_format
+                # (connection/timeout/auth/rate-limit/server errors) - see
+                # _LLM_RETRY_EXCLUDED_EXCEPTIONS.
+                if response_format is not None and is_reasoning and not isinstance(e, _LLM_RETRY_EXCLUDED_EXCEPTIONS):
                     logger.warning(
                         f"Completion request with response_format={response_format} failed for "
                         f"reasoning model '{model}' ({e}) - retrying once without it (this backend/"

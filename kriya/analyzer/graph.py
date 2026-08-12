@@ -236,14 +236,23 @@ class DependencyGraph:
         cursor.execute("SELECT name FROM symbols WHERE filepath = ?", (filepath,))
         return [r[0] for r in cursor.fetchall()]
 
-    def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2) -> List[Dict[str, Any]]:
+    def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2, max_results: int = 30) -> List[Dict[str, Any]]:
         """Perform bounded BFS traversal on the symbol relationship graph.
 
         Each hit carries a "score" (relation-type weight / hop distance, see
         _RELATION_WEIGHTS) so callers can prioritize which related files are
         actually worth keeping when a token budget is tight, instead of
         treating every hop-2 annotation reference the same as a direct
-        hop-1 import. Results are sorted by score descending."""
+        hop-1 import. Results are sorted by score descending, then capped
+        at `max_results` - previously unbounded, so a common method name
+        shared across many unrelated classes (e.g. "process", "save") could
+        pull in every unrelated definition sharing that bare name as
+        "related" context, since BFS matches are keyed on unqualified
+        symbol names with no file/class scoping at all (2026-08-12 SME
+        review). The cap applies to the final, score-sorted output, not the
+        internal traversal itself - the BFS still explores as far as
+        max_hops allows to find the genuinely highest-scoring hits, only
+        the returned list is bounded."""
         if not seed_symbols:
             return []
             
@@ -295,7 +304,7 @@ class DependencyGraph:
                     })
 
         results.sort(key=lambda r: r["score"], reverse=True)
-        return results
+        return results[:max_results]
 
     def close(self) -> None:
         if hasattr(self, "conn") and self.conn:

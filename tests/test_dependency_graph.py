@@ -255,3 +255,70 @@ def test_get_neighborhood_scores_direct_import_above_deeper_annotation_hit(tmp_p
     # Sorted descending by score - the strongest hit comes first.
     assert results[0]["filepath"] == "Direct.java"
     assert results[0]["score"] == best_by_file["Direct.java"]
+
+
+def test_get_neighborhood_caps_results_instead_of_returning_every_hit(tmp_path):
+    """Regression test for a finding from the 2026-08-12 SME review:
+    get_neighborhood()'s BFS is keyed on bare, unqualified symbol names with
+    no per-result cap - a common method name shared across many unrelated
+    classes (e.g. "process", "save") previously pulled in every unrelated
+    definition as "related" context, unbounded. Now capped, keeping the
+    highest-scoring hits (a direct import) over lower-scoring ones
+    (generic calls) rather than an arbitrary truncation."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    # One genuinely strong signal: Seed directly imports RealTarget.
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("RealTarget.java", "process", "function", 1, 1),
+    )
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+        ("Seed", "process", "imports", "Seed.java"),
+    )
+    # Many unrelated classes that happen to define a same-named "process"
+    # method, reachable only via a weak generic "calls" relation - the
+    # noise this cap is meant to bound.
+    for i in range(40):
+        filepath = f"Unrelated{i}.java"
+        cursor.execute(
+            "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+            (filepath, f"process{i}", "function", 1, 1),
+        )
+        cursor.execute(
+            "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+            ("process", f"process{i}", "calls", "RealTarget.java"),
+        )
+    graph.conn.commit()
+
+    results = graph.get_neighborhood(["Seed"], max_hops=2, max_results=10)
+
+    assert len(results) == 10
+    # The strong direct-import hit must survive the cap, not be crowded out
+    # by an arbitrary subset of the 40 weak "calls" hits.
+    assert any(r["filepath"] == "RealTarget.java" for r in results)
+
+
+def test_get_neighborhood_default_max_results_bounds_a_large_fan_out(tmp_path):
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    for i in range(50):
+        filepath = f"File{i}.java"
+        cursor.execute(
+            "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+            (filepath, f"sym{i}", "function", 1, 1),
+        )
+        cursor.execute(
+            "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+            ("Seed", f"sym{i}", "calls", "Seed.java"),
+        )
+    graph.conn.commit()
+
+    results = graph.get_neighborhood(["Seed"], max_hops=2)  # default max_results
+
+    assert len(results) <= 30
+    assert len(results) < 50  # confirms it's actually bounded, not coincidentally equal
