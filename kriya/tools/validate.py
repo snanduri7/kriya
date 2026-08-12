@@ -297,7 +297,23 @@ class PolymorphicValidator:
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass  # already exited between the timeout firing and this kill
-            stdout, stderr = process.communicate()  # reap the process, collect whatever output exists
+            try:
+                # Reap the process, collect whatever output exists. SIGKILL
+                # doesn't guarantee IMMEDIATE death - a child stuck in
+                # uninterruptible I/O sleep (D-state, real under slow/
+                # networked storage) can't be reaped until that I/O
+                # completes, so this call needs its own timeout too or it
+                # can hang indefinitely, defeating the whole point of the
+                # outer timeout (2026-08-12 SME review).
+                stdout, stderr = process.communicate(timeout=10)
+            except subprocess.TimeoutExpired as reap_ex:
+                # .output/.stderr are populated even on a second timeout -
+                # return whatever was captured rather than hang forever.
+                stdout = reap_ex.output or ""
+                stderr = (reap_ex.stderr or "") + (
+                    "\n[REAP TIMEOUT] Process could not be reaped after SIGKILL "
+                    "(possibly stuck in uninterruptible I/O)."
+                )
             return {
                 "returncode": -1,
                 "stdout": stdout,

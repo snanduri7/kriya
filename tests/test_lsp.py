@@ -194,6 +194,80 @@ async def test_start_does_not_inherit_java_home_from_parent_process():
     assert "JAVA_HOME" not in launch_kwargs["env"]
     assert launch_kwargs["env"]["PATH"] == "/usr/bin"  # everything else still passed through
 
+@pytest.mark.asyncio
+async def test_shutdown_sigkills_a_process_that_ignores_sigterm():
+    """Regression test for a finding from the 2026-08-12 SME review:
+    shutdown() previously only sent SIGTERM with no confirmation of death and
+    no SIGKILL fallback - the exact leaked-orphan-subprocess bug class
+    already fixed for validate.py's _run_cmd_with_timeout(), not applied
+    here."""
+    client = _make_client([])
+    client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
+    client.process.terminate = MagicMock()
+    client.process.kill = MagicMock()
+    wait_calls = {"n": 0}
+
+    async def fake_wait():
+        wait_calls["n"] += 1
+        if wait_calls["n"] == 1:
+            raise asyncio.TimeoutError()
+        return None
+
+    client.process.wait = fake_wait
+
+    await client.shutdown()
+
+    client.process.terminate.assert_called_once()
+    client.process.kill.assert_called_once()
+    assert wait_calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_shutdown_does_not_sigkill_a_process_that_terminates_promptly():
+    client = _make_client([])
+    client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
+    client.process.terminate = MagicMock()
+    client.process.kill = MagicMock()
+    client.process.wait = AsyncMock(return_value=None)
+
+    await client.shutdown()
+
+    client.process.terminate.assert_called_once()
+    client.process.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_request_removes_pending_future_on_timeout():
+    """Regression test for a finding from the 2026-08-12 SME review: a timed-
+    out request's entry in self._pending was never removed - it lived for
+    the rest of the client's lifetime instead of being cleaned up."""
+    client = _make_client([])  # no response ever arrives
+    with pytest.raises(asyncio.TimeoutError):
+        await client._request("initialize", {}, timeout=0.05)
+    assert client._pending == {}
+
+
+@pytest.mark.asyncio
+async def test_read_loop_logs_warning_and_stops_on_malformed_content_length():
+    """Regression test for a finding from the 2026-08-12 SME review: a
+    malformed Content-Length header raised an uncaught ValueError that ended
+    LSP grounding for the rest of the run with only a DEBUG-level log line -
+    invisible by default. Now explicitly surfaced at WARNING, matching the
+    project's own established pattern for an optional feature's failure
+    path (toolchain/skill warnings)."""
+    client = _make_client([])
+    client.process.stdout._buffer = b"Content-Length: notanumber\r\n\r\n"
+    client.process.stdout._new_data.set()
+
+    with patch("kriya.tools.lsp.logger") as mock_logger:
+        await client._read_loop()
+
+    assert mock_logger.warning.called
+    warning_text = mock_logger.warning.call_args[0][0]
+    assert "malformed message" in warning_text
+    assert "disabled for the rest of this run" in warning_text
+
+
 def test_format_diagnostics_for_prompt_filters_to_errors_only():
     diagnostics = [
         {"severity": 1, "range": {"start": {"line": 4}}, "message": "cannot resolve import"},

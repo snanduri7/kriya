@@ -12,6 +12,8 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,11 +96,20 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
     i = 0
     length = len(content)
     method_sig_pattern = re.compile(r'(?:public|protected|private|static|\s)+[\w<>]+\s+\w+\s*\([^\)]*\)\s*$')
-    
+    # Comment/string-stripped mirror (same length - comment/string spans
+    # blanked to whitespace, everything else untouched) used only to detect
+    # REAL structural braces; `content` itself (unchanged) is what actually
+    # gets buffered/emitted, so a '{'/'}' inside a Java string literal or
+    # comment no longer miscounts and truncates or merges skeleton
+    # boundaries - the exact bug class edit_safety.py's own
+    # _strip_java_comments_and_strings() was built to avoid, not previously
+    # extended to this call site (2026-08-12 SME review).
+    structural = _strip_java_comments_and_strings(content)
+
     buffer = ""
     while i < length:
         char = content[i]
-        if char == '{':
+        if structural[i] == '{':
             if method_sig_pattern.search(buffer.strip()):
                 result.append(buffer)
                 result.append(" { ... }")
@@ -106,7 +117,7 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
                 brace_count = 1
                 i += 1
                 while i < length and brace_count > 0:
-                    c = content[i]
+                    c = structural[i]
                     if c == '{':
                         brace_count += 1
                     elif c == '}':
@@ -115,27 +126,46 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
                 continue
             else:
                 result.append(buffer)
-                result.append("{")
+                result.append(char)
                 buffer = ""
                 i += 1
-        elif char == '}':
+        elif structural[i] == '}':
             result.append(buffer)
-            result.append("}")
+            result.append(char)
             buffer = ""
             i += 1
         else:
             buffer += char
             i += 1
-            
+
     if buffer:
         result.append(buffer)
-        
+
     return "".join(result)
 
 
 def estimate_tokens(text: str) -> int:
-    """Estimates the number of tokens in a string using word heuristics (~1.3 tokens per word)."""
-    return int(len(text.split()) * 1.3)
+    """Estimates the number of tokens in a string.
+
+    A whitespace-split word count (~1.3 tokens/word) systematically
+    undercounts real BPE tokenization for dotted/punctuation-heavy
+    identifiers common in code (2026-08-12 SME review) - a long Java import
+    statement like `import com.example.very.long.package.ClassName;` splits
+    into only 2 "words" by whitespace, but a real tokenizer splits on
+    punctuation too (dots, semicolons, camelCase boundaries), producing far
+    more actual tokens - undermining the context budget allocator this
+    function directly feeds (see _reserve_graph_context_budget's own
+    docstring for a real 2026-08-07 incident from exactly this class of
+    under-reservation).
+
+    A character-count heuristic (~4 chars/token, the standard rule-of-thumb
+    approximation for English-like BPE tokenizers) is punctuation-agnostic -
+    it doesn't rely on whitespace at all, so it degrades gracefully for
+    code instead of specifically failing on it, while staying close to the
+    old word-based estimate for ordinary prose (average English word ~4.7
+    chars + a space ~= 5.7 chars * ~1.3 tokens/word ~= 1 token per ~4.4
+    chars - almost the same ratio)."""
+    return max(1, len(text) // 4) if text else 0
 
 
 # Floor for build_code_context()'s own budget after skills_prompt/learned_rag_context

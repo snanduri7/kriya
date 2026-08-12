@@ -81,6 +81,31 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
     return resolved
 
 
+# Cheap proxy for "this candidate has real content, not just a thin
+# landing/index page" - see _augment_error_with_live_lookup's own docstring
+# for why this can't just call the LLM-based extraction judgment
+# (_extract_first_usable) uses elsewhere.
+_MIN_USABLE_LOOKUP_TEXT_CHARS = 200
+
+
+def _first_usable_lookup_candidate(candidates: List[Dict[str, str]]) -> Dict[str, str]:
+    """Picks the first candidate whose fetched text looks like real content
+    rather than blindly using candidates[0] - the exact "landing-page
+    problem" _resolve_via_web_lookup's own docstring documents finding live
+    (a marketing/index page with nothing concrete to extract) is precisely
+    why multiple candidates get fetched per term in the first place, but the
+    caller here previously never looked past the first one regardless of
+    whether it was actually useful. Falls back to candidates[0] if none
+    clear the bar, so a term with only thin candidates still gets SOMETHING
+    rather than nothing - this is a cheap length heuristic, not an LLM
+    judgment call, matching this function's own deliberate avoidance of a
+    slow extraction round-trip."""
+    for candidate in candidates:
+        if len(candidate.get("text", "").strip()) >= _MIN_USABLE_LOOKUP_TEXT_CHARS:
+            return candidate
+    return candidates[0]
+
+
 async def _augment_error_with_live_lookup(
     error_text: str, terms: List[str], search_base_url: str, top_k: int
 ) -> str:
@@ -100,13 +125,14 @@ async def _augment_error_with_live_lookup(
 
     augmented = error_text
     for item in found:
-        snippet = item["candidates"][0]["text"][:2000]
+        candidate = _first_usable_lookup_candidate(item["candidates"])
+        snippet = candidate["text"][:2000]
         augmented += (
-            f"\n\n=== Reference material found for '{item['term']}' (from {item['url']}) - "
+            f"\n\n=== Reference material found for '{item['term']}' (from {candidate['url']}) - "
             "this repeated failure may be resolved by it, but verify before relying on it ===\n"
             f"{snippet}"
         )
-        logger.info(f"Live lookup found reference material for repeated failure term '{item['term']}' ({item['url']}).")
+        logger.info(f"Live lookup found reference material for repeated failure term '{item['term']}' ({candidate['url']}).")
     return augmented
 
 

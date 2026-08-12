@@ -1,6 +1,6 @@
 import inspect
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +30,21 @@ class EventSystem:
             logger.debug(f"Unsubscribed handler from event '{event_name}'")
 
     async def emit(self, event_name: str, data: Dict[str, Any]) -> None:
-        """Emit an event, notifying all subscribers. Handles both sync and async handlers."""
+        """Emit an event, notifying all subscribers. Handles both sync and async handlers.
+
+        Every subscribed handler runs regardless of an earlier one raising -
+        a broken handler previously stopped the loop outright (re-raised
+        immediately), silently skipping every handler registered after it
+        for the same event. Still raises afterward (the first exception
+        encountered) so a caller relying on emit() propagating a failure -
+        see test_event_handler_errors - keeps seeing one; this only fixes
+        fault ISOLATION between handlers, not whether emit() can raise at all."""
         event_name = event_name.lower()
         handlers = self._handlers.get(event_name, [])
         if not handlers:
             return
 
+        first_exception: Optional[Exception] = None
         for handler in handlers:
             try:
                 if inspect.iscoroutinefunction(handler):
@@ -44,4 +53,7 @@ class EventSystem:
                     handler(data)
             except Exception as e:
                 logger.error(f"Error in event handler for '{event_name}': {e}", exc_info=True)
-                raise e
+                if first_exception is None:
+                    first_exception = e
+        if first_exception is not None:
+            raise first_exception

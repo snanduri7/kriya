@@ -147,10 +147,25 @@ class JdtlsClient:
             if self._reader_task:
                 self._reader_task.cancel()
             if self.process:
+                # SIGTERM alone, with no wait/confirmation and no SIGKILL
+                # fallback, is the same leaked-orphan-subprocess bug class
+                # already fixed for validate.py's _run_cmd_with_timeout() -
+                # jdtls not honoring SIGTERM promptly would otherwise leave
+                # an orphan process (and its temp data dir) behind across
+                # separate generation runs.
                 try:
                     self.process.terminate()
-                except Exception:
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    try:
+                        self.process.kill()
+                        await self.process.wait()
+                    except ProcessLookupError:
+                        pass
+                except ProcessLookupError:
                     pass
+                except Exception as ex:
+                    logger.debug(f"jdtls process termination failed: {ex}")
             if self._data_dir:
                 shutil.rmtree(self._data_dir, ignore_errors=True)
 
@@ -158,6 +173,19 @@ class JdtlsClient:
         while True:
             try:
                 message = await self._read_message()
+            except (ValueError, json.JSONDecodeError) as ex:
+                # A malformed Content-Length header or invalid JSON body means
+                # message framing is lost - there's no safe way to resync a
+                # raw stdio LSP stream, so this genuinely ends grounding for
+                # the rest of the run. WARNING (not DEBUG), matching the
+                # project's own established pattern for an optional feature's
+                # failure path (toolchain/skill warnings) - a DEBUG-only line
+                # would let this end silently with no operator visibility.
+                logger.warning(
+                    f"jdtls sent a malformed message (bad Content-Length header or invalid JSON) - "
+                    f"LSP grounding is now disabled for the rest of this run: {ex}"
+                )
+                break
             except Exception as ex:
                 logger.debug(f"jdtls read loop stopped: {ex}")
                 break
@@ -211,7 +239,14 @@ class JdtlsClient:
         self._write_message({"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params})
         if self.process and self.process.stdin:
             await self.process.stdin.drain()
-        return await asyncio.wait_for(fut, timeout=timeout)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            # A timed-out request's future was never popped by _read_loop
+            # (its response, if it ever arrives, is now unwanted) - without
+            # this, self._pending grows for the rest of the client's
+            # lifetime on every timeout.
+            self._pending.pop(msg_id, None)
 
     def _notify(self, method: str, params: Dict[str, Any]) -> None:
         self._write_message({"jsonrpc": "2.0", "method": method, "params": params})

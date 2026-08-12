@@ -120,10 +120,27 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
         pkg_match = re.search(r"package\s+([\w\.]+);", content)
         package = pkg_match.group(1) if pkg_match else "default"
         
+        # Local import: kriya.workflow's package __init__ pulls in
+        # workflow.py, which itself imports RepositoryAnalyzer from this
+        # module - a module-level import here would be a circular import
+        # (analyzer.py -> kriya.workflow -> workflow.py -> analyzer.py,
+        # mid-initialization). Deferred to first actual use instead, by
+        # which point both modules are fully loaded.
+        from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+
         lines = content.splitlines()
+        # Comment/string-stripped mirror (same line count, same length per
+        # line - _strip_java_comments_and_strings() blanks comment/string
+        # spans to whitespace rather than deleting them) used ONLY for the
+        # brace-counting below, so a '{'/'}' inside a Java string literal or
+        # // or /* */ comment doesn't miscount and truncate or merge method
+        # body chunks - the exact bug class edit_safety.py's own
+        # _strip_java_comments_and_strings() was built to avoid, not
+        # previously extended to this call site (2026-08-12 SME review).
+        brace_count_lines = _strip_java_comments_and_strings(content).splitlines()
         current_class = ""
         current_class_javadoc = ""
-        
+
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -163,7 +180,7 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
                     while i < len(lines) and brace_count > 0:
                         line = lines[i]
                         method_lines.append(line)
-                        brace_count += line.count("{") - line.count("}")
+                        brace_count += brace_count_lines[i].count("{") - brace_count_lines[i].count("}")
                         i += 1
                         
                     header = f"File: {rel_path}\nPackage: {package}\nClass: {current_class}\nClass Javadoc: {current_class_javadoc}\nMethod: {method_name}\n=== Method Body ===\n"

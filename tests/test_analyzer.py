@@ -99,6 +99,29 @@ def test_analyzer_excludes_kriyas_own_reserved_directories(tmp_path):
 
     assert model.project_structure["top_level_folders"] == ["myapp"]
 
+def test_chunk_file_with_metadata_headers_java_ignores_braces_inside_string_literals():
+    """Regression test for a finding from the 2026-08-12 SME review: the
+    Java method-body brace counter was line.count("{")/line.count("}") with
+    no comment/string awareness, so a brace character INSIDE a string
+    literal (or comment) miscounted and could end a method chunk too early,
+    truncating the rest of the real method body."""
+    from kriya.analyzer.analyzer import chunk_file_with_metadata_headers
+
+    content = (
+        "package com.example;\n\n"
+        "public class Foo {\n"
+        "    public void bar() {\n"
+        '        String s = "unexpected } brace";\n'
+        "        int x = 1;\n"
+        "    }\n"
+        "}\n"
+    )
+    chunks = chunk_file_with_metadata_headers(content, "Foo.java")
+    method_chunks = [c for c in chunks if "Method: bar" in c["text"]]
+    assert len(method_chunks) == 1
+    assert "int x = 1;" in method_chunks[0]["text"]
+
+
 def test_chunk_file_syntactically():
     from kriya.analyzer.analyzer import chunk_file_syntactically
     

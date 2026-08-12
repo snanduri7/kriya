@@ -182,9 +182,10 @@ def test_review_multiple_files_over_budget_splits_into_batches(tmp_path):
     to multiple separate review calls (each within budget) rather than either
     silently truncating the combined prompt or crashing - every file must
     actually reach the model in some call, clearly labeled which batch."""
-    (tmp_path / "kriya.yaml").write_text("llm:\n  context_window: 500\n")
-    # ~30 lines / ~150 words / ~195 estimated tokens each - comfortably under
-    # the 375-token budget alone, but two of them combined (~390) exceed it.
+    (tmp_path / "kriya.yaml").write_text("llm:\n  context_window: 310\n")
+    # ~30 lines, one file's wrapped review blob estimates to ~157 tokens -
+    # comfortably under the 232-token budget (0.75 * 310) alone, but two of
+    # them combined (~314) exceed it.
     padding = "\n".join(f"x_{i} = {i}  # padding" for i in range(30))
     (tmp_path / "a.py").write_text(padding)
     (tmp_path / "b.py").write_text(padding.replace("x_", "y_"))

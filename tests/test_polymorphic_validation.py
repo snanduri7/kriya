@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import time
 from unittest.mock import MagicMock, patch
@@ -136,6 +137,37 @@ def test_run_app_timeout_kills_child_processes_too(tmp_path):
     time.sleep(1.0)
     size_later = heartbeat.stat().st_size if heartbeat.exists() else 0
     assert size_after_kill == size_later, "child process kept running after the timed-out parent was killed"
+
+
+def test_run_app_timeout_does_not_hang_forever_if_sigkill_cannot_reap_the_process():
+    """Regression test for a finding from the 2026-08-12 SME review: the
+    post-SIGKILL process.communicate() call (to reap the process and collect
+    whatever output exists) previously had no timeout of its own - a child
+    stuck in an uninterruptible I/O sleep (D-state, real under slow/
+    networked storage) can't be reaped even by SIGKILL until that I/O
+    completes, so this call could hang indefinitely, defeating the whole
+    point of the surrounding timeout. Not reproducible with a real
+    subprocess (SIGKILL always succeeds immediately for an ordinary
+    process), so this mocks subprocess.Popen directly to simulate a second
+    (reap) timeout after the first."""
+    validator = PolymorphicValidator("/fake/workspace")
+
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.communicate.side_effect = [
+        subprocess.TimeoutExpired(cmd=["sleep", "999"], timeout=1),
+        subprocess.TimeoutExpired(cmd=["sleep", "999"], timeout=10, output="partial stdout", stderr="partial stderr"),
+    ]
+
+    with patch("subprocess.Popen", return_value=mock_process), \
+         patch("os.killpg"), patch("os.getpgid", return_value=12345):
+        res = validator._run_cmd_with_timeout(["sleep", "999"], cwd="/fake/workspace", timeout=1)
+
+    assert res["timeout"] is True
+    assert res["stdout"] == "partial stdout"
+    assert "REAP TIMEOUT" in res["stderr"]
+    assert "partial stderr" in res["stderr"]
+    assert mock_process.communicate.call_count == 2
 
 def test_run_app_no_command():
     validator = PolymorphicValidator(".")

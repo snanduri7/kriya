@@ -5396,6 +5396,50 @@ async def test_augment_error_with_live_lookup_nothing_found_returns_unchanged():
 
 
 @pytest.mark.asyncio
+async def test_augment_error_with_live_lookup_skips_a_thin_landing_page_candidate():
+    """Regression test for a finding from the 2026-08-12 SME review: this
+    function always used candidates[0]'s text, even though
+    _resolve_via_web_lookup fetches MULTIPLE candidates per term specifically
+    to survive an unhelpful top result (the "landing-page problem" its own
+    docstring documents) - the sibling skill-gap lookup path already tries
+    each candidate in turn (_extract_first_usable), this one never did."""
+    found = [
+        {"url": "https://example.com/landing", "snippet": "..."},
+        {"url": "https://example.com/real-example", "snippet": "..."},
+    ]
+
+    async def fake_fetch(url):
+        if url == "https://example.com/landing":
+            return "Welcome to our project."  # thin, below the usable threshold
+        return "Full working example: " + ("x" * 300)
+
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)), \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(side_effect=fake_fetch)):
+        result = await _augment_error_with_live_lookup(
+            "COMPILATION FAILURE: ...", ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
+        )
+
+    assert "https://example.com/real-example" in result
+    assert "Full working example" in result
+    assert "Welcome to our project." not in result
+
+
+@pytest.mark.asyncio
+async def test_augment_error_with_live_lookup_falls_back_to_first_candidate_when_none_are_usable():
+    found = [
+        {"url": "https://example.com/thin1", "snippet": "..."},
+        {"url": "https://example.com/thin2", "snippet": "..."},
+    ]
+    with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)), \
+         patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="too short")):
+        result = await _augment_error_with_live_lookup(
+            "some error", ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
+        )
+    assert "https://example.com/thin1" in result
+    assert "too short" in result
+
+
+@pytest.mark.asyncio
 async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(tmp_path):
     """A compile failure that repeats identically across two consecutive Developer
     retry attempts (the model isn't self-correcting) should trigger live lookup,
@@ -6280,6 +6324,61 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
     assert unaddressed[0]["likely_files"] == ["App.java"]
     assert unaddressed[0]["file_locations"] == [{"filepath": "App.java", "line": 2, "col": None}]
     assert unaddressed[0]["success"] is False
+
+
+def test_estimate_tokens_no_longer_undercounts_punctuation_heavy_identifiers():
+    """Regression test for a finding from the 2026-08-12 SME review: the old
+    whitespace-split word heuristic (~1.3 tokens/word) treated a long dotted
+    Java import as roughly 2 "words" regardless of how many real tokens a
+    BPE tokenizer would actually split it into, systematically undercounting
+    the exact class of text that feeds this budget allocator."""
+    java_import = "import com.example.very.long.package.path.SomeReallyLongClassName;"
+    old_word_based_estimate = int(len(java_import.split()) * 1.3)  # what it used to return
+    assert estimate_tokens(java_import) > old_word_based_estimate * 2
+
+
+def test_estimate_tokens_stays_close_to_the_old_estimate_for_ordinary_prose():
+    # The new character-based heuristic shouldn't wildly change behavior for
+    # normal prose (skills text, error messages) - only fix the code/
+    # punctuation-heavy undercount.
+    prose = "The quick brown fox jumps over the lazy dog near the riverbank today"
+    old_estimate = int(len(prose.split()) * 1.3)
+    new_estimate = estimate_tokens(prose)
+    assert abs(new_estimate - old_estimate) <= max(3, old_estimate * 0.25)
+
+
+def test_estimate_tokens_empty_string_is_zero():
+    assert estimate_tokens("") == 0
+
+
+def test_skeletonize_braced_code_ignores_braces_inside_string_literals():
+    """Regression test for a finding from the 2026-08-12 SME review: neither
+    analyzer.py's Java chunker (see test_analyzer.py's sibling regression
+    test) nor this function were comment/string-literal-aware when brace-
+    counting - a '{' or '}' inside a Java string literal or line comment
+    miscounted and could truncate or merge skeleton boundaries, the exact
+    bug class edit_safety.py's _strip_java_comments_and_strings() was
+    specifically built to avoid."""
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = (
+        "public class Foo {\n"
+        '    public void bar() { String s = "unexpected } brace"; int x = 1; }\n'
+        "    public void baz() { int y = 2; }\n"
+        "}\n"
+    )
+    skeleton = skeletonize_braced_code(content, "skeleton")
+    # Both method bodies collapsed cleanly - the embedded '}' inside bar()'s
+    # string must not have been mistaken for its real closing brace. Pre-fix,
+    # that premature stop left a garbled leftover fragment of bar()'s own
+    # body (everything after the embedded '}') spliced in front of baz()'s
+    # signature instead of being fully collapsed away.
+    assert skeleton == (
+        "public class Foo {\n"
+        "    public void bar()  { ... }\n"
+        "    public void baz()  { ... }\n"
+        "}\n"
+    )
 
 
 def test_reserve_graph_context_budget_subtracts_unbounded_text_size():
