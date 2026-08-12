@@ -9,4 +9,7 @@ tags:
 - little-endian
 - binary protocol
 - byte-level protocol
-verification_gap_acknowledged: true
+verification_gap_acknowledged: false
+verified: true
+verified_at: '2026-08-12'
+verified_context: version unspecified
