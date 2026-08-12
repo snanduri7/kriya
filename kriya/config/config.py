@@ -83,6 +83,18 @@ class AutonomyConfig(BaseModel):
     # firing it anyway and silently discarding the result. Set True only if you've
     # accepted unattended outbound search as part of your threat model.
     web_lookup_auto_approve: bool = Field(default=False)
+    # Off by default for the same reason as web_lookup_enabled above: this activates
+    # a genuinely new capability (the Developer's own model gets a bounded native
+    # tool-calling loop against the sandbox worktree on a compile failure, before
+    # falling back to today's full-regeneration retry) rather than tuning an existing
+    # one. Native tool-calling is confirmed reliable only for SMALL tool-call
+    # arguments on local models (spikes/tool_call_developer/README.md) - the loop's
+    # toolset (kriya/workflow/self_correction.py) is deliberately restricted to
+    # small-argument-only actions on files already in the sandbox, never full file
+    # content and never a new file, so this stays a narrow, additive recovery path,
+    # not a parallel generation architecture.
+    self_correction_loop_enabled: bool = Field(default=False)
+    self_correction_loop_max_turns: int = Field(default=4)
 
 class SearchConfig(BaseModel):
     # Empty by default - live lookup stays fully inert unless a project explicitly

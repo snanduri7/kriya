@@ -659,18 +659,62 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
 
         compile_res = validator.run_compile_check(list(state.all_files_written))
         if not compile_res["success"]:
-            failure = _build_quality_gate_failure(
-                "compile", f"COMPILATION FAILURE:\n{compile_res['output']}",
-                compile_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
-            )
-            state.gate_outcomes.append(failure.to_gate_outcome())
-            raise QualityGateFailure(failure)
-        state.gate_outcomes.append({
-            "attempt": state.attempt_number,
-            "type": "compile",
-            "success": True,
-            "output": compile_res.get("output", "")
-        })
+            self_correction_result = None
+            if ctx.kernel.config.autonomy.self_correction_loop_enabled:
+                from kriya.workflow.self_correction import run_self_correction_loop
+                logger.info(
+                    "Compile gate failed - attempting bounded self-correction "
+                    "micro-loop before raising QualityGateFailure."
+                )
+                self_correction_result = await run_self_correction_loop(
+                    llm=ctx.developer.llm,
+                    worktree_path=ctx.worktree_path,
+                    validator=validator,
+                    files_in_scope=list(state.all_files_written),
+                    compile_error_output=compile_res["output"],
+                    active_code_context=active_code_context,
+                    max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                )
+
+            if self_correction_result and self_correction_result.resolved:
+                logger.info(
+                    "Self-correction micro-loop resolved the compile failure in "
+                    f"{self_correction_result.turns_used} turn(s)."
+                )
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "compile",
+                    "success": True,
+                    "output": self_correction_result.final_compile_output,
+                    "self_corrected": True,
+                    "self_correction_turns": self_correction_result.turns_used,
+                    "self_correction_transcript": self_correction_result.transcript,
+                })
+            else:
+                failure = _build_quality_gate_failure(
+                    "compile", f"COMPILATION FAILURE:\n{compile_res['output']}",
+                    compile_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                )
+                if self_correction_result is not None:
+                    # The loop ran but didn't resolve it within budget - persist
+                    # what it tried (its transcript) instead of silently
+                    # discarding it, so a real exhaustion is diagnosable from
+                    # gate_outcomes/traces.db afterward rather than only visible
+                    # in the process's own (possibly-rotated) log file.
+                    failure.self_correction_attempt = {
+                        "turns_used": self_correction_result.turns_used,
+                        "transcript": self_correction_result.transcript,
+                        "final_compile_output": self_correction_result.final_compile_output,
+                    }
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+        else:
+            state.gate_outcomes.append({
+                "attempt": state.attempt_number,
+                "type": "compile",
+                "success": True,
+                "output": compile_res.get("output", "")
+            })
 
         target_test = extract_target_test(state.error_context, list(state.all_files_written))
         if target_test:
@@ -912,7 +956,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         "attempt": state.attempt_number,
                         "type": "run_verification",
                         "success": True,
-                        "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
+                        "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
+                        # Only reachable via the clean-run branch above (the timed-out
+                        # branch always forces grade["passed"] = False, so it can never
+                        # reach here) - contract_verdict is guaranteed in scope. Makes
+                        # deterministic-contract-vs-LLM-grader compliance queryable
+                        # directly from traces.db instead of grepping raw stdout logs by
+                        # hand, which is what diagnosing the underlying reliability gap
+                        # required this session, repeatedly.
+                        "graded_by": "contract" if contract_verdict is not None else "llm",
                     })
                     logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
                     # A passing real-world run is exactly the proof the

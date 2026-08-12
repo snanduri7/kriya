@@ -22,6 +22,7 @@ def test_failure_to_gate_outcome_shape():
         "file_locations": [{"filepath": "App.java", "line": 12, "col": None}],
         "failed_content": {},
         "attempted_edits": [],
+        "self_correction_attempt": None,
     }
 
 
