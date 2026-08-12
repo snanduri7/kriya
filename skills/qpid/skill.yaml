@@ -13,4 +13,4 @@ tags:
 verification_gap_acknowledged: false
 verified: true
 verified_at: '2026-08-12'
-verified_context: org.apache.qpid:qpid-broker-core unspecified
+verified_context: version unspecified
