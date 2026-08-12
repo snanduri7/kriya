@@ -773,6 +773,30 @@ async def test_fill_missing_content_prompt_includes_incompatible_types_scaffold(
     assert '"java.lang.Object" cannot be converted to "com.example.Person"' in file_prompt
     assert "explicit cast" in file_prompt
 
+@pytest.mark.asyncio
+async def test_fill_missing_content_repeats_verification_contract_reminder_at_end():
+    """Regression test for a real compliance gap found live this session:
+    VERIFICATION_CONTRACT_HEADER reaches the prompt (folded into
+    task_description, near the top) but two real eval-harness runs whose
+    goal was exactly the shape it describes still produced zero
+    "[VERIFICATION]" markers - the instruction was stated once, early, then
+    buried under everything the prompt adds after it. Same failure shape the
+    "only this file" instruction already solved by being repeated at the very
+    end, right before generation - this reminder must land there too, after
+    the "only this file" line."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+    )
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    only_this_file_pos = file_prompt.index("Return ONLY the content of")
+    reminder_pos = file_prompt.index("[VERIFICATION] PASS")
+    assert reminder_pos > only_this_file_pos
+
 def test_build_buffer_capacity_scaffold_names_overflow_direction():
     """Regression test for a real bug found live, 2026-08-08
     (ignite_qpid_protocol): the model's own FIX ANALYSIS correctly diagnosed

@@ -944,14 +944,24 @@ class DeveloperAgent(BaseAgent):
             # The "only this file" instruction is repeated at the very end, right before
             # generation starts, not just in the system prompt - confirmed live as necessary:
             # a reasoning model that had it only once (system prompt) still concatenated a
-            # sibling file's full content into this file's response.
+            # sibling file's full content into this file's response. The verification-contract
+            # reminder right after it follows the exact same precedent: VERIFICATION_CONTRACT_HEADER
+            # (folded into task_description above, near the TOP of this prompt) was confirmed live
+            # this session to reach attempt 1's prompt correctly but still not get reliably followed -
+            # two real eval-harness runs whose captured output was grepped directly showed zero
+            # "[VERIFICATION]" markers despite the goal being exactly the shape the header describes
+            # (a round-trip encode/decode). A single early mention buried under everything the prompt
+            # adds after it is the same failure shape the "only this file" fix above already solved.
             file_prompt = (
                 f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
                 f"=== Architecture Design ===\n{design_context}\n\n"
                 f"=== Task ===\n{task_description}\n\n"
                 f"{sibling_section}"
                 f"Please generate the complete, correct, and production-grade file content for: '{filepath}'\n"
-                f"Return ONLY the content of '{filepath}' - nothing before it, nothing after it, no other file."
+                f"Return ONLY the content of '{filepath}' - nothing before it, nothing after it, no other file.\n"
+                "Reminder: per the Verification Contract above, if this file is (or contains) the "
+                "entrypoint and the goal describes a checkable runtime outcome, it must end by printing "
+                "\"[VERIFICATION] PASS\" or \"[VERIFICATION] FAIL: <reason>\"."
                 f"{source_context_block}"
                 f"{fix_analysis_instruction}"
             )

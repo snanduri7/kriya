@@ -956,7 +956,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         "attempt": state.attempt_number,
                         "type": "run_verification",
                         "success": True,
-                        "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
+                        "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
+                        # Only reachable via the clean-run branch above (the timed-out
+                        # branch always forces grade["passed"] = False, so it can never
+                        # reach here) - contract_verdict is guaranteed in scope. Makes
+                        # deterministic-contract-vs-LLM-grader compliance queryable
+                        # directly from traces.db instead of grepping raw stdout logs by
+                        # hand, which is what diagnosing the underlying reliability gap
+                        # required this session, repeatedly.
+                        "graded_by": "contract" if contract_verdict is not None else "llm",
                     })
                     logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
                     # A passing real-world run is exactly the proof the

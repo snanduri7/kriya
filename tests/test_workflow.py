@@ -2165,6 +2165,117 @@ async def test_workflow_verification_contract_marker_skips_llm_grade_on_pass(tmp
     assert res["quality_gates_passed"] is True
 
 @pytest.mark.asyncio
+async def test_workflow_run_verification_gate_outcome_records_graded_by_contract(tmp_path):
+    """Companion to the marker-skips-llm-grade test above: the persisted
+    gate_outcome must record HOW a run_verification pass was decided, not just
+    that it passed - added so a future eval-harness batch can query
+    graded_by's distribution across many runs directly from traces.db instead
+    of grepping raw stdout logs by hand for "[VERIFICATION]", which is what
+    diagnosing the underlying grader-reliability gap required this session."""
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints a [VERIFICATION] verdict line",
+    })
+    we.run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("grade() must not be called when the verification-contract marker is present")
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should self-verify",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    rv_outcome = next(g for g in gate_outcomes if g["type"] == "run_verification")
+    assert rv_outcome["graded_by"] == "contract"
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_gate_outcome_records_graded_by_llm(tmp_path):
+    """Sibling to the contract test above: when no marker is present, grade()
+    IS called and the gate_outcome must record graded_by="llm" - confirms the
+    field reflects which path actually decided the outcome, not a hardcoded
+    value."""
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints hi",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "Printed hi as expected."})
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "hi\n"},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should print hi",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    we.run_verifier.grade.assert_called_once()
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    rv_outcome = next(g for g in gate_outcomes if g["type"] == "run_verification")
+    assert rv_outcome["graded_by"] == "llm"
+
+@pytest.mark.asyncio
 async def test_workflow_verification_contract_marker_skips_llm_grade_on_fail(tmp_path):
     """Same deterministic short-circuit for a FAIL marker: the run_verification gate
     must fail using the marker's own reason text, still without ever invoking
