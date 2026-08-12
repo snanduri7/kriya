@@ -277,6 +277,13 @@ class RepositoryModel(BaseModel):
     frameworks: List[str] = Field(default_factory=list, description="Detected frameworks.")
     architecture: str = Field(default="Unknown", description="Inferred codebase architecture style.")
     dependencies: List[str] = Field(default_factory=list, description="Key discovered project dependencies.")
+    dependency_versions: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Best-effort exact version string per dependency name, where the manifest format carries one "
+                     "(requirements.txt pins, package.json, pom.xml <version>, build.gradle 'group:artifact:version'). "
+                     "May be a range lower-bound or an unresolved Maven property reference rather than a fully-"
+                     "resolved pin - downstream consumers should treat this as a hint, not a guarantee."
+    )
     testing_frameworks: List[str] = Field(default_factory=list, description="Testing framework identifiers.")
     project_structure: Dict[str, Any] = Field(default_factory=dict, description="Basic folder structure hierarchy.")
     coding_style: Dict[str, Any] = Field(default_factory=dict, description="Detected coding style metrics.")
@@ -402,6 +409,7 @@ class RepositoryAnalyzer:
         frameworks = set()
         dependencies = set()
         testing = set()
+        dependency_versions: Dict[str, str] = {}
 
         # Python requirement checks
         pyproject_path = os.path.join(self.root_path, "pyproject.toml")
@@ -444,6 +452,12 @@ class RepositoryAnalyzer:
                         # Remove version specifiers
                         pkg = re.split(r"[=<>]", line)[0].strip()
                         dependencies.add(pkg)
+                        # Also keep the pin/bound itself where the line carries one
+                        # (e.g. "ignite-core==2.18.0" or "requests>=2.28,<3.0") - best-
+                        # effort, may be a range lower-bound rather than an exact pin.
+                        ver_match = re.match(r"^[A-Za-z0-9_.\-]+\s*(?:==|>=|<=|~=|!=|>|<)\s*([A-Za-z0-9_.\-]+)", line)
+                        if ver_match:
+                            dependency_versions[pkg] = ver_match.group(1).strip()
             except Exception as e:
                 logger.debug(f"Failed to parse '{req_path}': {e}")
 
@@ -454,8 +468,10 @@ class RepositoryAnalyzer:
                 with open(package_json_path, "r", errors="replace") as f:
                     data = json.load(f)
                     all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
-                    for dep in all_deps.keys():
+                    for dep, ver in all_deps.items():
                         dependencies.add(dep)
+                        if isinstance(ver, str) and ver.strip():
+                            dependency_versions[dep] = ver.strip()
             except Exception as e:
                 logger.debug(f"Failed to parse '{package_json_path}': {e}")
 
@@ -496,6 +512,14 @@ class RepositoryAnalyzer:
                     deps = re.findall(r"<artifactId>([^<]+)</artifactId>", content)
                     for d in deps:
                         dependencies.add(d.strip())
+                    # Pair each <dependency> block's artifactId with its own <version>
+                    # (may be an unresolved ${property} reference rather than a literal
+                    # pin - best-effort, same caveat as everywhere else in this method).
+                    for block in re.findall(r"<dependency>(.*?)</dependency>", content, re.DOTALL):
+                        artifact_match = re.search(r"<artifactId>([^<]+)</artifactId>", block)
+                        version_match = re.search(r"<version>([^<]+)</version>", block)
+                        if artifact_match and version_match:
+                            dependency_versions[artifact_match.group(1).strip()] = version_match.group(1).strip()
             except Exception as e:
                 logger.debug(f"Failed to parse '{pom_path}': {e}")
 
@@ -510,6 +534,16 @@ class RepositoryAnalyzer:
                     deps = re.findall(r"(?:implementation|compileOnly|runtimeOnly|testImplementation)\s+['\"](?:[^:]+:)?([^:']+)['\"]", content)
                     for d in deps:
                         dependencies.add(d.strip())
+                    # Separately capture full group:artifact:version triples for the version map -
+                    # the regex above only keeps the last colon-delimited segment, which is the
+                    # version itself when a triple is given, not the artifact id, so it can't be
+                    # reused for this without changing existing dependency-name behavior.
+                    triples = re.findall(
+                        r"(?:implementation|compileOnly|runtimeOnly|testImplementation)\s+['\"]([^:'\"]+):([^:'\"]+):([^'\"]+)['\"]",
+                        content,
+                    )
+                    for _group, artifact, version in triples:
+                        dependency_versions[artifact.strip()] = version.strip()
                     if "spring-boot" in content:
                         frameworks.add("Spring Boot")
                     if "junit" in content:
@@ -529,6 +563,7 @@ class RepositoryAnalyzer:
 
         model.frameworks = sorted(list(frameworks))
         model.dependencies = sorted(list(dependencies))
+        model.dependency_versions = dependency_versions
         model.testing_frameworks = sorted(list(testing))
 
     def _detect_architecture(self, model: RepositoryModel, directories: set) -> None:

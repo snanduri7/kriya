@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 from pydantic import BaseModel, Field
 
+from kriya.analyzer.analyzer import RepositoryModel
+
 logger = logging.getLogger(__name__)
 
 def get_global_skills_dir() -> str:
@@ -278,6 +280,21 @@ def is_version_supported(ver_str: str, range_str: str) -> bool:
             if version >= cond_ver:
                 return False
     return True
+
+
+def fact_match(skill: "Skill", repo_model: RepositoryModel) -> bool:
+    """Does any of this skill's tags substring-match a dependency or framework the
+    repo analyzer actually found in the target repo? Extracted from the inline check
+    that used to live only in kriya/workflow/workflow.py's skill-activation loop, so
+    other consumers (e.g. the repo-manifest knowledge channel) share one implementation
+    instead of a second copy that could silently drift from it."""
+    for tag in skill.tags:
+        tag_lower = tag.lower()
+        if any(tag_lower in dep.lower() for dep in repo_model.dependencies):
+            return True
+        if any(tag_lower in f.lower() for f in repo_model.frameworks):
+            return True
+    return False
 
 class Skill(BaseModel):
     name: str = Field(description="Name of the skill.")

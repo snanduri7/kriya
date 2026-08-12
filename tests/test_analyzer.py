@@ -23,6 +23,53 @@ def test_analyzer_python_project(tmp_path):
     assert model.languages == {"Python": 100.0}
     assert "FastAPI" in model.frameworks
     assert "pytest" in model.testing_frameworks
+
+
+def test_analyzer_captures_dependency_versions_across_manifest_formats(tmp_path):
+    """dependency_versions is additive - requirements.txt/package.json/pom.xml/
+    build.gradle all already parsed versions and threw them away before this field
+    existed; this locks in that they're now captured without changing the existing
+    name-only `dependencies` field's behavior."""
+    project_dir = tmp_path / "multi_manifest_project"
+    project_dir.mkdir()
+
+    (project_dir / "requirements.txt").write_text("requests>=2.28,<3.0\npytest==7.4.0\n")
+    (project_dir / "package.json").write_text('{"dependencies": {"react": "^18.2.0"}}')
+    (project_dir / "pom.xml").write_text(
+        "<project><dependencies>"
+        "<dependency><groupId>org.apache.ignite</groupId><artifactId>ignite-core</artifactId>"
+        "<version>2.18.0</version></dependency>"
+        "</dependencies></project>"
+    )
+    (project_dir / "build.gradle").write_text(
+        "dependencies { implementation 'org.apache.qpid:qpid-jms-client:1.9.0' }"
+    )
+
+    analyzer = RepositoryAnalyzer(str(project_dir))
+    model = analyzer.analyze()
+
+    # dependencies (name-only) is untouched, existing behavior - note its pre-existing
+    # build.gradle regex never matched a 3-part 'group:artifact:version' coordinate at
+    # all (confirmed separately), so qpid-jms-client legitimately isn't in this set;
+    # dependency_versions uses its own, more precise triple-capturing regex below.
+    assert set(model.dependencies) >= {"requests", "pytest", "react", "ignite-core"}
+    assert model.dependency_versions["requests"] == "2.28"
+    assert model.dependency_versions["pytest"] == "7.4.0"
+    assert model.dependency_versions["react"] == "^18.2.0"
+    assert model.dependency_versions["ignite-core"] == "2.18.0"
+    assert model.dependency_versions["qpid-jms-client"] == "1.9.0"
+
+
+def test_analyzer_dependency_versions_empty_when_no_version_present(tmp_path):
+    project_dir = tmp_path / "bare_requirements_project"
+    project_dir.mkdir()
+    (project_dir / "requirements.txt").write_text("requests\n")
+
+    analyzer = RepositoryAnalyzer(str(project_dir))
+    model = analyzer.analyze()
+
+    assert "requests" in model.dependencies
+    assert "requests" not in model.dependency_versions
     assert "Flat/Modular Package layout" in model.architecture or "Standard Source" in model.architecture
 
 def test_analyzer_node_project(tmp_path):

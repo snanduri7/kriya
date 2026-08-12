@@ -3,8 +3,9 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
+from kriya.analyzer.analyzer import RepositoryModel
 from kriya.cli import main
-from kriya.skills.skill import Skill, SkillEngine
+from kriya.skills.skill import Skill, SkillEngine, fact_match
 from kriya.workflow.skill_extraction import _skill_staleness_warning
 
 
@@ -515,4 +516,28 @@ def test_skills_show_flags_unverified_rules_individually(tmp_path):
     # The pre-existing rule's line must not be flagged - only the tracked one.
     existing_line = next(line for line in result.output.splitlines() if "Existing rule." in line)
     assert "[unverified]" not in existing_line
+
+
+def test_fact_match_true_on_dependency_substring():
+    skill = _make_skill(tags=["ignite", "qpid"])
+    repo_model = RepositoryModel(root_path="/tmp/proj", dependencies=["ignite-core"], frameworks=[])
+    assert fact_match(skill, repo_model) is True
+
+
+def test_fact_match_true_on_framework_substring():
+    skill = _make_skill(tags=["spring boot"])
+    repo_model = RepositoryModel(root_path="/tmp/proj", dependencies=[], frameworks=["Spring Boot"])
+    assert fact_match(skill, repo_model) is True
+
+
+def test_fact_match_false_when_no_tag_matches():
+    skill = _make_skill(tags=["django"])
+    repo_model = RepositoryModel(root_path="/tmp/proj", dependencies=["ignite-core"], frameworks=["Maven (Java)"])
+    assert fact_match(skill, repo_model) is False
+
+
+def test_fact_match_false_with_no_tags():
+    skill = _make_skill(tags=[])
+    repo_model = RepositoryModel(root_path="/tmp/proj", dependencies=["ignite-core"], frameworks=[])
+    assert fact_match(skill, repo_model) is False
 
