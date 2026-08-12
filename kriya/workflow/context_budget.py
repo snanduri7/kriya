@@ -12,6 +12,7 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
     result = []
     i = 0
     length = len(content)
-    method_sig_pattern = re.compile(r'(?:public|protected|private|static|\s)+[\w<>]+\s+\w+\s*\([^\)]*\)\s*$')
+    method_sig_pattern = re.compile(JAVA_METHOD_SIGNATURE_CORE + r'\s*$')
     # Comment/string-stripped mirror (same length - comment/string spans
     # blanked to whitespace, everything else untouched) used only to detect
     # REAL structural braces; `content` itself (unchanged) is what actually

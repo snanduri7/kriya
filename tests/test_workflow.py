@@ -6381,6 +6381,29 @@ def test_skeletonize_braced_code_ignores_braces_inside_string_literals():
     )
 
 
+def test_java_method_signature_core_pattern_is_shared_across_all_three_call_sites():
+    """Regression test for a finding from the 2026-08-12 SME review: the
+    same Java method-signature-matching regex was independently duplicated
+    three times (analyzer.py, graph.py, context_budget.py) - a fix to the
+    shared core (e.g. handling a generic return type) previously wouldn't
+    propagate to the other two. Confirms all three now compose their own
+    trailing-anchor variant on top of ONE shared JAVA_METHOD_SIGNATURE_CORE
+    constant, not just that each independently happens to still work."""
+    import re
+
+    from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
+    from kriya.analyzer.graph import JAVA_METHOD_SIGNATURE_CORE as graph_core
+    from kriya.workflow.context_budget import JAVA_METHOD_SIGNATURE_CORE as context_budget_core
+
+    assert graph_core is JAVA_METHOD_SIGNATURE_CORE
+    assert context_budget_core is JAVA_METHOD_SIGNATURE_CORE
+
+    signature = "public List<String> process(int id, String name)"
+    assert re.search(JAVA_METHOD_SIGNATURE_CORE + r"\s*\{", signature + " {").group(1) == "process"
+    assert re.match(JAVA_METHOD_SIGNATURE_CORE + r"\s*\{?", signature).group(1) == "process"
+    assert re.search(JAVA_METHOD_SIGNATURE_CORE + r"\s*$", signature)
+
+
 def test_reserve_graph_context_budget_subtracts_unbounded_text_size():
     """Regression test for a real live failure, 2026-08-07 (ignite_qpid_person):
     every retry path computed build_code_context()'s budget as a flat fraction

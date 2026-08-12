@@ -34,6 +34,16 @@ EXTENSION_MAP = {
     ".swift": "Swift"
 }
 
+# Shared core of a Java method signature (modifiers, return type, captured
+# method name, parameter list) - independently duplicated three times before
+# this (here, kriya/analyzer/graph.py, kriya/workflow/context_budget.py),
+# each with its own trailing-anchor variant (a literal "{", an optional
+# "{?", or "$" for end-of-buffer) - a fix to the shared core (e.g. handling
+# multi-line signatures or generic return types) previously wouldn't
+# propagate to the other two call sites at all (2026-08-12 SME review).
+# Each caller appends its own trailing anchor on top of this.
+JAVA_METHOD_SIGNATURE_CORE = r'(?:public|protected|private|static|\s)+[\w<>]+\s+(\w+)\s*\([^\)]*\)'
+
 def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[str, Any]]:
     _, ext = os.path.splitext(rel_path)
     ext = ext.lower()
@@ -168,7 +178,7 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
                 i += 1
                 continue
                 
-            method_match = re.search(r'(?:public|protected|private|static|\s)+[\w<>]+\s+(\w+)\s*\([^\)]*\)(?:\s+throws\s+[\w\s,]+)?\s*\{', line_strip)
+            method_match = re.search(JAVA_METHOD_SIGNATURE_CORE + r'(?:\s+throws\s+[\w\s,]+)?\s*\{', line_strip)
             if method_match and current_class:
                 method_name = method_match.group(1)
                 if method_name not in {"class", "interface", "enum", "if", "for", "while", "switch", "catch"}:
@@ -618,7 +628,21 @@ class RepositoryAnalyzer:
                 raise e
         
         # 2. Find target files (respecting nested gitignores and system ignore filters)
-        target_extensions = {".py", ".java", ".xml", ".rb"}
+        # RepositoryAnalyzer.analyze() already detects far more languages via
+        # EXTENSION_MAP (JS/TS/Go/Rust/C#/etc.), but this set previously only
+        # ever indexed 4 of them for Graph RAG - every other detected
+        # language was structurally a no-op for retrieval, embedded zero
+        # chunks regardless of how much of the repo was written in it
+        # (2026-08-12 SME review). chunk_file_with_metadata_headers() already
+        # falls back to generic syntactic chunking for any extension without
+        # a dedicated branch (only .py/.java/.xml get language-aware
+        # handling), so extending coverage here is a safe, mechanical
+        # expansion - not a chunking-quality regression for the newly-added
+        # extensions, just real embeddings instead of none at all. ".xml"
+        # is unioned in separately since chunk_file_with_metadata_headers()
+        # has dedicated Spring-bean-aware handling for it but EXTENSION_MAP
+        # itself doesn't track XML as a "language" at all.
+        target_extensions = set(EXTENSION_MAP.keys()) | {".xml"}
         
         files_to_index = []
         gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
@@ -656,8 +680,15 @@ class RepositoryAnalyzer:
             import subprocess
             try:
                 res = subprocess.run(["git", "diff", "--name-only"], cwd=self.root_path, capture_output=True, text=True)
+                # `git diff --name-only` alone only ever shows UNSTAGED
+                # changes (working tree vs. index) - a file that's been
+                # `git add`ed but not modified again since staging shows up
+                # in neither this nor the untracked-files listing below, so
+                # it was silently excluded from --changed entirely
+                # (2026-08-12 SME review).
+                res_staged = subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=self.root_path, capture_output=True, text=True)
                 res_untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=self.root_path, capture_output=True, text=True)
-                if res.returncode != 0 or res_untracked.returncode != 0:
+                if res.returncode != 0 or res_staged.returncode != 0 or res_untracked.returncode != 0:
                     # Confirmed live: on a non-git directory, both commands fail
                     # (returncode != 0, not an exception) - the OLD code silently
                     # left git_files empty either way, which filtered
@@ -666,7 +697,7 @@ class RepositoryAnalyzer:
                     # rather than because there really were zero changes. Warn
                     # clearly and fall back to indexing everything instead of
                     # silently indexing nothing.
-                    stderr = (res.stderr or res_untracked.stderr or "").strip()
+                    stderr = (res.stderr or res_staged.stderr or res_untracked.stderr or "").strip()
                     logger.warning(
                         f"--changed requires a git repository, but git reported an error at "
                         f"'{self.root_path}'{f': {stderr}' if stderr else ''} - indexing all files "
@@ -674,12 +705,10 @@ class RepositoryAnalyzer:
                     )
                 else:
                     git_files = set()
-                    for line in res.stdout.splitlines():
-                        if line.strip():
-                            git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
-                    for line in res_untracked.stdout.splitlines():
-                        if line.strip():
-                            git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
+                    for res_lines in (res.stdout, res_staged.stdout, res_untracked.stdout):
+                        for line in res_lines.splitlines():
+                            if line.strip():
+                                git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
                     files_to_index = [f for f in files_to_index if os.path.abspath(f) in git_files]
             except Exception as e:
                 logger.warning(f"Failed to query git for changes: {e} - indexing all files instead of only changed ones.")
@@ -722,69 +751,87 @@ class RepositoryAnalyzer:
                 if progress_callback:
                     progress_callback(rel_path, idx, total_files)
 
-                # Wrap changes in explicit transaction
-                with store.conn, graph.conn:
-                    # Clear old chunks first to support re-indexing clean
-                    store.remove_file(rel_path)
-                    
-                    # Index in dependency graph
-                    graph.index_file(rel_path, content, mtime, file_hash)
-                    
-                    # Chunk file with metadata headers
-                    chunks = chunk_file_with_metadata_headers(content, rel_path)
-                    
-                    chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
-                    embedding_failed = False
-                    if chunk_texts:
-                        # Generate all embeddings concurrently
-                        embs = await client.get_embeddings(chunk_texts)
+                # NOT an atomic transaction, despite appearances - removed the
+                # `with store.conn, graph.conn:` wrapper that used to sit here
+                # (2026-08-12 SME review). store.remove_file()/add_document()
+                # and graph.index_file() each call their own conn.commit()
+                # internally (so they stay independently durable for every
+                # OTHER caller that invokes them standalone, e.g. `kriya
+                # learn`) - every write below commits immediately as it
+                # happens, regardless of any wrapping `with` block, so a
+                # failure partway through this file's re-index (e.g. the
+                # embeddings call raising) leaves store.remove_file()'s
+                # deletion and graph.index_file()'s write already permanently
+                # committed. Not fixed here: doing so would mean changing
+                # remove_file()/add_document()/index_file()'s own commit
+                # behavior, a broader change affecting every other call site
+                # that relies on their current standalone durability. The
+                # blast radius is bounded to this one file - the outer
+                # try/except below already isolates a per-file failure from
+                # the rest of the run, and file_metadata is deliberately left
+                # unset on any failure path (see below), so a later
+                # non-`--force` run naturally retries this exact file.
+                # Clear old chunks first to support re-indexing clean
+                store.remove_file(rel_path)
 
-                        for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs, strict=True)):
-                            # get_embeddings() silently substitutes an all-zero
-                            # "dummy" vector on any failure (embedding server
-                            # unreachable, malformed response) to degrade
-                            # gracefully - reasonable for a query-time caller,
-                            # where a dummy query vector naturally scores
-                            # near-zero and gets filtered out, but not here: a
-                            # zero-vector chunk is genuinely unsearchable
-                            # forever once written.
-                            if not any(v != 0.0 for v in emb):
-                                embedding_failed = True
-                            store.add_document(
-                                filepath=rel_path,
-                                text=chunk_text,
-                                embedding=emb,
-                                chunk_index=chunk_idx,
-                                model_name=cfg.embedding.model,
-                                dimensions=len(emb)
-                            )
-                    # Store new cache metadata (including hash and mtime) -
-                    # but NOT when any chunk's embedding silently degraded to
-                    # a zero-vector above. Found live, 2026-08-12 (SME
-                    # architecture review): a transient embedding-API failure
-                    # during indexing previously got cached as a normal
-                    # successful mtime/hash match, so a later non-`--force`
-                    # `kriya analyze` would see the file as already
-                    # up-to-date (per the fast-path skip check above) and
-                    # never retry it - permanent, silent corruption of that
-                    # file's RAG entries, recoverable only via `--force`.
-                    # Deliberately leaving file_metadata unset here (the
-                    # dependency graph's own cached mtime/hash, written
-                    # above via graph.index_file, is NOT similarly gated -
-                    # graph indexing has no embedding step to fail) means
-                    # the fast-path skip's `cached_mtime == mtime` check
-                    # will not match on the next run, so it naturally
-                    # retries this file instead of skipping it forever.
-                    if embedding_failed:
-                        logger.warning(
-                            f"Embedding generation failed for one or more chunks of '{rel_path}' "
-                            "(embedding server unreachable or returned an error) - indexed with a "
-                            "placeholder vector for those chunks, which will NOT be findable via "
-                            "similarity search. This file's cache metadata was deliberately not "
-                            "updated, so the next 'kriya analyze' run will retry it automatically."
+                # Index in dependency graph
+                graph.index_file(rel_path, content, mtime, file_hash)
+
+                # Chunk file with metadata headers
+                chunks = chunk_file_with_metadata_headers(content, rel_path)
+
+                chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
+                embedding_failed = False
+                if chunk_texts:
+                    # Generate all embeddings concurrently
+                    embs = await client.get_embeddings(chunk_texts)
+
+                    for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs, strict=True)):
+                        # get_embeddings() silently substitutes an all-zero
+                        # "dummy" vector on any failure (embedding server
+                        # unreachable, malformed response) to degrade
+                        # gracefully - reasonable for a query-time caller,
+                        # where a dummy query vector naturally scores
+                        # near-zero and gets filtered out, but not here: a
+                        # zero-vector chunk is genuinely unsearchable
+                        # forever once written.
+                        if not any(v != 0.0 for v in emb):
+                            embedding_failed = True
+                        store.add_document(
+                            filepath=rel_path,
+                            text=chunk_text,
+                            embedding=emb,
+                            chunk_index=chunk_idx,
+                            model_name=cfg.embedding.model,
+                            dimensions=len(emb)
                         )
-                    else:
-                        store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
+                # Store new cache metadata (including hash and mtime) -
+                # but NOT when any chunk's embedding silently degraded to
+                # a zero-vector above. Found live, 2026-08-12 (SME
+                # architecture review): a transient embedding-API failure
+                # during indexing previously got cached as a normal
+                # successful mtime/hash match, so a later non-`--force`
+                # `kriya analyze` would see the file as already
+                # up-to-date (per the fast-path skip check above) and
+                # never retry it - permanent, silent corruption of that
+                # file's RAG entries, recoverable only via `--force`.
+                # Deliberately leaving file_metadata unset here (the
+                # dependency graph's own cached mtime/hash, written
+                # above via graph.index_file, is NOT similarly gated -
+                # graph indexing has no embedding step to fail) means
+                # the fast-path skip's `cached_mtime == mtime` check
+                # will not match on the next run, so it naturally
+                # retries this file instead of skipping it forever.
+                if embedding_failed:
+                    logger.warning(
+                        f"Embedding generation failed for one or more chunks of '{rel_path}' "
+                        "(embedding server unreachable or returned an error) - indexed with a "
+                        "placeholder vector for those chunks, which will NOT be findable via "
+                        "similarity search. This file's cache metadata was deliberately not "
+                        "updated, so the next 'kriya analyze' run will retry it automatically."
+                    )
+                else:
+                    store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
             except Exception as e:
                 logger.error(f"Failed to index file {rel_path}: {e}")
                 

@@ -5,6 +5,7 @@ import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
+from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
 from kriya.core.db import get_connection
 
 logger = logging.getLogger(__name__)
@@ -374,7 +375,7 @@ class DependencyGraph:
             r"(?:\s+extends\s+(\w+))?"
             r"(?:\s+implements\s+([\w\s,]+))?"
         )
-        method_regex = re.compile(r"(?:public|protected|private|static|\s)+[\w<>]+\s+(\w+)\s*\([^\)]*\)\s*\{?")
+        method_regex = re.compile(JAVA_METHOD_SIGNATURE_CORE + r"\s*\{?")
         import_regex = re.compile(r"import\s+([\w\.\*]+);")
         field_regex = re.compile(r"(?:public|protected|private|static|final|\s)*([\w<>\?]+)\s+(\w+)\s*;")
         
