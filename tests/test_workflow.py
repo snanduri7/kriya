@@ -837,7 +837,7 @@ async def test_workflow_fallback_chain(tmp_path):
             # Fixed this time - Step 1 + content in one shot.
             return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
         elif n == 9:
-            return "Avoid missing colon in function definition."
+            return '[{"category": "Rules", "value": "Avoid missing colon in function definition.", "quote": "SyntaxError: expected \':\'"}]'
         else:
             return "Review: Approved"
 
@@ -865,11 +865,11 @@ async def test_workflow_fallback_chain(tmp_path):
     repo_slug = os.path.basename(tmp_path).lower().strip(".")
     if not repo_slug:
          repo_slug = "root"
-    rules_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_rules.txt")
-    assert os.path.exists(rules_file)
-    with open(rules_file, "r", encoding="utf-8") as f:
-        rules_content = f.read()
-    assert "Avoid missing colon in function definition." in rules_content
+    staged_knowledge_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_knowledge.json")
+    assert os.path.exists(staged_knowledge_file)
+    with open(staged_knowledge_file, "r", encoding="utf-8") as f:
+        staged_facts = json.load(f)
+    assert any(fact["value"] == "Avoid missing colon in function definition." for fact in staged_facts)
 
 @pytest.mark.asyncio
 async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_full_set_attempts(tmp_path):
@@ -898,7 +898,7 @@ async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
         "Design: Write math.py",
-        "Always resolve the build dependency graph fully before adding an explicit version pin.",  # lesson extraction
+        '[{"category": "Rules", "value": "Always resolve the build dependency graph fully before adding an explicit version pin.", "quote": "Build error: dependency resolution failed."}]',  # lesson extraction
         "Review: Approved",
     ])
     we = WorkflowEngine(kernel, llm)
@@ -923,11 +923,14 @@ async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_
 
     assert res["quality_gates_passed"] is True
     repo_slug = os.path.basename(tmp_path).lower().strip(".") or "root"
-    staged_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_rules.txt")
-    assert os.path.exists(staged_file)
-    with open(staged_file, "r", encoding="utf-8") as f:
-        staged_content = f.read()
-    assert "Always resolve the build dependency graph fully before adding an explicit version pin." in staged_content
+    staged_knowledge_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_knowledge.json")
+    assert os.path.exists(staged_knowledge_file)
+    with open(staged_knowledge_file, "r", encoding="utf-8") as f:
+        staged_facts = json.load(f)
+    assert any(
+        fact["value"] == "Always resolve the build dependency graph fully before adding an explicit version pin."
+        for fact in staged_facts
+    )
 
 @pytest.mark.asyncio
 async def test_workflow_does_not_extract_lesson_from_a_single_targeted_retry(tmp_path):
@@ -958,7 +961,80 @@ async def test_workflow_does_not_extract_lesson_from_a_single_targeted_retry(tmp
     assert res["quality_gates_passed"] is True
     repo_slug = os.path.basename(tmp_path).lower().strip(".") or "root"
     staged_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_rules.txt")
+    staged_knowledge_file = os.path.join(tmp_path, "skills", f"auto-{repo_slug}", "staged_knowledge.json")
     assert not os.path.exists(staged_file)
+    assert not os.path.exists(staged_knowledge_file)
+
+@pytest.mark.asyncio
+async def test_workflow_best_of_n_never_activates_without_a_real_sandbox(tmp_path):
+    """best_of_n_first_attempt > 1 must be a no-op whenever create_git_worktree()
+    fell back to worktree_path == workspace_path (no real isolated sandbox - here
+    because tmp_path is never git-initialized) - discarding a candidate with
+    nowhere to reset to would leave its files on the real project. Confirms the
+    workflow.py dispatch condition, not just run_attempt_with_best_of_n's own
+    internal behavior (already covered in tests/test_best_of_n.py)."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.best_of_n_first_attempt = 3
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+
+    with patch("kriya.workflow.best_of_n.run_attempt_with_best_of_n") as mock_best_of_n:
+        res = await we.run_generation_workflow(
+            goal="Create a math library",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_best_of_n.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_workflow_best_of_n_succeeds_on_second_independent_candidate(tmp_path):
+    """End-to-end happy path with a REAL worktree sandbox (_init_git_repo, unlike
+    the no-sandbox test above): the first independent candidate's compile fails,
+    Best-of-N discards it and resets, the second candidate's compile succeeds -
+    the run must still pass overall, and best_of_n_candidates_tried must record
+    exactly one discarded candidate."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.best_of_n_first_attempt = 2
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{"filepath": "math.py", "content": "def add(a,b)\n    return a+b\n"}],
+        [{"filepath": "math.py", "content": "def add(a,b):\n    return a+b\n"}],
+    ])
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        side_effect=[
+            {"success": False, "output": "SyntaxError: invalid syntax"},
+            {"success": True, "output": "Compiled successfully."},
+        ],
+    ):
+        res = await we.run_generation_workflow(
+            goal="Create math library",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.await_count == 2
 
 @pytest.mark.asyncio
 async def test_workflow_fallback_targeted_fix_succeeds_before_full_set_regeneration(tmp_path):
@@ -2391,6 +2467,48 @@ async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(
     assert "app.py" in state.all_files_written
     assert state.gate_outcomes[-1]["type"] == "compile"
     assert state.gate_outcomes[-1]["success"] is False
+
+@pytest.mark.asyncio
+async def test_run_attempt_static_check_fires_before_compile_gate(tmp_path):
+    """Regression test for the static pre-check added 2026-08-12 (evidenced by
+    the SAME live ignite_qpid_protocol run's "already been started" failure):
+    a generated app mixing Apache Ignite's Method A (Ignition.start() direct)
+    with Method B (an XML defining IgniteSpringBean) must be caught by
+    kriya/workflow/static_checks.py BEFORE the expensive compile gate ever
+    runs - PolymorphicValidator.run_compile_check must never be called."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "ProtocolApp.java", "content": (
+            'public class ProtocolApp {\n'
+            '    public static void main(String[] args) throws Exception {\n'
+            '        Ignite ignite = Ignition.start("ignite-config.xml");\n'
+            '    }\n'
+            '}\n'
+        )},
+        {"filepath": "ignite-config.xml", "content": (
+            '<beans>\n'
+            '    <bean id="igniteNode" class="org.apache.ignite.IgniteSpringBean">\n'
+            '        <property name="configuration" ref="ignite.cfg"/>\n'
+            '    </bean>\n'
+            '</beans>\n'
+        )},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["ProtocolApp.java", "ignite-config.xml"],
+        expected_files_upfront=["ProtocolApp.java", "ignite-config.xml"],
+        architect_basename_to_path={"ProtocolApp.java": "ProtocolApp.java", "ignite-config.xml": "ignite-config.xml"},
+    )
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    mock_compile.assert_not_called()
+    assert exc_info.value.failure.type == "static_rule_violation"
+    assert "ignite_method_mixing" in exc_info.value.failure.message
+    assert state.gate_outcomes[-1]["type"] == "static_rule_violation"
 
 @pytest.mark.asyncio
 async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
@@ -6000,6 +6118,44 @@ def test_extract_implicated_files_still_implicates_pom_xml_when_genuinely_the_ca
     # only when locator evidence points elsewhere, it never blanket-excludes
     # pom.xml.
     error = "Non-resolvable parent POM: Could not find artifact ... in pom.xml"
+    known = ["src/App.java", "pom.xml"]
+    assert extract_implicated_files(error, known) == ["pom.xml"]
+
+def test_extract_implicated_files_ignores_pom_mention_thats_only_in_info_banner_noise():
+    """Regression test for a real live bug, 2026-08-12 (ignite_qpid_protocol): a
+    Runtime Verification hang (an unclosed Ignite resource - the actual bug is a
+    missing ignite.close() in the main entrypoint's finally block) produces NO
+    compile-style locator anywhere, so the 2026-08-10 "prefer a locator" fix
+    (test_extract_implicated_files_prefers_locator_over_boilerplate_pom_mention
+    above) never engages, and the plain substring fallback matched "pom.xml" via
+    Maven's own unconditional "[INFO]   from pom.xml" banner line alone - on every
+    targeted retry of a real run, even though the Developer's own fix-analysis
+    correctly diagnosed the true broken file each time. With no other known file
+    mentioned anywhere either, this must now return [] (triggering the existing
+    full-file-set fallback) rather than wrongly implicating pom.xml."""
+    error = (
+        "[INFO] Scanning for projects...\n"
+        "[INFO] ------------------------< com.example:ignite-qpid-protocol >------------------------\n"
+        "[INFO] Building ignite-qpid-protocol 1.0-SNAPSHOT\n"
+        "[INFO]   from pom.xml\n"
+        "RUNTIME VERIFICATION FAILURE: The goal's described output WAS produced correctly, "
+        "but the process never exited on its own and had to be killed after 90s. Fix the "
+        "resource lifecycle, not the application logic, which already works.\n"
+    )
+    known = ["src/main/java/com/example/ProtocolApp.java", "src/main/java/com/example/ProtocolParser.java", "pom.xml"]
+    assert extract_implicated_files(error, known) == []
+
+def test_extract_implicated_files_still_matches_pom_xml_error_line_even_with_info_banner_present():
+    # The [INFO] banner noise and a genuine, non-[INFO]-prefixed pom.xml error
+    # (Maven's real "[ERROR] The project ... (/path/to/pom.xml) has N errors"
+    # shape) can coexist in the same captured output - the real error line must
+    # still win even though the banner line above it gets stripped.
+    error = (
+        "[INFO]   from pom.xml\n"
+        "[FATAL] 'modelVersion' is missing. @ line 1, column 10\n"
+        "[ERROR]   The project [unknown-group-id]:artemis-server:[unknown-version] "
+        "(/private/tmp/workspace/pom.xml) has 3 errors\n"
+    )
     known = ["src/App.java", "pom.xml"]
     assert extract_implicated_files(error, known) == ["pom.xml"]
 

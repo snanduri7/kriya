@@ -367,6 +367,39 @@ def _build_quality_gate_failure(
     )
 
 
+def _strip_build_tool_info_noise(text: str) -> str:
+    """Strips lines that start with Maven's own `[INFO]`-level log prefix before the
+    plain-substring implication scan below runs. Maven prints an unconditional
+    reactor/build banner ("[INFO]   from pom.xml", "[INFO] Building <name> ...") on
+    EVERY invocation, success or failure - a known file's name appearing only inside
+    that banner is not evidence it caused anything, any more than the 2026-08-10 fix's
+    original finding was (see that fix's docstring note above) - it's just the build
+    tool announcing itself.
+
+    Found live again, 2026-08-12 (ignite_qpid_protocol): the 2026-08-10 fix above only
+    helps when a REAL locator exists for some OTHER file to outrank the banner mention.
+    A Runtime Verification hang (an unclosed resource keeping the JVM alive after all
+    application logic already succeeded) produces NO compile-style locator anywhere -
+    there's no error to point at, the code that's actually wrong is a `finally` block
+    that never called `.close()` - so `located_basenames` is always empty for this
+    failure class, the "prefer a locator" branch above never engages, and the plain
+    substring fallback matched "pom.xml" via this exact banner line on every targeted
+    retry of a real run, even though the Developer's own fix-analysis correctly
+    diagnosed the true broken file (the main entrypoint) each time - the targeting
+    mechanism simply never gave it that file to edit, burning the whole retry budget
+    on a file that could never contain the fix.
+
+    Deliberately narrow: only strips lines literally prefixed `[INFO]`, Maven's own
+    log-level marker for its own banner/preamble noise. A genuine pom.xml problem is
+    reported via `[ERROR]`/`[FATAL]` lines (e.g. "[FATAL] 'modelVersion' is missing.
+    @ line 1, column 10", or a bare non-prefixed message like "Non-resolvable parent
+    POM: ... in pom.xml") - neither is touched by this, so real pom.xml-caused
+    failures remain fully detectable exactly as before."""
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("[INFO]")
+    )
+
+
 def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> List[str]:
     """Deterministically identifies which of this run's already-written files a
     Quality Gate failure implicates, for the Developer retry loop's targeted-retry
@@ -401,9 +434,15 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
     _resolve_file_locations()/_build_error_source_context() already rely on,
     rather than special-casing pom.xml/Maven by name. When no known file has a
     locator at all (a bare exit code, a non-Java stack, a dependency-resolution
-    error with no file:line info), falls back to today's plain substring
-    behavior unchanged - this only narrows the result when locator evidence is
-    actually available, never adds a new failure-to-match case."""
+    error with no file:line info), falls back to a plain substring scan - with
+    Maven's own `[INFO]`-level banner noise stripped first (see
+    _strip_build_tool_info_noise), so a build tool announcing its own manifest
+    file's name can't masquerade as evidence when nothing else narrows the
+    result either (found live, 2026-08-12 - see that helper's own docstring).
+    This still only narrows the result when real evidence is available, never
+    adds a new failure-to-match case; a genuine pom.xml-caused failure (which
+    Maven reports via `[ERROR]`/`[FATAL]` lines, or a bare non-prefixed message)
+    remains fully detectable exactly as before."""
     known_files = list(known_files)
     located_basenames = {basename for basename, _line in extract_error_source_locations(error_text)}
     if located_basenames:
@@ -411,9 +450,10 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
         if located:
             return located
 
+    scan_text = _strip_build_tool_info_noise(error_text)
     implicated = []
     for filepath in known_files:
         basename = os.path.basename(filepath)
-        if basename and (basename in error_text or filepath in error_text):
+        if basename and (basename in scan_text or filepath in scan_text):
             implicated.append(filepath)
     return implicated

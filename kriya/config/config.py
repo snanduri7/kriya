@@ -95,6 +95,20 @@ class AutonomyConfig(BaseModel):
     # not a parallel generation architecture.
     self_correction_loop_enabled: bool = Field(default=False)
     self_correction_loop_max_turns: int = Field(default=4)
+    # Default 1 = today's exact behavior (a single first attempt, unchanged). A value
+    # above 1 tries that many INDEPENDENT full-set candidates for the very first
+    # generation attempt only (never on later retries, which already have real error
+    # grounding to react to) before falling into the normal retry loop - see
+    # kriya/workflow/best_of_n.py. Deliberately sequential, never parallel: a goal
+    # binding real fixed resources (an embedded broker's port, an Ignite node's
+    # discovery/comm ports) would have two candidates' generated apps port-conflict
+    # under real parallel execution, and local model serving typically doesn't
+    # meaningfully parallelize multiple requests against one loaded model anyway - so
+    # peak resource usage at any moment stays identical to a normal single-attempt
+    # run; the only cost is added wall-clock in the bounded worst case. Only takes
+    # effect when a real isolated worktree sandbox exists (see best_of_n.py's own
+    # guard) - never risks writing a discarded candidate's files into the real project.
+    best_of_n_first_attempt: int = Field(default=1)
 
 class SearchConfig(BaseModel):
     # Empty by default - live lookup stays fully inert unless a project explicitly

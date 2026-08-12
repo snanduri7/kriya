@@ -67,6 +67,14 @@ def main():
     print("By status:")
     for status, count in status_counts.most_common():
         print(f"  {status:<16} {count}")
+    if status_counts.get("in_progress"):
+        print(
+            "  NOTE: 'in_progress' means a knowledge-gap retry genuinely started running "
+            "(the real generation attempt, not just the gate check) but never reached its "
+            "own final result - almost always killed by this harness's own --timeout-per-goal "
+            "before it could finish, not an instant/benign halt. Check that goal's own "
+            "*.stdout.log for what actually happened before treating it as a fast failure."
+        )
 
     category_counts = Counter(r["failure_category"] for r in rows if r["failure_category"])
     if category_counts:

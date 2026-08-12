@@ -76,7 +76,6 @@ from kriya.workflow.skill_extraction import (
     _likely_misattributed_sibling,
     _loose_identity_words,
     _rule_content_words,
-    _sanitize_for_flat_file_line,
     _scoped_skill_gap_description,
     _skill_identity_words,
     _skill_staleness_warning,
@@ -353,7 +352,13 @@ class WorkflowEngine:
         logger.info("Analyzing workspace context...")
         analyzer = RepositoryAnalyzer(workspace_path)
         repo_model = analyzer.analyze()
-        repo_context = repo_model.model_dump_json(indent=2)
+        # dependency_versions (added for kriya/knowledge/) is excluded here on purpose -
+        # this JSON dump is embedded directly into the Planner/Architect prompts below,
+        # so including it would mean every generate run's prompt content changes shape
+        # depending on what's in the repo's manifests, even though the field's only
+        # real consumer is kriya/knowledge/channels/repo_manifest.py, which reads
+        # repo_model.dependency_versions directly and doesn't need it duplicated here.
+        repo_context = repo_model.model_dump_json(indent=2, exclude={"dependency_versions"})
         
         # Load local workspace conventions if present
         from kriya.skills.skill import SkillEngine
@@ -390,22 +395,15 @@ class WorkflowEngine:
                 )
             convention_prompt += "==========================================\n"
         for skill in se.list_skills():
-            # Check matches with repository facts (dependencies and frameworks)
-            fact_match = False
-            for tag in skill.tags:
-                tag_lower = tag.lower()
-                if any(tag_lower in dep.lower() for dep in repo_model.dependencies):
-                    fact_match = True
-                    break
-                if any(tag_lower in f.lower() for f in repo_model.frameworks):
-                    fact_match = True
-                    break
-
+            # Check matches with repository facts (dependencies and frameworks) -
+            # shared with kriya/knowledge/channels/repo_manifest.py so both call
+            # sites use one implementation of "is this skill relevant to this repo".
+            from kriya.skills.skill import fact_match as _fact_match
             is_relevant = (
                 skill.name.lower() in goal.lower() or
                 any(tag.lower() in goal.lower() for tag in skill.tags) or
                 skill.name.lower() == f"auto-{repo_slug}" or
-                fact_match
+                _fact_match(skill, repo_model)
             )
             
             # Check version-range compatibility, and (independently of any
@@ -1223,7 +1221,19 @@ class WorkflowEngine:
             bool(state.last_implicated_files) and bool(chain) and not state.budgets.fallback_targeted_attempted
         ):
             try:
-                await run_attempt(state, attempt_ctx)
+                # Best-of-N only ever applies to the very first attempt of a run
+                # (state.attempt_number == 0 going in - resumed checkpoints also
+                # start here, but short-circuit to a trivial success on the first
+                # call, so they're unaffected), and only when a real isolated
+                # worktree sandbox actually exists (worktree_path != workspace_path)
+                # - without one, "discarding a candidate" has nothing to reset and
+                # would leave that candidate's files on the real project.
+                best_of_n = self.kernel.config.autonomy.best_of_n_first_attempt
+                if state.attempt_number == 0 and best_of_n > 1 and worktree_path != workspace_path:
+                    from kriya.workflow.best_of_n import run_attempt_with_best_of_n
+                    await run_attempt_with_best_of_n(state, attempt_ctx, n=best_of_n)
+                else:
+                    await run_attempt(state, attempt_ctx)
 
                 # Checkpoint here (before the human approval gate, which can block
                 # indefinitely on interactive input) so a kill/crash while waiting on
@@ -1320,7 +1330,11 @@ class WorkflowEngine:
                                 run_id=trace_id,
                                 goal=goal,
                                 duration_sec=time.time() - start_time,
-                                attempts=state.budgets.retry_count,
+                                # + best_of_n_candidates_tried: retry_count alone understates true
+                                # effort whenever Best-of-N discarded independent candidates before
+                                # this run's winning/final attempt (retry_count gets reset to 0 for
+                                # each fresh candidate - see kriya/workflow/best_of_n.py).
+                                attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
                                 status="human_rejected",
                                 files_modified=[],
                                 failure_category="human_rejected"
@@ -1359,7 +1373,10 @@ class WorkflowEngine:
                 # unrelated later goal's skill-gap detection. Only accrue a
                 # coordinate that actually appears in the FINAL applied file content -
                 # real evidence it was used, not just suggested at some point.
-                if state.budgets.retry_count > 0:
+                # best_of_n_candidates_tried also counts: a discarded independent
+                # candidate's own gate_outcomes can carry the same real dependency-
+                # resolution evidence retry_count alone would've gated on.
+                if state.budgets.retry_count > 0 or state.budgets.best_of_n_candidates_tried > 0:
                     final_contents_combined = ""
                     for filepath in state.all_files_written:
                         try:
@@ -1424,56 +1441,43 @@ class WorkflowEngine:
                 # proxy in the first place: reaching a SECOND full-set attempt is a
                 # real signal the first fix didn't fully work, not a proxy for
                 # "informed by a real failure" that's true almost always.
-                if state.last_model_override or state.budgets.retry_count >= 2:
+                # best_of_n_candidates_tried >= 2 mirrors the same "genuinely hard-won"
+                # bar for two DISCARDED independent candidates, not just two full-set
+                # retries within one candidate - equally real signal, just reset out of
+                # retry_count between candidates (see kriya/workflow/best_of_n.py).
+                if (
+                    state.last_model_override
+                    or state.budgets.retry_count >= 2
+                    or state.budgets.best_of_n_candidates_tried >= 2
+                ):
                     try:
-                        error_kind = (
-                            "runtime verification" if "RUNTIME VERIFICATION" in state.error_context
-                            else "compilation/test"
-                        )
-                        logger.info(f"Escalation model successfully resolved the {error_kind} issue! Extracting lessons learned...")
-                        extract_prompt = (
-                            f"A {error_kind} error occurred:\n{state.error_context}\n\n"
-                            f"The files were successfully fixed with this final content:\n"
-                        )
+                        logger.info("A hard-won fix resolved the issue - extracting structured knowledge facts...")
+                        from kriya.knowledge import staging as knowledge_staging
+                        from kriya.knowledge.channels.live_failure import LiveFailureChannel, LiveFailureContext
+
+                        file_contents = {}
                         for filepath in state.all_files_written:
                             full_path = os.path.join(workspace_path, filepath)
                             try:
                                 with open(full_path, "r", encoding="utf-8") as fh:
-                                    extract_prompt += f"=== File: {filepath} ===\n{fh.read()}\n"
+                                    file_contents[filepath] = fh.read()
                             except Exception as e:
                                 logger.debug(f"Failed to read '{full_path}' for lesson extraction: {e}")
-                        extract_prompt += "\nExtract a single, concise coding rule (maximum 1 sentence) explaining the fix so that future models can avoid the same error. Do not output anything else, just the sentence starting with a capital letter."
 
-                        lesson = await self.llm.complete(
-                            system_prompt="You are a senior software engineer. Extract the core rule/lesson from this error resolution so future generations of similar code avoid repeating it.",
-                            user_prompt=extract_prompt,
+                        channel = LiveFailureChannel(self.llm)
+                        facts = await channel.extract(LiveFailureContext(
+                            error_context=state.error_context,
+                            file_contents=file_contents,
                             model_override=state.last_model_override,
                             base_url_override=state.last_base_url_override,
-                            api_key_override=state.last_api_key_override
-                        )
-                        lesson = _sanitize_for_flat_file_line(lesson.strip().strip('"').strip("'"))
-                        if lesson:
-                            logger.info(f"Extracted lesson: {lesson}")
+                            api_key_override=state.last_api_key_override,
+                        ))
+                        if facts:
                             skills_dir = self.kernel.config.paths.skills
                             skill_folder = os.path.join(skills_dir, f"auto-{repo_slug}")
-                            os.makedirs(skill_folder, exist_ok=True)
-                            rules_file = os.path.join(skill_folder, "rules.txt")
-                            staged_file = os.path.join(skill_folder, "staged_rules.txt")
-                            
-                            existing_rules = []
-                            if os.path.exists(rules_file):
-                                with open(rules_file, "r", encoding="utf-8") as rf:
-                                    existing_rules = [line.strip() for line in rf if line.strip()]
-
-                            existing_staged = []
-                            if os.path.exists(staged_file):
-                                with open(staged_file, "r", encoding="utf-8") as sf:
-                                    existing_staged = [line.strip() for line in sf if line.strip()]
-                            
-                            if lesson not in existing_rules and lesson not in existing_staged:
-                                with open(staged_file, "a", encoding="utf-8") as sf:
-                                    sf.write(f"\n{lesson}")
-                                logger.info(f"Staged extracted lesson rule to {staged_file}")
+                            written = knowledge_staging.stage_facts(skill_folder, facts)
+                            if written:
+                                logger.info(f"Staged {len(written)} structured knowledge fact(s) to {skill_folder}")
                     except Exception as ex:
                         logger.warning(f"Failed to extract lesson or update skills: {ex}")
 
@@ -1584,7 +1588,10 @@ class WorkflowEngine:
                 run_id=trace_id,
                 goal=goal,
                 duration_sec=duration,
-                attempts=state.budgets.retry_count,
+                # + best_of_n_candidates_tried: see the identical comment earlier in this
+                # method - retry_count alone understates true effort whenever Best-of-N
+                # discarded independent candidates before this run's winning/final attempt.
+                attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
                 status="success" if quality_passed else "failure",
                 files_modified=list(state.all_files_written),
                 retrieved_chunks=retrieved_chunks,

@@ -76,7 +76,7 @@ def _init_git_repo(path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
-def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction):
+def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction, best_of_n):
     # paths.skills/memory stay relative (resolved against this config file's own
     # directory, i.e. per-goal-isolated - see CLAUDE.md's config-resolution note)
     # so one goal's skill/RAG state can never leak into another's. paths.logs is
@@ -108,6 +108,11 @@ def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url,
             # compile-gate micro-loop (kriya/workflow/self_correction.py)
             # against the same goal set, not just its mocked unit tests.
             "self_correction_loop_enabled": self_correction,
+            # 1 by default (matches AutonomyConfig's own default, i.e. off) unless
+            # --best-of-n is passed - same before/after comparison pattern as
+            # --self-correction above, for kriya/workflow/best_of_n.py's sequential,
+            # first-attempt-only independent-candidate retry.
+            "best_of_n_first_attempt": best_of_n,
         },
         # The second, separate switch web_lookup_enabled alone doesn't turn on -
         # see LIVE_SEARCH_BASE_URL's own comment above for why this was missing
@@ -176,6 +181,14 @@ def main():
                               "(default off, matching AutonomyConfig's own default) - run the same goal set "
                               "with and without this flag for a before/after comparison of the bounded "
                               "compile-gate self-correction micro-loop (kriya/workflow/self_correction.py).")
+    parser.add_argument("--best-of-n", type=int, default=1, metavar="N",
+                         help="Set autonomy.best_of_n_first_attempt for every goal in this batch (default 1, "
+                              "matching AutonomyConfig's own default - i.e. off, today's exact single-attempt "
+                              "behavior). N > 1 tries that many independent full-set candidates at the very "
+                              "first attempt only before falling into the normal retry loop - run the same "
+                              "goal set with and without this flag for a before/after comparison "
+                              "(kriya/workflow/best_of_n.py). Deliberately sequential, never parallel - see "
+                              "that module's own docstring for why.")
     args = parser.parse_args()
 
     goals = GOALS if not args.goal_id else [g for g in GOALS if g.id in args.goal_id]
@@ -192,6 +205,7 @@ def main():
     print(f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}")
     print(f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}")
     print(f"Self-correction loop: {'ON' if args.self_correction else 'off'}")
+    print(f"Best-of-N (first attempt): {args.best_of_n}")
     print(f"Goals: {[g.id for g in goals]}\n")
 
     summary_lines = [
@@ -199,6 +213,7 @@ def main():
         f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}",
         f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}",
         f"Self-correction loop: {'ON' if args.self_correction else 'off'}",
+        f"Best-of-N (first attempt): {args.best_of_n}",
         f"traces.db: {os.path.join(logs_dir, 'traces.db')}",
         "",
     ]
@@ -207,7 +222,7 @@ def main():
         goal_dir = Path(os.path.join(batch_dir, "workspaces", goal.id))
         goal_dir.mkdir(parents=True, exist_ok=True)
         _init_git_repo(goal_dir)
-        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model, args.search_base_url, args.self_correction)
+        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model, args.search_base_url, args.self_correction, args.best_of_n)
 
         print(f"--- Running goal '{goal.id}' (timeout {args.timeout_per_goal}s) ---")
         start = time.time()

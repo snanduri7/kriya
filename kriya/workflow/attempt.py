@@ -26,6 +26,7 @@ from kriya.workflow.context_budget import _reserve_graph_context_budget, build_c
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
+from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict
 
@@ -631,6 +632,24 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 f"You must generate ALL files listed in the Architect Design Guidelines, "
                 f"not just a subset."
             )
+
+        # Static pre-check: deterministic, no-LLM scan for known anti-patterns already
+        # documented in active skill rules (e.g. mixing Ignite's two startup mechanisms,
+        # an unclosed Ignition.start()) - catches a mistake the model already had the
+        # rule for, before the expensive compile+run cycle rather than after it. Same
+        # philosophy/wiring shape as find_structural_corruption() above: a direct
+        # Failure(...) construction (no compiler output exists yet to ground against).
+        static_violation = run_static_checks(ctx.worktree_path, state.all_files_written)
+        if static_violation:
+            failure = Failure(
+                type="static_rule_violation",
+                message=f"STATIC RULE VIOLATION: {static_violation}",
+                raw_output=static_violation,
+                likely_files=list(state.all_files_written),
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
 
         # Quality Gates: Polymorphic compile & test checks inside sandbox
         logger.info("Quality Gates: Running polymorphic compiler and test checks...")

@@ -763,6 +763,80 @@ def skills_show(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Skill '{skill_name}' not found.", fg="red")
         sys.exit(1)
 
+@skills_group.command(name="readiness")
+@click.argument('skill_name')
+@click.pass_context
+def skills_readiness(ctx: click.Context, skill_name: str) -> None:
+    """Score a skill's knowledge against the 10-category readiness rubric (0-4 per
+    category, scoring both staged and already-approved structured facts together)."""
+    cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
+    se = SkillEngine(cfg.paths.skills)
+    se.discover_and_load()
+
+    try:
+        s = se.get_skill(skill_name)
+    except KeyError:
+        click.secho(f"Skill '{skill_name}' not found.", fg="red")
+        sys.exit(1)
+        return
+
+    from kriya.knowledge import staging
+    from kriya.knowledge.rubric import score_skill
+
+    facts = staging.load_staged(s.source_path) + staging.load_knowledge(s.source_path)
+    readiness = score_skill(s.name, facts)
+
+    click.secho(f"=== Readiness: {s.name} ===", bold=True, fg="cyan")
+    click.echo(f"Overall level: {readiness.overall_level}/4 (a skill is only as ready as its weakest category)")
+    for category, level in readiness.category_levels.items():
+        fg = "green" if level >= 3 else ("yellow" if level > 0 else "red")
+        click.secho(f"  {category:<15} Level {level}/4", fg=fg)
+    if readiness.missing_categories:
+        click.secho(f"\nMissing entirely: {', '.join(readiness.missing_categories)}", fg="red")
+    click.echo("\nRun 'kriya skills gaps " + skill_name + "' for targeted questions on what's still thin.")
+
+@skills_group.command(name="gaps")
+@click.argument('skill_name')
+@click.option('--interactive', is_flag=True, help="Prompt for an answer to each gap question and record it immediately.")
+@click.pass_context
+def skills_gaps(ctx: click.Context, skill_name: str, interactive: bool) -> None:
+    """Show targeted questions for whatever the readiness rubric says is still thin,
+    instead of a blank rules.txt - optionally answer them right here with --interactive."""
+    cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
+    se = SkillEngine(cfg.paths.skills)
+    se.discover_and_load()
+
+    try:
+        s = se.get_skill(skill_name)
+    except KeyError:
+        click.secho(f"Skill '{skill_name}' not found.", fg="red")
+        sys.exit(1)
+        return
+
+    from kriya.knowledge import scaffold, staging
+    from kriya.knowledge.rubric import score_skill
+
+    facts = staging.load_staged(s.source_path) + staging.load_knowledge(s.source_path)
+    readiness = score_skill(s.name, facts)
+    questions = scaffold.generate_gap_questions(readiness)
+
+    if not questions:
+        click.secho(f"'{s.name}' already clears the readiness threshold in every category.", fg="green")
+        return
+
+    click.secho(f"=== Knowledge gaps: {s.name} ===", bold=True, fg="cyan")
+    for i, question in enumerate(questions, 1):
+        click.echo(f"  {i}. {question}")
+        if interactive:
+            category = question.split(":", 1)[0].lstrip("[")
+            answer = click.prompt("     Answer (blank to skip)", default="", show_default=False)
+            if answer.strip():
+                written = scaffold.record_scaffold_answer(s.source_path, category, answer.strip())
+                if written:
+                    click.secho("     Recorded.", fg="green")
+                else:
+                    click.secho("     Skipped - duplicates an existing rule.", fg="yellow")
+
 @skills_group.command(name="create")
 @click.argument('skill_name')
 @click.pass_context
@@ -795,34 +869,44 @@ def skills_create(ctx: click.Context, skill_name: str) -> None:
 @click.argument('skill_name')
 @click.pass_context
 def skills_approve(ctx: click.Context, skill_name: str) -> None:
-    """Approve all staged rules for a specific skill, promoting them to rules.txt."""
+    """Approve all staged rules/knowledge facts for a specific skill, promoting them
+    to rules.txt (and, for structured facts, knowledge.json)."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
     skill_folder = os.path.join(cfg.paths.skills, skill_name.lower())
     if not os.path.exists(skill_folder):
         skill_folder = os.path.join(cfg.paths.skills, skill_name)
     staged_file = os.path.join(skill_folder, "staged_rules.txt")
     rules_file = os.path.join(skill_folder, "rules.txt")
-    
-    if not os.path.exists(staged_file):
-        click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
-        return
-        
-    try:
-        with open(staged_file, "r", encoding="utf-8") as sf:
-            staged_lines = [line.strip() for line in sf if line.strip()]
-            
-        if not staged_lines:
-            click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
-            return
-            
-        with open(rules_file, "a", encoding="utf-8") as rf:
-            for line in staged_lines:
-                rf.write(f"\n{line}")
-                
-        os.remove(staged_file)
-        click.secho(f"Successfully approved and promoted {len(staged_lines)} rule(s) to rules.txt for skill '{skill_name}'!", fg="green")
-    except Exception as e:
-        click.secho(f"Failed to approve staged rules: {e}", fg="red")
+
+    approved_anything = False
+
+    if os.path.exists(staged_file):
+        try:
+            with open(staged_file, "r", encoding="utf-8") as sf:
+                staged_lines = [line.strip() for line in sf if line.strip()]
+
+            if staged_lines:
+                with open(rules_file, "a", encoding="utf-8") as rf:
+                    for line in staged_lines:
+                        rf.write(f"\n{line}")
+                os.remove(staged_file)
+                approved_anything = True
+                click.secho(f"Approved and promoted {len(staged_lines)} rule(s) to rules.txt for skill '{skill_name}'.", fg="green")
+        except Exception as e:
+            click.secho(f"Failed to approve staged rules: {e}", fg="red")
+
+    from kriya.knowledge import staging
+    staged_facts = staging.load_staged(skill_folder)
+    if staged_facts:
+        try:
+            promoted = staging.promote_staged(skill_folder)
+            approved_anything = True
+            click.secho(f"Approved and promoted {len(promoted)} structured knowledge fact(s) for skill '{skill_name}'.", fg="green")
+        except Exception as e:
+            click.secho(f"Failed to approve staged knowledge facts: {e}", fg="red")
+
+    if not approved_anything:
+        click.secho(f"No staged rules or knowledge facts found for skill '{skill_name}'.", fg="yellow")
 
 @skills_group.command(name="promote")
 @click.argument('source_skill')
@@ -959,6 +1043,44 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
     else:
         click.secho(f"Failed to update skill '{skill_name}'.", fg="red")
         sys.exit(1)
+
+def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> None:
+    """Overwrites a transient `knowledge_gap` trace row with an honest `in_progress`
+    marker the instant a knowledge-gap retry actually starts executing the real
+    generation run - so if that retry itself gets killed or times out (e.g. an eval
+    harness's outer subprocess timeout) before ever reaching its own final `log_run()`
+    call, the trace shows a real run that didn't finish, not the stale, terminal-
+    sounding `knowledge_gap` status left behind by the initial gate check.
+
+    Found live, 2026-08-12 (ignite_qpid_protocol via spikes/eval_harness): a real run
+    that auto-confirmed past the knowledge gate, ran for the full 20-minute harness
+    timeout (reaching multiple targeted retries and a fallback-model attempt) still
+    left `report.py` showing "knowledge_gap, 0 attempts, 8.5s" as the only trace -
+    genuinely misleading, not just imprecise, since it looks identical to a run that
+    never proceeded past the gate at all. This is a narrower, still-open edge of the
+    `trace_id_override` fix from 2026-08-07 (docs/design.md) - that fix makes the
+    retry's own real trace row correctly supersede the transient one WHEN the retry
+    completes; it does nothing for a retry that's killed before completing, which is
+    exactly what happened here (twice, in the same session).
+
+    Best-effort like every other trace write in this codebase - a failure here must
+    never block the actual retry from proceeding."""
+    if not run_id:
+        return
+    try:
+        from kriya.core.trace import TraceLogger
+        trace_db = os.path.join(cfg.paths.logs, "traces.db")
+        TraceLogger(trace_db).log_run(
+            run_id=run_id,
+            goal=goal,
+            duration_sec=0.0,
+            attempts=0,
+            status="in_progress",
+            files_modified=[],
+        )
+    except Exception as trace_ex:
+        logger.warning(f"Failed to mark run '{run_id}' in_progress: {trace_ex}")
+
 
 @main.command()
 @click.argument('goal', required=False)
@@ -1143,6 +1265,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     unacked_gaps.append(g)
 
             if not unacked_gaps or knowledge_policy == 'permissive':
+                _mark_run_in_progress(cfg, res.get("run_id"), goal)
                 res = await we.run_generation_workflow(
                     goal=goal,
                     workspace_path=os.getcwd(),
@@ -1188,6 +1311,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     confirm = click.confirm("Do you want to proceed anyway despite the knowledge risk?")
 
                 if confirm:
+                    _mark_run_in_progress(cfg, res.get("run_id"), goal)
                     res = await we.run_generation_workflow(
                         goal=goal,
                         workspace_path=os.getcwd(),

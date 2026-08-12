@@ -1,4 +1,6 @@
 import json
+import os
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,7 +10,7 @@ from click.testing import CliRunner
 # List[...]/Dict[...] type annotations without importing them from `typing`,
 # which raised NameError at module-import time on every Python version except
 # 3.14 (where PEP 649 made annotation evaluation lazy by default).
-from kriya.cli import main
+from kriya.cli import _mark_run_in_progress, main
 
 TOP_LEVEL_COMMANDS = [
     "version", "config", "doctor", "repl", "plugins", "analyze",
@@ -189,6 +191,74 @@ def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
     with pytest.raises(json.JSONDecodeError):
         json.loads(result.stdout)
     assert "looks good" in result.stdout
+
+
+def test_mark_run_in_progress_writes_honest_status(tmp_path):
+    """Regression test for a real live finding, 2026-08-12 (ignite_qpid_protocol via
+    spikes/eval_harness, twice in the same session): a knowledge-gap retry that
+    genuinely started running but got killed by an outer timeout before its own
+    log_run() call left only the stale, terminal-sounding 'knowledge_gap' trace row
+    behind - report.py showed '0 attempts, 8.5s' for a run that actually ran for the
+    full 20-minute timeout. _mark_run_in_progress overwrites that row the instant the
+    retry actually starts, so a killed retry is distinguishable from one that never
+    proceeded past the gate at all."""
+    from kriya.config import AppConfig
+
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+
+    _mark_run_in_progress(cfg, "run-123", "some goal")
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs WHERE run_id = ?", ("run-123",)).fetchone()
+    conn.close()
+
+    assert row is not None
+    assert row["status"] == "in_progress"
+    assert row["goal"] == "some goal"
+
+
+def test_mark_run_in_progress_noop_when_run_id_missing(tmp_path):
+    from kriya.config import AppConfig
+
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+
+    _mark_run_in_progress(cfg, None, "some goal")
+
+    # No traces.db should even be created - nothing to write without a run_id.
+    assert not os.path.exists(os.path.join(cfg.paths.logs, "traces.db"))
+
+
+def test_generate_marks_in_progress_before_knowledge_gap_retry_runs(runner, tmp_path):
+    """CLI-level companion to the unit tests above: confirms _mark_run_in_progress is
+    actually called, with the first call's own run_id, in between the two
+    run_generation_workflow() calls a knowledge-gap retry makes (here via the
+    no-unacked-gaps branch - the other branch, the 'warn' auto-confirm path, calls
+    the exact same helper the exact same way, see kriya/cli.py)."""
+    knowledge_gap_result = {"status": "knowledge_gap", "gap_report": {"gaps": []}, "run_id": "run-456"}
+    real_result = dict(_FAKE_GENERATE_RESULT)
+
+    mock_we = MagicMock()
+    mock_we.run_generation_workflow = AsyncMock(side_effect=[knowledge_gap_result, real_result])
+
+    calls = []
+
+    def _record_mark(cfg, run_id, goal):
+        calls.append(run_id)
+
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"), \
+             patch("kriya.cli._mark_run_in_progress", side_effect=_record_mark):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert calls == ["run-456"]
+    assert mock_we.run_generation_workflow.await_count == 2
 
 
 def test_tools_execute_shell_requires_confirmation_without_yes(runner):

@@ -48,8 +48,12 @@ class Failure:
     kriya/workflow/workflow.py), "structural_corruption" (the edit/content
     applied cleanly but the resulting file is obviously, mechanically broken -
     unbalanced Java braces or malformed XML; see find_structural_corruption()
-    in kriya/workflow/workflow.py), or "general_error" (fallback for a bare,
-    non-QualityGateFailure Exception).
+    in kriya/workflow/workflow.py), "static_rule_violation" (the generated
+    code matches a known-bad pattern already documented in an active skill's
+    rules - e.g. mixing Apache Ignite's two startup mechanisms - caught by a
+    deterministic, no-LLM scan before the compile gate rather than after a
+    live failure; see run_static_checks() in kriya/workflow/static_checks.py),
+    or "general_error" (fallback for a bare, non-QualityGateFailure Exception).
     """
     type: str
     message: str

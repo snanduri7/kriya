@@ -39,6 +39,13 @@ class RetryBudgets:
     # normal first-time failure - only a repeat is eligible for error-triggered
     # live lookup.
     last_failure_signature: Optional[Tuple[str, Any]] = None
+    # How many independent candidates kriya/workflow/best_of_n.py discarded before
+    # this run's winning (or final) attempt. Unlike retry_count, this is NEVER reset
+    # between candidates - it's a running total across the whole run, since it exists
+    # specifically to answer "was this actually hard-won" for the heuristics in
+    # workflow.py that read retry_count for that purpose, after best_of_n.py resets
+    # retry_count back to 0 for each fresh independent candidate.
+    best_of_n_candidates_tried: int = 0
 
 
 @dataclass
