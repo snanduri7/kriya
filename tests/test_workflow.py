@@ -7002,6 +7002,54 @@ def test_write_skill_extraction_never_overwrites_existing_example(tmp_path):
     assert (examples_dir / "new_file.txt").read_text() == "brand new content"
 
 
+def test_write_skill_extraction_collapses_embedded_newlines_in_a_rule(tmp_path):
+    """Regression test for a finding from the 2026-08-12 SME review:
+    rules.txt is written with no newline-stripping/escaping, but every
+    reader (SkillEngine.discover_and_load, kriya/cli.py's skills commands)
+    parses strictly line-by-line - an embedded newline in extracted rule
+    text silently split into multiple unrelated "rules" with no error."""
+    from kriya.skills.skill import Skill
+    from kriya.workflow.workflow import _write_skill_extraction
+
+    skill_dir = tmp_path / "myskill"
+    skill_dir.mkdir()
+    skill = Skill(name="myskill", description="test", source_path=str(skill_dir))
+
+    _write_skill_extraction(
+        skill,
+        {"rules": ["Always call close() on the client.\nNever skip this step."]},
+        source="test",
+    )
+
+    lines = [
+        line.strip() for line in (skill_dir / "rules.txt").read_text().splitlines() if line.strip()
+    ]
+    assert lines == ["Always call close() on the client. Never skip this step."]
+
+
+def test_stage_skill_conflicts_collapses_embedded_newlines(tmp_path):
+    from kriya.skills.skill import Skill
+    from kriya.workflow.workflow import _stage_skill_conflicts
+
+    skill_dir = tmp_path / "myskill"
+    skill_dir.mkdir()
+    skill = Skill(name="myskill", description="test", source_path=str(skill_dir))
+
+    _stage_skill_conflicts(skill, [{
+        "candidate_rule": "Use a fixed\nthread pool.",
+        "conflicts_with": "Use a cached\nthread pool.",
+        "reason": "contradicts\nexisting guidance",
+    }])
+
+    lines = [
+        line.strip() for line in (skill_dir / "staged_rules.txt").read_text().splitlines() if line.strip()
+    ]
+    assert lines == [
+        "[CONFLICT] Use a fixed thread pool. -- conflicts with existing rule: "
+        "'Use a cached thread pool.' (contradicts existing guidance)"
+    ]
+
+
 def test_create_git_worktree_carries_over_uncommitted_changes(tmp_path):
     """Regression test for a real bug caught live: create_git_worktree only ever
     reflected git HEAD, so any uncommitted work in the real workspace (the normal
@@ -7230,6 +7278,21 @@ def test_likely_misattributed_sibling_accepts_genuinely_on_topic_content():
 def test_likely_misattributed_sibling_no_siblings_never_flags():
     qpid = _make_skill("qpid", ["qpid"])
     assert _likely_misattributed_sibling("Use Apache Ignite for caching.", qpid, []) is None
+
+def test_likely_misattributed_sibling_abstains_when_target_identity_is_all_stopwords():
+    """Regression test for a finding from the 2026-08-12 SME review: a
+    target skill whose entire name+tags are composed only of generic
+    stoplist words (e.g. a bare "java" skill - "java" itself is in
+    _IDENTITY_GENERIC_WORDS) has an EMPTY identity word set, so the "target's
+    own words present" short-circuit could never fire for it - every rule
+    extracted for this skill got checked ONLY against siblings, and any
+    incidental word overlap wrongly flagged genuinely on-topic content as
+    misattributed. An empty target identity must abstain (return None)
+    instead of becoming maximally aggressive."""
+    bare_java = _make_skill("java", ["java"])
+    other = _make_skill("spring-boot", ["spring", "spring-boot"])
+    genuinely_on_topic_rule = "Use try-with-resources to ensure the Spring context closes cleanly."
+    assert _likely_misattributed_sibling(genuinely_on_topic_rule, bare_java, [other]) is None
 
 def test_filter_misattributed_extraction_drops_only_the_misattributed_entries():
     qpid = _make_skill("qpid", ["qpid", "qpid-jms", "qpid-broker-j", "redhat-mrg", "mrg", "amqp-1.0"])

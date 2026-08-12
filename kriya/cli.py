@@ -56,11 +56,14 @@ async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dic
     """Attempts each discovered plugin's initialize() independently, so one
     broken plugin can't prevent the others - or their tools - from becoming
     available. Deliberately not PluginManager.initialize_all(), which raises
-    on the first failure and aborts before later plugins are even attempted;
-    that's the right behavior for the kernel-startup call sites that keep
-    using initialize_all() directly, but every command here needs to keep
-    working around one bad plugin. Returns {plugin_name: None-or-exception}
-    so a caller can report per-plugin status or just log failures and move on."""
+    on the first failure and aborts before later plugins are even attempted -
+    every real call site in this file uses this tolerant wrapper instead
+    (initialize_all() is fail-fast by design for a hypothetical caller that
+    wants it, not something anything in production actually calls today;
+    confirmed via a repo-wide search, corrected here 2026-08-12 after this
+    docstring previously claimed real "kernel-startup call sites" for it that
+    don't exist). Returns {plugin_name: None-or-exception} so a caller can
+    report per-plugin status or just log failures and move on."""
     results: Dict[str, Optional[Exception]] = {}
     for p in pm.list_plugins():
         try:

@@ -76,6 +76,7 @@ from kriya.workflow.skill_extraction import (
     _likely_misattributed_sibling,
     _loose_identity_words,
     _rule_content_words,
+    _sanitize_for_flat_file_line,
     _scoped_skill_gap_description,
     _skill_identity_words,
     _skill_staleness_warning,
@@ -1450,7 +1451,7 @@ class WorkflowEngine:
                             base_url_override=state.last_base_url_override,
                             api_key_override=state.last_api_key_override
                         )
-                        lesson = lesson.strip().strip('"').strip("'")
+                        lesson = _sanitize_for_flat_file_line(lesson.strip().strip('"').strip("'"))
                         if lesson:
                             logger.info(f"Extracted lesson: {lesson}")
                             skills_dir = self.kernel.config.paths.skills

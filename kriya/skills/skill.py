@@ -213,15 +213,23 @@ def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> None:
 
 
 def parse_version_parts(v_str: str) -> Tuple[int, int, int]:
-    """Helper to parse a version string into (major, minor, patch) integer tuple."""
+    """Helper to parse a version string into (major, minor, patch) integer tuple.
+
+    Each dot-separated part's own LEADING digit run is used, ignoring
+    whatever comes after it - a pre-release/build qualifier attached
+    directly to a numeric part (e.g. the "3-SNAPSHOT" in "1.2.3-SNAPSHOT",
+    or "0-rc1" in "1.0.0-rc1") must not zero out that whole component.
+    Previously a whole-string trailing-non-digit strip only worked when the
+    qualifier was on the LAST part with nothing but non-digits after it -
+    "1.2.3-SNAPSHOT" ends in a letter, so that strip left "3-SNAPSHOT"
+    attached, int() raised, and the entire patch number silently coerced to
+    0 (2026-08-12 SME review) - not just a precision loss, a genuinely wrong
+    major/minor/patch component."""
     parts = []
     cleaned = re.sub(r'^[^\d]+', '', v_str)
-    cleaned = re.sub(r'[^\d]+$', '', cleaned)
     for part in cleaned.split('.'):
-        try:
-            parts.append(int(part))
-        except ValueError:
-            parts.append(0)
+        match = re.match(r'^(\d+)', part)
+        parts.append(int(match.group(1)) if match else 0)
     while len(parts) < 3:
         parts.append(0)
     return tuple(parts[:3])
@@ -230,13 +238,19 @@ def is_version_supported(ver_str: str, range_str: str) -> bool:
     """
     Checks if ver_str satisfies the range_str.
     Supports operators: >=, <=, >, <, ==, !=, *
-    Example ranges: ">=2.15.0 <3.0.0", "==2.18.0"
+    Example ranges: ">=2.15.0 <3.0.0", ">=2.15.0,<3.0.0", "==2.18.0"
     """
     if not range_str or range_str.strip() == "*":
         return True
-    
+
     version = parse_version_parts(ver_str)
-    conditions = range_str.strip().split()
+    # Split on whitespace OR commas - a comma-separated range with no space
+    # (">=2.15.0,<3.0.0", a natural way to write it) used to become ONE
+    # token; re.match below only ever consumes the FIRST bound from that
+    # token and silently ignores everything after the comma via re.match's
+    # partial-match semantics, so the upper bound never applied at all
+    # (2026-08-12 SME review).
+    conditions = [c for c in re.split(r"[\s,]+", range_str.strip()) if c]
     for cond in conditions:
         match = re.match(r"^([>=<!\s]*)([0-9\.]+)", cond.strip())
         if not match:

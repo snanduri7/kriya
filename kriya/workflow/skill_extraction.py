@@ -54,6 +54,18 @@ def _is_near_duplicate_rule(candidate: str, existing_rules: Iterable[str], min_w
     return False
 
 
+def _sanitize_for_flat_file_line(text: str) -> str:
+    """Collapses embedded newlines (and any other run of whitespace) to a
+    single space before a piece of extracted text is written into
+    rules.txt/staged_rules.txt. Every reader of these flat files parses
+    strictly line-by-line (kriya/skills/skill.py's discover_and_load(),
+    kriya/cli.py's skills_list/skills_approve) - an unsanitized embedded
+    newline silently splits into multiple unrelated "rules" with no error
+    on read-back (2026-08-12 SME review). Also strips leading/trailing
+    whitespace, matching every reader's own .strip() on each line."""
+    return " ".join(text.split())
+
+
 def _scoped_skill_gap_description(skill_name: str) -> str:
     """Per-skill extraction gap description, used instead of reusing the full
     (possibly multi-skill) human-facing gap_reason text for every skill resolved
@@ -123,9 +135,24 @@ def _likely_misattributed_sibling(text: str, target: Any, siblings: Iterable[Any
     mentions both skills (a legitimate comparison/contrast) is never wrongly
     dropped. A false negative here (missing a real misattribution) is far
     cheaper than a false positive (discarding genuinely on-topic content), so
-    the check is deliberately conservative in that direction."""
+    the check is deliberately conservative in that direction.
+
+    Abstains entirely (returns None) when the TARGET's own identity word set
+    is empty - e.g. a skill literally named "java", with no other tags, has
+    nothing left after _IDENTITY_GENERIC_WORDS subtracts "java" itself. An
+    empty target identity means this heuristic has no signal, not that the
+    target's identity is definitionally absent from every text - without
+    this check, EVERY rule extracted for such a skill would fail the
+    "target's own words present" short-circuit unconditionally and get
+    compared ONLY against siblings, so any incidental word overlap with a
+    sibling wrongly flags genuinely on-topic content as misattributed
+    (2026-08-12 SME review) - the opposite of this function's own stated
+    "false negative is cheaper than a false positive" design."""
     text_words = _loose_identity_words(text)
-    if not text_words or _skill_identity_words(target) & text_words:
+    target_words = _skill_identity_words(target)
+    if not text_words or not target_words:
+        return None
+    if target_words & text_words:
         return None
     for sibling in siblings:
         sibling_words = _skill_identity_words(sibling)
@@ -181,7 +208,8 @@ def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str 
         to_add = []
         effective_existing = list(skill.rules)
         for r in new_rules:
-            if r in existing:
+            r = _sanitize_for_flat_file_line(r)
+            if not r or r in existing:
                 continue
             if _is_near_duplicate_rule(r, effective_existing):
                 logger.info(f"Skipping near-duplicate rule for skill '{skill.name}' (already covered by an existing rule): {r[:100]}")
@@ -233,9 +261,9 @@ def _stage_skill_conflicts(skill: Any, conflicts: List[Dict[str, str]]) -> None:
     staged_file = os.path.join(skill.source_path, "staged_rules.txt")
     with open(staged_file, "a", encoding="utf-8") as sf:
         for c in conflicts:
-            candidate = c.get("candidate_rule", "")
-            existing = c.get("conflicts_with", "")
-            reason = c.get("reason", "")
+            candidate = _sanitize_for_flat_file_line(c.get("candidate_rule", ""))
+            existing = _sanitize_for_flat_file_line(c.get("conflicts_with", ""))
+            reason = _sanitize_for_flat_file_line(c.get("reason", ""))
             if candidate:
                 sf.write(f"\n[CONFLICT] {candidate} -- conflicts with existing rule: '{existing}' ({reason})")
     git_commit_if_tracked(staged_file, f"Kriya: flag {len(conflicts)} conflicting candidate rule(s) for skill '{skill.name}'")

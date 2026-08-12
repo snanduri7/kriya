@@ -147,6 +147,37 @@ def test_is_version_supported():
     assert is_version_supported("3.1.0", ">=2.15.0 <3.0.0") is False
 
 
+def test_is_version_supported_comma_separated_range_applies_both_bounds():
+    """Regression test for a finding from the 2026-08-12 SME review: a
+    comma-separated range with no space (">=2.15.0,<3.0.0", a natural way to
+    write it) used to become ONE token - re.match only ever consumed the
+    FIRST bound and silently ignored everything after the comma, so the
+    upper bound never applied at all."""
+    from kriya.skills.skill import is_version_supported
+
+    assert is_version_supported("2.18.0", ">=2.15.0,<3.0.0") is True
+    # The real bug: without this fix, this would incorrectly be True too,
+    # since the "<3.0.0" upper bound was silently dropped.
+    assert is_version_supported("3.1.0", ">=2.15.0,<3.0.0") is False
+
+
+def test_parse_version_parts_preserves_the_numeric_component_a_qualifier_is_attached_to():
+    """Regression test for a finding from the 2026-08-12 SME review: a
+    trailing-non-digit strip over the WHOLE string only works when the
+    qualifier's own last character is a non-digit ("1.2.3-SNAPSHOT" - the
+    old code already handled this case correctly, since "-SNAPSHOT" is
+    itself all non-digit chars at the string's end). It silently breaks
+    when the qualifier ENDS in a digit instead (e.g. "rc1" in "1.0.5-rc1"):
+    nothing is stripped, the affected part's own int("5-rc1") then raises
+    and gets coerced to 0 - not just losing the qualifier, zeroing out an
+    otherwise-correct patch number entirely."""
+    from kriya.skills.skill import parse_version_parts
+
+    assert parse_version_parts("1.0.5-rc1") == (1, 0, 5)
+    assert parse_version_parts("1.2.3-SNAPSHOT") == (1, 2, 3)
+    assert parse_version_parts("2.18.0") == (2, 18, 0)
+
+
 def _make_promote_project(tmp_path):
     """Sets up a project-local skills dir with an already-approved auto-<repo> lesson,
     and a separate 'global' skills dir (standing in for the real shared library, always
