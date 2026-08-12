@@ -196,6 +196,21 @@ def _resolve_run_command(command: List[str], workspace_path: Optional[str] = Non
 _FENCED_CODE_BLOCK_PATTERN = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
 _PLANNER_CODE_REUSE_LOOKBACK_CHARS = 300
 
+# Cheap, per-extension "does this even look like real code for this file
+# type" check - not a parser, just enough to catch a fence that's obviously
+# NOT source for the target file. Small and explicitly extensible (same
+# precedent as toolchain.py's JDK-incompatible-flags table): one entry per
+# concretely-observed incident, not a speculative general framework. Added
+# after a live eval-harness run (2026-08-12, ignite_qpid_person) found a
+# fenced block near a ".java" file's heading that was actually the
+# qpid/ignite-java17 skill's own documented run-command example ("mvn -q
+# compile exec:exec -Dexec.mainClass=..."), not Java source - the Planner
+# had written it as a "here's how to run this" note, and extraction had no
+# way to tell it apart from real code before this check existed.
+_MIN_PLAUSIBLE_CODE_PATTERN: Dict[str, "re.Pattern"] = {
+    ".java": re.compile(r"\b(class|interface|enum|record)\b"),
+}
+
 
 def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -> Dict[str, str]:
     """PlannerAgent's own system prompt only ever asks for a step-by-step plan
@@ -218,10 +233,16 @@ def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -
     given file if it's mentioned more than once (a plan that shows a file,
     then a corrected/final version of it later, should yield the final one).
 
-    Deliberately does nothing more than this extraction - whether/how the
-    result gets used (and re-verified through the exact same Quality Gates
-    any Developer-generated content goes through) is the caller's decision,
-    not this function's."""
+    A matched fence is also checked against _MIN_PLAUSIBLE_CODE_PATTERN (for
+    extensions with an entry there) before being trusted - a fence that
+    doesn't even look like the target language is rejected rather than
+    returned, so a filename mention followed by an unrelated snippet (e.g. a
+    run-command example) doesn't get treated as that file's real content.
+
+    Otherwise deliberately does nothing more than this extraction - whether/
+    how the result gets used (and re-verified through the exact same
+    Quality Gates any Developer-generated content goes through) is the
+    caller's decision, not this function's."""
     expected_files = list(expected_files)
     if not expected_files or not plan_text:
         return {}
@@ -256,6 +277,21 @@ def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -
                 best_pos = pos
                 found_path = path
         if found_path:
+            ext = os.path.splitext(found_path)[1]
+            pattern = _MIN_PLAUSIBLE_CODE_PATTERN.get(ext)
+            if pattern and not pattern.search(content):
+                # Reject, don't just skip silently into results - the
+                # caller's own existing all-or-nothing check (reuse Planner
+                # code only when EVERY expected file matched) then safely
+                # falls through to a real Developer generation for the
+                # whole set, instead of writing obviously-wrong content
+                # straight to disk with zero review.
+                logger.debug(
+                    f"Rejected a Planner code block for '{found_path}': content doesn't look "
+                    f"like {ext} source (no class/interface/enum/record keyword found) - likely "
+                    "an unrelated snippet (e.g. a run-command example) near the file's heading."
+                )
+                continue
             results[found_path] = content
     return results
 

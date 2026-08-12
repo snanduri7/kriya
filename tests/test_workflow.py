@@ -593,6 +593,36 @@ def test_extract_planner_code_blocks_empty_inputs():
     assert extract_planner_code_blocks("", ["Foo.java"]) == {}
     assert extract_planner_code_blocks("some plan text", []) == {}
 
+def test_extract_planner_code_blocks_rejects_non_java_content_for_java_file():
+    """Regression test for a real bug found live (2026-08-12 eval harness
+    batch, ignite_qpid_person): the Planner mentioned IgniteQpidPersonDemo.java,
+    then later - within the lookback window - wrote a fenced "how to run this"
+    snippet quoting the qpid/ignite-java17 skill's own documented run-command
+    example, not real Java source. Extraction had no way to tell a run-command
+    snippet apart from real code, so it got reused as the file's ENTIRE
+    content, and only the (much more expensive) compile gate caught it
+    afterward. A single-line, class-less fence for a .java file must be
+    rejected - the caller's own all-or-nothing check then falls through to a
+    real Developer generation instead of writing this straight to disk."""
+    plan = (
+        "### src/main/java/com/example/IgniteQpidPersonDemo.java\n"
+        "Run it via:\n"
+        "```\nmvn -q compile exec:exec -Dexec.mainClass=com.example.IgniteQpidPersonDemo\n```\n"
+    )
+    result = extract_planner_code_blocks(plan, ["src/main/java/com/example/IgniteQpidPersonDemo.java"])
+    assert result == {}
+
+def test_extract_planner_code_blocks_still_accepts_real_java_content():
+    """Sibling to the rejection test above - confirms the new plausibility
+    check doesn't false-positive on genuinely valid Java content that merely
+    lacks a top-level class/interface/enum/record on this particular fence
+    (e.g. a real class declaration is still accepted normally)."""
+    plan = (
+        "### Foo.java\n```java\npackage com.example;\npublic class Foo {}\n```\n"
+    )
+    result = extract_planner_code_blocks(plan, ["Foo.java"])
+    assert result == {"Foo.java": "package com.example;\npublic class Foo {}\n"}
+
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):
     """Configured agent_llms overrides must actually reach each role's real
@@ -980,6 +1010,152 @@ async def test_workflow_fallback_targeted_fix_succeeds_before_full_set_regenerat
     assert fifth_call_kwargs["model_override"] == "fallback-1"
     assert fifth_call_kwargs["known_target_files"] == ["App.java"]  # scoped, not a full-set file-list re-derivation
     assert fifth_call_kwargs["extra_fix_instruction"] == DeveloperAgent.SELF_CONSISTENCY_NUDGE
+
+@pytest.mark.asyncio
+async def test_workflow_self_correction_loop_resolves_compile_failure(tmp_path):
+    """When autonomy.self_correction_loop_enabled is on and a compile gate
+    fails, the bounded tool-calling micro-loop (kriya/workflow/self_correction.py)
+    gets a chance to fix it in-place before the run falls back to a full-set
+    regeneration. If it resolves the failure, the attempt should succeed
+    without ever reaching a second Developer generation call - the entire
+    point of the feature over today's regenerate-blind retry."""
+    from kriya.workflow.self_correction import SelfCorrectionResult
+
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.self_correction_loop_enabled = True
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('broken'"},
+    ])
+
+    fake_result = SelfCorrectionResult(
+        resolved=True,
+        turns_used=2,
+        final_compile_output="compiled OK",
+        modified_files={"app.py": "print('broken')"},
+        transcript=[{"turn": 0, "tool": "recompile", "arguments": {}, "result": "SUCCESS: compiled OK"}],
+    )
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": False, "output": "SyntaxError: unexpected EOF"}), \
+         patch("kriya.workflow.self_correction.run_self_correction_loop", new=AsyncMock(return_value=fake_result)) as mock_loop:
+        res = await we.run_generation_workflow(goal="Create a python script", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 1  # never reached a second, full-set regeneration
+    mock_loop.assert_called_once()
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    compile_outcomes = [o for o in gate_outcomes if o.get("type") == "compile"]
+    assert len(compile_outcomes) == 1
+    assert compile_outcomes[0]["success"] is True
+    assert compile_outcomes[0]["self_corrected"] is True
+    assert compile_outcomes[0]["self_correction_turns"] == 2
+
+@pytest.mark.asyncio
+async def test_workflow_self_correction_loop_exhausts_falls_through_unchanged(tmp_path):
+    """If the micro-loop can't resolve the failure within its turn budget,
+    the run must fall through to today's unmodified behavior - a full-set
+    regeneration on the next attempt - not get stuck or fail differently."""
+    from kriya.workflow.self_correction import SelfCorrectionResult
+
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.self_correction_loop_enabled = True
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{"filepath": "app.py", "content": "print('broken'"}],
+        [{"filepath": "app.py", "content": "print('fixed')"}],
+    ])
+
+    fake_transcript = [{"turn": 0, "tool": "recompile", "arguments": {}, "result": "FAILURE: still broken"}]
+    fake_result = SelfCorrectionResult(
+        resolved=False, turns_used=4, final_compile_output="still broken", modified_files={}, transcript=fake_transcript,
+    )
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.workflow.self_correction.run_self_correction_loop", new=AsyncMock(return_value=fake_result)) as mock_loop:
+        mock_compile.side_effect = [
+            {"success": False, "output": "SyntaxError: unexpected EOF"},  # attempt 1
+            {"success": True, "output": ""},                              # attempt 2, full-set regeneration
+        ]
+        res = await we.run_generation_workflow(goal="Create a python script", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 2  # exactly today's unmodified retry behavior
+    mock_loop.assert_called_once()
+
+    # Forensics regression test: an exhausted (not just a resolved) loop's
+    # transcript must still be persisted, not silently discarded the moment
+    # execution falls through to the ordinary QualityGateFailure path -
+    # found live (2026-08-12 eval harness batch) that it previously wasn't.
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    failed_compile_outcomes = [o for o in gate_outcomes if o.get("type") == "compile" and not o["success"]]
+    assert len(failed_compile_outcomes) == 1
+    assert failed_compile_outcomes[0]["self_correction_attempt"] == {
+        "turns_used": 4, "transcript": fake_transcript, "final_compile_output": "still broken",
+    }
+
+@pytest.mark.asyncio
+async def test_workflow_self_correction_loop_disabled_by_default_zero_new_code_path(tmp_path):
+    """With the flag left at its pydantic default (off), a compile failure
+    must never even import/invoke the self-correction module - proving the
+    flag-off path is a true no-op, not just a discarded result."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    assert cfg.autonomy.self_correction_loop_enabled is False  # sanity: default, not explicitly set
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{"filepath": "app.py", "content": "print('broken'"}],
+        [{"filepath": "app.py", "content": "print('fixed')"}],
+    ])
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.workflow.self_correction.run_self_correction_loop") as mock_loop:
+        mock_compile.side_effect = [
+            {"success": False, "output": "SyntaxError: unexpected EOF"},  # attempt 1
+            {"success": True, "output": ""},                              # attempt 2, full-set regeneration
+        ]
+        res = await we.run_generation_workflow(goal="Create a python script", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 2  # today's unmodified retry flow, unaffected
+    mock_loop.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_workflow_fallback_targeted_fix_skipped_without_fallback_chain(tmp_path):

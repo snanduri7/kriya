@@ -221,3 +221,80 @@ def test_is_local_url_still_allows_real_local_hosts():
 
 def test_is_local_url_still_rejects_real_remote_hosts():
     assert is_local_url("http://api.openai.com/v1") is False
+
+
+def _mock_tool_call_response(tool_calls=None, content=""):
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = content
+    mock_response.choices[0].message.tool_calls = tool_calls
+    return mock_response
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_returns_tool_calls():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    raw_call = MagicMock()
+    raw_call.id = "call_1"
+    raw_call.function.name = "recompile"
+    raw_call.function.arguments = '{"foo": "bar"}'
+
+    mock_create = AsyncMock(return_value=_mock_tool_call_response(tool_calls=[raw_call]))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete_with_tools(
+            [{"role": "user", "content": "fix it"}],
+            [{"type": "function", "function": {"name": "recompile", "parameters": {}}}],
+        )
+        assert res["content"] == ""
+        assert res["tool_calls"] == [{"id": "call_1", "name": "recompile", "arguments": {"foo": "bar"}}]
+        assert mock_create.call_args[1].get("tools") is not None
+        assert mock_create.call_args[1].get("tool_choice") == "auto"
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_handles_empty_tool_calls():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_tool_call_response(tool_calls=None, content="all done"))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete_with_tools([{"role": "user", "content": "status?"}], [])
+        assert res == {"content": "all done", "tool_calls": []}
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_respects_egress_policy():
+    from kriya.core.llm import EgressViolationError
+
+    cfg = AppConfig()
+    cfg.autonomy.egress_policy = "local_only"
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock()
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        with pytest.raises(EgressViolationError):
+            await llm.complete_with_tools(
+                [{"role": "user", "content": "x"}], [], base_url_override="https://api.deepseek.com/v1",
+            )
+        mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_malformed_arguments_does_not_crash():
+    """Echoes this session's confirmed local-model failure mode - malformed/
+    truncated JSON even at small tool-call-argument scale - falling back to
+    {} rather than raising keeps one bad tool call from crashing the loop."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    raw_call = MagicMock()
+    raw_call.id = "call_1"
+    raw_call.function.name = "apply_patch"
+    raw_call.function.arguments = '{"filepath": "a.py", "edits": [truncated...'
+
+    mock_create = AsyncMock(return_value=_mock_tool_call_response(tool_calls=[raw_call]))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete_with_tools([{"role": "user", "content": "fix it"}], [])
+        assert res["tool_calls"] == [{"id": "call_1", "name": "apply_patch", "arguments": {}}]

@@ -19,7 +19,7 @@ by design) since this is a pure data shape, trivial to unit-test in
 isolation from the retry loop itself.
 """
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -80,6 +80,18 @@ class Failure:
     attempted_edits: List[Dict[str, str]] = field(default_factory=list)
     attempt: int = 0
     mode: Optional[str] = None
+    # Set only on a "compile" failure where autonomy.self_correction_loop_enabled
+    # was on and the loop actually ran but did NOT resolve it within its turn
+    # budget (kriya/workflow/self_correction.py) - {"turns_used", "transcript",
+    # "final_compile_output"}. None whenever the loop never ran at all (flag off,
+    # or a non-compile failure type). Closes the same forensics gap
+    # attempted_edits closed for anchored edits above: without this, a live run
+    # (2026-08-12 eval harness batch) showed the loop making its full 4 turns of
+    # genuine diagnostic tool calls, then silently discarding all of it the
+    # moment it fell through to the ordinary QualityGateFailure path - exactly
+    # the "captured in memory but never persisted" gap this file's own history
+    # already names as a repeat mistake worth avoiding.
+    self_correction_attempt: Optional[Dict[str, Any]] = None
 
     def to_gate_outcome(self) -> dict:
         """The shape kriya/workflow/workflow.py's gate_outcomes list expects -
@@ -100,6 +112,7 @@ class Failure:
             ],
             "failed_content": dict(self.failed_content),
             "attempted_edits": list(self.attempted_edits),
+            "self_correction_attempt": self.self_correction_attempt,
         }
 
 

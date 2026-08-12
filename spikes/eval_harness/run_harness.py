@@ -43,7 +43,7 @@ LIVE_BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1
 # kriya-protocol-parser-app's own kriya.yaml independently chose and never hit
 # this problem with - not a guess, a model already validated live in this
 # exact fallback role.
-LIVE_FALLBACK_MODEL = os.environ.get("KRIYA_LIVE_FALLBACK_MODEL", "deepseek-coder-v2:16b")
+LIVE_FALLBACK_MODEL = os.environ.get("KRIYA_LIVE_FALLBACK_MODEL", "devstral-small-2:24b")
 # Kriya's own kriya/config/config.py::SearchConfig deliberately makes
 # autonomy.web_lookup_enabled and search.base_url two SEPARATE switches - "so
 # a config merge/copy-paste can't silently enable outbound search" - but
@@ -76,7 +76,7 @@ def _init_git_repo(path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
-def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url):
+def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction):
     # paths.skills/memory stay relative (resolved against this config file's own
     # directory, i.e. per-goal-isolated - see CLAUDE.md's config-resolution note)
     # so one goal's skill/RAG state can never leak into another's. paths.logs is
@@ -102,6 +102,12 @@ def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url,
             "run_verification_enabled": True,
             "web_lookup_enabled": True,
             "web_lookup_auto_approve": True,
+            # Off by default (matches AutonomyConfig's own default) unless
+            # --self-correction is passed - lets a batch be run twice, flag
+            # on vs. off, for a real before/after comparison of the new
+            # compile-gate micro-loop (kriya/workflow/self_correction.py)
+            # against the same goal set, not just its mocked unit tests.
+            "self_correction_loop_enabled": self_correction,
         },
         # The second, separate switch web_lookup_enabled alone doesn't turn on -
         # see LIVE_SEARCH_BASE_URL's own comment above for why this was missing
@@ -165,6 +171,11 @@ def main():
     parser.add_argument("--batch-dir", default=None,
                          help="Where to put this batch's workspaces/logs/summary. Defaults to a timestamped "
                               "directory under spikes/eval_harness/runs/.")
+    parser.add_argument("--self-correction", action="store_true",
+                         help="Turn on autonomy.self_correction_loop_enabled for every goal in this batch "
+                              "(default off, matching AutonomyConfig's own default) - run the same goal set "
+                              "with and without this flag for a before/after comparison of the bounded "
+                              "compile-gate self-correction micro-loop (kriya/workflow/self_correction.py).")
     args = parser.parse_args()
 
     goals = GOALS if not args.goal_id else [g for g in GOALS if g.id in args.goal_id]
@@ -180,12 +191,14 @@ def main():
     print(f"Eval harness batch: {batch_dir}")
     print(f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}")
     print(f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}")
+    print(f"Self-correction loop: {'ON' if args.self_correction else 'off'}")
     print(f"Goals: {[g.id for g in goals]}\n")
 
     summary_lines = [
         f"Eval harness batch {batch_ts}",
         f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}",
         f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}",
+        f"Self-correction loop: {'ON' if args.self_correction else 'off'}",
         f"traces.db: {os.path.join(logs_dir, 'traces.db')}",
         "",
     ]
@@ -194,7 +207,7 @@ def main():
         goal_dir = Path(os.path.join(batch_dir, "workspaces", goal.id))
         goal_dir.mkdir(parents=True, exist_ok=True)
         _init_git_repo(goal_dir)
-        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model, args.search_base_url)
+        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model, args.search_base_url, args.self_correction)
 
         print(f"--- Running goal '{goal.id}' (timeout {args.timeout_per_goal}s) ---")
         start = time.time()
