@@ -4897,6 +4897,34 @@ def test_extract_error_source_locations_handles_both_shapes_together():
     )
     assert extract_error_source_locations(error) == [("App.java", 10), ("Worker.java", 42)]
 
+def test_extract_error_source_locations_finds_python_syntax_error_shape():
+    """Regression test for a real bug found live (2026-08-13, python_greeter,
+    reproduced identically across two separate eval-harness runs): the SAME
+    "no anchor -> full-file regeneration -> stated fix gets lost in the
+    rewrite" failure mode as the JUnit/stack-trace gap above, this time for
+    Python. PolymorphicValidator.run_compile_check()'s own SyntaxError
+    formatting ('Syntax error in {file} line {N}: {text} ({msg})',
+    kriya/tools/validate.py) was never recognized by the compile-error-only
+    regex, so every Python goal's syntax-error retries got zero source-line
+    grounding and no anchored-edit preference - unlike a Java compile error
+    carrying the identical file:line precision. Live consequence: a model
+    (glm-4.7-flash) correctly diagnosed a one-line fix in its own FIX
+    ANALYSIS text on 4 consecutive retries and never once implemented it,
+    forced to blindly rewrite the whole file from scratch each time with no
+    anchor to patch against."""
+    error = "Syntax error in greet.py line 6: [VERIFICATION] PASS (invalid syntax)"
+    assert extract_error_source_locations(error) == [("greet.py", 6)]
+
+def test_extract_error_source_locations_handles_all_three_shapes_together():
+    error = (
+        "[ERROR] .../App.java:[10,5] incompatible types\n"
+        "\tat com.example.Worker.run(Worker.java:42)\n"
+        "Syntax error in greet.py line 6: [VERIFICATION] PASS (invalid syntax)\n"
+    )
+    assert extract_error_source_locations(error) == [
+        ("App.java", 10), ("Worker.java", 42), ("greet.py", 6),
+    ]
+
 def test_build_error_source_context_extracts_real_source_window(tmp_path):
     (tmp_path / "IntegrationApp.java").write_text(
         "\n".join(f"line {i}" for i in range(1, 20))
@@ -4918,6 +4946,20 @@ def test_build_error_source_context_skips_unknown_file(tmp_path):
 def test_build_error_source_context_no_locations_returns_empty(tmp_path):
     result = _build_error_source_context(str(tmp_path), "Process exited with code 1.", known_files=["App.java"])
     assert result == {}
+
+def test_build_error_source_context_extracts_python_syntax_error_window(tmp_path):
+    """End-to-end sibling to test_build_error_source_context_extracts_real_source_window
+    for the Python SyntaxError shape - proves the fix actually reaches the
+    same source-window-extraction path a Java compile error already uses,
+    not just that extract_error_source_locations() parses the location."""
+    (tmp_path / "greet.py").write_text(
+        "def greet(name: str) -> str:\n    return f\"Hello, {name}!\"\n\n"
+        "[VERIFICATION] PASS\nprint(greet('World'))\n"
+    )
+    error = "Syntax error in greet.py line 4: [VERIFICATION] PASS (invalid syntax)"
+    result = _build_error_source_context(str(tmp_path), error, known_files=["greet.py"])
+    assert "greet.py" in result
+    assert ">> 4: [VERIFICATION] PASS" in result["greet.py"]
 
 @pytest.mark.asyncio
 async def test_get_or_start_jdtls_client_returns_none_when_jdtls_not_found():

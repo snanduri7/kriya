@@ -206,8 +206,9 @@ def extract_error_search_terms(
 
 
 _ERROR_LOCATION_PATTERN = re.compile(
-    r"([\w./\\-]+\.java):\[(\d+),\d+\]"    # javac compile-error shape: File.java:[line,col]
-    r"|\(([\w.-]+\.java):(\d+)\)"          # Java stack-trace shape: (File.java:line)
+    r"(?P<jc_file>[\w./\\-]+\.java):\[(?P<jc_line>\d+),\d+\]"      # javac compile-error shape: File.java:[line,col]
+    r"|\((?P<jt_file>[\w.-]+\.java):(?P<jt_line>\d+)\)"            # Java stack-trace shape: (File.java:line)
+    r"|Syntax error in (?P<py_file>[\w./\\-]+\.py) line (?P<py_line>\d+):"  # PolymorphicValidator's Python SyntaxError shape
 )
 
 
@@ -236,20 +237,34 @@ def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
     diagnosed the bug but, with no precise anchor to patch against, fell back
     to full-file regeneration and reintroduced an equivalent bug - the exact
     failure mode _build_error_source_context/anchored-edit preference exists
-    to prevent, just never wired up for this shape. Purely local: reads real
+    to prevent, just never wired up for this shape.
+
+    ALSO recognizes PolymorphicValidator.run_compile_check()'s own Python
+    SyntaxError shape ('Syntax error in greet.py line 6: ... (invalid
+    syntax)', kriya/tools/validate.py) - confirmed live, 2026-08-13
+    (python_greeter, reproduced identically across two separate eval-harness
+    runs): the SAME "no anchor -> full-file regeneration -> stated fix gets
+    lost in the rewrite" failure mode as the JVM-stack-trace gap above, this
+    time for every Python goal rather than one specific JVM shape - a model
+    (glm-4.7-flash) correctly diagnosed a one-line fix in its own FIX ANALYSIS
+    text on 4 consecutive retries and never once implemented it, because it
+    was never shown the exact broken line and never asked to prefer a small
+    anchored patch over rewriting the whole file. Purely local: reads real
     source lines from the worktree to show the LOCAL model, in the SAME
     prompt-building path a compile error already uses - not related to, and
     does not touch, extract_error_search_terms()'s separate, narrowly-scoped
     live-lookup mechanism (a hard-coded Maven/Gradle-coordinate-only regex
     that never sees raw error/stack-trace text at all, by design - see its
-    own docstring). Both location shapes share this one function/return
-    contract; a match's file/line comes from whichever alternative matched
-    (group 1/2 for the compile shape, group 3/4 for the stack-trace shape)."""
+    own docstring). All three location shapes share this one function/return
+    contract; a match's file/line comes from whichever alternative's named
+    groups matched (jc_*/jt_*/py_* for the compile/stack-trace/Python
+    shapes respectively) - named rather than positional groups specifically
+    so a future fourth shape doesn't need to renumber every existing one."""
     seen = set()
     locations: List[Tuple[str, int]] = []
     for m in _ERROR_LOCATION_PATTERN.finditer(error_text):
-        filepath = m.group(1) or m.group(3)
-        line = m.group(2) or m.group(4)
+        filepath = m.group("jc_file") or m.group("jt_file") or m.group("py_file")
+        line = m.group("jc_line") or m.group("jt_line") or m.group("py_line")
         key = (os.path.basename(filepath), int(line))
         if key not in seen:
             seen.add(key)
