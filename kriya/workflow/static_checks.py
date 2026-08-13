@@ -6,13 +6,18 @@ complete, before the expensive compile gate - catches a mistake the model
 already had the rule for, without waiting through a full Maven build + JVM
 boot + broker startup + a live hang/crash to discover it.
 
-Found live, 2026-08-12 (ignite_qpid_protocol): both checks below reproduce
-real failures hit in the same session - a generated app that mixed
+Found live, 2026-08-12 (ignite_qpid_protocol): the two Ignite checks below
+reproduce real failures hit in the same session - a generated app that mixed
 Ignition.start() with an XML defining IgniteSpringBean threw
 "IgniteException: Ignite instance with this name has already been started"
 at runtime, and a separate attempt left an Ignition.start()'d node with no
 matching close(), hanging the JVM indefinitely after all application logic
-had already finished and printed its correct result.
+had already finished and printed its correct result. Both are inherently
+Java/Ignite-specific. A third check (BareVerificationMarkerCheck, added
+2026-08-13) is deliberately language-generic instead - it scans every
+written file regardless of extension, since the anti-pattern it catches
+(Kriya's own runtime-verification marker text getting embedded unprinted)
+can happen in any target language, not just Java.
 
 Best-effort by design, matching this project's own established philosophy for
 this class of check (see kriya/workflow/failure_grounding.py's
@@ -56,6 +61,58 @@ class IgniteMethodMixingCheck(StaticCheck):
         return None
 
 
+class BareVerificationMarkerCheck(StaticCheck):
+    """Catches Kriya's own Verification Contract instruction
+    (retry_prompts.py's VERIFICATION_CONTRACT_HEADER, which asks the model to
+    make its entrypoint PRINT an exact "[VERIFICATION] PASS"/"[VERIFICATION]
+    FAIL: ..." verdict line) getting written into the source as bare,
+    unquoted, un-printed text instead of an actual print/output call.
+
+    Found live, 2026-08-13 (python_greeter, reproduced identically across two
+    separate eval-harness runs): qwen3-coder:30b's first-draft generation
+    wrote the literal, unquoted tokens `[VERIFICATION] PASS` as a standalone
+    line - genuinely invalid Python (a syntax error), but nothing guarantees
+    the same mistake is a compile-time error in every target language; a
+    language where a bare identifier-like expression is legal would let this
+    slip through as a silent no-op that never actually prints the verdict.
+    This check is language-generic by design (scans every written file, not
+    just one extension) since the marker text and the mistake shape are
+    identical regardless of target language - unlike the Ignite checks
+    above, which are inherently Java/XML-specific to the frameworks
+    involved.
+
+    Deliberately narrow: only flags the exact confirmed shape (the marker
+    starting a stripped line completely bare, no leading quote or print-call
+    prefix). A correctly quoted-but-never-printed marker (e.g. a bare
+    "[VERIFICATION] PASS" string expression sitting on its own, syntactically
+    valid in some languages but still never reaching real output) is a
+    plausible sibling mistake but not yet a confirmed live incident - not
+    covered here, matching this module's own established practice of one
+    check per concretely-observed failure rather than speculative coverage."""
+
+    name = "bare_verification_marker"
+
+    _BARE_MARKER_RE = re.compile(r"^\[VERIFICATION\]\s+(PASS|FAIL)\b")
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            for line_no, line in enumerate(content.splitlines(), start=1):
+                stripped = line.strip()
+                if self._BARE_MARKER_RE.match(stripped):
+                    return (
+                        f"{filepath} line {line_no} contains the literal, unquoted text "
+                        f"'{stripped}' sitting on its own. The verification contract's verdict "
+                        "line must be the argument to an actual print/console-output call in "
+                        "this file's language (e.g. Python's print(...), Java's "
+                        "System.out.println(...), Ruby's puts) - not a bare line of source text. "
+                        "As written, this either fails to compile, or compiles but never actually "
+                        "prints anything, so the verdict will never reach the program's real "
+                        "output. Wrap it in the correct print/output call for this file's "
+                        "language."
+                    )
+        return None
+
+
 class IgniteUnclosedResourceCheck(StaticCheck):
     name = "ignite_unclosed_resource"
 
@@ -83,7 +140,7 @@ class IgniteUnclosedResourceCheck(StaticCheck):
         return None
 
 
-STATIC_CHECKS = [IgniteMethodMixingCheck(), IgniteUnclosedResourceCheck()]
+STATIC_CHECKS = [IgniteMethodMixingCheck(), IgniteUnclosedResourceCheck(), BareVerificationMarkerCheck()]
 
 
 def run_static_checks(worktree_path: str, all_files_written: Iterable[str]) -> Optional[str]:

@@ -1,10 +1,13 @@
 """Tests for kriya/workflow/static_checks.py - the deterministic, no-LLM
 pre-flight anti-pattern scanner. Fixtures reproduce the two real bugs found
-live 2026-08-12 (ignite_qpid_protocol) that motivated this module.
+live 2026-08-12 (ignite_qpid_protocol), plus the language-generic
+bare-verification-marker bug found live 2026-08-13 (python_greeter), that
+motivated this module and its checks.
 """
 import os
 
 from kriya.workflow.static_checks import (
+    BareVerificationMarkerCheck,
     IgniteMethodMixingCheck,
     IgniteUnclosedResourceCheck,
     run_static_checks,
@@ -134,3 +137,64 @@ def test_run_static_checks_skips_unreadable_files_gracefully(tmp_path):
     # A path in all_files_written that no longer exists on disk must not crash.
     violation = run_static_checks(str(tmp_path), ["src/DoesNotExist.java"])
     assert violation is None
+
+
+_BARE_MARKER_PYTHON = (
+    "def greet(name: str) -> str:\n"
+    "    return f\"Hello, {name}!\"\n\n"
+    "[VERIFICATION] PASS\n"
+    "print(greet('World'))\n"
+)
+
+_CORRECTLY_PRINTED_PYTHON = (
+    "def greet(name: str) -> str:\n"
+    "    return f\"Hello, {name}!\"\n\n"
+    "print(greet('World'))\n"
+    "print(\"[VERIFICATION] PASS\")\n"
+)
+
+_CORRECTLY_PRINTED_JAVA = (
+    "public class App {\n"
+    "    public static void main(String[] args) {\n"
+    "        System.out.println(\"[VERIFICATION] PASS\");\n"
+    "    }\n"
+    "}\n"
+)
+
+
+def test_bare_verification_marker_check_detects_unquoted_standalone_marker():
+    """Regression test for the real bug found live (2026-08-13,
+    python_greeter, reproduced identically across two separate eval-harness
+    runs): qwen3-coder:30b wrote Kriya's own verification-contract marker as
+    bare, unquoted source text instead of a print() argument."""
+    files = {"greet.py": _BARE_MARKER_PYTHON}
+    violation = BareVerificationMarkerCheck().check(files)
+    assert violation is not None
+    assert "greet.py" in violation
+    assert "line 4" in violation
+
+
+def test_bare_verification_marker_check_detects_fail_variant():
+    files = {"greet.py": "def f():\n    pass\n\n[VERIFICATION] FAIL: bad\n"}
+    violation = BareVerificationMarkerCheck().check(files)
+    assert violation is not None
+
+
+def test_bare_verification_marker_check_clean_when_correctly_printed_python():
+    assert BareVerificationMarkerCheck().check({"greet.py": _CORRECTLY_PRINTED_PYTHON}) is None
+
+
+def test_bare_verification_marker_check_clean_when_correctly_printed_java():
+    # Language-generic - the check doesn't special-case any one extension.
+    assert BareVerificationMarkerCheck().check({"App.java": _CORRECTLY_PRINTED_JAVA}) is None
+
+
+def test_bare_verification_marker_check_clean_when_marker_never_mentioned():
+    assert BareVerificationMarkerCheck().check({"App.java": "public class App {}"}) is None
+
+
+def test_run_static_checks_reports_bare_verification_marker_violation(tmp_path):
+    (tmp_path / "greet.py").write_text(_BARE_MARKER_PYTHON)
+    violation = run_static_checks(str(tmp_path), ["greet.py"])
+    assert violation is not None
+    assert violation.startswith("[bare_verification_marker]")
