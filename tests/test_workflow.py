@@ -63,6 +63,7 @@ from kriya.workflow.workflow import (
     extract_error_source_locations,
     extract_expected_files,
     extract_implicated_files,
+    find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
     find_missing_expected_files,
     find_structural_corruption,
@@ -6706,6 +6707,94 @@ def test_find_edits_ignoring_reported_line_empty_without_a_locatable_error():
     assert ignored == []
 
 
+# --- find_edits_ignoring_own_diagnosis(): does the edit implement its own analysis? ---
+
+def test_find_edits_ignoring_own_diagnosis_flags_a_fix_that_never_happened():
+    # The analysis names a specific fix; the edit changes something else,
+    # leaving the actual fix content nowhere in the new code.
+    analysis = "the fix requires declaring the cache with explicit generic type parameters `IgniteCache<Integer, Protocol>` instead of using `var`."
+    edits = [{"search": "var cache = ignite.getOrCreateCache(\"protocol-cache\");",
+              "replace": "var cache = ignite.getOrCreateCache(\"protocol-cache-v2\");"}]
+    result = find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant orig text")
+    assert result is not None
+    assert "IgniteCache<Integer, Protocol>" in result
+
+
+def test_find_edits_ignoring_own_diagnosis_passes_when_the_fix_is_present():
+    analysis = "the fix requires declaring the cache with explicit generic type parameters `IgniteCache<Integer, Protocol>` instead of using `var`."
+    edits = [{"search": "var cache = ignite.getOrCreateCache(\"protocol-cache\");",
+              "replace": "IgniteCache<Integer, Protocol> cache = ignite.getOrCreateCache(\"protocol-cache\");"}]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant orig text") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_excludes_the_problem_quote_already_in_old_code():
+    # `var` (describing the PROBLEM) is already present in the old code -
+    # must not count as evidence the fix was made just because it's a quoted
+    # span that happens to still be there. This is the exact old-vs-new
+    # ambiguity the design resolves.
+    analysis = "the fix requires explicit generics `IgniteCache<Integer, Protocol>` instead of `var`."
+    edits = [{"search": "var cache = ignite.getOrCreateCache(\"x\");",
+              "replace": "var cacheTwo = ignite.getOrCreateCache(\"x\");"}]  # `var` still present, no real fix
+    result = find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant")
+    assert result is not None
+
+
+def test_find_edits_ignoring_own_diagnosis_passes_with_no_quoted_spans():
+    # A prose-only diagnosis with no backtick-quoted code has nothing
+    # specific enough to check against - never flag it.
+    analysis = "the null check was missing before dereferencing the object."
+    edits = [{"search": "x", "replace": "y"}]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_passes_with_no_analysis():
+    assert find_edits_ignoring_own_diagnosis(None, [{"search": "x", "replace": "y"}], None, "irrelevant") is None
+    assert find_edits_ignoring_own_diagnosis("", [{"search": "x", "replace": "y"}], None, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_handles_full_content_shape():
+    analysis = "should use `StringBuilder` instead of string concatenation in a loop."
+    orig_text = "String result = \"\";\nfor (String s : parts) { result += s; }\n"
+    fixed_content = "StringBuilder result = new StringBuilder();\nfor (String s : parts) { result.append(s); }\n"
+    assert find_edits_ignoring_own_diagnosis(analysis, None, fixed_content, orig_text) is None
+
+    unfixed_content = "String result = \"\";\nfor (String s : parts) { result = result + s; }\n"
+    result = find_edits_ignoring_own_diagnosis(analysis, None, unfixed_content, orig_text)
+    assert result is not None
+    assert "StringBuilder" in result
+
+
+def test_find_edits_ignoring_own_diagnosis_regression_validation_3():
+    """Regression test for the real, live-reproduced failure that motivated
+    this check (2026-08-13, spikes/eval_harness/runs/attribution-fix-
+    validation-3): a compile error recurred verbatim across 3 consecutive
+    targeted retries despite a textbook-correct FIX ANALYSIS every time.
+    Exact analysis text from kriya.log, attempt 1's retry."""
+    analysis = (
+        "The error occurs because `ignite.getOrCreateCache(\"protocol-cache\")` returns "
+        "a generic `IgniteCache` object without explicit type parameters, causing the "
+        "compiler to infer it as `IgniteCache<Object, Object>`. When calling "
+        "`cache.get(1)`, the return value is `Object` which cannot be implicitly "
+        "converted to `Protocol`. The fix requires either explicitly casting the result "
+        "or declaring the cache with proper generic type parameters. Since we're using "
+        "`getOrCreateCache` and need to store `Protocol` objects, we should declare the "
+        "cache with explicit generic types `IgniteCache<Integer, Protocol>`."
+    )
+    # Reproduces what the worktree evidence showed actually happened: an edit
+    # that leaves the untyped `var cache = ...` declaration unchanged.
+    unfixed_edits = [{
+        "search": "var cache = ignite.getOrCreateCache(\"protocol-cache\");",
+        "replace": "var cache = ignite.getOrCreateCache(\"protocol-cache\"); // unchanged",
+    }]
+    assert find_edits_ignoring_own_diagnosis(analysis, unfixed_edits, None, "irrelevant") is not None
+
+    fixed_edits = [{
+        "search": "var cache = ignite.getOrCreateCache(\"protocol-cache\");",
+        "replace": "IgniteCache<Integer, Protocol> cache = ignite.getOrCreateCache(\"protocol-cache\");",
+    }]
+    assert find_edits_ignoring_own_diagnosis(analysis, fixed_edits, None, "irrelevant") is None
+
+
 @pytest.mark.asyncio
 async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_path):
     """End-to-end regression test for the same real live failure
@@ -7777,3 +7866,180 @@ def test_filter_misattributed_extraction_drops_only_the_misattributed_entries():
     filtered = _filter_misattributed_extraction(extraction, qpid, [ignite])
     assert filtered["rules"] == ["Use org.apache.qpid:qpid-broker-core for an embedded Qpid Broker-J server."]
     assert list(filtered["examples"].keys()) == ["qpid-initial-config.json"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_gate_outcome_records_attribution_tier(tmp_path):
+    """attribute_failure() (kriya/workflow/attribution.py) persists which
+    tier decided a failure's implicated file(s) onto the gate_outcome - same
+    graded_by-style pattern already used for the verification-contract-
+    reliability fix, so a live run can be audited for which attribution tier
+    actually fired instead of just trusted. A locator-bearing compile error
+    (a real javac-style File.java:[line,col] locator) should record
+    tier="locator"/confidence="high" and correctly scope the very next
+    attempt to a targeted retry of just that file."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+        [{"filepath": "App.java", "content": "class App {\n  String x;\n}"}],
+    ])
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 2
+    second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
+    assert second_call_kwargs["known_target_files"] == ["App.java"]
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    compile_failure = next(g for g in gate_outcomes if g["type"] == "compile" and g["success"] is False)
+    assert compile_failure["attribution_tier"] == "locator"
+    assert compile_failure["attribution_confidence"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_workflow_self_diagnosis_redirects_after_confirmed_repeat_failure(tmp_path):
+    """End-to-end regression test for the self-diagnosis-feedback fix
+    (2026-08-13, motivated by a real divergence found live in
+    spikes/eval_harness/runs/attribution-fix-validation-2): a stack-trace
+    locator kept a real run's retries stuck targeting the file where an
+    exception was THROWN, even after the model's own FIX ANALYSIS correctly
+    named a different file as the real cause. When a targeted retry's own
+    analysis diverges from what it was asked to fix, and the SAME failure
+    signature recurs, the NEXT attempt must redirect to the self-diagnosed
+    file instead of re-deriving the same (wrong) locator forever."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write A.java and B.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        # Attempt 1 (full-set): writes both files.
+        [
+            {"filepath": "A.java", "content": "class A {\n  Object x;\n}"},
+            {"filepath": "B.java", "content": "class B {}"},
+        ],
+        # Attempt 2 (targeted retry of A.java, driven by the locator below) -
+        # the model's own analysis says the real cause is in B.java.
+        [{
+            "filepath": "A.java", "content": "class A {\n  Object x2;\n}",
+            "analysis": "A.java itself is fine - the real problem is in B.java's own field type.",
+        }],
+        # Attempt 3 - should now be targeted at B.java via self_diagnosis,
+        # not another blind re-try of A.java.
+        [{"filepath": "B.java", "content": "class B { int y; }"}],
+    ])
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},  # identical - same signature
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 3
+    third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
+    assert third_call_kwargs["known_target_files"] == ["B.java"]
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    second_failure = [g for g in gate_outcomes if g["type"] == "compile" and g["success"] is False][1]
+    assert second_failure["attribution_tier"] == "self_diagnosis"
+    assert second_failure["likely_files"] == ["B.java"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_path):
+    """End-to-end regression test for the diagnosis-vs-diff check (2026-08-13,
+    motivated by a real divergence found live in spikes/eval_harness/runs/
+    attribution-fix-validation-3): a targeted retry's own FIX ANALYSIS
+    correctly named a specific fix, but the returned edit never actually made
+    that change - caught as a pre-flight failure BEFORE the expensive compile
+    gate ever runs a second time for the wrong reason, and correctly scoped
+    back to the same file for the next retry."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write A.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        # Attempt 1 (full-set): a real compile error with a locator for A.java.
+        [{"filepath": "A.java", "content": "class A {\n  var cache = get();\n}"}],
+        # Attempt 2 (targeted retry) - analysis names a specific fix, but the
+        # edit doesn't actually make it (reproduces the real captured
+        # validation-3 divergence).
+        [{
+            "filepath": "A.java", "content": None,
+            "edits": [{"search": "var cache = get();", "replace": "var cache = get(); // still untyped"}],
+            "analysis": "the fix requires declaring `IgniteCache<Integer, Protocol>` explicitly instead of `var`.",
+        }],
+        # Attempt 3 (targeted retry again, redirected back to A.java by the
+        # diagnosis_mismatch failure) - this time the fix is actually made.
+        [{"filepath": "A.java", "content": "class A {\n  IgniteCache<Integer, Protocol> cache = get();\n}"}],
+    ])
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},
+            # No second entry for attempt 2 - it never reaches the compile
+            # gate at all, caught by the pre-flight check first.
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 3
+    assert mock_compile.call_count == 2  # confirms attempt 2 never reached the compile gate
+    third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
+    assert third_call_kwargs["known_target_files"] == ["A.java"]
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    mismatch_outcome = next(g for g in gate_outcomes if g["type"] == "diagnosis_mismatch")
+    assert mismatch_outcome["likely_files"] == ["A.java"]
+    assert "IgniteCache<Integer, Protocol>" in mismatch_outcome["output"]

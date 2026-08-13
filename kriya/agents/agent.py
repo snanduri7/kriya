@@ -978,6 +978,7 @@ class DeveloperAgent(BaseAgent):
             )
 
             edits = None
+            analysis = None
             if prefer_anchored_edit:
                 analysis, edits, content = self._split_fix_analysis_edit(content)
                 if analysis:
@@ -989,10 +990,19 @@ class DeveloperAgent(BaseAgent):
                 if analysis:
                     logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
 
+            # Threaded out (not just logged) so kriya/workflow/attribution.py's
+            # self_diagnosis tier can check whether this text names a DIFFERENT
+            # known file than the one it's attached to - closes a real gap found
+            # live (2026-08-13, ignite_qpid_protocol validation): the model's own
+            # analysis correctly named the real cause in a sibling file, but
+            # nothing downstream ever read this text again after logging it.
             if edits:
-                files_out.append({"filepath": filepath, "content": None, "edits": edits})
+                file_entry = {"filepath": filepath, "content": None, "edits": edits}
             else:
-                files_out.append({"filepath": filepath, "content": self.sanitize_generated_content(content)})
+                file_entry = {"filepath": filepath, "content": self.sanitize_generated_content(content)}
+            if analysis:
+                file_entry["analysis"] = analysis
+            files_out.append(file_entry)
         return files_out
 
     async def _resolve_step1_file_list(

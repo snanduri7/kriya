@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
-from kriya.workflow.edit_safety import apply_anchored_edits, find_edits_ignoring_reported_line, find_structural_corruption
+from kriya.workflow.edit_safety import apply_anchored_edits, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_structural_corruption
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
@@ -27,6 +27,7 @@ from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_mi
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
 from kriya.workflow.static_checks import run_static_checks
+from kriya.workflow.attribution import extract_self_diagnosed_files, resolve_fallback_model
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict
 
@@ -304,9 +305,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         base_url_override = None
         api_key_override = None
 
-        if state.budgets.retry_count > 0 and ctx.chain:
-            fallback_idx = min(state.budgets.retry_count - 1, len(ctx.chain) - 1)
-            fallback = ctx.chain[fallback_idx]
+        fallback = resolve_fallback_model(state.budgets.retry_count, ctx.chain)
+        if fallback is not None:
             model_override = fallback.model
             base_url_override = fallback.base_url
             api_key_override = fallback.api_key
@@ -430,6 +430,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         normalized_files.append(file_obj)
     files = normalized_files
 
+    # Captured here (before any write can raise) rather than after the write
+    # loop below, so a self-diagnosis is never lost to an anchored-edit
+    # exception on an unrelated file later in the same batch. Paired with
+    # the failure signature THIS attempt was responding to - state.budgets.
+    # last_failure_signature is still the PREVIOUS failure's signature at
+    # this point (retry_strategy.py only overwrites it after the NEXT
+    # failure is classified) - see kriya/workflow/attribution.py's
+    # extract_self_diagnosed_files() and retry_strategy.py's signature-gated
+    # consumption of this field.
+    self_diagnosed = extract_self_diagnosed_files(files, list(state.all_files_written))
+    if self_diagnosed:
+        state.last_self_diagnosis = (state.budgets.last_failure_signature, self_diagnosed)
+
     # Read original file contents before overwriting (crucial for fallback mode diffs)
     for file_obj in files:
         filepath = file_obj.get("filepath", "")
@@ -449,6 +462,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         filepath = file_obj.get("filepath", "")
         content = file_obj.get("content", "")
         edits = file_obj.get("edits", [])
+        analysis = file_obj.get("analysis")
 
         if not filepath:
             continue
@@ -589,6 +603,33 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
 
+            # Layer 2 pre-flight check (see find_edits_ignoring_own_diagnosis's own
+            # docstring): the Layer 1 check above only catches an edit that left the
+            # COMPILER's own reported line unchanged - it deliberately allows a fix
+            # at a different, legitimate line (e.g. a declaration above the reported
+            # use site). This catches the gap that leaves open: does the edit's own
+            # content actually implement what its own FIX ANALYSIS just said, at ANY
+            # line - found live, 2026-08-13, a real compile error recurred verbatim
+            # across 3 targeted retries despite a textbook-correct analysis every time.
+            diagnosis_mismatch = find_edits_ignoring_own_diagnosis(analysis, edits, None, orig_text)
+            if diagnosis_mismatch:
+                failure = Failure(
+                    type="diagnosis_mismatch",
+                    message=(
+                        f"DIAGNOSIS MISMATCH in {filepath}: {diagnosis_mismatch}. "
+                        f"Make the exact change your own analysis described - not a "
+                        f"different or partial change."
+                    ),
+                    raw_output=diagnosis_mismatch,
+                    file_locations=[FileLocation(filepath=filepath)],
+                    likely_files=[filepath],
+                    failed_content={filepath: orig_text},
+                    attempted_edits=edits,
+                    attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
         else:
@@ -607,6 +648,38 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
+
+            # Layer 2 pre-flight check - same rationale as the anchored-edit branch
+            # above, applied to a full-file regeneration instead. Only reads the
+            # file's current on-disk content when there's actually an analysis to
+            # check against, to avoid the extra I/O on the common (no prior error)
+            # case.
+            if analysis:
+                current_file_path = os.path.join(ctx.worktree_path, filepath)
+                if not os.path.exists(current_file_path):
+                    current_file_path = os.path.join(ctx.workspace_path, filepath)
+                prior_content = ""
+                if os.path.exists(current_file_path):
+                    with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
+                        prior_content = fh.read()
+                diagnosis_mismatch = find_edits_ignoring_own_diagnosis(analysis, None, content, prior_content)
+                if diagnosis_mismatch:
+                    failure = Failure(
+                        type="diagnosis_mismatch",
+                        message=(
+                            f"DIAGNOSIS MISMATCH in {filepath}: {diagnosis_mismatch}. "
+                            f"Make the exact change your own analysis described - not a "
+                            f"different or partial change."
+                        ),
+                        raw_output=diagnosis_mismatch,
+                        file_locations=[FileLocation(filepath=filepath)],
+                        likely_files=[filepath],
+                        failed_content={filepath: prior_content},
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
 

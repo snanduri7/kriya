@@ -21,13 +21,13 @@ estimate.
 import logging
 import os
 
+from kriya.workflow.attribution import attribute_failure, read_worktree_file
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
     _normalize_error_for_repeat_detection,
     classify_environment_failure,
     extract_error_search_terms,
-    extract_implicated_files,
 )
 from kriya.workflow.file_resolution import IncompleteGenerationError
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
@@ -155,13 +155,72 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         state.last_missing_files = e.missing_files
         state.last_implicated_files = None
     else:
-        # failure.likely_files is already populated at the raise site for
-        # every QualityGateFailure (compile/test/run_verification/
-        # regression_test via _build_quality_gate_failure(), anchored_edit
-        # directly) - no more re-deriving it here from raw text. Falls back
-        # to the legacy regex scan only for the general_error case (a bare,
-        # unexpected Exception with no Failure of its own).
-        implicated = failure.likely_files or extract_implicated_files(raw_error_context, state.all_files_written)
+        # attribute_failure() (kriya/workflow/attribution.py) is the single
+        # decision point for "which file(s) is this failure about" - replaces
+        # the old inline "failure.likely_files or extract_implicated_files(...)"
+        # fallback with a tiered ladder that also covers the case neither of
+        # those two sources ever handled: a deterministic verification-
+        # contract FAIL, which deliberately carries no locator at all (see
+        # extract_contract_verdict()'s own docstring) and used to fall
+        # straight through to a blind full-set walk. Reuses
+        # ctx.developer.llm (the same configured LLMClient generation
+        # already uses) for its triage tier, and state.budgets.retry_count/
+        # ctx.chain so that tier rides the exact same model-escalation
+        # ladder the current attempt is already on.
+        # Only trust a self-diagnosis (kriya/workflow/attribution.py's
+        # extract_self_diagnosed_files(), captured in attempt.py right after
+        # the attempt that produced it) when THIS failure is a CONFIRMED
+        # repeat of the exact failure that diagnosis was responding to -
+        # current_failure_signature was just computed fresh above, before
+        # state.budgets.last_failure_signature gets overwritten to it at
+        # line 142. A stale diagnosis from an unrelated, different failure
+        # must never override a fresh locator.
+        self_diagnosed_files = None
+        if state.last_self_diagnosis and state.last_self_diagnosis[0] == current_failure_signature:
+            self_diagnosed_files = state.last_self_diagnosis[1]
+
+        attribution = await attribute_failure(
+            failure,
+            list(state.all_files_written),
+            state.budgets.retry_count,
+            ctx.chain,
+            ctx.developer.llm,
+            lambda fp: read_worktree_file(ctx.worktree_path, fp),
+            self_diagnosed_files=self_diagnosed_files,
+        )
+        implicated = attribution.files
+        state.last_attribution = attribution
+        # failure.likely_files must be overwritten with the FINAL attribution
+        # result, not left at whatever _build_quality_gate_failure() computed
+        # at construction time (its own internal extract_implicated_files()
+        # call, before this module's self_diagnosis/triage tiers ever ran) -
+        # found via a live test failure, not assumed: the actual retry
+        # targeting already correctly used the local `implicated` var above,
+        # but the PERSISTED gate_outcome's likely_files silently stayed
+        # stale, same class of bug as the attribution_tier fix below.
+        failure.likely_files = implicated
+        failure.attribution_tier = attribution.tier
+        failure.attribution_confidence = attribution.confidence
+        failure.attribution_reasoning = attribution.reasoning
+        # For a QualityGateFailure type that appends its own gate_outcome at
+        # the RAISE SITE (compile/test/regression_test/run_verification/
+        # anchored_edit, all inside attempt.py) - that append already
+        # happened, with a to_gate_outcome() snapshot taken BEFORE this
+        # attribution ever ran, so likely_files/attribution_tier/confidence/
+        # reasoning would silently stay stale/None in the persisted
+        # gate_outcome despite being set on the Failure object right above.
+        # Confirmed via a live test failure, not assumed: patch the
+        # already-appended entry for THIS attempt in place rather than
+        # relying on to_gate_outcome() being called again - the
+        # de-dup-guarded append further below already handles the other
+        # case (general_error, which never appends at a raise site)
+        # correctly on its own.
+        for outcome in state.gate_outcomes:
+            if outcome.get("attempt") == state.attempt_number and outcome.get("type") == fail_type:
+                outcome["likely_files"] = failure.likely_files
+                outcome["attribution_tier"] = failure.attribution_tier
+                outcome["attribution_confidence"] = failure.attribution_confidence
+                outcome["attribution_reasoning"] = failure.attribution_reasoning
         # A missing build manifest the Architect never asked for at all
         # (see _detect_missing_build_manifest) takes priority over normal
         # implication scoping - extract_implicated_files() can never name

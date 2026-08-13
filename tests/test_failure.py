@@ -23,6 +23,9 @@ def test_failure_to_gate_outcome_shape():
         "failed_content": {},
         "attempted_edits": [],
         "self_correction_attempt": None,
+        "attribution_tier": None,
+        "attribution_confidence": None,
+        "attribution_reasoning": None,
     }
 
 
@@ -76,3 +79,6 @@ def test_failure_defaults_are_empty_not_none():
     assert failure.failed_content == {}
     assert failure.attempted_edits == []
     assert failure.diagnostics is None
+    assert failure.attribution_tier is None
+    assert failure.attribution_confidence is None
+    assert failure.attribution_reasoning is None

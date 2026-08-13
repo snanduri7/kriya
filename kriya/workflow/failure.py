@@ -53,7 +53,14 @@ class Failure:
     rules - e.g. mixing Apache Ignite's two startup mechanisms - caught by a
     deterministic, no-LLM scan before the compile gate rather than after a
     live failure; see run_static_checks() in kriya/workflow/static_checks.py),
-    or "general_error" (fallback for a bare, non-QualityGateFailure Exception).
+    "diagnosis_mismatch" (an edit/content applied cleanly and (for an edit)
+    didn't leave the compiler's reported line unchanged either - unlike
+    unaddressed_error_location above, this is about a DIFFERENT, legitimate
+    line: the model's own FIX ANALYSIS text quoted specific code it said the
+    fix required, but none of that quoted content is actually new anywhere in
+    the resulting file - see find_edits_ignoring_own_diagnosis() in
+    kriya/workflow/edit_safety.py), or "general_error" (fallback for a bare,
+    non-QualityGateFailure Exception).
     """
     type: str
     message: str
@@ -96,6 +103,19 @@ class Failure:
     # the "captured in memory but never persisted" gap this file's own history
     # already names as a repeat mistake worth avoiding.
     self_correction_attempt: Optional[Dict[str, Any]] = None
+    # Set by kriya/workflow/retry_strategy.py right after attribute_failure()
+    # (kriya/workflow/attribution.py) runs, before this Failure's
+    # to_gate_outcome() is called - which of that module's tiers
+    # ("locator"/"judge"/"triage"/"full_set") actually produced likely_files
+    # for this failure, and how confident it was. None only for a Failure
+    # that never went through attribute_failure() at all (shouldn't happen
+    # in the normal retry path as of 2026-08-13, kept Optional defensively
+    # like self_correction_attempt above). Persisted into gate_outcomes/
+    # traces.db for the same reason graded_by was: so a live run can be
+    # audited for which attribution tier actually fired, not just trusted.
+    attribution_tier: Optional[str] = None
+    attribution_confidence: Optional[str] = None
+    attribution_reasoning: Optional[str] = None
 
     def to_gate_outcome(self) -> dict:
         """The shape kriya/workflow/workflow.py's gate_outcomes list expects -
@@ -117,6 +137,9 @@ class Failure:
             "failed_content": dict(self.failed_content),
             "attempted_edits": list(self.attempted_edits),
             "self_correction_attempt": self.self_correction_attempt,
+            "attribution_tier": self.attribution_tier,
+            "attribution_confidence": self.attribution_confidence,
+            "attribution_reasoning": self.attribution_reasoning,
         }
 
 

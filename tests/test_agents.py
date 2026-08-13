@@ -1111,7 +1111,18 @@ async def test_fill_missing_content_no_change_needed_leaves_file_untouched_ancho
 
     file_prompt = llm.complete.call_args_list[0][0][1]
     assert "NO CHANGE NEEDED" in file_prompt
-    assert files == [{"filepath": "ProtocolApp.java", "content": None}]
+    # "analysis" is threaded out (not just logged) as of 2026-08-13 - this
+    # exact scenario (a NO CHANGE NEEDED analysis naming a DIFFERENT real
+    # file, "the fix belongs entirely in ProtocolParser.java, not here") is
+    # precisely what kriya/workflow/attribution.py's self_diagnosis tier
+    # reads to redirect the next retry, see tests/test_attribution.py.
+    assert files == [{
+        "filepath": "ProtocolApp.java", "content": None,
+        "analysis": (
+            "The BufferOverflowException occurs because ProtocolParser.encode() "
+            "incorrectly uses putInt() for a 3-byte dataLength field."
+        ),
+    }]
 
 @pytest.mark.asyncio
 async def test_fill_missing_content_no_change_needed_leaves_file_untouched_plain_path():
@@ -1132,7 +1143,10 @@ async def test_fill_missing_content_no_change_needed_leaves_file_untouched_plain
 
     file_prompt = llm.complete.call_args_list[0][0][1]
     assert "NO CHANGE NEEDED" in file_prompt
-    assert files == [{"filepath": "App.java", "content": None}]
+    assert files == [{
+        "filepath": "App.java", "content": None,
+        "analysis": "the bug is in a different file.",
+    }]
 
 def test_split_fix_analysis_edit_no_change_needed_takes_priority_over_search_replace():
     # If the model contradicts itself (declares no change needed but also

@@ -187,6 +187,71 @@ def find_edits_ignoring_reported_line(
     return ignored
 
 
+_ANALYSIS_QUOTED_SPAN_RE = re.compile(r"`([^`]+)`")
+
+
+def find_edits_ignoring_own_diagnosis(
+    analysis: Optional[str],
+    edits: Optional[List[Dict[str, str]]],
+    content: Optional[str],
+    orig_text: str,
+) -> Optional[str]:
+    """Layer 2 pre-flight check, sibling to find_edits_ignoring_reported_line() above -
+    that check catches an edit that left the COMPILER's own reported line unchanged,
+    but deliberately does NOT flag an edit at a different line, since its own docstring
+    correctly treats that as a legitimate alternative fix. This one closes the gap that
+    leaves open: found live, 2026-08-13 (spikes/eval_harness/runs/
+    attribution-fix-validation-3) - a real compile error (`incompatible types:
+    java.lang.Object cannot be converted to com.example.Protocol`, from an untyped
+    `var cache = ignite.getOrCreateCache(...)` declaration) recurred VERBATIM across 3
+    consecutive targeted retries. Each retry's own FIX ANALYSIS text was textbook-correct
+    every time ("...requires explicitly declaring the cache with proper generic type
+    parameters `IgniteCache<Integer, Protocol>` instead of using `var`"), confirmed via
+    kriya.log - yet the worktree file still showed the identical untyped declaration
+    unchanged after all 3 rounds, confirmed directly against the file. No anchor-match
+    failure occurred (edits applied cleanly) and no worktree reset happened between
+    retries - the edit itself simply never implemented what its own analysis said, at
+    ANY line, not just the compiler-reported ones.
+
+    Detection, deliberately avoiding an old-vs-new quote ambiguity: a diagnosis often
+    quotes BOTH the broken pattern and the prescribed fix in the same sentence (as
+    above - `IgniteCache<Integer, Protocol>` the fix, `var` the problem, both
+    backtick-quoted). Naively checking "does any quoted span appear anywhere in the new
+    code" is ambiguous - the OLD quoted pattern trivially still appears in old code too.
+    Resolved precisely: a quoted span only counts as evidence the fix was made if it
+    appears in the NEW content but did NOT already appear in the OLD content - a quote
+    describing the problem (already present in the old code) is naturally excluded
+    without needing to guess which quoted span is "the fix" from sentence structure.
+
+    Returns a descriptive mismatch reason (naming the specific quoted content that never
+    appeared) when analysis has at least one backtick-quoted span and NONE of them are
+    new in the resulting content; None when analysis has no quoted spans at all (nothing
+    specific enough to check against - never flag a prose-only diagnosis), or when at
+    least one quoted span's content genuinely is new."""
+    if not analysis:
+        return None
+    quoted = [q for q in _ANALYSIS_QUOTED_SPAN_RE.findall(analysis) if len(q.strip()) >= 2]
+    if not quoted:
+        return None
+
+    if edits:
+        old_text = "\n".join(e.get("search") or "" for e in edits)
+        new_text = "\n".join(e.get("replace") or "" for e in edits)
+    else:
+        old_text = orig_text
+        new_text = content or ""
+
+    for q in quoted:
+        if q in new_text and q not in old_text:
+            return None
+
+    quoted_desc = ", ".join(f"`{q}`" for q in quoted)
+    return (
+        f"your analysis said \"{analysis.strip()}\" - specifically naming {quoted_desc} - "
+        f"but none of that appears anywhere new in your proposed change"
+    )
+
+
 def _strip_java_comments_and_strings(code: str) -> str:
     """Best-effort removal of Java string/char literals and // and /* */
     comments, replacing each with equal-length whitespace (blank, not deleted,

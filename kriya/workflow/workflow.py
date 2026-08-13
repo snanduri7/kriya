@@ -49,6 +49,7 @@ from kriya.workflow.context_budget import (
 from kriya.workflow.edit_safety import (
     _strip_java_comments_and_strings,
     apply_anchored_edits,
+    find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
     find_structural_corruption,
     normalize_whitespace,

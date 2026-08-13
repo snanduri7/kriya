@@ -97,6 +97,25 @@ class GenerationState:
     # written), any other failure clears this and re-evaluates
     # last_implicated_files as before.
     last_missing_files: Optional[List[str]] = None
+    # The full AttributionResult (kriya/workflow/attribution.py) behind the
+    # MOST RECENT last_implicated_files - which tier produced it
+    # ("locator"/"judge"/"triage"/"full_set") and how confident that tier
+    # was. last_implicated_files/last_missing_files stay the source of truth
+    # for retry-mode decisions (unchanged downstream contract); this is
+    # purely for observability (persisted onto the Failure that triggered it,
+    # see attribution_tier/attribution_confidence/attribution_reasoning in
+    # kriya/workflow/failure.py) and for a future caller that wants the
+    # ranking/reasoning, not just the winning file list.
+    last_attribution: Optional[Any] = None
+    # (failure_signature, files) from the MOST RECENT attempt's own FIX
+    # ANALYSIS text, when it named a DIFFERENT known file than the one it
+    # was attached to (extract_self_diagnosed_files(), kriya/workflow/
+    # attribution.py) - paired with the failure signature that attempt was
+    # RESPONDING to, so retry_strategy.py can only trust it on a CONFIRMED
+    # repeat of that exact failure, never on a genuinely new/unrelated one.
+    # None whenever the most recent attempt produced no analysis text, or
+    # its analysis didn't diverge from what it was asked to fix.
+    last_self_diagnosis: Optional[Any] = None
     # {filepath: source-line snippet} for the MOST RECENT failure's error
     # location(s) - empty whenever the last failure's error text named no
     # javac-style file:[line,col] locator, or before any failure has happened.
