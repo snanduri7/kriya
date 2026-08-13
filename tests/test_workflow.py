@@ -624,6 +624,47 @@ def test_extract_planner_code_blocks_still_accepts_real_java_content():
     result = extract_planner_code_blocks(plan, ["Foo.java"])
     assert result == {"Foo.java": "package com.example;\npublic class Foo {}\n"}
 
+def test_extract_planner_code_blocks_rejects_syntactically_invalid_python():
+    """Regression test for a real bug found live (2026-08-13 eval harness,
+    python_greeter): the Planner's fenced greet.py content had Kriya's own
+    "[VERIFICATION] PASS" runtime-verification marker embedded as a bare,
+    unquoted line rather than inside a print() call - syntactically invalid,
+    but it still contained real `def`/`print` elsewhere, so the .java-style
+    keyword-presence check this table originally shipped with would have
+    missed it entirely (unlike Java, valid Python has no required top-level
+    keyword to search for). The reused, unreviewed content then took the
+    Developer retry loop 5 attempts to recover from live. A .py fence that
+    doesn't actually parse must be rejected the same way a .java fence that
+    doesn't look like Java is."""
+    plan = (
+        "### greet.py\n```python\n"
+        "def greet(name: str) -> str:\n"
+        "    return f\"Hello, {name}!\"\n\n"
+        "[VERIFICATION] PASS\n"
+        "print(greet('World'))\n"
+        "```\n"
+    )
+    result = extract_planner_code_blocks(plan, ["greet.py"])
+    assert result == {}
+
+def test_extract_planner_code_blocks_still_accepts_real_python_content():
+    """Sibling to the rejection test above - confirms the new ast.parse()-based
+    plausibility check doesn't false-positive on genuinely valid Python (e.g.
+    a file with no class/def at all, just top-level statements, is still
+    accepted normally - unlike Java's keyword check, Python has no required
+    keyword to look for)."""
+    plan = (
+        "### greet.py\n```python\n"
+        "def greet(name: str) -> str:\n"
+        "    return f\"Hello, {name}!\"\n\n"
+        "print(greet('World'))\n"
+        "```\n"
+    )
+    result = extract_planner_code_blocks(plan, ["greet.py"])
+    assert result == {
+        "greet.py": "def greet(name: str) -> str:\n    return f\"Hello, {name}!\"\n\nprint(greet('World'))\n"
+    }
+
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):
     """Configured agent_llms overrides must actually reach each role's real

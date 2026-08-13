@@ -1,5 +1,6 @@
 """Expected-vs-written file detection for the Developer retry loop completeness check and missing-file recovery. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
+import ast
 import asyncio
 import difflib
 import hashlib
@@ -196,19 +197,47 @@ def _resolve_run_command(command: List[str], workspace_path: Optional[str] = Non
 _FENCED_CODE_BLOCK_PATTERN = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
 _PLANNER_CODE_REUSE_LOOKBACK_CHARS = 300
 
-# Cheap, per-extension "does this even look like real code for this file
-# type" check - not a parser, just enough to catch a fence that's obviously
-# NOT source for the target file. Small and explicitly extensible (same
-# precedent as toolchain.py's JDK-incompatible-flags table): one entry per
-# concretely-observed incident, not a speculative general framework. Added
-# after a live eval-harness run (2026-08-12, ignite_qpid_person) found a
-# fenced block near a ".java" file's heading that was actually the
-# qpid/ignite-java17 skill's own documented run-command example ("mvn -q
-# compile exec:exec -Dexec.mainClass=..."), not Java source - the Planner
-# had written it as a "here's how to run this" note, and extraction had no
-# way to tell it apart from real code before this check existed.
-_MIN_PLAUSIBLE_CODE_PATTERN: Dict[str, "re.Pattern"] = {
-    ".java": re.compile(r"\b(class|interface|enum|record)\b"),
+
+def _looks_like_java(content: str) -> bool:
+    return bool(re.search(r"\b(class|interface|enum|record)\b", content))
+
+
+def _looks_like_python(content: str) -> bool:
+    # A real syntax check, not a keyword heuristic - unlike Java, valid Python
+    # has no required top-level keyword to search for (a file with nothing
+    # but `print("hi")` is completely valid), so a regex can't distinguish
+    # plausible-looking-but-broken content from real source the way the Java
+    # check does. ast.parse() is exact rather than approximate: it catches
+    # the actual failure mode this table exists for (2026-08-13, live -
+    # Kriya's own "[VERIFICATION] PASS" runtime-verification marker ended up
+    # embedded as a bare, unquoted line in a Planner-drafted greet.py -
+    # syntactically invalid, but it still contains real `def`/`print`
+    # elsewhere, so a keyword-presence check would have missed it entirely).
+    try:
+        ast.parse(content)
+        return True
+    except SyntaxError:
+        return False
+
+
+# Extension -> plausibility check. Each entry answers "does this content
+# genuinely look like/parse as this language" for a Planner-drafted fenced
+# code block before it's trusted as a file's real content (see
+# extract_planner_code_blocks() below). Deliberately per-language rather than
+# one shared heuristic - Java's cheapest reliable signal is a keyword regex
+# (no stdlib Java parser available here); Python's is exact syntax validation
+# via the stdlib `ast` module, which is strictly stronger where available.
+# Extensions with no entry here get no plausibility check at all - this is a
+# known, incomplete allowlist, not a claim of full coverage. Root cause of
+# this table's very first version (2026-08-12): a fenced block near a
+# ".java" file's heading that was actually the qpid/ignite-java17 skill's own
+# documented run-command example ("mvn -q compile exec:exec
+# -Dexec.mainClass=..."), not Java source - the Planner had written it as a
+# "here's how to run this" note, and extraction had no way to tell it apart
+# from real code before this check existed.
+_MIN_PLAUSIBLE_CODE_CHECK: Dict[str, Callable[[str], bool]] = {
+    ".java": _looks_like_java,
+    ".py": _looks_like_python,
 }
 
 
@@ -233,11 +262,12 @@ def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -
     given file if it's mentioned more than once (a plan that shows a file,
     then a corrected/final version of it later, should yield the final one).
 
-    A matched fence is also checked against _MIN_PLAUSIBLE_CODE_PATTERN (for
+    A matched fence is also checked against _MIN_PLAUSIBLE_CODE_CHECK (for
     extensions with an entry there) before being trusted - a fence that
-    doesn't even look like the target language is rejected rather than
-    returned, so a filename mention followed by an unrelated snippet (e.g. a
-    run-command example) doesn't get treated as that file's real content.
+    doesn't even look like (or, where checkable, doesn't actually parse as)
+    the target language is rejected rather than returned, so a filename
+    mention followed by an unrelated snippet (e.g. a run-command example) or
+    genuinely broken content doesn't get treated as that file's real content.
 
     Otherwise deliberately does nothing more than this extraction - whether/
     how the result gets used (and re-verified through the exact same
@@ -278,8 +308,8 @@ def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -
                 found_path = path
         if found_path:
             ext = os.path.splitext(found_path)[1]
-            pattern = _MIN_PLAUSIBLE_CODE_PATTERN.get(ext)
-            if pattern and not pattern.search(content):
+            check = _MIN_PLAUSIBLE_CODE_CHECK.get(ext)
+            if check and not check(content):
                 # Reject, don't just skip silently into results - the
                 # caller's own existing all-or-nothing check (reuse Planner
                 # code only when EVERY expected file matched) then safely
@@ -288,8 +318,8 @@ def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -
                 # straight to disk with zero review.
                 logger.debug(
                     f"Rejected a Planner code block for '{found_path}': content doesn't look "
-                    f"like {ext} source (no class/interface/enum/record keyword found) - likely "
-                    "an unrelated snippet (e.g. a run-command example) near the file's heading."
+                    f"like valid {ext} source - likely an unrelated snippet (e.g. a run-command "
+                    "example) near the file's heading, or genuinely broken content."
                 )
                 continue
             results[found_path] = content
