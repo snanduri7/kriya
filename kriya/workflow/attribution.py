@@ -208,6 +208,21 @@ _TRIAGE_SYSTEM_PROMPT = (
     'return an empty "files" list and "confidence": "low" rather than guessing.'
 )
 
+# A tight budget here isn't just "keep this cheap" - it can silently starve the
+# call outright. Root-caused live (2026-08-13, spikes/tool_call_developer's
+# run_spike_real_triage_shape.py, 3/3 exact reproduction): some models reason
+# internally before ever committing to the requested JSON regardless of
+# whether Kriya's own llm_chain config classifies them as "reasoning" (that
+# flag only gates complete()'s own <think>-stripping and its 12288-token
+# floor for models IT thinks reason - a model can reason silently without
+# being classified that way, and then the completion hits max_tokens with
+# nothing ever written to content). 300 reproduced an empty response 3/3
+# times against gpt-oss:20b classified reasoning=False; 2000 was clean 3/3
+# (no empty response) in the same reproduction - the actual JSON answer here
+# is only a few dozen tokens, this budget exists to give room for whatever
+# reasoning happens first, not for the answer itself.
+_TRIAGE_MAX_TOKENS = 2000
+
 
 async def _tier_triage(
     failure: Failure,
@@ -249,7 +264,7 @@ async def _tier_triage(
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
-            max_tokens_override=300,
+            max_tokens_override=_TRIAGE_MAX_TOKENS,
         )
         parsed = json.loads(response)
         files = [f for f in parsed.get("files", []) if f in known_files]
