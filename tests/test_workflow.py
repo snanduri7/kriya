@@ -6847,6 +6847,37 @@ def test_find_edits_ignoring_own_diagnosis_handles_full_content_shape():
     assert "StringBuilder" in result
 
 
+def test_find_edits_ignoring_own_diagnosis_passes_a_correct_wrap_edit():
+    """Regression test for a real false-positive bug found live (2026-08-13,
+    python_greeter, reproduced identically across two separate eval-harness
+    runs, both qwen3-coder:30b AND glm-4.7-flash): this check was flagging a
+    genuinely CORRECT fix ("wrap the bare marker in a print() call") as a
+    mismatch on every single retry, because the quoted marker text is
+    unavoidably identical before and after a correct wrap edit - the old
+    signal (quoted span must be NEW, not in old text) can never be satisfied
+    by a wrap/extend edit that deliberately preserves the quoted text intact.
+    Not a model execution failure at all - this check's own false positive
+    was actively blocking an already-correct fix."""
+    analysis = (
+        "The previous implementation had a bare verification marker `[VERIFICATION] PASS` "
+        "on line 6 which was not wrapped in a print() call. The fix involves wrapping this "
+        "literal in a proper print() function call."
+    )
+    edits = [{"search": "[VERIFICATION] PASS", "replace": "print(\"[VERIFICATION] PASS\")"}]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant orig text") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_still_flags_unrelated_change_near_a_wrap_shape():
+    # A wrap-shaped edit that DOESN'T actually wrap the diagnosed text (changes
+    # something else nearby, leaves the marker exactly as broken as before)
+    # must still be flagged - the fix above must not accidentally accept any
+    # edit that merely touches the same area.
+    analysis = "wrap the bare marker `[VERIFICATION] PASS` in a print() call."
+    edits = [{"search": "[VERIFICATION] PASS\nx = 1", "replace": "[VERIFICATION] PASS\nx = 2"}]
+    result = find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant")
+    assert result is not None
+
+
 def test_find_edits_ignoring_own_diagnosis_regression_validation_3():
     """Regression test for the real, live-reproduced failure that motivated
     this check (2026-08-13, spikes/eval_harness/runs/attribution-fix-

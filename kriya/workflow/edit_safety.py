@@ -218,16 +218,39 @@ def find_edits_ignoring_own_diagnosis(
     above - `IgniteCache<Integer, Protocol>` the fix, `var` the problem, both
     backtick-quoted). Naively checking "does any quoted span appear anywhere in the new
     code" is ambiguous - the OLD quoted pattern trivially still appears in old code too.
-    Resolved precisely: a quoted span only counts as evidence the fix was made if it
-    appears in the NEW content but did NOT already appear in the OLD content - a quote
-    describing the problem (already present in the old code) is naturally excluded
-    without needing to guess which quoted span is "the fix" from sentence structure.
+    Resolved precisely: a quoted span counts as evidence the fix was made if EITHER (a)
+    it appears in the NEW content but did NOT already appear in the OLD content (the
+    original signal - a quote describing the problem, already present in the old code,
+    is naturally excluded without needing to guess which quoted span is "the fix" from
+    sentence structure), OR (b) it appears in the new content AND the quote IS the
+    entire old (search) text, not merely present somewhere within a larger old text (a
+    WRAP/EXTEND edit, e.g. `X` -> `print(X)` - the quoted span legitimately stays
+    byte-identical because the fix adds context AROUND the whole thing being replaced,
+    so signal (a) alone always misses this shape). Found live, 2026-08-13
+    (python_greeter, reproduced across two separate eval-harness runs): this check
+    itself was flagging a genuinely correct fix ("wrap the bare `[VERIFICATION] PASS`
+    marker in a print() call") as a mismatch on every single retry, for both
+    qwen3-coder:30b and glm-4.7-flash, because the quoted marker text is unavoidably
+    identical before and after a correct wrap - not a model execution failure at all,
+    this check's own false positive was blocking a fix that was likely already correct.
+
+    Signal (b) is deliberately scoped to `q == old_text.strip()`, not the broader "the
+    whole old_text survives as a substring of new_text" - that broader version was
+    tried first and found to reintroduce a real regression: an edit that appends an
+    unrelated trailing comment to an unfixed line (`X;` -> `X; // unchanged`) trivially
+    makes the ENTIRE old line a substring of the new one, which would incorrectly clear
+    every quote in the analysis, not just one actually being wrapped - confirmed via
+    test_find_edits_ignoring_own_diagnosis_regression_validation_3, which still expects
+    that shape to be flagged. Requiring the quote to equal the whole search block ties
+    the signal specifically to "this edit's target WAS just this quoted text," which
+    the append-a-comment case doesn't satisfy (its search block is a full statement, not
+    the bare quoted fragment) but the print-wrap case does exactly.
 
     Returns a descriptive mismatch reason (naming the specific quoted content that never
     appeared) when analysis has at least one backtick-quoted span and NONE of them are
-    new in the resulting content; None when analysis has no quoted spans at all (nothing
-    specific enough to check against - never flag a prose-only diagnosis), or when at
-    least one quoted span's content genuinely is new."""
+    new (or a wrapped whole-search-block) in the resulting content; None when analysis
+    has no quoted spans at all (nothing specific enough to check against - never flag a
+    prose-only diagnosis), or when at least one quoted span satisfies either signal."""
     if not analysis:
         return None
     quoted = [q for q in _ANALYSIS_QUOTED_SPAN_RE.findall(analysis) if len(q.strip()) >= 2]
@@ -242,7 +265,18 @@ def find_edits_ignoring_own_diagnosis(
         new_text = content or ""
 
     for q in quoted:
-        if q in new_text and q not in old_text:
+        # Signal (b) is deliberately scoped to "the quote IS the entire old
+        # text" (not just present somewhere within a larger old_text) - a
+        # broader "old_text survives anywhere inside new_text" version was
+        # tried and found to also let a genuine mismatch through: appending
+        # an unrelated trailing comment to an unfixed line trivially makes
+        # the whole old line a substring of the new one too, for every
+        # quote in the analysis, not just the one actually being wrapped.
+        # Requiring q == old_text.strip() ties the signal to the specific
+        # quote whose surrounding statement was JUST that quote, which is
+        # exactly the real wrap shape (search: "X", replace: "print(X)")
+        # and excludes a multi-token old_text merely containing q somewhere.
+        if q in new_text and (q not in old_text or q == old_text.strip()):
             return None
 
     quoted_desc = ", ".join(f"`{q}`" for q in quoted)
