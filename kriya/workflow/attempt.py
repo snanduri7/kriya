@@ -709,16 +709,34 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # Static pre-check: deterministic, no-LLM scan for known anti-patterns already
         # documented in active skill rules (e.g. mixing Ignite's two startup mechanisms,
         # an unclosed Ignition.start()) - catches a mistake the model already had the
-        # rule for, before the expensive compile+run cycle rather than after it. Same
-        # philosophy/wiring shape as find_structural_corruption() above: a direct
-        # Failure(...) construction (no compiler output exists yet to ground against).
+        # rule for, before the expensive compile+run cycle rather than after it.
         static_violation = run_static_checks(ctx.worktree_path, state.all_files_written)
         if static_violation:
-            failure = Failure(
-                type="static_rule_violation",
+            # _build_quality_gate_failure() (not a bare Failure(...)), matching the
+            # SAME construction every other Quality Gate type already uses (compile/
+            # test/run_verification/regression_test) - its extract_implicated_files()
+            # call scopes likely_files to whichever known file(s) the violation TEXT
+            # actually names, instead of defaulting to state.all_files_written (every
+            # file the run has ever written). Found live, 2026-08-13
+            # (ignite_qpid_protocol): every StaticCheck's own violation message
+            # already names its implicated file(s) by exact known relative path (see
+            # static_checks.py) - broadcasting to the whole file set discarded that
+            # precision, sending a targeted retry's per-file "explain the fix"
+            # instruction to every unrelated file too. Confirmed as a real, non-
+            # theoretical cost, not just a wasted-call inefficiency: one of those
+            # broadcast files applied a genuinely unrelated edit (an unprompted
+            # config section) that had nothing to do with the actual violation. A
+            # violation whose text names no known file (a hypothetical future check
+            # with no per-file locality) falls through to extract_implicated_files()'s
+            # own empty-list fallback, same honest degrade-to-full-set behavior every
+            # other gate type already has - never a regression from today's blind
+            # broadcast, just no longer the ONLY behavior available.
+            failure = _build_quality_gate_failure(
+                type_="static_rule_violation",
                 message=f"STATIC RULE VIOLATION: {static_violation}",
                 raw_output=static_violation,
-                likely_files=list(state.all_files_written),
+                worktree_path=ctx.worktree_path,
+                known_files=state.all_files_written,
                 attempt=state.attempt_number,
             )
             state.gate_outcomes.append(failure.to_gate_outcome())

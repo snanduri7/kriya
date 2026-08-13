@@ -2551,6 +2551,62 @@ async def test_run_attempt_static_check_fires_before_compile_gate(tmp_path):
     assert exc_info.value.failure.type == "static_rule_violation"
     assert "ignite_method_mixing" in exc_info.value.failure.message
     assert state.gate_outcomes[-1]["type"] == "static_rule_violation"
+    # Both files are genuinely implicated by this specific check (Method A in
+    # one, Method B in the other) - both belong in likely_files, unlike the
+    # over-broadcast regression test below where only one of several written
+    # files is actually implicated.
+    assert set(exc_info.value.failure.likely_files) == {"ProtocolApp.java", "ignite-config.xml"}
+
+@pytest.mark.asyncio
+async def test_run_attempt_static_check_scopes_likely_files_not_every_written_file(tmp_path):
+    """Regression test for a real bug found live (2026-08-13,
+    ignite_qpid_protocol): a static_rule_violation's likely_files was
+    hardcoded to state.all_files_written (every file this run has ever
+    written) instead of the file(s) the violation message actually names -
+    even though every StaticCheck's own message already names its implicated
+    file(s) by exact known path. Consequence, confirmed live: a targeted
+    retry broadcast its per-file "explain the fix" instruction to 6 unrelated
+    files, one of which applied a genuinely unrelated edit having nothing to
+    do with the actual violation. Here, only ProtocolApp.java calls
+    Ignition.start() without closing it - Protocol.java (a plain data class)
+    and pom.xml are also written but wholly unrelated, and must NOT appear in
+    likely_files."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "ProtocolApp.java", "content": (
+            'public class ProtocolApp {\n'
+            '    public static void main(String[] args) throws Exception {\n'
+            '        Ignite ignite = Ignition.start();\n'
+            '        ignite.getOrCreateCache("x");\n'
+            '    }\n'
+            '}\n'
+        )},
+        {"filepath": "Protocol.java", "content": (
+            'public class Protocol {\n'
+            '    private final String id;\n'
+            '    public Protocol(String id) { this.id = id; }\n'
+            '}\n'
+        )},
+        {"filepath": "pom.xml", "content": "<project></project>\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["ProtocolApp.java", "Protocol.java", "pom.xml"],
+        expected_files_upfront=["ProtocolApp.java", "Protocol.java", "pom.xml"],
+        architect_basename_to_path={
+            "ProtocolApp.java": "ProtocolApp.java", "Protocol.java": "Protocol.java", "pom.xml": "pom.xml",
+        },
+    )
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check"):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "static_rule_violation"
+    assert "ignite_unclosed_resource" in exc_info.value.failure.message
+    assert exc_info.value.failure.likely_files == ["ProtocolApp.java"]
+    assert state.gate_outcomes[-1]["likely_files"] == ["ProtocolApp.java"]
 
 @pytest.mark.asyncio
 async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
