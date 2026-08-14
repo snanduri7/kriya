@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
-from kriya.workflow.edit_safety import apply_anchored_edits, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_structural_corruption
+from kriya.workflow.edit_safety import apply_anchored_edits, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_structural_corruption
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
@@ -515,6 +515,60 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # sanitized) is captured alongside it as attempted_edits - together
                 # both halves of "why didn't this match" are now persisted, not just
                 # the generic "matched 0 times" message.
+                #
+                # Before accepting that generic explanation, check whether the
+                # failed search block actually belongs to a DIFFERENT known file -
+                # see find_misdirected_edit_target()'s own docstring for the real
+                # incident (a-3, ignite_qpid_protocol, 2026-08-14) this closes: a
+                # retry scoped to one file by a locator that could only ever name
+                # the file where an explicit runtime check THREW, not the
+                # different file whose method silently returned the wrong value,
+                # produced a textbook-correct diagnosis whose edit could never
+                # match the file it was constrained to. Reads every OTHER
+                # already-written file straight from the worktree (nothing keeps
+                # their content in memory this late in the per-file write loop).
+                other_files: Dict[str, str] = {}
+                for other_filepath in state.all_files_written:
+                    if other_filepath == filepath:
+                        continue
+                    other_full_path = os.path.join(ctx.worktree_path, other_filepath)
+                    try:
+                        with open(other_full_path, "r", encoding="utf-8", errors="replace") as fh:
+                            other_files[other_filepath] = fh.read()
+                    except OSError:
+                        continue
+
+                misdirected_target = find_misdirected_edit_target(edits, orig_text, other_files)
+                if misdirected_target:
+                    # raw_output (not just message) carries both filenames - it's
+                    # what to_gate_outcome() persists as "output" (raw_output or
+                    # message) and what a future post-mortem reads from traces.db,
+                    # same forensics goal as failed_content/attempted_edits below.
+                    misdirected_explanation = (
+                        f"the search block for {filepath} matched 0 times against "
+                        f"{filepath}'s content, but was found instead inside {misdirected_target}"
+                    )
+                    failure = Failure(
+                        type="misdirected_edit",
+                        message=(
+                            f"MISDIRECTED EDIT: {misdirected_explanation}. The fix you "
+                            f"diagnosed likely belongs in {misdirected_target}, not {filepath} - "
+                            f"target {misdirected_target} in your next edit (and {filepath} too, "
+                            f"only if it genuinely also needs its own companion change)."
+                        ),
+                        raw_output=misdirected_explanation,
+                        file_locations=[
+                            FileLocation(filepath=filepath),
+                            FileLocation(filepath=misdirected_target),
+                        ],
+                        likely_files=[filepath, misdirected_target],
+                        failed_content={filepath: orig_text, misdirected_target: other_files[misdirected_target]},
+                        attempted_edits=edits,
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure) from anchor_ex
+
                 failure = Failure(
                     type="anchored_edit",
                     message=f"ANCHORED EDIT FAILURE in {filepath}: {anchor_ex}",

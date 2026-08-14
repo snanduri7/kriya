@@ -65,6 +65,7 @@ from kriya.workflow.workflow import (
     extract_implicated_files,
     find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
+    find_misdirected_edit_target,
     find_missing_expected_files,
     find_structural_corruption,
     normalize_written_filepath,
@@ -6780,6 +6781,73 @@ async def test_workflow_anchored_edit_failure_captures_filepath(tmp_path):
     ]
 
 
+@pytest.mark.asyncio
+async def test_workflow_anchored_edit_failure_redirects_to_the_real_target_file(tmp_path):
+    """End-to-end regression test for the a-3 ignite_qpid_protocol incident
+    (2026-08-14): a compile error names only App.java, so the targeted retry is
+    scoped to App.java alone - but the model's edit is actually a fix for
+    Helper.java (its search block is lifted verbatim from Helper.java's real
+    content), so it matches 0 times against App.java. Confirms this now
+    produces a "misdirected_edit" gate_outcome naming BOTH files in
+    likely_files (widening the next retry's scope), instead of the generic
+    "anchored_edit"/"matched 0 times" failure that used to burn the retry with
+    no way to recover."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java and Helper.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../App.java:[2,3] cannot find symbol"},
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                # Attempt 1: full content for both files, App.java fails compile.
+                [
+                    {"filepath": "App.java", "content": "class App {\n  Object x;\n}"},
+                    {"filepath": "Helper.java", "content": "class Helper {\n  static final int Y = 5;\n}"},
+                ],
+                # Attempt 2: targeted retry scoped to App.java (the only file the
+                # compile error names) - but the edit's search block is actually
+                # Helper.java's own content, never App.java's.
+                [{"filepath": "App.java", "edits": [
+                    {"search": "static final int Y = 5;", "replace": "static final int Y = 6;"}
+                ]}],
+                # Attempt 3: full content for App.java, succeeds compile.
+                [{"filepath": "App.java", "content": "class App {\n  String x;\n}"}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+
+    misdirected = [o for o in gate_outcomes if o.get("type") == "misdirected_edit"]
+    assert len(misdirected) == 1, gate_outcomes
+    assert set(misdirected[0]["likely_files"]) == {"App.java", "Helper.java"}
+    assert {loc["filepath"] for loc in misdirected[0]["file_locations"]} == {"App.java", "Helper.java"}
+    assert "Helper.java" in misdirected[0]["output"]
+    # No generic "anchored_edit" outcome should have been recorded for this
+    # attempt - the misdirected-file check pre-empts it entirely.
+    assert not [o for o in gate_outcomes if o.get("type") == "anchored_edit"]
+
+
 def test_find_edits_ignoring_reported_line_flags_a_real_non_fix():
     """Regression test for a real live failure, 2026-08-07 (ignite_qpid_person):
     a targeted retry's own SEARCH block spanned the exact line the compiler
@@ -6844,6 +6912,65 @@ def test_find_edits_ignoring_reported_line_empty_without_a_locatable_error():
         "App.java", "some error with no file:[line,col] locator at all",
     )
     assert ignored == []
+
+
+# --- find_misdirected_edit_target(): did a failed anchor match aim at the wrong file? ---
+
+def test_find_misdirected_edit_target_finds_the_real_target():
+    # Reproduces the real a-3 ignite_qpid_protocol shape: the edit was scoped to
+    # ProtocolApp.java (whose real content doesn't contain the encode() body at
+    # all) but its search block is actually lifted from ProtocolParser.java.
+    orig_text = "public class ProtocolApp {\n    private static void testProtocolLayer() {}\n}\n"
+    edits = [{
+        "search": "int dataLength = protocol.body.length;",
+        "replace": "int dataLength = protocol.dataLength;",
+    }]
+    other_files = {
+        "ProtocolParser.java": (
+            "public class ProtocolParser {\n"
+            "    public static byte[] encode(Protocol protocol) {\n"
+            "        int dataLength = protocol.body.length;\n"
+            "        return null;\n"
+            "    }\n"
+            "}\n"
+        ),
+    }
+    result = find_misdirected_edit_target(edits, orig_text, other_files)
+    assert result == "ProtocolParser.java"
+
+
+def test_find_misdirected_edit_target_none_when_no_other_file_matches_either():
+    orig_text = "public class ProtocolApp {}\n"
+    edits = [{"search": "this text exists nowhere", "replace": "irrelevant"}]
+    other_files = {"ProtocolParser.java": "public class ProtocolParser {}\n"}
+    assert find_misdirected_edit_target(edits, orig_text, other_files) is None
+
+
+def test_find_misdirected_edit_target_skips_edits_that_already_matched():
+    # An edit whose search block DOES match its own intended file is never the
+    # culprit, even if that same text happens to also appear elsewhere (e.g. a
+    # shared constant) - only a failing edit's search block is ever checked.
+    orig_text = "public class ProtocolApp {\n    static final int X = 9;\n}\n"
+    edits = [{"search": "static final int X = 9;", "replace": "static final int X = 10;"}]
+    other_files = {"Other.java": "public class Other {\n    static final int X = 9;\n}\n"}
+    assert find_misdirected_edit_target(edits, orig_text, other_files) is None
+
+
+def test_find_misdirected_edit_target_tolerates_whitespace_drift():
+    # Leading/trailing whitespace and blank-line differences are tolerated
+    # (same tolerance apply_anchored_edits() itself uses) - internal
+    # mid-line spacing is not, consistent with normalize_whitespace()'s own
+    # per-line-strip-only philosophy used throughout this module.
+    orig_text = "public class ProtocolApp {}\n"
+    edits = [{"search": "  int dataLength = protocol.body.length;  ", "replace": "x"}]
+    other_files = {"ProtocolParser.java": "public class ProtocolParser {\n\n\nint dataLength = protocol.body.length;\n}\n"}
+    assert find_misdirected_edit_target(edits, orig_text, other_files) == "ProtocolParser.java"
+
+
+def test_find_misdirected_edit_target_empty_other_files():
+    orig_text = "public class ProtocolApp {}\n"
+    edits = [{"search": "does not match anything", "replace": "x"}]
+    assert find_misdirected_edit_target(edits, orig_text, {}) is None
 
 
 # --- find_edits_ignoring_own_diagnosis(): does the edit implement its own analysis? ---

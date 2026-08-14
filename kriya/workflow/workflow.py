@@ -51,6 +51,7 @@ from kriya.workflow.edit_safety import (
     apply_anchored_edits,
     find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
+    find_misdirected_edit_target,
     find_structural_corruption,
     normalize_whitespace,
 )

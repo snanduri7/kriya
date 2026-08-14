@@ -59,6 +59,13 @@ class Failure:
     line: the model's own FIX ANALYSIS text quoted specific code it said the
     fix required, but none of that quoted content is actually new anywhere in
     the resulting file - see find_edits_ignoring_own_diagnosis() in
+    kriya/workflow/edit_safety.py), "misdirected_edit" (an anchored edit's
+    search block matched 0 times against the file it was scoped to, but that
+    exact text was found instead inside a DIFFERENT already-written file -
+    strong evidence the edit's fix was correct but aimed at the wrong target,
+    e.g. a targeted retry scoped by a locator that could only ever name the
+    file where a runtime check threw, not the different file whose method
+    silently computed the wrong value; see find_misdirected_edit_target() in
     kriya/workflow/edit_safety.py), or "general_error" (fallback for a bare,
     non-QualityGateFailure Exception).
     """
@@ -87,7 +94,10 @@ class Failure:
     # failure happened (whitespace drift, a gutter/fence artifact that
     # slipped past sanitize_generated_content, a stale search target)
     # without needing to reproduce the failure with debug logging enabled.
-    # Empty for every failure type other than anchored_edit.
+    # Empty for every failure type other than anchored_edit and its sibling
+    # misdirected_edit (same underlying anchor-match failure, redirected to a
+    # different file once find_misdirected_edit_target() finds where the
+    # search block actually belongs).
     attempted_edits: List[Dict[str, str]] = field(default_factory=list)
     attempt: int = 0
     mode: Optional[str] = None

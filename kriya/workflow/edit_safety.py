@@ -113,6 +113,95 @@ def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], sho
     return current_content
 
 
+def _search_block_matches(content: str, search_block: str) -> bool:
+    """Whitespace-tolerant "does this search block exist anywhere in this
+    content at all" check - shares apply_anchored_edits()'s own two-tier
+    matching philosophy (an exact substring match first, then a blank-line-
+    tolerant, stripped-line subsequence match) but answers a simpler
+    question: containment, not uniqueness or splicing (no position is ever
+    needed by this function's only caller, find_misdirected_edit_target()
+    below - it only needs a yes/no)."""
+    if not search_block:
+        return False
+    if search_block in content:
+        return True
+    search_norm_lines = [ln.strip() for ln in search_block.splitlines() if ln.strip()]
+    if not search_norm_lines:
+        return False
+    content_norm_lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+    n = len(search_norm_lines)
+    return any(
+        content_norm_lines[i:i + n] == search_norm_lines
+        for i in range(len(content_norm_lines) - n + 1)
+    )
+
+
+def find_misdirected_edit_target(
+    edits: List[Dict[str, str]], orig_text: str, other_files: Dict[str, str]
+) -> Optional[str]:
+    """Called from attempt.py's `except ValueError as anchor_ex:` handler, right
+    after apply_anchored_edits() has ALREADY raised a "matched 0 times" failure -
+    this function asks one more question before accepting that failure at face
+    value: does the search block that failed to match its intended file actually
+    exist, verbatim or near-verbatim, inside a DIFFERENT known file instead? If
+    so, that's direct, ground-truth evidence the model's edit was aimed at the
+    wrong file, not that its content was simply wrong.
+
+    Found live, 2026-08-14 (spikes/eval_harness/runs/a-3, ignite_qpid_protocol):
+    a runtime verification failure's stack trace -
+    `at com.example.ProtocolApp.testProtocolLayer(ProtocolApp.java:73)` - has
+    exactly one locatable frame, because the failure is an EXPLICIT
+    `if (!protocol.equals(decoded)) throw new RuntimeException(...)` check
+    written directly in ProtocolApp.java (the exact pattern Kriya's own
+    VERIFICATION_CONTRACT_HEADER prompts every goal to write). extract_implicated_
+    files() correctly scoped the resulting targeted retry to ProtocolApp.java -
+    the only file with a locator - but the REAL bug was silently-wrong data
+    returned from ProtocolParser.encode() (a local `dataLength` variable
+    computed from body.length that was never written back to the encoded
+    header the same way on every call path), a method that doesn't itself
+    throw and so never appears in the stack trace at all. The model's own FIX
+    ANALYSIS text was textbook-correct ("...in the encode method, we're not
+    using the protocol.dataLength field - instead we're using body.length
+    directly...") but, constrained to editing only ProtocolApp.java, it wrote a
+    SEARCH block that was actually ProtocolParser.encode()'s own body - which
+    can never match ProtocolApp.java's real content, guaranteeing "matched 0
+    times" and burning the whole retry attempt (confirmed directly from the
+    real captured kriya.log and worktree file contents, not inferred).
+
+    This is a different trigger of the same general shape the 2026-08-10
+    _NO_CHANGE_NEEDED_RE incident (kriya/agents/agent.py) closed for a stack
+    trace that names TWO files (one needing no change) - here the stack trace
+    only ever names ONE file, because an explicit-throw runtime check
+    structurally can't produce a locator for whatever file's logic actually
+    computed the wrong value. No amount of improving extract_implicated_files()
+    itself can fix this: the file that needs the fix is never named anywhere in
+    the error text, precisely because it fails silently rather than throwing.
+    The one piece of ground truth Kriya already has at this exact moment - the
+    edit's own search-block bytes, and the real on-disk content of every OTHER
+    file already written this run - is what this function checks instead,
+    sidestepping the need to name the right file from error text at all.
+
+    Deliberately generic: no Java/Ignite/protocol-specific logic anywhere here,
+    just whitespace-tolerant text containment across two known texts, reusing
+    apply_anchored_edits()'s own tolerant-match philosophy via
+    _search_block_matches() above. Only considers an edit whose search block did
+    NOT already match its own intended file (orig_text) - an edit that matched
+    fine is never the culprit, regardless of what else it might coincidentally
+    also match elsewhere. Returns the first other file whose content contains a
+    failing edit's search block, or None if no failing edit's search block is
+    found anywhere else either (the caller falls through to the existing,
+    unchanged generic "matched 0 times" failure in that case - this is purely
+    additive, never a regression on the prior behavior)."""
+    for edit in edits:
+        search_block = edit.get("search") or ""
+        if not search_block or _search_block_matches(orig_text, search_block):
+            continue
+        for other_path, other_content in other_files.items():
+            if _search_block_matches(other_content, search_block):
+                return other_path
+    return None
+
+
 def find_edits_ignoring_reported_line(
     original_content: str, edits: List[Dict[str, str]], filepath: str, error_context: str
 ) -> List[int]:
