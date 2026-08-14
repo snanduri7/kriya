@@ -48,12 +48,31 @@ set -e
 
 if [ "$PLAN_A_STATUS" -eq 0 ] && [ -f adapter.gguf ]; then
     echo "Plan A conversion succeeded: adapter.gguf"
+    # base_model_name_or_path (from the adapter's own adapter_config.json) is a
+    # Hugging Face Hub identifier (e.g. "Qwen/Qwen2.5-0.5B-Instruct") - NOT an
+    # Ollama model name. Found live: pointing Ollama's `FROM` directly at that
+    # string makes `ollama create` try to PULL it as an Ollama registry
+    # reference and fail with "pull model manifest: file does not exist" -
+    # Ollama has no way to know it's actually a Hub identifier. The adapter
+    # was trained against THESE EXACT weights, so the fix isn't "find a
+    # same-named Ollama tag" (which may be a different quantization/revision
+    # than what the adapter was trained on) - it's converting the SAME base
+    # checkpoint to a local GGUF too, so `FROM` points at a file, not a name.
+    BASE_MODEL_ID=$(python3 -c "import json; print(json.load(open('$ADAPTER_DIR/adapter_config.json'))['base_model_name_or_path'])")
+    echo "Downloading and converting the base model ($BASE_MODEL_ID) to a local GGUF too,"
+    echo "so it matches the exact weights the adapter was trained against..."
+    python3 - "$BASE_MODEL_ID" <<'PYEOF'
+import sys
+from huggingface_hub import snapshot_download
+path = snapshot_download(sys.argv[1], local_dir="base-model-hf")
+print(f"Downloaded to {path}")
+PYEOF
+    python3 llama.cpp/convert_hf_to_gguf.py base-model-hf --outfile base-model.gguf
     cat > Modelfile.adapter <<EOF
-FROM $(python3 -c "import json; print(json.load(open('$ADAPTER_DIR/adapter_config.json'))['base_model_name_or_path'])" 2>/dev/null || echo "REPLACE_WITH_BASE_MODEL_NAME")
+FROM ./base-model.gguf
 ADAPTER ./adapter.gguf
 EOF
-    echo "Wrote Modelfile.adapter - check the FROM line names a model Ollama already has"
-    echo "(pull it first with 'ollama pull <name>' if not, or point FROM at a local GGUF path)."
+    echo "Wrote Modelfile.adapter (FROM a local GGUF, not a bare HF identifier)."
     echo "Then: ollama create kriya-lora-spike-adapter -f Modelfile.adapter"
 else
     echo "Plan A failed (conversion script exited $PLAN_A_STATUS, or Ollama's ADAPTER"

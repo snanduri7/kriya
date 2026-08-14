@@ -178,6 +178,7 @@ scratch_generate/
 /spikes/lora_ollama_feasibility/soup.yaml
 /spikes/lora_ollama_feasibility/output/
 /spikes/lora_ollama_feasibility/merged-model/
+/spikes/lora_ollama_feasibility/base-model-hf/
 /spikes/lora_ollama_feasibility/*.gguf
 /spikes/lora_ollama_feasibility/Modelfile.*
 
