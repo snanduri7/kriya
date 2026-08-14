@@ -7176,6 +7176,114 @@ def test_find_edits_ignoring_own_diagnosis_regression_validation_3():
     assert find_edits_ignoring_own_diagnosis(analysis, fixed_edits, None, "irrelevant") is None
 
 
+# --- find_edits_ignoring_own_diagnosis(): the "removed the old code too" signal ---
+
+def test_find_edits_ignoring_own_diagnosis_flags_a_stale_removal():
+    """Regression test for a real gap found 2026-08-14 via
+    spikes/protocol_bug_pocs/05_incremental_composition, reproducing a bug
+    skills/binary-wire-protocol/rules.txt already documents from live
+    incidents: a generated ProtocolParser.java contained BOTH the wrong
+    `buffer.putInt(dataLength)` call (writes 4 bytes for a 3-byte wire field)
+    AND the correct manual byte-shift replacement, in the SAME method - a
+    half-finished migration that throws BufferOverflowException. The old
+    addition-only signal would have passed this: the quoted fix genuinely is
+    new content. This reproduces the same shape directly against the
+    function - a diagnosis naming the old call for removal ("instead of
+    `buffer.putInt(dataLength)`"), and an edit that adds the byte-shift fix
+    without ever deleting the old call."""
+    analysis = (
+        "The encode() method incorrectly writes the 3-byte dataLength field using "
+        "`buffer.putInt(dataLength)`, which always writes 4 bytes regardless of the "
+        "wire format's declared width, overflowing the allocated buffer. Instead of "
+        "`buffer.putInt(dataLength)`, manually byte-shift: "
+        "`buffer.put((byte) ((dataLength >> 16) & 0xFF))` and so on for each byte."
+    )
+    edits = [{
+        "search": "buffer.putInt(dataLength);",
+        "replace": (
+            "buffer.putInt(dataLength);\n"
+            "buffer.put((byte) ((dataLength >> 16) & 0xFF));\n"
+            "buffer.put((byte) ((dataLength >> 8) & 0xFF));\n"
+            "buffer.put((byte) (dataLength & 0xFF));"
+        ),
+    }]
+    result = find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant")
+    assert result is not None
+    assert "buffer.putInt(dataLength)" in result
+    assert "still appears" in result
+
+
+def test_find_edits_ignoring_own_diagnosis_passes_a_clean_removal():
+    # Same diagnosis as above, but the edit actually DELETES the old call
+    # this time (search block spans both the old call and the surrounding
+    # statement, replace contains only the byte-shift fix) - must not flag.
+    # The fix itself is also quoted (matching this function's existing
+    # addition-check requirement elsewhere in this file - a prose-only
+    # description of the fix, with no literal quote for it, can never
+    # satisfy that check regardless of the removal signal).
+    analysis = (
+        "Instead of `buffer.putInt(dataLength)`, manually byte-shift each byte: "
+        "`buffer.put((byte) (dataLength & 0xFF))`."
+    )
+    edits = [{
+        "search": "buffer.putInt(dataLength);",
+        "replace": (
+            "buffer.put((byte) ((dataLength >> 16) & 0xFF));\n"
+            "buffer.put((byte) ((dataLength >> 8) & 0xFF));\n"
+            "buffer.put((byte) (dataLength & 0xFF));"
+        ),
+    }]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_removal_signal_ignores_unrelated_substring():
+    # The flagged-for-removal span (`var`) is short enough to collide with an
+    # unrelated identifier that merely CONTAINS it as a substring
+    # (`variance`) - must not false-positive; `var` the keyword itself is
+    # genuinely gone. The fix is also quoted, matching this function's
+    # existing addition-check requirement.
+    analysis = "declare the cache with explicit generics `IgniteCache<Integer, Protocol>` instead of `var`."
+    edits = [{
+        "search": "var cache = ignite.getOrCreateCache(\"x\");",
+        "replace": "IgniteCache<Integer, Protocol> cache = ignite.getOrCreateCache(\"x\"); // variance ok",
+    }]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_removal_signal_takes_priority_over_addition():
+    # The addition-check alone would pass this (the fix content genuinely is
+    # new), but the removal-check must still catch it - the two signals are
+    # independent, and either one failing is a real mismatch.
+    analysis = "Use `dataLength` computed fresh from body.length, instead of `protocol.dataLength`."
+    edits = [{
+        "search": "int dataLength = protocol.dataLength;",
+        "replace": "int dataLength = protocol.body.length; int old = protocol.dataLength;",
+    }]
+    result = find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant")
+    assert result is not None
+    assert "protocol.dataLength" in result
+
+
+def test_find_edits_ignoring_own_diagnosis_removal_signal_handles_full_content_shape():
+    # The fix is quoted as the literal call actually used (`sb.append(s)`),
+    # matching this function's existing addition-check requirement - a
+    # prose-only description of the fix can never satisfy it.
+    analysis = "Instead of `result += s`, use `sb.append(s)`."
+    orig_text = "String result = \"\";\nfor (String s : parts) { result += s; }\n"
+    # Half-finished: appends a StringBuilder line but never deletes the old one.
+    unfixed_content = (
+        "StringBuilder sb = new StringBuilder();\n"
+        "String result = \"\";\n"
+        "for (String s : parts) { result += s; sb.append(s); }\n"
+    )
+    result = find_edits_ignoring_own_diagnosis(analysis, None, unfixed_content, orig_text)
+    assert result is not None
+    assert "result += s" in result
+
+    fixed_content = "StringBuilder sb = new StringBuilder();\nfor (String s : parts) { sb.append(s); }\n"
+    assert find_edits_ignoring_own_diagnosis(analysis, None, fixed_content, orig_text) is None
+
+
 @pytest.mark.asyncio
 async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_path):
     """End-to-end regression test for the same real live failure

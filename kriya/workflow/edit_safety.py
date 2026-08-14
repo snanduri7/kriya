@@ -278,6 +278,42 @@ def find_edits_ignoring_reported_line(
 
 _ANALYSIS_QUOTED_SPAN_RE = re.compile(r"`([^`]+)`")
 
+# Phrases that explicitly mark the quoted span right after them as the
+# PROBLEM being moved away from, not the fix - "instead of `var`", "never a
+# raw or var-inferred cache handle" style language already seen verbatim in
+# real captured fix-analysis text this session, and in skills/binary-wire-
+# protocol/rules.txt's own wording ("do NOT use ByteBuffer.putInt()... for
+# that field"). Deliberately a small, closed set of unambiguous removal-
+# signaling phrases - not a general negation/NLP detector - see
+# find_edits_ignoring_own_diagnosis's own docstring for why this exists as a
+# second, independent signal from the addition-check above it.
+_REMOVAL_PHRASE_RE = re.compile(
+    r"(?:instead of|rather than|not|never|remove|removing|stop using|no longer)\s+(?:using\s+)?`([^`]+)`",
+    re.IGNORECASE,
+)
+
+
+def _still_contains(needle: str, haystack: str) -> bool:
+    """Word-boundary-aware containment check, only anchoring `\\b` at
+    whichever edge of `needle` is itself a word character (alnum/underscore).
+    A plain `\\b...\\b` wrapper was tried first and found to fail in both
+    directions: a bare substring check lets a short flagged token like `var`
+    false-positive inside an unrelated identifier like `variable` (why a
+    boundary check is needed at all), but a short token that legitimately
+    ends in punctuation - `buffer.putInt(dataLength)`, immediately followed
+    by `;` in real code - can never satisfy a trailing `\\b` either: `\\b`
+    only matches at a transition between a word and a non-word character,
+    and both `)` and `;` are non-word, so no such transition exists there no
+    matter how exactly the real match lines up. Anchoring `\\b` only where
+    `needle`'s own edge is actually a word character avoids both failure
+    modes."""
+    pattern = re.escape(needle)
+    if needle[:1].isalnum() or needle[:1] == "_":
+        pattern = r"\b" + pattern
+    if needle[-1:].isalnum() or needle[-1:] == "_":
+        pattern = pattern + r"\b"
+    return re.search(pattern, haystack) is not None
+
 
 def find_edits_ignoring_own_diagnosis(
     analysis: Optional[str],
@@ -339,7 +375,33 @@ def find_edits_ignoring_own_diagnosis(
     appeared) when analysis has at least one backtick-quoted span and NONE of them are
     new (or a wrapped whole-search-block) in the resulting content; None when analysis
     has no quoted spans at all (nothing specific enough to check against - never flag a
-    prose-only diagnosis), or when at least one quoted span satisfies either signal."""
+    prose-only diagnosis), or when at least one quoted span satisfies either signal.
+
+    SECOND, INDEPENDENT SIGNAL (2026-08-14) - a sibling gap the design above never
+    covered: found via spikes/protocol_bug_pocs/05_incremental_composition, reproducing
+    a bug skills/binary-wire-protocol/rules.txt already documents from live incidents -
+    a generated ProtocolParser.java contained BOTH the wrong `buffer.putInt(dataLength)`
+    call (writes 4 bytes for a 3-byte wire field) AND the correct manual byte-shift
+    replacement, in the SAME method - a half-finished migration that throws
+    BufferOverflowException. If a live retry produced this exact shape - a diagnosis
+    correctly saying "instead of `buffer.putInt(dataLength)`, manually byte-shift" and
+    an edit that ADDS the byte-shift lines without ever DELETING the old putInt line -
+    the check above would pass it: the quoted fix genuinely is new content, satisfying
+    signal (a). The bug survives because that check only ever validates the diagnosis's
+    POSITIVE claim (what should be added); "instead of X" also makes a NEGATIVE claim
+    (X should be gone) that nothing checked.
+
+    Extracts a second, narrower category of quoted span - one immediately preceded by an
+    explicit removal-signaling phrase ("instead of `X`", "never `X`", "remove `X`", etc.
+    - see _REMOVAL_PHRASE_RE, a small closed set of phrasings already confirmed verbatim
+    in real captured fix-analysis text and in skills/binary-wire-protocol's own rules.txt,
+    not a general negation detector). If any such span is STILL present in the new
+    content - checked via _still_contains() above, not a bare substring - that's direct
+    evidence the diagnosis's own removal instruction wasn't followed. Checked independently
+    of, and takes priority over, the
+    addition signal above: the two are separate claims, and either one failing means the
+    edit doesn't actually implement what its own analysis said. Same dual edit-shape
+    handling (edits list vs. full content) as the rest of this function."""
     if not analysis:
         return None
     quoted = [q for q in _ANALYSIS_QUOTED_SPAN_RE.findall(analysis) if len(q.strip()) >= 2]
@@ -352,6 +414,16 @@ def find_edits_ignoring_own_diagnosis(
     else:
         old_text = orig_text
         new_text = content or ""
+
+    removal_quoted = [q for q in _REMOVAL_PHRASE_RE.findall(analysis) if len(q.strip()) >= 2]
+    stale_removals = [q for q in removal_quoted if _still_contains(q, new_text)]
+    if stale_removals:
+        stale_desc = ", ".join(f"`{q}`" for q in stale_removals)
+        return (
+            f"your analysis said \"{analysis.strip()}\" - explicitly marking {stale_desc} as "
+            f"what to stop using - but {stale_desc} still appears, unchanged, in your proposed "
+            f"change. You added the fix without removing what it was supposed to replace."
+        )
 
     for q in quoted:
         # Signal (b) is deliberately scoped to "the quote IS the entire old

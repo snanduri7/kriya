@@ -161,3 +161,14 @@ scratch_generate/
 # Fix-alignment spike output (JSON results per batch) - same reasoning, scratch
 # regenerated on every run.
 /spikes/fix_alignment/runs/
+
+# Wire-format-roundtrip POC output (generated Protocol.java/ProtocolParser.java
+# per trial, plus the Maven build it was compiled/run in) - same reasoning,
+# scratch regenerated on every run, kept locally (not tempfile-deleted) so a
+# specific trial's generated code can actually be inspected afterward.
+/spikes/protocol_bug_pocs/01_wire_format_roundtrip/runs/
+
+# Incremental-composition POC output (prompt/response/extracted files/verdict
+# per trial per step, plus a run.log) - same reasoning as the wire-format POC
+# above, kept locally so a specific trial can be inspected after the fact.
+/spikes/protocol_bug_pocs/05_incremental_composition/runs/
