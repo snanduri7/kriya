@@ -1110,6 +1110,69 @@ async def test_fill_missing_content_no_anchored_edit_preference_without_source_c
     assert files[0]["content"] == "class App {}"
 
 @pytest.mark.asyncio
+async def test_fill_missing_content_prefers_anchored_edit_when_current_content_known_without_locator():
+    """Regression test for the a-6 live incident, 2026-08-14
+    (spikes/eval_harness/runs/a-6): a runtime-verification failure ("[VERIFICATION]
+    FAIL: Protocols do not match") carries no compiler-style file:line locator, so
+    error_source_context has no entry for the target file - the OLD gate
+    (prefer_anchored_edit = apply_fix_analysis and bool(source_context_block)) would
+    force a full FILE CONTENT: regeneration here, which is exactly what silently
+    reverted an already-fixed import from two attempts earlier in the real incident.
+    files_with_current_content widens the gate: even with zero source_context_block,
+    naming this file as one whose current content is already embedded in
+    existing_code_context should still prefer a small anchored patch."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value=(
+            "FIX ANALYSIS: the time field round-trip is wrong.\n"
+            "SEARCH:\nlong time = buffer.getLong();\nREPLACE:\nlong time = buffer.getInt() & 0xFFFFFFFFL;"
+        )
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["ProtocolApp.java"],
+        prior_error_context="[VERIFICATION] FAIL: Protocols do not match",
+        error_source_context=None,
+        files_with_current_content=["ProtocolApp.java", "Protocol.java"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "SEARCH:" in file_prompt
+    assert files[0]["content"] is None
+    assert files[0]["edits"] == [{
+        "search": "long time = buffer.getLong();",
+        "replace": "long time = buffer.getInt() & 0xFFFFFFFFL;",
+    }]
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_anchored_edit_preference_when_file_not_in_current_content_set():
+    """Sibling/negative case: files_with_current_content is set (this IS a retry
+    with other files already written), but the specific target file isn't in it -
+    the real shape of a missing-file recovery, where the target file doesn't exist
+    yet, so there is no current content to copy verbatim from. Must stay on the
+    plain FILE CONTENT: instruction, same as having no files_with_current_content
+    at all."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nFILE CONTENT:\nclass App {}")
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="some error with no location",
+        files_with_current_content=["OtherFile.java"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "SEARCH:" not in file_prompt
+    assert "FILE CONTENT:" in file_prompt
+    assert files[0]["content"] == "class App {}"
+
+@pytest.mark.asyncio
 async def test_fill_missing_content_no_change_needed_leaves_file_untouched_anchored_path():
     """Regression test for a real live bug, 2026-08-10 (ignite_qpid_protocol,
     run 20260810-111517): a java.nio.BufferOverflowException's stack trace

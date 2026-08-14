@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from abc import ABC
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.agents.contracts import parse_file_list
 from kriya.config.config import FallbackModelConfig, LLMConfig
@@ -789,11 +789,24 @@ class DeveloperAgent(BaseAgent):
         error_source_context: Optional[Dict[str, str]] = None,
         retry_temperature: Optional[float] = None,
         extra_fix_instruction: str = "",
+        files_with_current_content: Optional[Iterable[str]] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
         so a model that only fills in some files in its file-list response doesn't
         silently end up with empty or missing files.
+
+        files_with_current_content: the set of already-written files whose current,
+        unskeletonized worktree content is guaranteed to be embedded in
+        existing_code_context (both _build_targeted_retry_prompt and
+        _build_full_set_retry_prompt in kriya/workflow/retry_prompts.py read every
+        file in this set fresh from the worktree, unconditionally, before this call
+        is ever made) - passed by attempt.py as state.all_files_written for the
+        targeted/fallback-targeted/full-set retry branches, left unset for a missing-
+        file recovery (where the target file doesn't exist yet, so there is no
+        current content to preserve). Widens prefer_anchored_edit below beyond just
+        "does this failure carry a precise compiler line locator" - see that
+        variable's own comment for why a locator-only gate was too narrow.
 
         extra_fix_instruction: appended verbatim to fix_analysis_instruction (only
         when apply_fix_analysis is true, same scope as the incompatible-types/
@@ -897,7 +910,31 @@ class DeveloperAgent(BaseAgent):
             # anchor that fails to match exactly once raises inside
             # apply_anchored_edits(), caught by the same retry-loop exception
             # handling as any other Quality Gate failure.
-            prefer_anchored_edit = apply_fix_analysis and bool(source_context_block)
+            #
+            # Originally gated on source_context_block alone (a precise compiler
+            # file:line locator) - too narrow, confirmed live 2026-08-14
+            # (spikes/eval_harness/runs/a-6): a runtime-verification failure (no
+            # exception, no line locator - just Kriya's own "[VERIFICATION] FAIL"
+            # marker) always fell through to this gate's false branch, forcing a
+            # full FILE CONTENT: regeneration for that whole failure class - even
+            # though the file's CURRENT, unskeletonized content was already sitting
+            # in existing_code_context (_build_targeted_retry_prompt/
+            # _build_full_set_retry_prompt both read it fresh from the worktree
+            # unconditionally, not just when a locator exists). The full rewrite,
+            # while fixing the runtime bug it was asked about, silently reverted an
+            # unrelated, already-fixed import from two attempts earlier - the model
+            # had the correct import right there in its own prompt and still didn't
+            # faithfully reproduce it, the same "unrelated content lost in a full
+            # rewrite" failure mode the locator-based preference above already
+            # exists to avoid, just triggered by a DIFFERENT failure shape than the
+            # one that originally motivated it. files_with_current_content extends
+            # the same reasoning to any failure type, not just locatable ones: if
+            # the file's real current content is available to copy verbatim from
+            # (true whenever it's already been written this run), a small anchored
+            # patch is just as well-grounded as it is for a compile-error locator.
+            prefer_anchored_edit = apply_fix_analysis and (
+                bool(source_context_block) or filepath in (files_with_current_content or ())
+            )
             if prefer_anchored_edit:
                 fix_analysis_instruction = (
                     "\nThis is a RETRY: the previous attempt at this file failed the error described "
@@ -1107,6 +1144,7 @@ class DeveloperAgent(BaseAgent):
         error_source_context: Optional[Dict[str, str]] = None,
         retry_temperature: Optional[float] = None,
         extra_fix_instruction: str = "",
+        files_with_current_content: Optional[Iterable[str]] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -1135,14 +1173,20 @@ class DeveloperAgent(BaseAgent):
         the error actually names, mattering specifically for a full-set retry
         (known_target_files unset, every written file passes through this same
         per-file loop) where without this scope every file in the batch got the
-        same "explain the fix" instruction regardless of relevance."""
+        same "explain the fix" instruction regardless of relevance.
+
+        files_with_current_content: see _fill_missing_content - the set of already-
+        written files whose current worktree content is embedded in
+        existing_code_context, widening when a small anchored edit is preferred
+        over a full-file rewrite beyond just "does this failure have a precise
+        line locator"."""
         if known_target_files:
             file_entries = [{"filepath": p, "content": None, "edits": None} for p in known_target_files]
             return await self._fill_missing_content(
                 file_entries, task_description, design_context, existing_code_context,
                 stream_callback, model_override, base_url_override, api_key_override,
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
-                extra_fix_instruction,
+                extra_fix_instruction, files_with_current_content,
             )
 
         try:
@@ -1154,7 +1198,7 @@ class DeveloperAgent(BaseAgent):
                     file_entries, task_description, design_context, existing_code_context,
                     stream_callback, model_override, base_url_override, api_key_override,
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
-                    extra_fix_instruction,
+                    extra_fix_instruction, files_with_current_content,
                 )
 
         except Exception as e:

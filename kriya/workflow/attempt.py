@@ -182,6 +182,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             error_source_context=state.last_error_source_context or None,
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+            files_with_current_content=state.all_files_written,
         )
     elif use_fallback_targeted:
         # One-shot targeted fix on the first fallback model (see
@@ -238,6 +239,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             error_source_context=state.last_error_source_context or None,
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+            files_with_current_content=state.all_files_written,
         )
     elif use_missing_files:
         # Missing-file recovery: same primary-model-only, non-escalating
@@ -442,6 +444,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 error_source_context=state.last_error_source_context or None,
                 retry_temperature=ctx.kernel.config.llm.retry_temperature,
                 extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+                files_with_current_content=state.all_files_written,
             )
 
     # Recorded now, not derived by the caller afterward - see the fields'
