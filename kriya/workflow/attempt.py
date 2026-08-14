@@ -355,6 +355,44 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         known_target_files = None
         if state.budgets.retry_count == 0 and ctx.expected_files_upfront:
             known_target_files = ctx.expected_files_upfront
+        elif state.budgets.retry_count == 0 and state.last_implicated_files:
+            # First full-set attempt reached via TARGETED-BUDGET EXHAUSTION,
+            # not via this exact failure genuinely resisting narrow scoping -
+            # found live, 2026-08-14 (spikes/eval_harness/runs/a-3, a-4,
+            # ignite_qpid_protocol): targeted_retry_count/fallback_targeted_attempted
+            # are single counters shared across the WHOLE run (kriya/workflow/
+            # state.py's RetryBudgets), not per-failure. A run that spends its
+            # entire targeted budget resolving one bug (a-4: 4 targeted attempts
+            # + 1 fallback-targeted fixing an unclosed Ignite resource) has ZERO
+            # scoped-retry runway left for the NEXT, completely different failure,
+            # even when that new failure has a precise, high-confidence locator
+            # (a-4: `Protocol.java:[17,5] variable dataLength might not have been
+            # initialized`, a one-line javac error) that's never once been given a
+            # targeted shot. Without this, that brand-new, trivially-scoped failure
+            # falls straight into a full, unscoped "regenerate every file" walk on
+            # a fallback model, chosen here purely by an unrelated earlier bug's
+            # bad luck - confirmed live as the actual mechanism behind BOTH runs'
+            # eventual 2400s timeout, not the fallback model's raw speed on its
+            # own (glm-4.7-flash then pays one multi-minute completion PER FILE,
+            # ~9 files, for a fix that only ever needed one).
+            #
+            # Fixed by reusing known_target_files here too - same mechanism
+            # already used for expected_files_upfront just above, and already
+            # trusted unconditionally (regardless of attribution confidence tier)
+            # by every targeted/fallback_targeted branch above. Deliberately
+            # gated to retry_count == 0 (the FIRST full-set attempt only, not
+            # every one) so the existing "broaden to a clean full regeneration"
+            # escape hatch is fully preserved for a failure that keeps recurring
+            # despite already being given a scoped shot at THIS level too - only
+            # the specific gap (a failure that's never once been targeted,
+            # inheriting a spent budget from a different, already-resolved bug)
+            # gets the cheaper, narrower first try.
+            known_target_files = state.last_implicated_files
+            logger.info(
+                f"First full-set attempt after targeted-budget exhaustion, but the "
+                f"current failure already has known implicated file(s) - scoping to "
+                f"{', '.join(known_target_files)} instead of the full file set."
+            )
 
         # PlannerAgent's own prompt never asks for full code, but models
         # routinely over-deliver it anyway in fenced blocks inside the plan

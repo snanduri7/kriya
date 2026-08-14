@@ -2636,6 +2636,90 @@ async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
     assert state.last_attempt_mode == "full_set"
 
 @pytest.mark.asyncio
+async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_after_budget_exhaustion(tmp_path):
+    """Regression test for a real live gap found this session (2026-08-14,
+    spikes/eval_harness/runs/a-3 and a-4, ignite_qpid_protocol): targeted_retry_count/
+    fallback_targeted_attempted are single counters shared across the WHOLE run, not
+    per-failure - a run that spends its entire targeted budget resolving one bug has
+    zero scoped-retry runway left for a completely different, freshly-diagnosed
+    failure that arrives right after, even when THAT failure has a precise
+    single-file locator. Confirmed live: a-4's targeted budget was spent fixing an
+    unclosed-Ignite-resource bug across 4 targeted attempts + 1 fallback-targeted
+    attempt; the very next, unrelated compile error (`Protocol.java:[17,5] variable
+    dataLength might not have been initialized`) then fell straight into an unscoped
+    full-file-set walk on the slow fallback model - one multi-minute completion PER
+    FILE (9 files) for a fix that only ever needed one - and the run timed out.
+
+    Confirms the FIRST full-set attempt reached via budget exhaustion (not via this
+    exact failure resisting narrow scoping) still passes
+    known_target_files=state.last_implicated_files, instead of falling through to an
+    unscoped full-file-set request."""
+    state = GenerationState()
+    state.budgets.targeted_retry_count = 3
+    state.budgets.fallback_targeted_attempted = True
+    state.last_implicated_files = ["Protocol.java"]
+    state.all_files_written = {"Protocol.java", "ProtocolApp.java", "ProtocolParser.java"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "Protocol.java", "content": "class Protocol {}\n"}
+    ])
+    kernel = Kernel(config=AppConfig())
+    kernel.config.autonomy.run_verification_enabled = False
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, kernel=kernel,
+        expected_files_upfront=[], targeted_max_retries=3,
+        architect_files=["Protocol.java", "ProtocolApp.java", "ProtocolParser.java"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    assert state.last_attempt_mode == "full_set"
+    call_kwargs = developer.run_generation.call_args.kwargs
+    assert call_kwargs["known_target_files"] == ["Protocol.java"]
+
+@pytest.mark.asyncio
+async def test_run_attempt_does_not_scope_a_later_full_set_attempt(tmp_path):
+    """Sibling/negative case: the scoping above is deliberately gated to the FIRST
+    full-set attempt only (state.budgets.retry_count == 0) - once a scoped full-set
+    attempt has already been tried and the same failure persists (retry_count now
+    >= 1), the existing "broaden to a clean full regeneration" escape hatch must
+    still apply completely unchanged, exactly as before this fix - a failure that
+    genuinely resists narrow scoping still gets a real clean-slate attempt, not an
+    endless narrower and narrower retry on the same wrong diagnosis."""
+    state = GenerationState()
+    state.budgets.retry_count = 1
+    state.budgets.targeted_retry_count = 3
+    state.budgets.fallback_targeted_attempted = True
+    state.last_implicated_files = ["Protocol.java"]
+    state.all_files_written = {"Protocol.java", "ProtocolApp.java", "ProtocolParser.java"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "Protocol.java", "content": "class Protocol {}\n"},
+        {"filepath": "ProtocolApp.java", "content": "class ProtocolApp {}\n"},
+        {"filepath": "ProtocolParser.java", "content": "class ProtocolParser {}\n"},
+    ])
+    kernel = Kernel(config=AppConfig())
+    kernel.config.autonomy.run_verification_enabled = False
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, kernel=kernel,
+        expected_files_upfront=[], targeted_max_retries=3,
+        architect_files=["Protocol.java", "ProtocolApp.java", "ProtocolParser.java"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    call_kwargs = developer.run_generation.call_args.kwargs
+    assert call_kwargs["known_target_files"] is None
+
+@pytest.mark.asyncio
 async def test_run_attempt_reuses_planner_code_when_full_coverage(tmp_path):
     """The actual payoff: when the Planner's own plan text already has
     complete code for every expected file, run_attempt() must use it
