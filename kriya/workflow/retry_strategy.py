@@ -21,7 +21,7 @@ estimate.
 import logging
 import os
 
-from kriya.workflow.attribution import attribute_failure, read_worktree_file
+from kriya.workflow.attribution import _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
@@ -33,7 +33,6 @@ from kriya.workflow.file_resolution import IncompleteGenerationError
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.state import GenerationState
-from kriya.workflow.toolchain import _detect_missing_build_manifest
 from kriya.workflow.worktree import remove_git_worktree
 
 logger = logging.getLogger(__name__)

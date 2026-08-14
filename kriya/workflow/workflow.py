@@ -49,11 +49,14 @@ from kriya.workflow.context_budget import (
 from kriya.workflow.edit_safety import (
     _strip_java_comments_and_strings,
     apply_anchored_edits,
+    find_structural_corruption,
+    normalize_whitespace,
+)
+from kriya.workflow.attribution import (
+    _detect_missing_build_manifest,
     find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
     find_misdirected_edit_target,
-    find_structural_corruption,
-    normalize_whitespace,
 )
 from kriya.workflow.file_resolution import (
     EXPECTED_FILE_EXTENSIONS,
@@ -112,9 +115,7 @@ from kriya.workflow.failure_grounding import (
 from kriya.workflow.toolchain import (
     _JAVA_VERSION_MENTION_PATTERN,
     _JDK_INCOMPATIBLE_JVM_FLAGS,
-    _UNRESOLVED_PACKAGE_PATTERN,
     _check_java_toolchain_mismatch,
-    _detect_missing_build_manifest,
     _goal_or_repo_targets_java,
     _java_toolchain_fact,
     _pin_exec_plugin_executable_to_resolved_jdk,

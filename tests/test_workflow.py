@@ -69,6 +69,7 @@ from kriya.workflow.workflow import (
     find_missing_expected_files,
     find_structural_corruption,
     normalize_written_filepath,
+    _resolve_file_locations,
 )
 
 
@@ -5101,6 +5102,46 @@ def test_build_error_source_context_extracts_python_syntax_error_window(tmp_path
     result = _build_error_source_context(str(tmp_path), error, known_files=["greet.py"])
     assert "greet.py" in result
     assert ">> 4: [VERIFICATION] PASS" in result["greet.py"]
+
+def test_build_error_source_context_covers_every_file_sharing_a_basename(tmp_path):
+    """Regression test for the Row 5 basename-collision bug found by code
+    inspection during the 2026-08-14 file-attribution-consolidation review:
+    _build_error_source_context() used to build `{os.path.basename(f): f for
+    f in known_files}` - a plain dict, silently keeping only the LAST known
+    file for a shared basename (e.g. the same-named class in two packages).
+    Two known files here share the basename 'Worker.java'; the fix
+    (_files_by_basename() in failure_grounding.py) must surface context for
+    BOTH, not just whichever happened to be iterated last."""
+    (tmp_path / "pkg_a").mkdir()
+    (tmp_path / "pkg_b").mkdir()
+    (tmp_path / "pkg_a" / "Worker.java").write_text("\n".join(f"a-line {i}" for i in range(1, 15)))
+    (tmp_path / "pkg_b" / "Worker.java").write_text("\n".join(f"b-line {i}" for i in range(1, 15)))
+    error = "[ERROR] .../Worker.java:[5,5] incompatible types"
+    result = _build_error_source_context(
+        str(tmp_path), error, known_files=["pkg_a/Worker.java", "pkg_b/Worker.java"]
+    )
+    assert set(result.keys()) == {"pkg_a/Worker.java", "pkg_b/Worker.java"}
+    assert ">> 5: a-line 5" in result["pkg_a/Worker.java"]
+    assert ">> 5: b-line 5" in result["pkg_b/Worker.java"]
+
+def test_resolve_file_locations_covers_every_file_sharing_a_basename():
+    """Sibling regression test to
+    test_build_error_source_context_covers_every_file_sharing_a_basename,
+    for _resolve_file_locations() - the other of the two call sites that
+    independently had the same Row 5 basename-collision bug (a Failure's own
+    file_locations, not a prompt-display snippet). Previously had ZERO test
+    coverage of any kind, found by code inspection alongside the bug itself."""
+    error = "[ERROR] .../Worker.java:[5,5] incompatible types"
+    locations = _resolve_file_locations(error, known_files=["pkg_a/Worker.java", "pkg_b/Worker.java"])
+    assert {loc.filepath for loc in locations} == {"pkg_a/Worker.java", "pkg_b/Worker.java"}
+    assert all(loc.line == 5 for loc in locations)
+
+def test_resolve_file_locations_single_file_unaffected():
+    error = "[ERROR] .../App.java:[10,5] incompatible types"
+    locations = _resolve_file_locations(error, known_files=["App.java"])
+    assert len(locations) == 1
+    assert locations[0].filepath == "App.java"
+    assert locations[0].line == 10
 
 @pytest.mark.asyncio
 async def test_get_or_start_jdtls_client_returns_none_when_jdtls_not_found():

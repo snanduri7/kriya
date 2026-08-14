@@ -348,48 +348,7 @@ def _pin_exec_plugin_executable_to_resolved_jdk(worktree_path: str, java_home_ov
         return None
 
 
-_UNRESOLVED_PACKAGE_PATTERN = re.compile(r"package [\w.]+ does not exist")
-
-
-def _detect_missing_build_manifest(worktree_path: str, raw_error_text: str) -> Optional[str]:
-    """Deterministically detects a Java compile failure caused by a build
-    manifest the Architect never explicitly asked the Developer to create -
-    not one the Developer merely dropped after being asked (that's
-    IncompleteGenerationError's job, and it already works).
-
-    Confirmed live, 2026-08-07 (kriya-protocol-parser-app): pom.xml was
-    never written across two separate full runs, three days apart. Every
-    retry's own fix-analysis correctly diagnosed "the dependencies aren't
-    declared in pom.xml" and explicitly declined to fix it, since a
-    per-file targeted retry is told (correctly, in every other case) to
-    stay in scope. extract_implicated_files()'s basename-in-text matching
-    can never implicate pom.xml either, since a "package X does not exist"
-    error never names the missing manifest file that's the real cause -
-    so nothing in the retry loop could ever recover it, no matter how many
-    attempts ran, because it was never requested in the first place, not
-    because it was requested and lost.
-
-    Fires purely from the error shape and the worktree's own current state,
-    independent of whether the Architect's design ever listed the file at
-    all - closes that structural blind spot as its own detection path,
-    parallel to (not replacing) IncompleteGenerationError. A "package X does
-    not exist" error can only happen for a genuinely external dependency (a
-    JDK-standard java.*/javax.* package always resolves regardless of any
-    build manifest), so requiring BOTH "no pom.xml/build.gradle exists" AND
-    this specific error shape is a low-false-positive combination - a
-    stdlib-only Java goal that never needed a manifest at all will simply
-    never produce this error shape to begin with.
-
-    Deliberately Maven-specific (returns "pom.xml", never "build.gradle") -
-    only one real instance of this problem class has been found, and it was
-    a Maven goal; a Gradle instance would need its own detection (different
-    error shape) rather than being guessed at here. Mirrors
-    _JDK_INCOMPATIBLE_JVM_FLAGS' philosophy: fix the confirmed instance
-    precisely, don't build generality for one that hasn't happened yet."""
-    if os.path.exists(os.path.join(worktree_path, "pom.xml")):
-        return None
-    if os.path.exists(os.path.join(worktree_path, "build.gradle")):
-        return None
-    if _UNRESOLVED_PACKAGE_PATTERN.search(raw_error_text):
-        return "pom.xml"
-    return None
+# _detect_missing_build_manifest() (formerly here) moved to
+# kriya/workflow/attribution.py on 2026-08-14, alongside the rest of the
+# "which file does this concern" checks - see that module's own docstring
+# taxonomy.

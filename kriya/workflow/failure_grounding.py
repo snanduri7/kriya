@@ -272,6 +272,28 @@ def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
     return locations
 
 
+def _files_by_basename(known_files: Iterable[str]) -> Dict[str, List[str]]:
+    """Groups known files by basename, preserving EVERY file sharing a
+    basename - not just the last one seen. A plain `{os.path.basename(f): f
+    for f in known_files}` dict comprehension (the shape both call sites
+    below independently used, before this fix) silently drops all but the
+    LAST file for a shared basename (e.g. the same-named class in two
+    packages, or a `test/`+`main/` tree with a same-named fixture) - a
+    FileLocation or a source-context snippet could silently attach to the
+    WRONG file's path whenever two known files share a basename. Found by
+    code inspection, 2026-08-14 (the file-attribution-consolidation
+    taxonomy review), zero live incident yet but zero test coverage either.
+    extract_implicated_files() was never affected (it already scans via a
+    list comprehension over every known file, not a basename dict), which is
+    exactly why this went unnoticed elsewhere - this is the one shared
+    helper both basename-keyed call sites now use instead of each
+    reimplementing the same lossy dict."""
+    by_basename: Dict[str, List[str]] = {}
+    for f in known_files:
+        by_basename.setdefault(os.path.basename(f), []).append(f)
+    return by_basename
+
+
 def _build_error_source_context(
     worktree_path: str, error_text: str, known_files: Iterable[str]
 ) -> Dict[str, str]:
@@ -284,47 +306,51 @@ def _build_error_source_context(
     keyed by the real relative filepath (matched against known_files by
     basename, since the error text's own path may be absolute/worktree-
     rooted) - a location naming a file Kriya doesn't know about (already
-    deleted, or a dependency's own source) is silently skipped, not an error."""
+    deleted, or a dependency's own source) is silently skipped, not an error.
+    A basename shared by more than one known file (see _files_by_basename)
+    adds context for EVERY matching file, not just one - the error text
+    itself gives no way to disambiguate which of several same-named files it
+    meant, so showing all of them is the honest behavior."""
     locations = extract_error_source_locations(error_text)
     if not locations:
         return {}
-    by_basename = {os.path.basename(f): f for f in known_files}
+    by_basename = _files_by_basename(known_files)
     context_by_file: Dict[str, str] = {}
     for filename, line_no in locations:
-        filepath = by_basename.get(filename)
-        if not filepath:
-            continue
-        try:
-            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
-                lines = fh.readlines()
-        except Exception as ex:
-            logger.debug(f"Failed to read source context for {filepath}:{line_no}: {ex}")
-            continue
-        if not (1 <= line_no <= len(lines)):
-            continue
-        start, end = max(0, line_no - 4), min(len(lines), line_no + 3)
-        snippet = "\n".join(
-            f"{'>>' if (i + 1) == line_no else '  '} {i + 1}: {lines[i].rstrip()}"
-            for i in range(start, end)
-        )
-        context_by_file[filepath] = (
-            context_by_file.get(filepath, "")
-            + f"\n=== Source context at the reported error location (line {line_no}) ===\n{snippet}\n"
-        )
+        for filepath in by_basename.get(filename, []):
+            try:
+                with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                    lines = fh.readlines()
+            except Exception as ex:
+                logger.debug(f"Failed to read source context for {filepath}:{line_no}: {ex}")
+                continue
+            if not (1 <= line_no <= len(lines)):
+                continue
+            start, end = max(0, line_no - 4), min(len(lines), line_no + 3)
+            snippet = "\n".join(
+                f"{'>>' if (i + 1) == line_no else '  '} {i + 1}: {lines[i].rstrip()}"
+                for i in range(start, end)
+            )
+            context_by_file[filepath] = (
+                context_by_file.get(filepath, "")
+                + f"\n=== Source context at the reported error location (line {line_no}) ===\n{snippet}\n"
+            )
     return context_by_file
 
 
 def _resolve_file_locations(error_text: str, known_files: Iterable[str]) -> List[FileLocation]:
-    """Same basename resolution _build_error_source_context() does internally,
-    but returning structured FileLocation objects for a Failure instead of a
-    prompt-ready snippet dict - lets a compile-error raise site populate
+    """Same basename resolution _build_error_source_context() does internally
+    (via _files_by_basename, shared rather than reimplemented), but returning
+    structured FileLocation objects for a Failure instead of a prompt-ready
+    snippet dict - lets a compile-error raise site populate
     Failure.file_locations directly instead of leaving it to be re-derived
-    later from str(e)."""
-    by_basename = {os.path.basename(f): f for f in known_files}
+    later from str(e). A basename shared by more than one known file produces
+    a FileLocation for EACH matching file, same reasoning as
+    _build_error_source_context above."""
+    by_basename = _files_by_basename(known_files)
     locations: List[FileLocation] = []
     for filename, line_no in extract_error_source_locations(error_text):
-        filepath = by_basename.get(filename)
-        if filepath:
+        for filepath in by_basename.get(filename, []):
             locations.append(FileLocation(filepath=filepath, line=line_no))
     return locations
 
