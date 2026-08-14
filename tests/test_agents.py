@@ -797,6 +797,49 @@ async def test_fill_missing_content_repeats_verification_contract_reminder_at_en
     reminder_pos = file_prompt.index("[VERIFICATION] PASS")
     assert reminder_pos > only_this_file_pos
 
+@pytest.mark.asyncio
+async def test_fill_missing_content_repeats_skill_conventions_reminder_at_end():
+    """Regression test for the same shape one section earlier (2026-08-14):
+    skills/binary-wire-protocol is confirmed LOADED and injected into
+    existing_code_context on every live ignite_qpid_protocol run this
+    session, its content is already correct and complete, yet the model
+    still writes the exact bug the skill documents. Its rules sit even
+    EARLIER than VERIFICATION_CONTRACT_HEADER did (the very FIRST section of
+    this prompt) - same "stated once, buried under everything after it"
+    shape, closed the same way: repeated as a short reminder at the very
+    end, right before generation."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+    dev = DeveloperAgent("developer", llm)
+    existing_code_context = (
+        "=== Engineering Skill Conventions: binary-wire-protocol ===\n"
+        "Rules:\n- do NOT use ByteBuffer.putInt() for a narrower-than-native field\n"
+    )
+    await dev.run_generation(
+        "Task", "Design", existing_code_context,
+        known_target_files=["App.java"],
+    )
+    file_prompt = dev.llm.complete.call_args_list[0][0][1]
+    only_this_file_pos = file_prompt.index("Return ONLY the content of")
+    reminder_pos = file_prompt.index("Engineering Skill Conventions in the Existing Code Base")
+    assert reminder_pos > only_this_file_pos
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_skill_reminder_without_active_skills():
+    # No-op when no skill matched this generation at all - never pay for a
+    # reminder pointing at content that isn't there.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code, no skills active",
+        known_target_files=["App.java"],
+    )
+    file_prompt = dev.llm.complete.call_args_list[0][0][1]
+    assert "Engineering Skill Conventions in the Existing Code Base" not in file_prompt
+
 def test_build_buffer_capacity_scaffold_names_overflow_direction():
     """Regression test for a real bug found live, 2026-08-08
     (ignite_qpid_protocol): the model's own FIX ANALYSIS correctly diagnosed

@@ -952,6 +952,26 @@ class DeveloperAgent(BaseAgent):
             # "[VERIFICATION]" markers despite the goal being exactly the shape the header describes
             # (a round-trip encode/decode). A single early mention buried under everything the prompt
             # adds after it is the same failure shape the "only this file" fix above already solved.
+            #
+            # Skill-conventions reminder, same precedent one more time (2026-08-14) - found via
+            # spikes/protocol_bug_pocs/, then confirmed against real logs: skills/binary-wire-protocol
+            # (and, from an earlier live incident this session, skills/qpid's defaultAlias rule) is
+            # confirmed LOADED and injected into existing_code_context on every run, its content is
+            # already correct and complete, yet the model still writes the exact bug the skill
+            # documents. Its rules sit even EARLIER than VERIFICATION_CONTRACT_HEADER did (inside
+            # "Existing Code Base Context", the very FIRST section of this prompt) - the same "stated
+            # once, buried under everything added after it" shape, one section earlier. Conditional on
+            # existing_code_context actually containing a skill section (cheap substring check, no new
+            # plumbing/parameters needed - this function already receives the exact string that would
+            # contain it) so a generation with no active skills doesn't pay for a no-op reminder.
+            has_skill_conventions = "Engineering Skill Conventions" in existing_code_context
+            skill_reminder = (
+                "\nReminder: re-check the Engineering Skill Conventions in the Existing Code Base "
+                "Context above before finalizing this file - they document specific mistakes already "
+                "confirmed to happen for this exact stack. Your response must not contradict any Rule "
+                "listed there."
+                if has_skill_conventions else ""
+            )
             file_prompt = (
                 f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
                 f"=== Architecture Design ===\n{design_context}\n\n"
@@ -962,6 +982,7 @@ class DeveloperAgent(BaseAgent):
                 "Reminder: per the Verification Contract above, if this file is (or contains) the "
                 "entrypoint and the goal describes a checkable runtime outcome, it must end by printing "
                 "\"[VERIFICATION] PASS\" or \"[VERIFICATION] FAIL: <reason>\"."
+                f"{skill_reminder}"
                 f"{source_context_block}"
                 f"{fix_analysis_instruction}"
             )
