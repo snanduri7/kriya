@@ -10,6 +10,7 @@ from kriya.workflow.static_checks import (
     BareVerificationMarkerCheck,
     IgniteMethodMixingCheck,
     IgniteUnclosedResourceCheck,
+    TestContradictsVerificationMarkerCheck,
     run_static_checks,
 )
 
@@ -198,3 +199,103 @@ def test_run_static_checks_reports_bare_verification_marker_violation(tmp_path):
     violation = run_static_checks(str(tmp_path), ["greet.py"])
     assert violation is not None
     assert violation.startswith("[bare_verification_marker]")
+
+
+# --- TestContradictsVerificationMarkerCheck: a test can't pass if it demands
+# empty stdout from a script required to always print a verdict line ---
+
+_WORDCOUNT_PY = (
+    "import sys\n"
+    "import os\n"
+    "from collections import Counter\n\n"
+    "def count_words(filename):\n"
+    "    if not os.path.isfile(filename):\n"
+    "        print(f\"Error: File '{filename}' not found.\")\n"
+    "        sys.exit(1)\n"
+    "    with open(filename, 'r', encoding='utf-8') as f:\n"
+    "        content = f.read()\n"
+    "    for word, count in Counter(content.split()).most_common(10):\n"
+    "        print(f\"{word}: {count}\")\n\n"
+    "if __name__ == '__main__':\n"
+    "    count_words(sys.argv[1])\n"
+    "    print(\"[VERIFICATION] PASS\")\n"
+)
+
+# Golden regression fixture: the exact real captured test_empty_file body
+# from the live incident (2026-08-14) - a demo wordcount.py goal, run
+# directly (not via the eval harness), where the generated app worked fine
+# and this test was the entire reason Quality Gates never passed.
+_WORDCOUNT_TEST_PY = (
+    "import os\n"
+    "import tempfile\n"
+    "import subprocess\n"
+    "import sys\n\n"
+    "def test_empty_file():\n"
+    "    \"\"\"Test wordcount with an empty file\"\"\"\n"
+    "    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:\n"
+    "        f.write(\"\")\n"
+    "        temp_file = f.name\n"
+    "    try:\n"
+    "        result = subprocess.run([sys.executable, 'wordcount.py', temp_file], \n"
+    "                              capture_output=True, text=True, cwd=os.getcwd())\n"
+    "        assert result.returncode == 0\n"
+    "        assert result.stdout.strip() == \"\"\n"
+    "    finally:\n"
+    "        os.unlink(temp_file)\n"
+)
+
+
+def test_test_contradicts_verification_marker_check_detects_real_incident():
+    """Golden regression fixture: the exact real wordcount.py/test_wordcount.py
+    pair from the live incident this check was built for - see this module's
+    own docstring and TestContradictsVerificationMarkerCheck's docstring."""
+    files = {"wordcount.py": _WORDCOUNT_PY, "test_wordcount.py": _WORDCOUNT_TEST_PY}
+    violation = TestContradictsVerificationMarkerCheck().check(files)
+    assert violation is not None
+    assert "test_wordcount.py" in violation
+    assert "wordcount.py" in violation
+
+
+def test_test_contradicts_verification_marker_check_clean_when_test_expects_marker():
+    fixed_test = _WORDCOUNT_TEST_PY.replace(
+        'assert result.stdout.strip() == ""',
+        'assert "[VERIFICATION] PASS" in result.stdout',
+    )
+    files = {"wordcount.py": _WORDCOUNT_PY, "test_wordcount.py": fixed_test}
+    assert TestContradictsVerificationMarkerCheck().check(files) is None
+
+
+def test_test_contradicts_verification_marker_check_clean_when_invoked_script_has_no_marker():
+    # The empty-stdout assertion targets a script that never prints the
+    # marker at all - a legitimate assertion, not a contradiction.
+    plain_script = "import sys\nprint('', end='')\n"
+    files = {"helper.py": plain_script, "test_helper.py": _WORDCOUNT_TEST_PY.replace("wordcount.py", "helper.py")}
+    assert TestContradictsVerificationMarkerCheck().check(files) is None
+
+
+def test_test_contradicts_verification_marker_check_clean_when_no_subprocess_call():
+    files = {"test_x.py": "def test_thing():\n    assert 1 == 1\n"}
+    assert TestContradictsVerificationMarkerCheck().check(files) is None
+
+
+def test_test_contradicts_verification_marker_check_clean_when_invoked_script_not_written():
+    # subprocess.run references a script name that isn't in this batch at
+    # all (e.g. a system tool) - nothing to cross-reference, must not guess.
+    files = {"test_x.py": "subprocess.run([sys.executable, 'other_tool.py'])\nassert result.stdout == \"\"\n"}
+    assert TestContradictsVerificationMarkerCheck().check(files) is None
+
+
+def test_test_contradicts_verification_marker_check_ignores_non_python_files():
+    files = {
+        "Test.java": "String out = run(\"wordcount.py\"); assertEquals(\"\", out);",
+        "wordcount.py": _WORDCOUNT_PY,
+    }
+    assert TestContradictsVerificationMarkerCheck().check(files) is None
+
+
+def test_run_static_checks_reports_test_contradicts_verification_marker_violation(tmp_path):
+    (tmp_path / "wordcount.py").write_text(_WORDCOUNT_PY)
+    (tmp_path / "test_wordcount.py").write_text(_WORDCOUNT_TEST_PY)
+    violation = run_static_checks(str(tmp_path), ["wordcount.py", "test_wordcount.py"])
+    assert violation is not None
+    assert violation.startswith("[test_contradicts_verification_marker]")

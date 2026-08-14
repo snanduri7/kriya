@@ -19,6 +19,19 @@ written file regardless of extension, since the anti-pattern it catches
 (Kriya's own runtime-verification marker text getting embedded unprinted)
 can happen in any target language, not just Java.
 
+A fourth check (TestContradictsVerificationMarkerCheck, added 2026-08-14)
+catches a different, previously-undiscovered shape of the same underlying
+theme - not a FALSE application defect this time, but a FALSE Quality Gate
+failure: the model writes a test asserting a subprocess's stdout is exactly
+empty, while the SAME entrypoint that subprocess invokes is (correctly)
+required to print a "[VERIFICATION] PASS"/"FAIL" line per the verification
+contract. Both facts can never be true together - the test is unsatisfiable
+by construction, not a bug in the actual application. Found live,
+2026-08-14 (a hand-run `wordcount.py` demo goal, not the eval harness): the
+generated app worked correctly when run manually; the retry loop spent its
+entire budget chasing a test whose own assertion contradicted a requirement
+the same completion had already (correctly) satisfied elsewhere.
+
 Best-effort by design, matching this project's own established philosophy for
 this class of check (see kriya/workflow/failure_grounding.py's
 extract_implicated_files() docstring): a false positive is low-cost since it's
@@ -140,7 +153,83 @@ class IgniteUnclosedResourceCheck(StaticCheck):
         return None
 
 
-STATIC_CHECKS = [IgniteMethodMixingCheck(), IgniteUnclosedResourceCheck(), BareVerificationMarkerCheck()]
+class TestContradictsVerificationMarkerCheck(StaticCheck):
+    """Catches a test file asserting a subprocess's stdout is EXACTLY empty
+    when the specific script it invokes is itself required (by the goal's
+    own verification contract) to print a "[VERIFICATION] PASS"/"FAIL" line
+    on every run - the two facts are structurally incompatible, so the test
+    can never pass regardless of how correct the invoked script actually is.
+
+    Found live, 2026-08-14 (a hand-run wordcount.py demo goal): `wordcount.py`
+    worked correctly when run manually - correct word counts, clean exit,
+    ending with `print("[VERIFICATION] PASS")` per the standing convention.
+    The model's OWN generated `test_empty_file` asserted
+    `result.stdout.strip() == ""` for that same script - impossible once the
+    verification line is always printed, regardless of input. The retry loop
+    spent its entire budget (multiple targeted + full-set attempts, plus an
+    escalation) chasing this before running out, never touching the real
+    contradiction: two artifacts written in the same completion, one
+    requiring output the other asserts can't exist. Distinct from
+    BareVerificationMarkerCheck above (that catches the marker never
+    reaching real output at all) - here the marker prints correctly, and a
+    SEPARATE, sibling file's test is what's wrong.
+
+    Deliberately narrow to the exact confirmed shape, matching this module's
+    own established practice (see BareVerificationMarkerCheck's own
+    docstring): Python only (`subprocess.run` is the specific idiom that
+    produced the real incident - a Java/JUnit or Ruby/RSpec equivalent would
+    need its own detection, not guessed at here), and only an EXACT-equality
+    assertion against an empty string literal (`.stdout(.strip())? == ""` or
+    `''`) - unambiguously wrong whenever it fires, since a script required to
+    print the marker can never produce fully empty stdout. A looser
+    "asserts some non-marker-inclusive literal" version was considered and
+    rejected: distinguishing a genuinely wrong assertion from one that
+    legitimately checks only a substring, or invokes a DIFFERENT script with
+    no verification-contract obligation of its own, isn't reliable from text
+    alone - the empty-string case is the one shape with no such ambiguity.
+
+    Cross-references the SPECIFIC invoked script (extracted from the
+    subprocess.run(...) call itself, not just "some file in this batch
+    mentions the marker somewhere") against every already-written file
+    sharing that basename, so a file that merely happens to also be in this
+    batch but isn't the one actually being tested never triggers a false
+    match."""
+
+    name = "test_contradicts_verification_marker"
+
+    _SUBPROCESS_INVOKE_RE = re.compile(
+        r"subprocess\.run\(\s*\[\s*(?:sys\.executable|[\"']python3?[\"'])\s*,\s*[\"']([^\"']+)[\"']"
+    )
+    _STDOUT_EXACT_EMPTY_RE = re.compile(r"\.stdout(?:\.strip\(\))?\s*==\s*(?:\"\"|'')")
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not filepath.endswith(".py"):
+                continue
+            if not self._STDOUT_EXACT_EMPTY_RE.search(content):
+                continue
+            for m in self._SUBPROCESS_INVOKE_RE.finditer(content):
+                invoked = m.group(1)
+                invoked_contents = [c for f, c in files.items() if os.path.basename(f) == invoked]
+                if any("[VERIFICATION]" in c for c in invoked_contents):
+                    return (
+                        f"{filepath} asserts a subprocess's stdout is exactly empty "
+                        f"(`.stdout ... == \"\"`), but it invokes {invoked}, which is required to "
+                        "print a '[VERIFICATION] PASS'/'[VERIFICATION] FAIL: ...' line on every run "
+                        "per the goal's verification contract - stdout can never be exactly empty. "
+                        f"This assertion can never pass regardless of whether {invoked} is correct. "
+                        "Assert on the actual expected content instead (e.g. that the verification "
+                        "marker is present, or the specific output besides it), not exact emptiness."
+                    )
+        return None
+
+
+STATIC_CHECKS = [
+    IgniteMethodMixingCheck(),
+    IgniteUnclosedResourceCheck(),
+    BareVerificationMarkerCheck(),
+    TestContradictsVerificationMarkerCheck(),
+]
 
 
 def run_static_checks(worktree_path: str, all_files_written: Iterable[str]) -> Optional[str]:
