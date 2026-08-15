@@ -53,6 +53,8 @@ from kriya.workflow.workflow import (
     _resolve_jdk_home_for_version,
     _resolve_maven_main_class,
     _resolve_run_command,
+    downgrade_ungrounded_goal_explicit_commands,
+    check_plan_completeness,
     extract_planner_code_blocks,
     _scoped_skill_gap_description,
     _strip_jdk_incompatible_jvm_flags,
@@ -60,6 +62,7 @@ from kriya.workflow.workflow import (
     estimate_tokens,
     extract_contract_verdict,
     extract_error_search_terms,
+    pass_verdict_is_grounded,
     extract_error_source_locations,
     extract_expected_files,
     extract_implicated_files,
@@ -344,6 +347,77 @@ def test_resolve_run_command_ignores_non_python_commands():
 
 def test_resolve_run_command_handles_empty_command():
     assert _resolve_run_command([]) == []
+
+def test_downgrade_ungrounded_goal_explicit_commands_leaves_grounded_claim_alone():
+    """The common, legitimate case: the goal genuinely names the command, so
+    the executable appears in the goal text - must NOT be downgraded (no
+    false positive on the ordinary case)."""
+    judgment = {
+        "command_source": "goal_explicit",
+        "run_commands": [["python", "app.py"]],
+        "should_run": True,
+        "success_criteria": "prints hi",
+    }
+    goal = "Run with python app.py; it should print hi"
+    result = downgrade_ungrounded_goal_explicit_commands(judgment, goal)
+    assert result["command_source"] == "goal_explicit"
+    assert result is judgment  # unchanged input returned as-is, not a copy
+
+def test_downgrade_ungrounded_goal_explicit_commands_downgrades_ungrounded_claim():
+    """Independent brutal review finding #2: a model claiming
+    command_source=goal_explicit for a command whose executable never
+    appears anywhere in the goal text must be downgraded to "inferred" so
+    the human-in-the-loop approval gate actually fires - the claim is
+    self-reported by the same untrusted JSON response as everything else,
+    with nothing else checking it."""
+    judgment = {
+        "command_source": "goal_explicit",
+        "run_commands": [["curl", "http://internal-service/admin"]],
+        "should_run": True,
+        "success_criteria": "returns 200",
+    }
+    goal = "Build a Python script that prints the current time."
+    result = downgrade_ungrounded_goal_explicit_commands(judgment, goal)
+    assert result["command_source"] == "inferred"
+    # Original input must never be mutated - a new dict is returned.
+    assert judgment["command_source"] == "goal_explicit"
+    assert result is not judgment
+
+def test_downgrade_ungrounded_goal_explicit_commands_case_insensitive():
+    judgment = {"command_source": "goal_explicit", "run_commands": [["python", "app.py"]]}
+    goal = "Run with Python app.py"
+    result = downgrade_ungrounded_goal_explicit_commands(judgment, goal)
+    assert result["command_source"] == "goal_explicit"
+
+def test_downgrade_ungrounded_goal_explicit_commands_uses_executable_basename():
+    """A full/absolute path executable (e.g. after some upstream resolution)
+    must still match against the goal naming just the bare tool name."""
+    judgment = {"command_source": "goal_explicit", "run_commands": [["/usr/bin/python3", "app.py"]]}
+    goal = "Run with python3 app.py"
+    result = downgrade_ungrounded_goal_explicit_commands(judgment, goal)
+    assert result["command_source"] == "goal_explicit"
+
+def test_downgrade_ungrounded_goal_explicit_commands_multi_command_any_ungrounded_downgrades_all():
+    """Multi-step sequence: even if the FIRST command is genuinely grounded,
+    one ungrounded command anywhere in the sequence downgrades the whole
+    thing - same AND-semantics precedent as extract_contract_verdict()'s
+    multi-step FAIL handling. Failing toward more approval-gating, not less."""
+    judgment = {
+        "command_source": "goal_explicit",
+        "run_commands": [["python", "app.py", "add"], ["curl", "http://internal/admin"]],
+    }
+    goal = "Run with python app.py add, then check the result."
+    result = downgrade_ungrounded_goal_explicit_commands(judgment, goal)
+    assert result["command_source"] == "inferred"
+
+def test_downgrade_ungrounded_goal_explicit_commands_leaves_inferred_alone():
+    """Already "inferred" is already the safe/gated state - no-op, and the
+    function must not require run_commands to look at a non-goal_explicit
+    judgment (e.g. should_run=False, run_commands=None)."""
+    judgment = {"command_source": "inferred", "run_commands": None, "should_run": False}
+    result = downgrade_ungrounded_goal_explicit_commands(judgment, "Build a library.")
+    assert result is judgment
+    assert result["command_source"] == "inferred"
 
 def test_resolve_run_command_prefixes_bundle_exec_for_rspec_with_gemfile(tmp_path):
     """Regression test for a real bug found live (2026-08-04 eval harness batch,
@@ -1723,6 +1797,58 @@ def _latest_trace_row(logs_dir):
 
 
 @pytest.mark.asyncio
+async def test_workflow_persists_intermediate_trace_checkpoint_before_reviewer(tmp_path):
+    """Found live, 2026-08-15, forensically investigating a real run whose
+    log ended abruptly mid-Reviewer-call: the ONLY trace_logger.log_run()
+    call for a normal (non-early-exit) run happened AFTER the Reviewer
+    completion - a single LLM call that can itself hang or get killed. When
+    that happens, state.gate_outcomes (the full per-attempt forensic history,
+    already complete in memory at that point - quality gates having fully
+    concluded either way) was entirely lost, leaving nothing for a future
+    investigation but raw log-scraping. Confirms an intermediate checkpoint
+    (status="in_progress", but WITH real gate_outcomes this time) is visible
+    in traces.db the moment Reviewer starts - not just at the very end - and
+    that the final call afterward still correctly replaces it with the
+    complete, final status."""
+    cfg = AppConfig()
+    cfg.paths.logs = str(tmp_path / "logs")
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+    ])
+    we = WorkflowEngine(kernel, llm)
+
+    checkpoint_seen = {}
+
+    async def reviewer_run(*args, **kwargs):
+        checkpoint_seen["row"] = _latest_trace_row(cfg.paths.logs)
+        return "Review: Approved"
+
+    we.reviewer.run = AsyncMock(side_effect=reviewer_run)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ):
+        res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+
+    checkpoint_row = checkpoint_seen["row"]
+    assert checkpoint_row is not None, "no trace row existed yet when Reviewer started"
+    assert checkpoint_row["status"] == "in_progress"
+    checkpoint_gate_outcomes = json.loads(checkpoint_row["gate_outcomes"])
+    assert any(g["type"] == "compile" for g in checkpoint_gate_outcomes)
+
+    final_row = _latest_trace_row(cfg.paths.logs)
+    assert final_row["status"] == "success"
+    assert final_row["run_id"] == checkpoint_row["run_id"]
+
+@pytest.mark.asyncio
 async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_path):
     """Regression test: a JVM crashing during its own startup (e.g. a startup
     flag unsupported by the actually-resolved JDK) is not a code defect - no
@@ -1923,6 +2049,11 @@ async def test_workflow_traces_human_rejected(tmp_path):
         "Step 1: Write code",
         "Design: Write app.py",
         '[{"filepath": "app.py", "content": "print(1)"}]',
+        # Stage 6 SME review, Finding 1: the Reviewer now runs at the Pre-Apply Human
+        # Approval Gate itself (so its verdict can inform the decision) - BEFORE the
+        # human's actual approve/reject answer, not after. Consumed here even though
+        # this run ends in rejection.
+        "Review: flagged for human judgment",
     ])
 
     we = WorkflowEngine(kernel, llm)
@@ -1938,6 +2069,134 @@ async def test_workflow_traces_human_rejected(tmp_path):
     assert trace_row is not None
     assert trace_row["status"] == "human_rejected"
     assert trace_row["failure_category"] == "human_rejected"
+
+
+@pytest.mark.asyncio
+async def test_workflow_reviewer_verdict_reaches_human_before_approval_decision(tmp_path):
+    """Stage 6 SME review, Finding 1 (2026-08-15): before this fix, the Reviewer only
+    ran AFTER the human-approval gate - a human approving in human-in-the-loop mode
+    had no access to the Reviewer's opinion at all, since it didn't exist yet, and
+    files were already applied to the real workspace before it ever ran. Confirms the
+    real wiring: the Reviewer's text now reaches the approval callback's own `reason`
+    argument - the actual thing a human sees at the decision point - not just that a
+    Reviewer call happens somewhere in the run."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "human-in-the-loop"
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",             # Planner
+        "Design: Write app.py",           # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',  # Developer
+        "REJECTED - hardcoded credential on line 4",  # Reviewer, at the approval gate
+    ])
+
+    captured_reasons = []
+    def approval_cb(files, reason):
+        captured_reasons.append(reason)
+        return True
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create app", workspace_path=str(tmp_path), approval_callback=approval_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert len(captured_reasons) == 1
+    assert "REJECTED - hardcoded credential on line 4" in captured_reasons[0]
+    # Reused, not re-run: exactly 4 LLM calls total (no 5th for a redundant second
+    # Reviewer call against the same final content), and the final result's own
+    # "review" field is the SAME text the human already saw at approval time.
+    assert llm.complete.await_count == 4
+    assert res["review"] == "REJECTED - hardcoded credential on line 4"
+
+@pytest.mark.asyncio
+async def test_workflow_reviewer_not_run_early_when_no_approval_needed(tmp_path):
+    """The pre-approval Reviewer call must only fire when a human is actually going
+    to see it - autonomous mode (no escalation, no approval_callback needed) must pay
+    zero extra latency/cost for it. Call count must match the pre-fix baseline exactly
+    (Planner/Architect/Developer/Reviewer, one each) - not one more for a wasted early
+    call nobody would ever see."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert llm.complete.await_count == 4
+    assert res["review"] == "Review: Approved"
+
+@pytest.mark.asyncio
+async def test_workflow_stale_pre_approval_review_not_reused_after_later_attempt_fails(tmp_path):
+    """Regression test for a real bug caught by independent review of Finding 1's own
+    fix (2026-08-15): the original reset (`state.pre_approval_review = None`) was
+    placed INSIDE the "4.5. Pre-Apply Human Approval Gate" section, so it only ran if
+    a later loop iteration reached that section again. But run_attempt() raises
+    QualityGateFailure directly from many sites (compile failure among them) that jump
+    straight to the loop's `except` handler, skipping "4.5" entirely for that
+    iteration - the ordinary, most common way an attempt fails. Reproduced exactly:
+    attempt 1 reaches 4.5, gets approved, files copied - then the SEPARATE full
+    regression-suite check fails, forcing a retry. Attempt 2's compile fails with an
+    unrecoverable JVM-startup error (environment_failure - an IMMEDIATE loop break,
+    never reaching 4.5 again). Without the fix (reset moved to run unconditionally,
+    once per loop iteration, before run_attempt() is even called), the final "review"
+    would still be attempt 1's stale, now-superseded verdict - describing content that
+    no longer exists - instead of a fresh review of what actually, finally failed."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "human-in-the-loop"
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",                                     # Planner
+        "Design: Write app.py",                                   # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',     # Developer, attempt 1
+        "Review A - stale, must not be reused",                   # Reviewer at 4.5, attempt 1
+        '[{"filepath": "app.py", "content": "print(2)\\n"}]',     # Developer, attempt 2
+        "Review B - fresh, describes the real final failure",     # Reviewer at "5.", after the loop ends
+    ])
+
+    jvm_error = (
+        "Error occurred during initialization of VM\n"
+        "java.lang.Error: A command line option has attempted to allow or "
+        "enable the Security Manager. Enabling a Security Manager is not "
+        "supported."
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        side_effect=[
+            {"success": True, "output": ""},           # attempt 1: compiles fine
+            {"success": False, "output": jvm_error},    # attempt 2: environment failure, immediate break
+        ],
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        side_effect=[
+            # workflow.py's own separate full-regression check, right after attempt 1's
+            # approval + file-copy - fails, forcing the retry that leads to attempt 2.
+            {"success": False, "output": "REGRESSION TEST SUITE FAILURE"},
+        ],
+    ):
+        we = WorkflowEngine(kernel, llm)
+        res = await we.run_generation_workflow(
+            goal="Create app", workspace_path=str(tmp_path),
+            approval_callback=lambda files, reason: True,
+        )
+
+    assert res["quality_gates_passed"] is False
+    assert res["environment_failure"] is not None
+    assert res["review"] == "Review B - fresh, describes the real final failure"
+    assert llm.complete.await_count == 6
 
 
 @pytest.mark.asyncio
@@ -2233,6 +2492,50 @@ def test_extract_contract_verdict_ignores_marker_not_at_line_start():
     must not be mistaken for an actual verdict."""
     assert extract_contract_verdict("noise [VERIFICATION] PASS trailing junk") is None
 
+def test_pass_verdict_is_grounded_true_when_fail_string_present():
+    """Independent brutal review finding #4: a genuine implementation, per
+    VERIFICATION_CONTRACT_HEADER's own instruction, has to literally write
+    the "[VERIFICATION] FAIL" string somewhere in source for that branch to
+    exist at all - however it's structured (if/else, ternary, whatever)."""
+    files = [
+        "public class App {\n"
+        "    public static void main(String[] args) {\n"
+        "        if (decoded.equals(original)) {\n"
+        '            System.out.println("[VERIFICATION] PASS");\n'
+        "        } else {\n"
+        '            System.out.println("[VERIFICATION] FAIL: mismatch");\n'
+        "        }\n"
+        "    }\n"
+        "}\n"
+    ]
+    assert pass_verdict_is_grounded(files) is True
+
+def test_pass_verdict_is_grounded_false_when_no_fail_string_anywhere():
+    """The actual gap this closes: a file that only ever prints PASS, with
+    no FAIL branch anywhere - the "check" doesn't look like it branches on
+    anything, so the PASS marker shouldn't be blindly trusted."""
+    files = [
+        "public class App {\n"
+        "    public static void main(String[] args) {\n"
+        '        System.out.println("[VERIFICATION] PASS");\n'
+        "    }\n"
+        "}\n"
+    ]
+    assert pass_verdict_is_grounded(files) is False
+
+def test_pass_verdict_is_grounded_checks_across_all_files_not_just_one():
+    """The FAIL-handling code doesn't have to live in the same file as the
+    PASS print - checking across the whole written-files set, not just one
+    file in isolation, matters for a multi-file batch."""
+    files = [
+        'System.out.println("[VERIFICATION] PASS");\n',
+        'System.out.println("[VERIFICATION] FAIL: from a helper class");\n',
+    ]
+    assert pass_verdict_is_grounded(files) is True
+
+def test_pass_verdict_is_grounded_empty_input():
+    assert pass_verdict_is_grounded([]) is False
+
 @pytest.mark.asyncio
 async def test_workflow_verification_contract_marker_skips_llm_grade_on_pass(tmp_path):
     """When the generated entrypoint prints the deterministic verification-contract
@@ -2254,7 +2557,13 @@ async def test_workflow_verification_contract_marker_skips_llm_grade_on_pass(tmp
     ])
     we = WorkflowEngine(kernel, llm)
     we.developer.run_generation = AsyncMock(return_value=[
-        {"filepath": "app.py", "content": "print('hi')\n"}
+        {"filepath": "app.py", "content": (
+            "print('hi')\n"
+            "if True:\n"
+            "    print('[VERIFICATION] PASS')\n"
+            "else:\n"
+            "    print('[VERIFICATION] FAIL: reason')\n"
+        )}
     ])
     we.run_verifier.judge = AsyncMock(return_value={
         "should_run": True,
@@ -2285,6 +2594,53 @@ async def test_workflow_verification_contract_marker_skips_llm_grade_on_pass(tmp
     assert res["quality_gates_passed"] is True
 
 @pytest.mark.asyncio
+async def test_workflow_ungrounded_pass_marker_falls_back_to_llm_grade(tmp_path):
+    """Independent brutal review finding #4, end-to-end: a PASS marker whose
+    written file contains no "[VERIFICATION] FAIL" string anywhere must NOT
+    be blindly trusted - confirms grade() genuinely gets called (the real
+    wiring through _extract_grounded_contract_verdict() in attempt.py), not
+    just the pure pass_verdict_is_grounded() function in isolation."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    # No FAIL branch anywhere in this file - the actual gap finding #4 closes.
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\nprint('[VERIFICATION] PASS')\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints a [VERIFICATION] verdict line",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "LLM grader agreed"})
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should self-verify",
+            workspace_path=str(tmp_path),
+        )
+
+    we.run_verifier.grade.assert_called_once()
+    assert res["quality_gates_passed"] is True
+
+@pytest.mark.asyncio
 async def test_workflow_run_verification_gate_outcome_records_graded_by_contract(tmp_path):
     """Companion to the marker-skips-llm-grade test above: the persisted
     gate_outcome must record HOW a run_verification pass was decided, not just
@@ -2304,7 +2660,13 @@ async def test_workflow_run_verification_gate_outcome_records_graded_by_contract
     ])
     we = WorkflowEngine(kernel, llm)
     we.developer.run_generation = AsyncMock(return_value=[
-        {"filepath": "app.py", "content": "print('hi')\n"}
+        {"filepath": "app.py", "content": (
+            "print('hi')\n"
+            "if True:\n"
+            "    print('[VERIFICATION] PASS')\n"
+            "else:\n"
+            "    print('[VERIFICATION] FAIL: reason')\n"
+        )}
     ])
     we.run_verifier.judge = AsyncMock(return_value={
         "should_run": True,
@@ -2411,7 +2773,13 @@ async def test_workflow_verification_contract_marker_skips_llm_grade_on_fail(tmp
     ])
     we = WorkflowEngine(kernel, llm)
     we.developer.run_generation = AsyncMock(return_value=[
-        {"filepath": "app.py", "content": "print('hi')\n"}
+        {"filepath": "app.py", "content": (
+            "print('hi')\n"
+            "if True:\n"
+            "    print('[VERIFICATION] PASS')\n"
+            "else:\n"
+            "    print('[VERIFICATION] FAIL: reason')\n"
+        )}
     ])
     we.run_verifier.judge = AsyncMock(return_value={
         "should_run": True,
@@ -2433,6 +2801,73 @@ async def test_workflow_verification_contract_marker_skips_llm_grade_on_fail(tmp
         "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
         return_value={
             "success": True, "timed_out": False, "returncode": 0,
+            "output": "hi\n[VERIFICATION] FAIL: decoded value did not match original",
+        },
+    ):
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should self-verify",
+            workspace_path=str(tmp_path),
+        )
+
+    we.run_verifier.grade.assert_not_called()
+    assert res["quality_gates_passed"] is False
+
+@pytest.mark.asyncio
+async def test_workflow_verification_contract_marker_used_on_plain_nonzero_exit(tmp_path):
+    """Independent brutal review finding #1 (2026-08-15): the plain
+    "run_app_sequence succeeded=False, no timeout" branch in attempt.py used
+    to short-circuit straight to a synthetic "one or more steps failed"
+    message, never checking extract_contract_verdict() or calling grade() at
+    all - the only one of the three outcome branches that skipped both. A
+    real crash (a step exits nonzero, no hang) is plausibly the single most
+    common real failure shape, and exactly the case an entrypoint that
+    detects its own failure and exits nonzero after printing
+    "[VERIFICATION] FAIL: <reason>" would hit - that rich, deterministic
+    diagnosis was being silently discarded for a generic message, and
+    likely_files was always empty, giving the retry loop zero file-
+    attribution signal for this failure class. Confirms the marker's own
+    reason text now reaches the persisted gate outcome and grade() is never
+    called, mirroring the sibling test above for the clean-exit-with-FAIL-
+    marker case."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        "Review: Approved",       # Reviewer - still runs after retries are exhausted
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": (
+            "print('hi')\n"
+            "if True:\n"
+            "    print('[VERIFICATION] PASS')\n"
+            "else:\n"
+            "    print('[VERIFICATION] FAIL: reason')\n"
+        )}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints a [VERIFICATION] verdict line",
+    })
+    we.run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("grade() must not be called when the verification-contract marker is present")
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={
+            "success": False, "timed_out": False, "returncode": 1,
             "output": "hi\n[VERIFICATION] FAIL: decoded value did not match original",
         },
     ):
@@ -2511,6 +2946,48 @@ async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(
     assert "app.py" in state.all_files_written
     assert state.gate_outcomes[-1]["type"] == "compile"
     assert state.gate_outcomes[-1]["success"] is False
+
+@pytest.mark.asyncio
+async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded(tmp_path):
+    """Independent brutal review finding #2, end-to-end: RunVerifierAgent.judge()
+    self-reporting command_source="goal_explicit" for a command whose
+    executable never appears in the goal text must NOT bypass the human-in-
+    the-loop approval gate - confirms the real wiring (downgrade_ungrounded_
+    goal_explicit_commands() called from attempt.py, before caching, before
+    the approval-gate check), not just the pure function in isolation."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        # "curl" appears nowhere in the goal text below - a mislabeled claim.
+        "run_commands": [["curl", "http://internal-service/admin"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "returns 200",
+    })
+    approval_callback = MagicMock(return_value=True)
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "human-in-the-loop"
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        approval_callback=approval_callback, kernel=Kernel(config=cfg),
+        architect_files=["app.py"], expected_files_upfront=["app.py"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "hi\n"},
+    ):
+        await run_attempt(state, ctx)
+
+    approval_callback.assert_called_once()
+    confirm_reason = approval_callback.call_args[0][1]
+    assert "curl" in confirm_reason
 
 @pytest.mark.asyncio
 async def test_run_attempt_static_check_fires_before_compile_gate(tmp_path):
@@ -2822,7 +3299,17 @@ async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure
     even though it was computed. A human (or a future debugging session)
     inspecting a failed run_verification gate_outcome in traces.db would see
     only the raw captured output, never the grader's diagnosis of what
-    actually went wrong - confirmed directly against a real trace."""
+    actually went wrong - confirmed directly against a real trace.
+
+    Mock shape corrected 2026-08-15 (independent brutal review finding #1):
+    this used to mock run_app_sequence with success=True/returncode=1 - a
+    shape the REAL run_app_sequence() can never produce (success reflects
+    the whole sequence, never True alongside a nonzero returncode with no
+    timeout), so this test was actually exercising the clean-run branch in
+    attempt.py, not the plain-nonzero-exit branch its own scenario (a crash)
+    describes. success=False is what a real crash actually looks like, and
+    is exactly the shape that branch had ZERO real test coverage for before
+    that finding - now this test genuinely exercises it."""
     state = GenerationState()
     developer = AsyncMock()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
@@ -2847,7 +3334,7 @@ async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure
         return_value={"success": True, "output": "compiled fine"},
     ), patch(
         "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
-        return_value={"success": True, "timed_out": False, "returncode": 1, "output": "Traceback: crashed"},
+        return_value={"success": False, "timed_out": False, "returncode": 1, "output": "Traceback: crashed"},
     ):
         with pytest.raises(QualityGateFailure):
             await run_attempt(state, ctx)
@@ -4006,6 +4493,70 @@ async def test_workflow_skill_conflict_remembered_resolution_skips_callback(tmp_
     # one that survives, artemis's the one excluded.
     assert _BETA_RULE in planner_prompt
     assert _ALPHA_RULE not in planner_prompt
+
+@pytest.mark.asyncio
+async def test_workflow_skill_conflict_check_sees_rule_extracted_earlier_in_same_run(tmp_path):
+    """Stage 5 SME review, Finding 2 (2026-08-15): section 1.3's cross-skill conflict
+    check reads skill.rules from SkillEngine's in-memory cache, but section 1.2's
+    extraction (skill-gap resolution) writes new rules straight to rules.txt on disk
+    without refreshing that cache. Before the fix (a se.discover_and_load() reload
+    right before 1.3), a rule extracted moments earlier in THIS SAME RUN was invisible
+    to the conflict check that runs immediately after it - 'brokeralpha' starts
+    unverified with NO rules on disk, gets _ALPHA_RULE extracted live via the
+    skill-gap callback, and 'brokerbeta' already has the genuinely conflicting
+    _BETA_RULE. The conflict must actually be caught in THIS run, not just a future
+    one."""
+    from kriya.skills.skill import load_conflict_resolutions
+
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "brokeralpha").mkdir(parents=True)
+    (skills_dir / "brokeralpha" / "skill.yaml").write_text("name: brokeralpha\ndescription: Test\ntags: [brokeralpha]\n")
+    (skills_dir / "brokeralpha" / "rules.txt").write_text("")
+    (skills_dir / "brokerbeta").mkdir(parents=True)
+    (skills_dir / "brokerbeta" / "skill.yaml").write_text("name: brokerbeta\ndescription: Test\ntags: [brokerbeta]\nverified: true\n")
+    (skills_dir / "brokerbeta" / "rules.txt").write_text(f"{_BETA_RULE}\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    extraction_response = json.dumps({"rules": [_ALPHA_RULE], "examples": {}, "conflicts": []})
+    llm.complete = AsyncMock(side_effect=[
+        extraction_response,      # SkillGapAgent.extract_skill_update for brokeralpha's gap (1.2)
+        _CONFLICT_RESPONSE,       # SkillGapAgent.check_skill_conflicts (1.3)
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        '[{"filepath": "app.py", "content": "print(1)\\n"}]',  # Developer
+        "Review: Approved"        # Reviewer
+    ])
+
+    def skill_gap_cb(reason, names):
+        return "Reference material establishing the alpha broker's port rule."
+
+    def conflict_cb(skill_a, rule_a, skill_b, rule_b, explanation):
+        return "prefer_b"  # brokerbeta (pre-existing, verified) wins
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Build something using both the brokeralpha and brokerbeta skills",
+        workspace_path=str(tmp_path),
+        skill_gap_callback=skill_gap_cb,
+        skill_conflict_callback=conflict_cb,
+    )
+
+    assert res["quality_gates_passed"] is True
+
+    # If the conflict check never fired (the stale-cache bug), both rules would appear
+    # unfiltered in the Planner prompt - the whole point of section 1.3 is to prevent
+    # exactly that.
+    planner_prompt = llm.complete.call_args_list[2].args[1]
+    assert _BETA_RULE in planner_prompt
+    assert _ALPHA_RULE not in planner_prompt
+
+    records = load_conflict_resolutions(str(skills_dir))
+    assert len(records) == 1
 
 @pytest.mark.asyncio
 async def test_workflow_skill_conflict_no_callback_response_does_not_persist(tmp_path):
@@ -8573,3 +9124,175 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
     mismatch_outcome = next(g for g in gate_outcomes if g["type"] == "diagnosis_mismatch")
     assert mismatch_outcome["likely_files"] == ["A.java"]
     assert "IgniteCache<Integer, Protocol>" in mismatch_outcome["output"]
+
+
+# =====================================================================
+# PlannerAgent SME review fixes (2026-08-15): finding 1 (output
+# completeness check) and finding 2 (skill-conventions reminder) - see
+# docs/kriya_backlog_and_lessons.md's matching dated entry.
+# =====================================================================
+
+def test_check_plan_completeness_flags_empty_plan():
+    assert check_plan_completeness("") is not None
+    assert check_plan_completeness("   \n  ") is not None
+
+
+def test_check_plan_completeness_accepts_a_short_but_nonempty_plan():
+    """Regression test: the first version of this check used a minimum-
+    length threshold, which broke 103 of 121 pre-existing tests in this
+    file whose Planner-position mock is a short placeholder like this one -
+    those tests exercise other stages, not plan content, and were never
+    meant to look like a real plan. A short-but-real, non-empty response
+    with no unclosed fence must be accepted."""
+    assert check_plan_completeness("Step 1: do it") is None
+
+
+def test_check_plan_completeness_flags_unclosed_code_fence():
+    """Confirmed live, 2026-08-15 (spikes/model_speed_poc/planner_reasoning_poc.py,
+    a real ignite_qpid_protocol run): a plan that runs out of token budget
+    mid-response leaves an odd number of ``` markers - the actual shape both
+    arms of that run hit, not a hypothetical."""
+    plan = "A" * 150 + "\n```python\ndef foo():\n    pass\n"
+    assert check_plan_completeness(plan) is not None
+
+
+def test_check_plan_completeness_accepts_a_complete_plan():
+    plan = "A" * 150 + "\n```python\ndef foo():\n    pass\n```\n"
+    assert check_plan_completeness(plan) is None
+
+
+@pytest.mark.asyncio
+async def test_planner_prompt_includes_skill_conventions_reminder(tmp_path):
+    """SME review finding 2: Planner receives convention_prompt the same as
+    Architect/Developer, but nothing told it to actually use that content -
+    the same "passive reference material is never enough" gap already fixed
+    for Developer's own skill_reminder (test_agents.py's
+    test_fill_missing_content_repeats_skill_conventions_reminder_at_end).
+    Mirrors that test's shape at the workflow level, since PlannerAgent has
+    no per-call prompt-building method of its own to unit-test directly."""
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Widgets must be printed in uppercase.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    # return_value, not a side_effect list: the real pipeline makes more
+    # than 4 calls (Planner, Architect, Developer, RunVerifier.judge(),
+    # Reviewer - judge() isn't obvious from the goal text alone) - a fixed
+    # side_effect list of 4 here originally caused a real StopAsyncIteration
+    # failure once actually run. Only call #1 (Planner) is inspected below,
+    # so a single response safe for every stage to receive avoids having to
+    # track the exact real call count at all.
+    llm.complete = AsyncMock(return_value="OK")
+    we = WorkflowEngine(kernel, llm)
+
+    await we.run_generation_workflow(
+        goal="Build a widget printer; the widgetlib skill applies here",
+        workspace_path=str(tmp_path)
+    )
+
+    planner_prompt = llm.complete.call_args_list[0][0][1]
+    conventions_pos = planner_prompt.index("Engineering Skill Conventions: widgetlib")
+    reminder_pos = planner_prompt.index("apply the Engineering Skill Conventions above")
+    assert reminder_pos > conventions_pos
+
+
+@pytest.mark.asyncio
+async def test_planner_prompt_no_skill_reminder_without_active_skills(tmp_path):
+    # No-op when no skill matched this generation at all - never pay for a
+    # reminder pointing at content that isn't there (same guarantee as
+    # Developer's own test_fill_missing_content_no_skill_reminder_without_active_skills).
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    # return_value, not a side_effect list - see the sibling test above for
+    # why a fixed-length list is fragile here (real call count is more than
+    # 4 and isn't obvious from the goal text alone).
+    llm.complete = AsyncMock(return_value="OK")
+    we = WorkflowEngine(kernel, llm)
+
+    await we.run_generation_workflow(goal="Print hello", workspace_path=str(tmp_path))
+
+    planner_prompt = llm.complete.call_args_list[0][0][1]
+    assert "apply the Engineering Skill Conventions above" not in planner_prompt
+
+
+@pytest.mark.asyncio
+async def test_workflow_stops_early_when_planner_output_is_truncated(tmp_path):
+    """SME review finding 1: PlannerAgent had zero output-sanity check - a
+    truncated/empty plan flowed silently into Architect with nothing
+    detecting or explaining why. Confirms the fix stops the run cleanly
+    (not a crash, same early-return shape as the KnowledgeGuard gap check)
+    BEFORE Architect is ever called."""
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    # Empty string specifically - the real, originally-observed incident
+    # (a reasoning model burning its whole token budget on invisible
+    # thinking, confirmed live earlier this session) returned literally
+    # nothing, not a short-but-real response. Same empty response every
+    # call if the fix regresses and Architect gets called anyway -
+    # call_count is the real signal here, not the content.
+    llm.complete = AsyncMock(return_value="")
+
+    we = WorkflowEngine(kernel, llm)
+
+    res = await we.run_generation_workflow(goal="Build something", workspace_path=str(tmp_path))
+
+    assert res["status"] == "planner_output_incomplete"
+    assert "reason" in res
+    assert llm.complete.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_architect_prompt_includes_skill_conventions_reminder(tmp_path):
+    """SME review finding, Architect stage (2026-08-15): same gap as
+    Planner's finding 2 - Architect receives the identical convention_prompt
+    content Planner does, but nothing told it to actually use it either."""
+    skills_dir = tmp_path / "skills"
+    skill_folder = skills_dir / "widgetlib"
+    skill_folder.mkdir(parents=True)
+    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
+    (skill_folder / "rules.txt").write_text("Widgets must be printed in uppercase.\n")
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(skills_dir)
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    # return_value, not a side_effect list - see the Planner-reminder tests
+    # above for why a fixed-length list is fragile here (real call count is
+    # more than 4 and isn't obvious from the goal text alone). Only call #2
+    # (Architect) is inspected below.
+    llm.complete = AsyncMock(return_value="OK")
+    we = WorkflowEngine(kernel, llm)
+
+    await we.run_generation_workflow(
+        goal="Build a widget printer; the widgetlib skill applies here",
+        workspace_path=str(tmp_path)
+    )
+
+    design_prompt = llm.complete.call_args_list[1][0][1]
+    conventions_pos = design_prompt.index("Engineering Skill Conventions: widgetlib")
+    reminder_pos = design_prompt.index("apply the Engineering Skill Conventions above when defining this design")
+    assert reminder_pos > conventions_pos
+
+
+@pytest.mark.asyncio
+async def test_architect_prompt_no_skill_reminder_without_active_skills(tmp_path):
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="OK")
+    we = WorkflowEngine(kernel, llm)
+
+    await we.run_generation_workflow(goal="Print hello", workspace_path=str(tmp_path))
+
+    design_prompt = llm.complete.call_args_list[1][0][1]
+    assert "apply the Engineering Skill Conventions above when defining this design" not in design_prompt

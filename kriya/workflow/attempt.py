@@ -21,7 +21,7 @@ from kriya.core.kernel import Kernel
 from kriya.workflow.edit_safety import apply_anchored_edits, find_structural_corruption
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
 from kriya.workflow.context_budget import _reserve_graph_context_budget, build_code_context
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.skill_extraction import _skill_verification_context
@@ -29,7 +29,7 @@ from kriya.workflow.state import GenerationState
 from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, resolve_fallback_model
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
-from kriya.workflow.verification_contract import extract_contract_verdict
+from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,41 @@ class AttemptContext:
     # function - already carries its own `self` reference, so it's just
     # another callable from this module's perspective.
     approve_web_lookup: Callable[..., Any]
+
+
+def _extract_grounded_contract_verdict(
+    output: str, worktree_path: str, files_written: List[str]
+) -> Optional[Dict[str, Any]]:
+    """Wraps extract_contract_verdict() with the independent grounding check
+    from verification_contract.py::pass_verdict_is_grounded() - see that
+    function's own docstring for the full reasoning (independent brutal
+    review finding #4, 2026-08-15: a PASS marker is self-reported by the
+    same model that wrote the implementation, with nothing else checking it
+    really branches on anything). A single shared helper, not three copies
+    of the same logic - used identically at all three of run_attempt()'s
+    run_res-outcome branches (clean run / timed out / plain nonzero exit) so
+    a PASS verdict's trust is checked consistently everywhere, not just
+    wherever someone happened to add it first."""
+    verdict = extract_contract_verdict(output)
+    if verdict is None or not verdict["passed"]:
+        return verdict
+    files_content = []
+    for filepath in files_written:
+        full_path = os.path.join(worktree_path, filepath)
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                files_content.append(f.read())
+        except Exception:
+            continue
+    if not pass_verdict_is_grounded(files_content):
+        logger.info(
+            "Runtime verification: a deterministic '[VERIFICATION] PASS' marker was found, but "
+            "none of the written files contain a '[VERIFICATION] FAIL' string anywhere - the "
+            "check doesn't look like it actually branches on anything. Not trusting it; falling "
+            "back to LLM grading instead."
+        )
+        return None
+    return verdict
 
 
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
@@ -971,11 +1006,22 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         pom_content_for_judge = f.read()
                 except Exception as e:
                     logger.debug(f"No pom.xml available for run-verification judgment: {e}")
-                state.cached_run_verification_judgment = await ctx.run_verifier.judge(
+                raw_judgment = await ctx.run_verifier.judge(
                     goal=ctx.goal,
                     design=ctx.design,
                     files_written=list(state.all_files_written),
                     build_file_content=pom_content_for_judge,
+                )
+                # Independent brutal review finding #2 (2026-08-15): don't trust
+                # command_source="goal_explicit" as self-reported - verify it's
+                # actually grounded in the goal text before it gets cached (and
+                # before the approval-gate check below ever sees it), same
+                # "never trust an LLM claim without an independent check" pattern
+                # already applied to grade()'s likely_files. See
+                # downgrade_ungrounded_goal_explicit_commands()'s own docstring
+                # for the full reasoning.
+                state.cached_run_verification_judgment = downgrade_ungrounded_goal_explicit_commands(
+                    raw_judgment, ctx.goal
                 )
             else:
                 logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
@@ -1048,7 +1094,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         # trying timeout-tuning fixes that could never fix a genuine
                         # resource leak, burning the whole retry budget on the wrong
                         # class of change.
-                        contract_verdict = extract_contract_verdict(run_res["output"])
+                        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
                         if contract_verdict is not None:
                             logger.info(
                                 "Runtime verification: using deterministic verification-contract "
@@ -1103,9 +1149,42 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         # returncode at 0 (every command runs regardless of an
                         # earlier step's exit code) - success reflects the whole
                         # sequence, not just the last command, so check that instead.
-                        grade = {"passed": False, "reasoning": f"One or more steps failed (final step exit code {run_res['returncode']})."}
+                        #
+                        # Independent-review finding (2026-08-15): this branch used to
+                        # short-circuit straight to a synthetic "one or more steps
+                        # failed" message, never checking extract_contract_verdict()
+                        # or calling grade() at all - the ONLY one of the three outcome
+                        # branches (clean run / timed out / plain nonzero exit) that
+                        # skipped both. A plain nonzero exit with no hang is plausibly
+                        # the single most common real failure shape, and it's exactly
+                        # the case VERIFICATION_CONTRACT_HEADER's marker convention is
+                        # for (an entrypoint that detects its own failure and exits
+                        # nonzero after printing "[VERIFICATION] FAIL: <reason>") - that
+                        # rich, deterministic diagnosis was being silently discarded in
+                        # favor of a generic "exit code 1", and likely_files was always
+                        # empty here, giving the retry loop zero file-attribution signal
+                        # for this failure class specifically (the exact gap grade()
+                        # exists to close - see its own docstring). Fixed by mirroring
+                        # the clean-run branch below exactly: check the deterministic
+                        # marker first, only fall back to the LLM grader if the
+                        # generated program didn't comply with the contract.
+                        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
+                        if contract_verdict is not None:
+                            logger.info(
+                                "Runtime verification: using deterministic verification-contract "
+                                "marker instead of LLM grading (non-zero exit, no hang)."
+                            )
+                            grade = contract_verdict
+                        else:
+                            grade = await ctx.run_verifier.grade(
+                                goal=ctx.goal,
+                                success_criteria=judgment["success_criteria"],
+                                output=run_res["output"],
+                                returncode=run_res["returncode"],
+                                files_written=list(state.all_files_written),
+                            )
                     else:
-                        contract_verdict = extract_contract_verdict(run_res["output"])
+                        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
                         if contract_verdict is not None:
                             logger.info(
                                 "Runtime verification: using deterministic verification-contract "

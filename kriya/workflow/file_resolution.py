@@ -107,6 +107,74 @@ def _resolve_maven_main_class(worktree_path: str) -> Optional[str]:
     return None
 
 
+def downgrade_ungrounded_goal_explicit_commands(judgment: Dict[str, Any], goal: str) -> Dict[str, Any]:
+    """Independent brutal review finding #2 (2026-08-15): RunVerifierAgent.judge()
+    self-reports command_source ("goal_explicit" vs "inferred") in the same
+    untrusted JSON response as everything else, with nothing anywhere checking
+    that a "goal_explicit" claim is actually grounded in the goal text - and
+    attempt.py's human-in-the-loop approval gate only fires for "inferred". A
+    model that mislabels a guessed command as goal_explicit (confusion, or a
+    goal/design/RAG-influenced response) skips the one safety check that
+    exists, even in strict human-in-the-loop mode, for a command about to be
+    executed via subprocess (kriya/tools/sandbox.py's own docstring: env
+    allowlist + best-effort resource limits, NOT a hard sandbox boundary - see
+    that module for why this self-report is functionally the only real gate).
+
+    This is the same "never trust an LLM claim without an independent,
+    deterministic check" pattern already used elsewhere in this codebase
+    (grade()'s likely_files validated against known_files; check_skill_
+    conflicts()'s index bounds-checking) - not a new design, closing a gap in
+    an existing one. judge()'s own system prompt already tells the model
+    "extract that exact command" when the goal states one explicitly - so by
+    construction, a genuinely goal_explicit command's executable should
+    already appear in the goal text. If it doesn't, don't trust the label:
+    downgrade to "inferred" so the existing approval gate actually fires,
+    rather than adding a second, parallel enforcement mechanism.
+
+    Deliberately conservative in a specific, considered direction: checks
+    ONLY the executable (command[0]'s basename, case-insensitive substring of
+    the goal text) - not the full command line or arguments, which a model
+    may reasonably expand/complete even for a genuinely goal-stated case
+    (e.g. Kriya's own -e/mainClass corrections happen AFTER this check, and
+    were never part of what the goal itself stated). A stricter full-command
+    match would produce more false positives (a legitimate goal_explicit
+    command incorrectly downgraded) for comparatively little extra safety.
+    Accepts a real, known false-positive class in exchange (e.g. a goal
+    saying "run using Maven" rather than naming "mvn" literally would fail
+    this check) - deliberately chosen: the failure mode of a false positive
+    here is an extra approval prompt for a command that was actually fine,
+    a safe, cheap degrade; the failure mode of a false negative is the
+    actual security-relevant gap this exists to close. When in doubt, this
+    always resolves toward MORE approval-gating, never less.
+
+    For a multi-command sequence, ALL commands must have a grounded
+    executable for the sequence to stay goal_explicit - one ungrounded
+    command downgrades the whole sequence (same "AND semantics, one failure
+    invalidates the whole thing" pattern already used by
+    extract_contract_verdict() for a multi-step FAIL). judgment/goal are
+    never mutated - returns a new dict (shallow-copied) when a downgrade is
+    needed, the original object unchanged otherwise."""
+    if judgment.get("command_source") != "goal_explicit":
+        return judgment
+    run_commands = judgment.get("run_commands") or []
+    goal_lower = goal.lower()
+    for cmd in run_commands:
+        if not cmd:
+            continue
+        executable = os.path.basename(cmd[0]).lower()
+        if executable and executable not in goal_lower:
+            logger.info(
+                f"Run-verification judgment claimed command_source=goal_explicit, but "
+                f"'{executable}' (from {cmd}) doesn't appear anywhere in the goal text - "
+                "not trusting the label; downgrading to 'inferred' so the human-in-the-loop "
+                "approval gate applies."
+            )
+            corrected = dict(judgment)
+            corrected["command_source"] = "inferred"
+            return corrected
+    return judgment
+
+
 def _resolve_run_command(command: List[str], workspace_path: Optional[str] = None) -> List[str]:
     """Substitutes Kriya's own interpreter for a bare 'python' the Runtime
     Verification judge inferred, if 'python' isn't actually resolvable on PATH - a
@@ -239,6 +307,46 @@ _MIN_PLAUSIBLE_CODE_CHECK: Dict[str, Callable[[str], bool]] = {
     ".java": _looks_like_java,
     ".py": _looks_like_python,
 }
+
+
+# Coarse "did the Planner call clearly fail" bar - not a quality check, the
+# same kind of cheap sanity gate _MIN_PLAUSIBLE_CODE_CHECK above applies to a
+# single fenced block, just applied to the whole plan. Real, reproduced
+# twice this session (SME review of PlannerAgent + spikes/model_speed_poc/
+# planner_reasoning_poc.py, a real ignite_qpid_protocol run): a thinking-
+# capable model can burn its entire token budget on invisible reasoning and
+# return empty content, or run out of budget mid-response leaving an
+# unclosed fenced code block - and PlannerAgent had ZERO check of any kind
+# before this (unlike ArchitectAgent's run_with_file_list(), which at least
+# validates its JSON block). A truncated plan flowed silently into
+# Architect's prompt with nothing anywhere detecting or explaining why.
+#
+# Deliberately NOT a minimum-length threshold, despite that being the first
+# version tried: a real regression run against the existing test suite
+# found 103 of 121 first-call (Planner-position) mock strings across
+# tests/test_workflow.py are under 20 chars ("Step 1: Write code" and
+# similar terse placeholders - those tests are exercising OTHER stages, not
+# plan content, and were never meant to look like a real plan). Any length
+# floor anywhere near a real plan's actual size is fundamentally
+# incompatible with how this whole suite mocks LLM responses. The two
+# checks below are both things actually observed in a real incident (true
+# empty content; an unclosed fence from running out of budget mid-response)
+# and neither can plausibly collide with a short hand-written test string.
+def check_plan_completeness(plan_text: str) -> Optional[str]:
+    """Returns a human-readable reason string if the Planner's raw plan text
+    looks empty or truncated, None if it looks complete enough to proceed."""
+    stripped = plan_text.strip() if plan_text else ""
+    if not stripped:
+        return (
+            "plan is empty - the model may have run out of token budget before producing "
+            "any real content (e.g. spent it all on reasoning/thinking)"
+        )
+    if plan_text.count("```") % 2 != 0:
+        return (
+            "plan contains an unclosed fenced code block (odd number of ``` markers) - "
+            "looks truncated mid-response, likely ran out of token budget"
+        )
+    return None
 
 
 def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -> Dict[str, str]:

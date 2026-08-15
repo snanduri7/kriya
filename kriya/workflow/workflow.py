@@ -67,6 +67,8 @@ from kriya.workflow.file_resolution import (
     _resolve_file_paths_from_design,
     _resolve_maven_main_class,
     _resolve_run_command,
+    check_plan_completeness,
+    downgrade_ungrounded_goal_explicit_commands,
     extract_expected_files,
     extract_planner_code_blocks,
     extract_target_test,
@@ -81,6 +83,7 @@ from kriya.workflow.skill_extraction import (
     _likely_misattributed_sibling,
     _loose_identity_words,
     _rule_content_words,
+    _sanitize_for_flat_file_line,
     _scoped_skill_gap_description,
     _skill_identity_words,
     _skill_staleness_warning,
@@ -139,8 +142,9 @@ from kriya.workflow.retry_prompts import (
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
+from kriya.workflow.review_context import build_review_batches
 from kriya.workflow.state import GenerationState
-from kriya.workflow.verification_contract import extract_contract_verdict
+from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
 
@@ -645,10 +649,22 @@ class WorkflowEngine:
                     # immediately, not just future runs - labeled unverified since it
                     # was just extracted and hasn't been through Runtime Verification.
                     if extraction["rules"]:
+                        # Sanitized the same way _write_skill_extraction() sanitizes before
+                        # writing to rules.txt (embedded newlines/whitespace runs collapsed) -
+                        # not just cosmetic. Section 1.3's conflict-resolution removal step
+                        # does a plain convention_prompt.replace(f"- {rule}\n", ...) against
+                        # skill.rules loaded fresh from disk (post-sanitize) after this run's
+                        # se.discover_and_load() reload; embedding the RAW extraction text here
+                        # would silently desync the two, letting the string-replace no-op and
+                        # leaving a "resolved" losing rule still visible to Planner/Architect
+                        # (2026-08-15 SME review, stage 5, Finding 2 - flagged by independent
+                        # review as a gap this same-run reload newly makes reachable).
                         convention_prompt += (
                             f"\n\n=== Engineering Skill Conventions: {target.name} (just added, unverified - "
                             "use with appropriate caution) ===\n"
-                            "Unverified Rules:\n" + "\n".join(f"- {r}" for r in extraction["rules"]) + "\n"
+                            "Unverified Rules:\n" + "\n".join(
+                                f"- {_sanitize_for_flat_file_line(r)}" for r in extraction["rules"]
+                            ) + "\n"
                         )
                     for basename, content in extraction["examples"].items():
                         convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
@@ -667,7 +683,17 @@ class WorkflowEngine:
         # always sees the actual skill set this run will use. A previously-resolved
         # pair is applied silently from the registry; a new one asks once and the
         # answer is remembered for future runs.
+        #
+        # Reload from disk first - same staleness the later Runtime-Verification rule
+        # snapshot already guards against (see its own reload + comment further down):
+        # 1.2's extraction writes (auto_resolutions/manual_resolutions, just above) append
+        # directly to rules.txt without refreshing SkillEngine's in-memory cache, so
+        # se.get_skill(...) below could otherwise still return the pre-extraction (often
+        # empty) rule list for a skill resolved moments ago in this very run - silently
+        # skipping the exact contradiction this check exists to catch (2026-08-15 SME
+        # review, stage 5, Finding 2).
         if skill_conflict_callback and len(active_skills) >= 2:
+            se.discover_and_load()
             from kriya.skills.skill import find_conflict_resolution, record_conflict_resolution
             sorted_active = sorted(set(active_skills))
             for idx_a in range(len(sorted_active)):
@@ -849,6 +875,20 @@ class WorkflowEngine:
         if state.error_context:
             plan_prompt = f"Fix the following compile/test error:\n{state.error_context}\n\n" + plan_prompt
         plan_prompt += convention_prompt
+        # SME review finding 2 (2026-08-15): Planner receives the identical
+        # convention_prompt content Architect/Developer do, but - unlike
+        # Developer's own skill_reminder in _fill_missing_content() - nothing
+        # told it to actually use that content. "Passive reference material
+        # is never enough - the model needs explicit checklists/instructions"
+        # is an already-documented durable lesson in this codebase; this is
+        # the same fix, same conditional-on-actually-present-content shape,
+        # applied to the one stage that was missing it.
+        if "Engineering Skill Conventions" in convention_prompt:
+            plan_prompt += (
+                "\nReminder: apply the Engineering Skill Conventions above when drafting this "
+                "plan - they document specific mistakes already confirmed to happen for this "
+                "exact stack. Your plan must not contradict any Rule listed there."
+            )
 
         if resume_state and resume_state.get("plan"):
             plan = resume_state["plan"]
@@ -861,11 +901,62 @@ class WorkflowEngine:
                 stream_callback=plan_stream
             )
             _save_stage_checkpoint("plan", plan=plan)
+
+        # SME review finding 1 (2026-08-15): PlannerAgent had zero output-
+        # sanity check of any kind, unlike ArchitectAgent.run_with_file_list()
+        # which at least validates its JSON block. Reproduced twice live (a
+        # reasoning model can burn its whole token budget on invisible
+        # thinking and return empty content, or run out of budget mid-
+        # response leaving an unclosed code fence) that a truncated/empty
+        # plan would flow silently into Architect with nothing anywhere
+        # detecting or explaining why. Same clean-early-return shape already
+        # used above for the KnowledgeGuard gap check, not a raised
+        # exception - this is a real, expected-to-happen outcome the caller
+        # should be able to handle/retry, not a crash.
+        plan_issue = check_plan_completeness(plan)
+        if plan_issue:
+            logger.warning(f"Planner output looks incomplete, stopping before Architect: {plan_issue}")
+            if step_callback:
+                step_callback("planner_output_incomplete", plan_issue)
+            try:
+                from kriya.core.trace import TraceLogger
+                trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                trace_logger = TraceLogger(trace_db)
+                trace_logger.log_run(
+                    run_id=trace_id,
+                    goal=goal,
+                    duration_sec=time.time() - start_time,
+                    attempts=0,
+                    status="planner_output_incomplete",
+                    files_modified=[],
+                    failure_category="planner_output_incomplete"
+                )
+            except Exception as trace_ex:
+                logger.warning(f"Failed to write run trace: {trace_ex}")
+            return {
+                "status": "planner_output_incomplete",
+                "reason": plan_issue,
+                "plan": plan,
+                "goal": goal,
+                "workspace_path": workspace_path,
+                "run_id": trace_id
+            }
+
         if step_callback:
             step_callback("Plan", plan)
 
         # 3. Architect
         design_prompt = f"Plan:\n{plan}\n\nWorkspace Context:\n{repo_context}" + convention_prompt
+        # SME review finding (2026-08-15): same gap as Planner's finding 2 -
+        # Architect receives the identical convention_prompt content Planner
+        # does, but nothing told it to actually use that content either.
+        # Same fix, same conditional-on-actually-present-content shape.
+        if "Engineering Skill Conventions" in convention_prompt:
+            design_prompt += (
+                "\nReminder: apply the Engineering Skill Conventions above when defining this "
+                "design - they document specific mistakes already confirmed to happen for this "
+                "exact stack. Your design must not contradict any Rule listed there."
+            )
         if resume_state and resume_state.get("design"):
             design = resume_state["design"]
             architect_files = resume_state.get("architect_files")
@@ -1223,6 +1314,19 @@ class WorkflowEngine:
         ) or (
             bool(state.last_implicated_files) and bool(chain) and not state.budgets.fallback_targeted_attempted
         ):
+            # Reset once per loop iteration, unconditionally - NOT just inside the "4.5"
+            # section below. Independent review (2026-08-15) found the narrower reset
+            # placement genuinely insufficient: run_attempt() (called just below) raises
+            # QualityGateFailure directly from many sites (compile-check, targeted-test,
+            # anchored-edit failures) that jump straight to this loop's `except` handler,
+            # skipping "4.5" entirely for that iteration. If THAT failure is what
+            # ultimately ends the loop (an immediate environment_failure break, or
+            # ordinary retry-budget exhaustion), a stale review from an EARLIER,
+            # now-superseded attempt that DID reach "4.5" would otherwise survive and get
+            # returned as if it described the final (failing) attempt's content - a
+            # concretely reproduced bug, not a theoretical one. Resetting here, before
+            # run_attempt() is even called, guarantees no exception path can skip it.
+            state.pre_approval_review = None
             try:
                 # Best-of-N only ever applies to the very first attempt of a run
                 # (state.attempt_number == 0 going in - resumed checkpoints also
@@ -1262,13 +1366,19 @@ class WorkflowEngine:
                 )
 
                 # 4.5. Pre-Apply Human Approval Gate
+                # (state.pre_approval_review is reset once per loop iteration, above -
+                # before run_attempt() runs, not here - see that comment for why.)
                 diffs_to_show = []
+                # Also kept for the pre-approval Reviewer call just below - same
+                # worktree read, no second file-open per file.
+                worktree_file_contents: Dict[str, str] = {}
                 for filepath in sorted(state.all_files_written):
                     worktree_file = os.path.join(worktree_path, filepath)
                     actual_content = state.all_original_contents.get(filepath, "")
                     with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
                         new_content = fh.read()
-                        
+                    worktree_file_contents[filepath] = new_content
+
                     file_diff = "".join(difflib.unified_diff(
                         actual_content.splitlines(keepends=True),
                         new_content.splitlines(keepends=True),
@@ -1276,7 +1386,7 @@ class WorkflowEngine:
                         tofile=f"b/{filepath}"
                     ))
                     diffs_to_show.append({"filepath": filepath, "content": file_diff})
-                    
+
                 total_diff_lines = sum(len(d["content"].splitlines()) for d in diffs_to_show)
                 autonomy_cfg = self.kernel.config.autonomy
                 
@@ -1306,7 +1416,42 @@ class WorkflowEngine:
                     escalation_reason = sensitive_reason
                 elif total_diff_lines > autonomy_cfg.risk_threshold_lines:
                     escalation_reason = f"Risk threshold exceeded ({total_diff_lines} lines > {autonomy_cfg.risk_threshold_lines})"
-                
+
+                # Stage 6 SME review, 2026-08-15, Finding 1: the Reviewer used to run
+                # AFTER this gate - by the time its verdict existed, a human had
+                # already approved based on nothing but a truncated raw diff, and the
+                # files were already copied into the real workspace with the worktree
+                # torn down. Even in strict human-in-the-loop mode, a Reviewer
+                # "REJECTED - critical issue" verdict changed nothing: quality_gates_passed
+                # stayed True, the files were already on disk. Only worth doing when a
+                # human is actually going to see it (need_human_approval AND a real
+                # callback) - the common autonomous-mode path pays zero extra latency/
+                # cost, Reviewer still runs at its usual later point for the final
+                # report. Deliberately folded into escalation_reason (a plain string
+                # on_approval already prints verbatim) rather than changing
+                # approval_callback's signature - that callback is shared, unmodified,
+                # across two OTHER, differently-shaped approval decisions elsewhere
+                # (Stage 2A knowledge-gap approval, Runtime-Verification command
+                # approval) and any external/REPL/MCP caller supplying their own
+                # callback - a signature change would risk breaking all of them for a
+                # fix scoped to just this one gate.
+                if need_human_approval and approval_callback:
+                    try:
+                        review_batches, _ = build_review_batches(
+                            [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
+                            int(self.kernel.config.llm.context_window * 0.75),
+                        )
+                        reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
+                        review_parts = []
+                        for i, batch in enumerate(review_batches, 1):
+                            batch_prompt = f"Goal: {goal}\n\nFiles generated:\n{batch}"
+                            label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
+                            review_parts.append(label + await self.reviewer.run(batch_prompt, stream_callback=reviewer_stream))
+                        state.pre_approval_review = "\n".join(review_parts)
+                        escalation_reason += f"\n\n=== Automated Code Review ===\n{state.pre_approval_review}"
+                    except Exception as ex:
+                        logger.warning(f"Pre-approval Reviewer call failed, proceeding without it: {ex}")
+
                 if need_human_approval and approval_callback:
                     logger.info(f"Escalating changes to human approval gate: {escalation_reason}")
                     approved = approval_callback(diffs_to_show, escalation_reason)
@@ -1538,31 +1683,91 @@ class WorkflowEngine:
                 if await handle_attempt_failure(state, attempt_ctx, e):
                     break
 
+        # Intermediate trace checkpoint (2026-08-15, found while forensically
+        # investigating a real live run): the ONLY trace_logger.log_run() call
+        # for a normal (non-early-exit) run used to happen after the Reviewer
+        # call below - a single LLM completion that can itself hang or get
+        # killed (by an external timeout, Ctrl-C, etc.). When that happens,
+        # state.gate_outcomes - the full per-attempt forensic history
+        # (compile/test/run_verification results, which retry mode, which
+        # files were implicated) that already exists in memory at this exact
+        # point, quality gates having fully concluded either way - was
+        # entirely lost; the trace row stayed at whatever status Ancient
+        # history (or "in_progress" with zero data) it started at, giving a
+        # future investigation nothing to work with beyond raw log-scraping.
+        # `runs.run_id` is the table's PRIMARY KEY and log_run() always does
+        # `INSERT OR REPLACE`, so writing here is a safe, idempotent
+        # checkpoint - the real, final call after Reviewer completes still
+        # runs as before and simply replaces this row with the complete
+        # record (including the review text's downstream effects). If
+        # Reviewer never finishes, this checkpoint is what survives, already
+        # carrying the same gate_outcomes/model_hops a post-mortem needs.
+        try:
+            from kriya.core.trace import TraceLogger
+            trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+            trace_logger = TraceLogger(trace_db)
+            trace_logger.log_run(
+                run_id=trace_id,
+                goal=goal,
+                duration_sec=time.time() - start_time,
+                attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
+                status="in_progress",
+                files_modified=list(state.all_files_written),
+                retrieved_chunks=retrieved_chunks,
+                active_skills=active_skills,
+                prompt_rendered=plan_prompt,
+                gate_outcomes=state.gate_outcomes,
+                model_hops=state.model_hops,
+            )
+        except Exception as trace_ex:
+            logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
+
         # 5. Reviewer
         logger.info("Reviewer Agent evaluating results...")
-        if state.final_attempt_contents:
-            review_prompt = (
-                f"Goal: {goal}\n\n"
-                "NOTE: Quality gates did not pass within the retry budget - these files were "
-                "NOT applied to the workspace and only reflect the last (failing) attempt.\n"
-                f"Last quality gate error:\n{state.error_context}\n\nFiles from the failing attempt:\n"
-            )
+        if state.pre_approval_review is not None:
+            # Stage 6 SME review, Finding 1: already ran (and already streamed) at the
+            # Pre-Apply Human Approval Gate, against the exact same final content - a
+            # second call here would be a redundant LLM round-trip for an identical
+            # answer. step_callback still fires below so anything consuming the "Review"
+            # step in pipeline order sees it at the position it expects.
+            review = state.pre_approval_review
         else:
-            review_prompt = f"Goal: {goal}\n\nFiles generated:\n"
-        for filepath in sorted(state.all_files_written):
-            if filepath in state.final_attempt_contents:
-                review_prompt += f"\n=== File: {filepath} ===\n{state.final_attempt_contents[filepath]}\n"
-                continue
-            full_path = os.path.join(workspace_path, filepath)
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                review_prompt += f"\n=== File: {filepath} ===\n{content}\n"
-            except Exception as e:
-                logger.debug(f"Failed to read '{full_path}' for reviewer prompt: {e}")
-                
-        reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
-        review = await self.reviewer.run(review_prompt, stream_callback=reviewer_stream)
+            if state.final_attempt_contents:
+                goal_header = (
+                    f"Goal: {goal}\n\n"
+                    "NOTE: Quality gates did not pass within the retry budget - these files were "
+                    "NOT applied to the workspace and only reflect the last (failing) attempt.\n"
+                    f"Last quality gate error:\n{state.error_context}\n\nFiles from the failing attempt:\n"
+                )
+            else:
+                goal_header = f"Goal: {goal}\n\nFiles generated:\n"
+
+            file_contents_for_review: List[Tuple[str, str]] = []
+            for filepath in sorted(state.all_files_written):
+                if filepath in state.final_attempt_contents:
+                    file_contents_for_review.append((filepath, state.final_attempt_contents[filepath]))
+                    continue
+                full_path = os.path.join(workspace_path, filepath)
+                try:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        file_contents_for_review.append((filepath, f.read()))
+                except Exception as e:
+                    logger.debug(f"Failed to read '{full_path}' for reviewer prompt: {e}")
+
+            # Stage 6 SME review, Finding 2: previously concatenated every file's full
+            # raw content with no token-budget check at all - the exact silent-
+            # truncation-from-the-front failure mode the standalone `kriya review` CLI
+            # command was already fixed for (see kriya/workflow/review_context.py).
+            review_batches, _ = build_review_batches(
+                file_contents_for_review, int(self.kernel.config.llm.context_window * 0.75),
+            )
+            reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
+            review_parts = []
+            for i, batch in enumerate(review_batches, 1):
+                batch_prompt = goal_header + batch
+                label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
+                review_parts.append(label + await self.reviewer.run(batch_prompt, stream_callback=reviewer_stream))
+            review = "\n".join(review_parts)
         if step_callback:
             step_callback("Review", review)
 

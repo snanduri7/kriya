@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -1341,6 +1342,57 @@ async def test_fill_missing_content_implicated_files_none_applies_to_all():
         assert "FIX ANALYSIS" in call[0][1]
 
 @pytest.mark.asyncio
+async def test_fill_missing_content_logs_pass_through_at_info_level(caplog):
+    """Found live, 2026-08-15, while forensically investigating a real run
+    where the same file kept failing STRUCTURAL CORRUPTION across 3 straight
+    full-set attempts with no way to tell, from logs alone, whether it was
+    ever actually regenerated: the pass-through path (an entry that already
+    has content/edits, e.g. from Planner-reuse or a resolved
+    known_target_files entry) had ZERO logging of any kind - not gated
+    behind the optional stream_callback, not logged at all. A real
+    kriya.log/captured-stdout investigation had nothing to distinguish
+    "this file was reused as-is" from "this file was silently dropped.\""""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        side_effect=AssertionError("must not call the model for an entry that already has content")
+    )
+    dev = DeveloperAgent("developer", llm)
+
+    with caplog.at_level(logging.INFO, logger="kriya.agents.agent"):
+        result = await dev._fill_missing_content(
+            [{"filepath": "App.java", "content": "class App {}", "edits": None}],
+            "Task", "Design", "Existing code", None, None, None, None,
+        )
+
+    assert result == [{"filepath": "App.java", "content": "class App {}", "edits": []}]
+    assert any(
+        "App.java" in r.message and "reusing it as-is" in r.message for r in caplog.records
+    )
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_logs_fresh_generation_at_info_level(caplog):
+    """Sibling to the pass-through test above - the "actively generating"
+    branch only logged via the optional stream_callback before this fix, so
+    a caller with none wired (or whose stream text isn't captured by
+    whatever log is being read) had no logger-level record of which files
+    got a fresh generation call either."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="class App {}")
+    dev = DeveloperAgent("developer", llm)
+
+    with caplog.at_level(logging.INFO, logger="kriya.agents.agent"):
+        await dev._fill_missing_content(
+            [{"filepath": "App.java", "content": None, "edits": None}],
+            "Task", "Design", "Existing code", None, None, None, None,
+        )
+
+    assert any(
+        "App.java" in r.message and "generating content for" in r.message for r in caplog.records
+    )
+
+@pytest.mark.asyncio
 async def test_run_generation_without_known_target_files_still_asks_for_file_list():
     """known_target_files must be strictly opt-in - a normal (non-targeted)
     generation call, which doesn't know the file set in advance, must be
@@ -1356,6 +1408,54 @@ async def test_run_generation_without_known_target_files_still_asks_for_file_lis
 
     assert llm.complete.call_count == 1
     assert files[0]["filepath"] == "math_lib.py"
+
+@pytest.mark.asyncio
+async def test_run_generation_fallback_includes_prior_error_context():
+    """SME review finding (2026-08-15): the single-stage-generation fallback
+    (triggered when Step 1's file-list resolution produces nothing usable -
+    a real, expected outcome per _resolve_step1_file_list()'s own docstring,
+    not a theoretical edge case) used to silently drop prior_error_context/
+    extra_fix_instruction/retry_temperature entirely - a retry that hit this
+    path got zero information about what it was supposed to fix, and would
+    plausibly just regenerate the same mistake."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "I cannot determine the file list from this design.",  # Step 1: unparseable, forces the fallback
+        json.dumps([{"filepath": "App.java", "content": "class App {}"}]),  # fallback's own response
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Goal: fix the bug", "Design specs", "Existing code",
+        prior_error_context="App.java:12: cannot find symbol: variable x",
+        extra_fix_instruction="Double-check the variable is declared.",
+        retry_temperature=0.1,
+    )
+
+    assert llm.complete.call_count == 2
+    fallback_prompt = llm.complete.call_args_list[1][0][1]
+    assert "App.java:12: cannot find symbol: variable x" in fallback_prompt
+    assert "Double-check the variable is declared." in fallback_prompt
+    assert llm.complete.call_args_list[1].kwargs["temperature_override"] == 0.1
+    assert files[0]["filepath"] == "App.java"
+
+@pytest.mark.asyncio
+async def test_run_generation_fallback_no_error_block_on_clean_first_attempt():
+    """No prior_error_context (a clean first attempt that just happens to hit
+    this fallback) must not fabricate an error block that was never real."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "I cannot determine the file list from this design.",
+        json.dumps([{"filepath": "App.java", "content": "class App {}"}]),
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation("Goal: build the app", "Design specs", "Existing code")
+
+    fallback_prompt = llm.complete.call_args_list[1][0][1]
+    assert "Prior Attempt Failed" not in fallback_prompt
 
 
 def test_strip_markdown_fences_plain_leading_fence():
@@ -1830,6 +1930,133 @@ async def test_skill_gap_agent_unparseable_response_returns_empty_not_error():
 
     assert result == {"rules": [], "examples": {}, "conflicts": []}
 
+@pytest.mark.asyncio
+async def test_skill_gap_agent_discards_malformed_conflict_entries_without_crashing():
+    # Same trust boundary as check_skill_conflicts' index-bounds check: a "conflicts"
+    # entry that isn't shaped like {"candidate_rule": ..., ...} must never reach
+    # _stage_skill_conflicts() (which calls .get() on every item unconditionally with
+    # no enclosing try/except at its call site) - a plain string entry would otherwise
+    # raise an uncaught AttributeError and abort the entire generation run.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": [
+            "just a string, not an object",
+            {"conflicts_with": "Use port 5672.", "reason": "no candidate_rule field"},
+            {"candidate_rule": "", "conflicts_with": "x", "reason": "blank candidate_rule"},
+            {"candidate_rule": "Use port 5673.", "conflicts_with": "Use port 5672.", "reason": "Different pinned port."},
+        ]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="What port?", existing_rules=["Use port 5672."]
+    )
+
+    assert len(result["conflicts"]) == 1
+    assert result["conflicts"][0]["candidate_rule"] == "Use port 5673."
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_conflict_non_string_subfields_default_to_empty():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": [{"candidate_rule": "Use port 5673.", "conflicts_with": 5672, "reason": None}]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="What port?", existing_rules=["Use port 5672."]
+    )
+
+    assert result["conflicts"] == [{"candidate_rule": "Use port 5673.", "conflicts_with": "", "reason": ""}]
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_whitespace_only_candidate_rule_is_discarded():
+    # A regression narrowing "not candidate_rule.strip()" back down to "not
+    # candidate_rule" would silently admit a whitespace-only rule as if it were
+    # real content - distinct from (and not covered by) the plain-empty-string case.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": [{"candidate_rule": "   ", "conflicts_with": "x", "reason": "whitespace only"}]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="What port?", existing_rules=["Use port 5672."]
+    )
+
+    assert result["conflicts"] == []
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_conflicts_not_a_list_returns_empty():
+    # The outer `isinstance(conflicts, list)` guard matters on its own, separately
+    # from per-item validation - a regression dropping it (e.g. iterating "conflicts"
+    # unconditionally) would raise iterating a dict's keys as strings, or crash
+    # outright on a plain string/int value.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": {"candidate_rule": "not actually a list"}
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="What port?", existing_rules=[]
+    )
+
+    assert result["conflicts"] == []
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_examples_filtered_per_item_not_all_or_nothing():
+    # One malformed example value used to discard the ENTIRE examples dict, even
+    # genuinely valid entries in the same response - inconsistent with "rules"'
+    # own per-item filtering in the same function.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {
+            "good-config.json": '{"modelVersion": "8.0"}',
+            "bad-config.json": {"nested": "not a string"},
+        },
+        "conflicts": []
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="Missing info.", existing_rules=[]
+    )
+
+    assert result["examples"] == {"good-config.json": '{"modelVersion": "8.0"}'}
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_examples_not_a_dict_returns_empty():
+    # The outer `isinstance(examples, dict)` guard matters on its own, separately
+    # from per-item filtering - a regression dropping it (e.g. calling .items()
+    # unconditionally) would crash on a list/string "examples" value.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [], "examples": ["good-config.json", "bad-config.json"], "conflicts": []
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="Missing info.", existing_rules=[]
+    )
+
+    assert result["examples"] == {}
+
 
 @pytest.mark.asyncio
 async def test_check_skill_conflicts_returns_valid_conflict():
@@ -1944,3 +2171,21 @@ def test_architect_agent_requires_explicit_build_manifest():
     assert "pom.xml" in prompt
     assert "build.gradle" in prompt
     assert "not implicit" in prompt.lower()
+
+def test_planner_agent_prompt_forbids_unrequested_multi_module_structure():
+    """Regression test for a real bug found live, 2026-08-15
+    (spikes/eval_harness, ignite_qpid_protocol): a goal describing
+    functionality in three layers, and explicitly stating all orchestration
+    must live in ONE entry-point class, was planned as three separate Maven
+    modules (protocol-layer/ignite-layer/qpid-layer, each with its own
+    pom.xml AND its own separate ProtocolApp.java) - directly contradicting
+    the goal's own explicit constraint. Confirmed via the actual checkpointed
+    plan text that this originated in Planner's own output, not a later
+    stage - Architect and Developer just faithfully implemented what a wrong
+    plan already specified. Unlike ArchitectAgent (which already has a
+    MINIMALISM principle, added earlier), PlannerAgent - which runs FIRST
+    and originates this exact class of decision - had no equivalent."""
+    prompt = PlannerAgent("planner", None).system_prompt
+    assert "MINIMALISM" in prompt
+    assert "single Maven/Gradle module" in prompt
+    assert "multi-module" in prompt.lower()

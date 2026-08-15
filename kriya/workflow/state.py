@@ -161,3 +161,11 @@ class GenerationState:
     gate_outcomes: List[Dict[str, Any]] = field(default_factory=list)
     model_hops: List[Dict[str, Any]] = field(default_factory=list)
     budgets: RetryBudgets = field(default_factory=RetryBudgets)
+    # Set when the Pre-Apply Human Approval Gate runs the Reviewer early (so its
+    # verdict can inform the human's actual approve/reject decision, instead of
+    # only appearing afterward when the decision - and the file copy - are
+    # already final) - the later "5. Reviewer" stage reuses this instead of
+    # running a second, redundant LLM call against identical content. None
+    # whenever no human-approval escalation happened this run (the common
+    # autonomous-mode path), or the run never reached that gate at all.
+    pre_approval_review: Optional[str] = None

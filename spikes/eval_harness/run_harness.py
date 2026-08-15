@@ -43,7 +43,7 @@ LIVE_BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1
 # kriya-protocol-parser-app's own kriya.yaml independently chose and never hit
 # this problem with - not a guess, a model already validated live in this
 # exact fallback role.
-LIVE_FALLBACK_MODEL = os.environ.get("KRIYA_LIVE_FALLBACK_MODEL", "qwen3-coder:30b-a3b-q8_0")
+LIVE_FALLBACK_MODEL = os.environ.get("KRIYA_LIVE_FALLBACK_MODEL", "qwen3.6:35b-a3b-q4_K_M")
 # Kriya's own kriya/config/config.py::SearchConfig deliberately makes
 # autonomy.web_lookup_enabled and search.base_url two SEPARATE switches - "so
 # a config merge/copy-paste can't silently enable outbound search" - but

@@ -279,3 +279,103 @@ def test_tools_execute_shell_runs_with_yes_flag(runner):
 def test_tools_execute_non_confirmation_tool_runs_without_yes(runner, tmp_path):
     result = runner.invoke(main, ["tools", "execute", "filesystem", f'{{"operation": "list", "path": "{tmp_path}"}}'])
     assert result.exit_code == 0, result.output
+
+
+def _skills_config(tmp_path):
+    """Writes a kriya.yaml pointing paths.skills at an isolated tmp dir, and
+    returns (config_file_path, skills_dir)."""
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    config_file = tmp_path / "kriya.yaml"
+    config_file.write_text(f"paths:\n  skills: {skills_dir}\n")
+    return str(config_file), skills_dir
+
+
+def test_skills_approve_does_not_promote_flagged_conflicts(runner, tmp_path):
+    """Stage 5 SME review, Finding 1 (2026-08-15): _stage_skill_conflicts()
+    (kriya/workflow/skill_extraction.py) is the only writer of staged_rules.txt
+    in the current codebase, and it always writes a "[CONFLICT] ..." diagnostic
+    line, never a plain rule. Before this fix, 'skills approve' promoted every
+    staged line verbatim regardless of that prefix - writing the raw conflict
+    diagnostic (marker, losing candidate, contradicted rule, and reasoning all
+    together) into rules.txt as if it were a trusted engineering rule. A
+    flagged conflict must stay staged for manual resolution instead."""
+    config_file, skills_dir = _skills_config(tmp_path)
+    skill_dir = skills_dir / "qpid"
+    skill_dir.mkdir()
+    (skill_dir / "rules.txt").write_text("Use qpid-broker-core 9.2.1.\n")
+    (skill_dir / "staged_rules.txt").write_text(
+        "Broker must bind AMQP to port 5673.\n"
+        "[CONFLICT] Use qpid-broker-core 10.0.0. -- conflicts with existing rule: "
+        "'Use qpid-broker-core 9.2.1.' (Different pinned version.)\n"
+    )
+
+    result = runner.invoke(main, ["--config", config_file, "skills", "approve", "qpid"])
+
+    assert result.exit_code == 0, result.output
+    assert "not auto-promoted" in result.output.lower()
+
+    rules_text = (skill_dir / "rules.txt").read_text()
+    assert "Broker must bind AMQP to port 5673." in rules_text
+    assert "[CONFLICT]" not in rules_text
+    assert "qpid-broker-core 10.0.0" not in rules_text
+
+    # The conflict stays staged - the file must survive with only that line left.
+    staged_path = skill_dir / "staged_rules.txt"
+    assert staged_path.exists()
+    staged_text = staged_path.read_text()
+    assert "[CONFLICT]" in staged_text
+    assert "Broker must bind AMQP to port 5673." not in staged_text
+
+
+def test_skills_approve_removes_staged_file_once_fully_resolved(runner, tmp_path):
+    """No flagged conflicts left after promotion - staged_rules.txt should be
+    removed entirely, matching the pre-fix behavior for the ordinary case."""
+    config_file, skills_dir = _skills_config(tmp_path)
+    skill_dir = skills_dir / "qpid"
+    skill_dir.mkdir()
+    (skill_dir / "rules.txt").write_text("")
+    (skill_dir / "staged_rules.txt").write_text("Broker must bind AMQP to port 5672.\n")
+
+    result = runner.invoke(main, ["--config", config_file, "skills", "approve", "qpid"])
+
+    assert result.exit_code == 0, result.output
+    assert "Broker must bind AMQP to port 5672." in (skill_dir / "rules.txt").read_text()
+    assert not (skill_dir / "staged_rules.txt").exists()
+
+
+def test_skills_list_marks_conflict_lines_distinctly(runner, tmp_path):
+    """CliRunner's captured output is never a real tty, so click strips ANSI color
+    codes regardless of what `fg=` was passed - asserting on result.output alone
+    can't actually tell a red-rendered line from a plain one (both come out as the
+    same bytes). Patch click.secho (wraps=, so real rendering still happens) to
+    inspect the fg= kwarg directly instead."""
+    import click as click_module
+
+    config_file, skills_dir = _skills_config(tmp_path)
+    skill_dir = skills_dir / "qpid"
+    skill_dir.mkdir()
+    (skill_dir / "skill.yaml").write_text(
+        "name: qpid\ndescription: Qpid broker skill\ncategory: messaging\ntags: []\n"
+    )
+    (skill_dir / "rules.txt").write_text("")
+    (skill_dir / "staged_rules.txt").write_text(
+        "[CONFLICT] Use qpid-broker-core 10.0.0. -- conflicts with existing rule: "
+        "'Use qpid-broker-core 9.2.1.' (Different pinned version.)\n"
+        "Broker must bind AMQP to port 5672.\n"
+    )
+
+    with patch("click.secho", wraps=click_module.secho) as mock_secho:
+        result = runner.invoke(main, ["--config", config_file, "skills", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "[CONFLICT]" in result.output
+    assert "Broker must bind AMQP to port 5672." in result.output
+
+    conflict_calls = [c for c in mock_secho.call_args_list if "[CONFLICT]" in c.args[0]]
+    assert len(conflict_calls) == 1
+    assert conflict_calls[0].kwargs.get("fg") == "red"
+
+    # The plain staged line must NOT go through secho(fg="red") - it's rendered via
+    # plain click.echo instead, so no secho call should mention it at all.
+    assert not any("port 5672" in c.args[0] for c in mock_secho.call_args_list)

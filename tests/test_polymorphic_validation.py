@@ -226,6 +226,40 @@ def test_run_app_sequence_continues_after_step_failure_and_reports_it(tmp_path):
     assert "second step ran" in res["output"]
     assert res["returncode"] == 0  # the LAST step's exit code
 
+def test_run_app_sequence_plain_crash_output_feeds_the_real_contract_parser(tmp_path):
+    """Deterministic integration check for the attempt.py Finding #1 fix
+    (2026-08-15, independent brutal review): no LLM involved at all - this
+    exercises the REAL, non-mocked PolymorphicValidator.run_app_sequence()
+    against a script that deliberately exits nonzero right after printing a
+    "[VERIFICATION] FAIL: <reason>" marker (a plain crash, no hang - the
+    exact success=False/timed_out=False shape the buggy branch used to
+    special-case into a synthetic "one or more steps failed" message,
+    discarding this marker entirely), then feeds the REAL captured output
+    through the REAL extract_contract_verdict() (also unmocked) - confirming
+    the actual integration boundary attempt.py's fixed branch now relies on,
+    not just the branch's own control-flow logic in isolation (already
+    covered separately by mocked unit/workflow-level tests)."""
+    from kriya.workflow.verification_contract import extract_contract_verdict
+
+    validator = PolymorphicValidator(str(tmp_path))
+    (tmp_path / "app.py").write_text(
+        "print('decoded=13, original=15')\n"
+        "print('[VERIFICATION] FAIL: decoded value did not match original')\n"
+        "import sys\n"
+        "sys.exit(1)\n"
+    )
+
+    res = validator.run_app_sequence([[sys.executable, "app.py"]], timeout=10)
+
+    assert res["success"] is False
+    assert res["timed_out"] is False
+    assert res["returncode"] == 1
+
+    verdict = extract_contract_verdict(res["output"])
+    assert verdict is not None, "the real captured output must carry the marker through intact"
+    assert verdict["passed"] is False
+    assert "decoded value did not match original" in verdict["reasoning"]
+
 def test_run_app_sequence_stops_on_timeout(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
     (tmp_path / "app.py").write_text("import time\ntime.sleep(10)\n")

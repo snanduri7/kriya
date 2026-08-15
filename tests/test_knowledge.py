@@ -291,19 +291,31 @@ def test_workflow_auto_accrual(tmp_path):
         {"success": True, "output": "Maven compilation succeeded."}
     ]
 
+    # Patch the methods on the class, not the class itself: PolymorphicValidator is
+    # constructed at TWO separate sites for a successful run - attempt.py's per-attempt
+    # compile/test gate (a deferred, function-local import that re-resolves
+    # kriya.tools.validate.PolymorphicValidator at call time) and workflow.py's own
+    # final full-regression-suite check (imported once at module load, so it holds its
+    # own frozen reference to the real class - patching the module attribute after
+    # that import already happened never reaches it). Replacing the whole class via
+    # patch("kriya.tools.validate.PolymorphicValidator") only affects the first call
+    # site; the second silently falls through to a REAL PolymorphicValidator against
+    # this test's minimal mocked pom.xml content, producing genuine Maven validation
+    # errors ('modelVersion' is missing, etc.) instead of using the mock. Patching the
+    # methods directly on the class object affects every instance regardless of which
+    # module's reference constructed it - the same pattern already used everywhere
+    # else in tests/test_workflow.py (see e.g. test_workflow_checks_toolchain_only_once_across_retries's
+    # own "regardless of which of the two PolymorphicValidator construction sites
+    # reaches it first" comment).
     with patch("kriya.workflow.workflow.RepositoryAnalyzer") as MockAnalyzer, \
-         patch("kriya.tools.validate.PolymorphicValidator") as MockValidator:
-         
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=mock_run_compile), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": "Tests passed"}):
+
         mock_analyzer = MockAnalyzer.return_value
         mock_analyzer.analyze.return_value.dependencies = []
         mock_analyzer.analyze.return_value.frameworks = []
         mock_analyzer.analyze.return_value.model_dump_json.return_value = "{}"
-        
-        mock_validator = MockValidator.return_value
-        mock_validator.run_compile_check = mock_run_compile
-        mock_validator.run_tests.return_value = {"success": True, "output": "Tests passed"}
-        mock_validator.stack = "java"
-        
+
         # Disable human approval to auto-apply
         cfg.autonomy.mode = "autonomous"
         cfg.autonomy.risk_threshold_lines = 1000
@@ -371,18 +383,18 @@ def test_workflow_auto_accrual_skipped_when_suggestion_never_actually_used(tmp_p
         {"success": True, "output": "Maven compilation succeeded."}
     ]
 
+    # See test_workflow_auto_accrual's comment above for why methods are patched on
+    # the class rather than replacing the whole class - workflow.py's own final
+    # regression-check PolymorphicValidator construction site otherwise falls through
+    # to real Maven validation unmocked.
     with patch("kriya.workflow.workflow.RepositoryAnalyzer") as MockAnalyzer, \
-         patch("kriya.tools.validate.PolymorphicValidator") as MockValidator:
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=mock_run_compile), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": "Tests passed"}):
 
         mock_analyzer = MockAnalyzer.return_value
         mock_analyzer.analyze.return_value.dependencies = []
         mock_analyzer.analyze.return_value.frameworks = []
         mock_analyzer.analyze.return_value.model_dump_json.return_value = "{}"
-
-        mock_validator = MockValidator.return_value
-        mock_validator.run_compile_check = mock_run_compile
-        mock_validator.run_tests.return_value = {"success": True, "output": "Tests passed"}
-        mock_validator.stack = "java"
 
         cfg.autonomy.mode = "autonomous"
         cfg.autonomy.risk_threshold_lines = 1000

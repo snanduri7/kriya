@@ -21,7 +21,7 @@ to a single verdict, e.g. free-form behavior with no fixed expected shape)
 gets exactly today's behavior, never worse.
 """
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 _VERIFICATION_MARKER_RE = re.compile(
     r"^\[VERIFICATION\]\s+(PASS|FAIL)(?::\s*(.*))?\s*$", re.MULTILINE
@@ -65,3 +65,37 @@ def extract_contract_verdict(output: str) -> Optional[Dict[str, Any]]:
         ),
         "likely_files": [],
     }
+
+
+def pass_verdict_is_grounded(files_content: Iterable[str]) -> bool:
+    """Independent brutal review finding #4 (2026-08-15): a PASS verdict from
+    extract_contract_verdict() above is trusted with zero independent check
+    that the marker is actually gated behind a real comparison - it's printed
+    by the SAME (possibly buggy) model that wrote the implementation, with no
+    semantic verification at all. Deliberately narrow, considered fix: per
+    VERIFICATION_CONTRACT_HEADER's own instruction (retry_prompts.py), a
+    compliant implementation prints PASS "if... [it] confirms" or FAIL
+    "otherwise" - so ANY genuine implementation, however it's structured
+    (if/else, ternary, whatever), has to literally write the "[VERIFICATION]
+    FAIL" string SOMEWHERE in its source for that branch to exist at all. If
+    the written files contain a PASS but zero trace of the FAIL string
+    anywhere, that's a strong, cheap, language-agnostic signal the "check"
+    never actually branches on anything - not a full guarantee (a model could
+    still write dead code like `if (true)`), the same "cheap, low-false-
+    positive tripwire, not a semantic guarantee" scope every other structural
+    check in this codebase already accepts (see find_structural_corruption()'s
+    own docstring).
+
+    Deliberately scoped to PASS only - a FAIL verdict has no equivalent risk
+    (worst case is one unnecessary retry, not silently shipping broken code
+    as "verified"). The caller's job when this returns False is to discard
+    the deterministic verdict and fall through to grade() instead (see
+    attempt.py's three call sites) - the exact same "never worse than
+    today's behavior" fallback this module's own docstring already promises
+    for a non-compliant program, just extended to cover an unconvincingly
+    compliant one too. Honest tradeoff, not overclaimed: grade() itself has a
+    documented history of its own hallucination failure mode (the reason this
+    module exists at all) - a fallible second opinion for the suspicious
+    minority of cases is still strictly safer than zero scrutiny, not a
+    guarantee of correctness."""
+    return any("[VERIFICATION] FAIL" in content for content in files_content)

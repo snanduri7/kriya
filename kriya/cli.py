@@ -6,7 +6,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 
@@ -715,7 +715,13 @@ def skills_list(ctx: click.Context) -> None:
                 if lines:
                     click.secho(f"    [STAGED RULES PENDING REVIEW ({len(lines)})]:", fg="yellow")
                     for line in lines:
-                        click.echo(f"      * {line}")
+                        # A "[CONFLICT]" line is a flagged contradiction, not a plain
+                        # staged rule - 'skills approve' won't auto-promote it (needs a
+                        # manual decision), so call it out distinctly here too.
+                        if line.startswith("[CONFLICT]"):
+                            click.secho(f"      * {line}", fg="red")
+                        else:
+                            click.echo(f"      * {line}")
             except Exception as e:
                 logger.debug(f"Failed to read staged rules file '{staged_file}': {e}")
 
@@ -891,13 +897,38 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
             with open(staged_file, "r", encoding="utf-8") as sf:
                 staged_lines = [line.strip() for line in sf if line.strip()]
 
-            if staged_lines:
+            # A "[CONFLICT] ..." line (written by _stage_skill_conflicts, the only
+            # writer of this file today) records a genuine contradiction between a
+            # candidate rule and one already in rules.txt - it needs a human to pick
+            # a side, not a blind append. Promoting it as-is would write the raw
+            # diagnostic sentence (marker, losing candidate, contradicted rule, and
+            # the model's reasoning all together) into rules.txt as if it were a
+            # trusted engineering rule, feeding straight into every future
+            # generation prompt - defeating the entire reason this staging exists
+            # (2026-08-15 SME review, stage 5, Finding 1). Only plain staged rules
+            # get auto-promoted; conflicts stay staged for manual resolution.
+            promotable = [line for line in staged_lines if not line.startswith("[CONFLICT]")]
+            unresolved_conflicts = [line for line in staged_lines if line.startswith("[CONFLICT]")]
+
+            if promotable:
                 with open(rules_file, "a", encoding="utf-8") as rf:
-                    for line in staged_lines:
+                    for line in promotable:
                         rf.write(f"\n{line}")
-                os.remove(staged_file)
                 approved_anything = True
-                click.secho(f"Approved and promoted {len(staged_lines)} rule(s) to rules.txt for skill '{skill_name}'.", fg="green")
+                click.secho(f"Approved and promoted {len(promotable)} rule(s) to rules.txt for skill '{skill_name}'.", fg="green")
+
+            if unresolved_conflicts:
+                with open(staged_file, "w", encoding="utf-8") as sf:
+                    for line in unresolved_conflicts:
+                        sf.write(f"{line}\n")
+                click.secho(
+                    f"{len(unresolved_conflicts)} flagged conflict(s) for skill '{skill_name}' were NOT "
+                    "auto-promoted - each needs a manual decision. Review them and edit rules.txt/"
+                    "staged_rules.txt directly to resolve.",
+                    fg="yellow",
+                )
+            else:
+                os.remove(staged_file)
         except Exception as e:
             click.secho(f"Failed to approve staged rules: {e}", fg="red")
 
@@ -1541,72 +1572,36 @@ def review(ctx: click.Context, file_path: str) -> None:
             return
 
         click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan", err=True)
-        from kriya.analyzer.analyzer import chunk_file_syntactically
-        from kriya.workflow.workflow import estimate_tokens
+        from kriya.workflow.review_context import build_review_batches
 
-        # Budget-aware batching. Confirmed live as a real, severe bug: with no
-        # size control at all, a file (or file set) exceeding the model's context
-        # window got silently truncated from the FRONT by the backend, cutting
+        # Budget-aware batching (kriya/workflow/review_context.py - shared with the
+        # generation workflow's own Reviewer stage). Confirmed live as a real, severe
+        # bug: with no size control at all, a file (or file set) exceeding the model's
+        # context window got silently truncated from the FRONT by the backend, cutting
         # off every "=== File: ... ===" framing marker along with it - the model
-        # received an unlabeled fragment of raw code with no indication it was
-        # even being asked to review anything, produced a confused non-review
-        # response, and Kriya still reported success (exit 0) with no warning
-        # at all. Same context_window * 0.75 budget convention used throughout
-        # workflow.py, via the same estimate_tokens() heuristic - not a new one.
+        # received an unlabeled fragment of raw code with no indication it was even
+        # being asked to review anything, produced a confused non-review response, and
+        # Kriya still reported success (exit 0) with no warning at all.
         budget = int(cfg.llm.context_window * 0.75)
-        file_blobs = []  # (rel, blob_text, token_estimate)
+        file_contents: List[Tuple[str, str]] = []
         for rel, full in files_to_review:
             try:
                 with open(full, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
-
-                chunks = chunk_file_syntactically(content, max_lines=150, overlap=15)
-                blob = ""
-                for c_idx, chunk_data in enumerate(chunks, 1):
-                    suffix = f" (Part {c_idx})" if len(chunks) > 1 else ""
-                    blob += f"\n=== File: {rel}{suffix} ===\n{chunk_data['text']}\n"
-
-                if estimate_tokens(blob) > budget:
-                    # Even this one file alone doesn't fit - keep as many whole
-                    # chunks as fit and say so explicitly, both to the model (so
-                    # it knows it's working from a partial view, not confidently
-                    # reviewing what it thinks is the complete file) and to the
-                    # user.
-                    click.secho(
-                        f"Warning: '{rel}' is too large to review in full within the "
-                        f"configured context window - reviewing only the portion that fits.",
-                        fg="yellow", err=True,
-                    )
-                    kept = ""
-                    for c_idx, chunk_data in enumerate(chunks, 1):
-                        suffix = f" (Part {c_idx})" if len(chunks) > 1 else ""
-                        candidate = kept + f"\n=== File: {rel}{suffix} ===\n{chunk_data['text']}\n"
-                        if estimate_tokens(candidate) > budget:
-                            break
-                        kept = candidate
-                    blob = kept + f"\n=== File: {rel} - TRUNCATED: remainder omitted, file exceeds the review token budget ===\n"
-
-                file_blobs.append((rel, blob, estimate_tokens(blob)))
+                    file_contents.append((rel, f.read()))
             except Exception as e:
                 click.secho(f"Failed to read file {rel}: {e}", fg="yellow", err=True)
 
-        # Greedily group files into batches that each fit the budget - the
-        # common case (a handful of small/medium files) still produces exactly
-        # ONE batch, unchanged behavior: one combined call, full cross-file
-        # architectural context for the reviewer. Only degrades to multiple
-        # separate calls when the combined content genuinely wouldn't fit.
-        batches: List[str] = []
-        current_batch = ""
-        current_tokens = 0
-        for _rel, blob, tokens in file_blobs:
-            if current_batch and current_tokens + tokens > budget:
-                batches.append(current_batch)
-                current_batch = ""
-                current_tokens = 0
-            current_batch += blob
-            current_tokens += tokens
-        if current_batch:
-            batches.append(current_batch)
+        batches, truncated_relpaths = build_review_batches(file_contents, budget)
+        for rel in truncated_relpaths:
+            # Even this one file alone doesn't fit - keep as many whole chunks as fit
+            # and say so explicitly, both to the model (so it knows it's working from a
+            # partial view, not confidently reviewing what it thinks is the complete
+            # file) and to the user.
+            click.secho(
+                f"Warning: '{rel}' is too large to review in full within the "
+                f"configured context window - reviewing only the portion that fits.",
+                fg="yellow", err=True,
+            )
 
         import sys
         def on_stream(token: str):

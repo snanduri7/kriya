@@ -286,7 +286,21 @@ class PlannerAgent(BaseAgent):
             "You are the Kriya Planner Agent.\n"
             "Your task is to decompose a software engineering request into logical step-by-step implementation tasks.\n"
             "Outline what files need to be created, modified, or verified.\n"
-            "Format your plan clearly in Markdown."
+            "Format your plan clearly in Markdown.\n"
+            "\n"
+            "MINIMALISM: Produce the smallest, simplest project structure that satisfies the goal - a "
+            "single Maven/Gradle module and a single build artifact, unless the goal explicitly asks for "
+            "a multi-module project. A goal describing multiple logically-distinct pieces of "
+            "functionality (e.g. layers, phases, subsystems) means separate classes/packages within ONE "
+            "project, never separate Maven <modules>/Gradle subprojects, separate pom.xml/build.gradle "
+            "files, or separate entry-point classes, unless a multi-module structure was explicitly "
+            "requested. Confirmed live as a real, repeated failure: a goal describing functionality in "
+            "three layers, and explicitly stating all orchestration must live in ONE entry-point class, "
+            "was planned as three separate Maven modules with three separate entry-point classes anyway - "
+            "directly contradicting the goal's own explicit constraint. If the goal states a specific "
+            "entry-point class name or says logic must live in a single class, that constraint applies to "
+            "the WHOLE implementation, not just part of it - do not let a goal's own multi-part "
+            "description (e.g. numbered layers/phases) suggest a multi-module answer on its own."
         )
 
 
@@ -848,9 +862,28 @@ class DeveloperAgent(BaseAgent):
         for entry in file_entries:
             filepath = entry["filepath"]
             if entry.get("content") or entry.get("edits"):
+                # Found live, 2026-08-15, forensically investigating a real
+                # run that kept failing STRUCTURAL CORRUPTION on the same
+                # file across 3 straight full-set attempts with no way to
+                # tell, from logs alone, whether it was ever actually
+                # regenerated: this pass-through path had ZERO logging of
+                # any kind - not even the optional stream_callback below has
+                # an equivalent here. A caller with no stream_callback wired
+                # (or one whose stream text isn't captured in whatever log
+                # is being read, as turned out to be the case for later
+                # retry attempts here) had literally nothing to show which
+                # files skipped regeneration vs which were freshly
+                # generated. logger.info (not gated behind stream_callback)
+                # so this is always visible in a normal log file.
+                logger.info(
+                    f"Developer: '{filepath}' already has content/edits from an earlier "
+                    "step (e.g. a Planner-reused block, or an already-resolved known_target_files "
+                    "entry) - reusing it as-is, no fresh generation call for this file."
+                )
                 files_out.append({"filepath": filepath, "content": entry.get("content"), "edits": entry.get("edits") or []})
                 continue
 
+            logger.info(f"Developer: generating content for '{filepath}'...")
             if stream_callback:
                 stream_callback(f"\n[Implementing file: {filepath}]")
 
@@ -1206,21 +1239,52 @@ class DeveloperAgent(BaseAgent):
 
         # Fallback to single-stage generation (original implementation)
         # Same stable-first/volatile-last ordering as _fill_missing_content, for KV-cache reuse across retries.
+        #
+        # SME review finding (2026-08-15): this branch used to silently drop
+        # prior_error_context/extra_fix_instruction/retry_temperature entirely -
+        # confirmed real and reachable (not theoretical): _resolve_step1_file_list()'s
+        # own docstring documents returning nothing ("none") as a real, expected
+        # outcome, the same malformed-response risk already established for
+        # ArchitectAgent's identical parse_file_list() contract, and this path has
+        # zero prior test coverage. The real consequence: if this fires DURING A
+        # RETRY - exactly when error context matters most - the model was asked to
+        # "generate the complete files" with no idea what it was fixing, and would
+        # plausibly just regenerate the same mistake, burning the retry for nothing.
+        # Deliberately NOT threading implicated_files/error_source_context/
+        # files_with_current_content through - those scope PER-FILE behavior
+        # (_fill_missing_content's own per-file loop, and an edits/anchored-patch
+        # output shape this single-call path doesn't have at all, only full
+        # "content"), so they don't map cleanly onto one batched completion. This
+        # is the minimal fix for the actual harm (zero error context), not an
+        # attempt to replicate _fill_missing_content's full fix-analysis machinery
+        # here - see this file's SME review notes in docs/kriya_backlog_and_lessons.md.
+        fix_context_block = ""
+        if prior_error_context:
+            fix_context_block = (
+                f"\n\n=== Prior Attempt Failed - Fix This Error ===\n{prior_error_context}\n"
+                "Identify the exact cause of this error and ensure your regenerated files fix it. "
+                "Do not repeat the same mistake."
+            )
+            if extra_fix_instruction:
+                fix_context_block += f"\n{extra_fix_instruction}"
+
         prompt = (
             f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
             f"=== Architect Design Guidelines ===\n{design_context}\n\n"
-            f"=== User Request & Task ===\n{task_description}\n\n"
+            f"=== User Request & Task ===\n{task_description}"
+            f"{fix_context_block}\n\n"
             "Please generate the complete, production-grade files. Return ONLY the JSON list of files."
         )
-        
+
         response_str = await self.llm.complete(
-            self.system_prompt, 
-            prompt, 
+            self.system_prompt,
+            prompt,
             stream_callback=stream_callback,
             json_mode=True,
             model_override=model_override,
             base_url_override=base_url_override,
-            api_key_override=api_key_override
+            api_key_override=api_key_override,
+            temperature_override=retry_temperature,
         )
         
         try:
@@ -1519,11 +1583,47 @@ class SkillGapAgent(BaseAgent):
         rules = parsed.get("rules")
         rules = [r for r in rules if isinstance(r, str) and r.strip()] if isinstance(rules, list) else []
 
+        # Per-item filtering, not all-or-nothing: one malformed example value (e.g. a
+        # model nesting a dict/list for a single file) used to discard every example
+        # in the response, including genuinely valid ones - inconsistent with `rules`'
+        # own per-item filtering just above (2026-08-15 SME review, stage 5).
         examples = parsed.get("examples")
-        examples = examples if isinstance(examples, dict) and all(isinstance(v, str) for v in examples.values()) else {}
+        examples = (
+            {k: v for k, v in examples.items() if isinstance(k, str) and k.strip() and isinstance(v, str)}
+            if isinstance(examples, dict) else {}
+        )
 
+        # Per-item shape validation, same trust boundary as check_skill_conflicts()'s
+        # index bounds check: raw list membership alone doesn't guarantee each entry is
+        # a dict. Downstream, _stage_skill_conflicts() calls c.get(...) on every item
+        # unconditionally with no enclosing try/except at its only call site
+        # (workflow.py's skill-gap-resolution block) - a model returning
+        # "conflicts": ["some string"] instead of [{"candidate_rule": ...}] would raise
+        # an uncaught AttributeError and abort the entire generation run (2026-08-15 SME
+        # review, stage 5). Validate here, at the boundary where untrusted LLM JSON
+        # first gets parsed, rather than hardening every downstream consumer.
         conflicts = parsed.get("conflicts")
-        conflicts = conflicts if isinstance(conflicts, list) else []
+        valid_conflicts: List[Dict[str, str]] = []
+        if isinstance(conflicts, list):
+            for c in conflicts:
+                if not isinstance(c, dict):
+                    continue
+                candidate_rule = c.get("candidate_rule")
+                if not isinstance(candidate_rule, str) or not candidate_rule.strip():
+                    continue
+                conflicts_with = c.get("conflicts_with")
+                reason = c.get("reason")
+                # Stored stripped so the returned dict matches what the mutual-exclusivity
+                # dedup below compares against - keeps "what's in `conflicts`" and "what's
+                # deduped out of `rules`" using the same normalized text, not just relying
+                # on downstream consumers (_stage_skill_conflicts' own sanitize step) to
+                # clean up whitespace later.
+                valid_conflicts.append({
+                    "candidate_rule": candidate_rule.strip(),
+                    "conflicts_with": conflicts_with.strip() if isinstance(conflicts_with, str) else "",
+                    "reason": reason.strip() if isinstance(reason, str) else "",
+                })
+        conflicts = valid_conflicts
 
         # The prompt tells the model not to put a conflicting candidate in both "rules"
         # and "conflicts", but that's an instruction, not a guarantee - a real run
@@ -1531,10 +1631,7 @@ class SkillGapAgent(BaseAgent):
         # conflicting AND separately listing it as a plain rule in the same response).
         # Enforce mutual exclusivity in code rather than trusting prompt adherence:
         # anything already flagged as conflicting must not also be silently added.
-        conflicting_texts = {
-            c.get("candidate_rule", "").strip()
-            for c in conflicts if isinstance(c, dict) and c.get("candidate_rule")
-        }
+        conflicting_texts = {c["candidate_rule"].strip() for c in conflicts}
         if conflicting_texts:
             rules = [r for r in rules if r.strip() not in conflicting_texts]
 

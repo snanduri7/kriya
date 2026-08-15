@@ -52,6 +52,7 @@ test rather than all three.
 """
 
 import ast
+import io
 import json
 import re
 import subprocess
@@ -136,15 +137,25 @@ def run_functional_test(code: str, test_snippet: str) -> tuple[bool, str]:
         Path(temp_path).unlink(missing_ok=True)
 
 
-def call_ollama(model: str, prompt: str, max_tokens: int, think: bool | None) -> dict:
+def call_ollama(model: str, prompt: str, max_tokens: int, think: bool | None, system_prompt: str | None = None) -> dict:
     """think=True/False sends an explicit think param (only meaningful for a
     thinking-capable model); think=None omits it entirely (use for
     non-thinking models - sending think:false to a model that doesn't
     support thinking is presumably a no-op, but omitting it is the honest
-    "this axis doesn't apply here" representation)."""
+    "this axis doesn't apply here" representation). system_prompt is
+    optional and defaults to None (existing callers/prompts.py-driven code-
+    gen prompts have no system message, matching the original bench.py
+    design) - added for planner_reasoning_poc.py, which needs the REAL
+    PlannerAgent/ArchitectAgent system prompt sent separately, the same way
+    kriya.core.llm.LLMClient.complete(system_prompt, user_prompt, ...) does,
+    not concatenated into one user-role message."""
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
     body = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "stream": True,
         "options": {"num_predict": max_tokens},
     }
@@ -158,13 +169,28 @@ def call_ollama(model: str, prompt: str, max_tokens: int, think: bool | None) ->
     start = time.perf_counter()
     ttft_thinking = None
     ttft_content = None
-    thinking_text = ""
+    thinking_parts = []
     thinking_chunks = 0
-    content_text = ""
+    content_parts = []
     content_chunks = 0
     final = None
     with urllib.request.urlopen(req, timeout=300) as resp:
-        for line in resp:
+        # Confirmed live, 2026-08-15: iterating the raw HTTPResponse line-by-
+        # line (`for line in resp`) on a long chunked-transfer-encoded stream
+        # (thousands of small NDJSON lines, one per token) added ~295s of
+        # pure Python-side overhead on top of a ~435s real generation - a
+        # direct curl of the identical request/payload confirmed the true
+        # time, isolating the gap to this loop (not streaming-vs-non-
+        # streaming, not Ollama, not the model - a controlled A/B ruled
+        # those out first). http.client.HTTPResponse's own iteration doesn't
+        # buffer efficiently for many-small-chunk streams; wrapping it in a
+        # real io.BufferedReader batches the underlying reads instead of
+        # doing one small read per NDJSON line. Also switched thinking_text/
+        # content_text from repeated += to list-append + "".join() at the
+        # end - correct regardless of whether a given CPython build's string
+        # concatenation optimization happens to kick in.
+        buffered = io.BufferedReader(resp, buffer_size=1 << 16)
+        for line in buffered:
             if not line.strip():
                 continue
             chunk = json.loads(line)
@@ -172,12 +198,12 @@ def call_ollama(model: str, prompt: str, max_tokens: int, think: bool | None) ->
             if message.get("thinking"):
                 if ttft_thinking is None:
                     ttft_thinking = time.perf_counter() - start
-                thinking_text += message["thinking"]
+                thinking_parts.append(message["thinking"])
                 thinking_chunks += 1
             if message.get("content"):
                 if ttft_content is None:
                     ttft_content = time.perf_counter() - start
-                content_text += message["content"]
+                content_parts.append(message["content"])
                 content_chunks += 1
             if chunk.get("done"):
                 final = chunk
@@ -206,8 +232,8 @@ def call_ollama(model: str, prompt: str, max_tokens: int, think: bool | None) ->
         else None,
         "thinking_tokens_approx": thinking_chunks or None,
         "content_tokens_approx": content_chunks or None,
-        "thinking_text": thinking_text,
-        "output_text": content_text,
+        "thinking_text": "".join(thinking_parts),
+        "output_text": "".join(content_parts),
     }
 
 
