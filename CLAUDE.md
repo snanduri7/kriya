@@ -27,6 +27,15 @@ pip install -e .                    # installs `kriya` and `kriya-mcp` console s
 
 There is no separate lint/format command configured in this repo — don't invent one.
 
+## Working practices in this repo (quota discipline)
+
+The user is quota-conscious in this repo specifically — apply these by default, without being asked each session:
+
+- **Never run `.venv/bin/pytest` (any invocation, including a single file/test) as part of normal work.** Hand the exact command to the user and let them run it in their own terminal, reporting pass/fail back. This applies even to a quick sanity check after a small edit.
+- **Don't launch long-running or live-model work (a `kriya generate`/`fix` run, `-m live_model` tests, eval batches) and then poll it from inside the session** (repeated Bash/Read check-ins, `ScheduleWakeup` loops) — every check-in costs a turn even while "just waiting." Either hand the command to the user's terminal, or start it with `run_in_background` and wait for the actual completion notification; only peek at interim output when there's a concrete reason (e.g. confirming it didn't fail fast), not out of curiosity.
+- **Prefer fewer, well-scoped tool calls over several exploratory ones.** Batch independent reads/searches in parallel rather than trickling them out one at a time.
+- Ordinary work stays in-session as normal: writing/editing code, quick targeted greps, `git status`/`git diff`/`git log`, doc updates, single fast commands.
+
 ## Live-model CI tier (`tests/test_live_smoke.py`, `.github/workflows/ci.yml`'s `live-model-smoke` job)
 Every other test in this repo runs against mocks - zero live LLM/embedding calls. `pyproject.toml`'s `addopts = '-m "not live_model"'` excludes this tier by default (both locally and in the `test`/`lint`/`lock-file` CI jobs); pass `-m live_model` explicitly to run it. CI runs it in a separate, `continue-on-error: true` job that installs Ollama fresh and pulls two small models (`qwen2.5-coder:1.5b`, `all-minilm`) - free on GitHub-hosted runners since this repo is public. The bar is deliberately narrow: "did the real pipeline complete without crashing on a real API response shape," not code-generation quality - a small CI-pulled model isn't held to the same bar as whatever model a real project configures. Note `SkillEngine` always loads Kriya's own global skill library (`load_global=True`, no config override) in addition to any project-local skills, which meaningfully inflates prompt size regardless of goal relevance - confirmed live to matter for a small model's throughput, hence the generous 600s timeout on the `generate` smoke test.
 
