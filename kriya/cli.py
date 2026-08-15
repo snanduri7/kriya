@@ -444,23 +444,29 @@ def prompt_generate(ctx: click.Context, description: str) -> None:
         "Output ONLY the optimized prompt itself, formatted cleanly in Markdown. Do not include introductory or concluding conversational filler."
     )
     
+    # Streamed tokens go straight to stdout (nl=False) as they arrive - same
+    # split as before still holds, since the banner/status chrome below stays
+    # on stderr: `kriya prompt generate "x" | kriya generate -y` still gets a
+    # clean goal on stdout, it just now arrives incrementally instead of all
+    # at once after the model finishes (which, for a large local reasoning
+    # model with no progress indication, could look indistinguishable from a
+    # hang - confirmed live against a 27B model on a long prompt).
+    def on_stream(token: str):
+        click.echo(token, nl=False)
+        sys.stdout.flush()
+
     async def run_gen():
         click.secho("Generating optimized prompt...", fg="cyan", err=True)
+        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green", err=True)
         return await llm.complete(
             system_prompt=system_prompt,
-            user_prompt=f"Create a developer prompt for: {description}"
+            user_prompt=f"Create a developer prompt for: {description}",
+            stream_callback=on_stream,
         )
 
     try:
         res = asyncio.run(run_gen())
-        # Status/header chrome goes to stderr, err=True - stdout carries ONLY
-        # the generated prompt text, so `kriya prompt generate "x" | kriya
-        # generate -y` (real shell piping, standalone CLI use) gets a clean
-        # goal rather than the two lines above mixed into it. Verified live
-        # before this fix: both lines appeared in stdout, which would have
-        # been fed to `generate` as if they were part of the actual goal.
-        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green", err=True)
-        click.echo(res)
+        click.echo()
 
         # Inside `kriya repl` there's no shell pipe between two typed lines -
         # each dispatches independently and control returns to the prompt
