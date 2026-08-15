@@ -12,5 +12,5 @@ tags:
 - amqp-1.0
 verification_gap_acknowledged: false
 verified: true
-verified_at: '2026-08-14'
+verified_at: '2026-08-15'
 verified_context: org.apache.qpid:qpid-broker-core unspecified
