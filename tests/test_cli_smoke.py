@@ -193,6 +193,46 @@ def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
     assert "looks good" in result.stdout
 
 
+def test_fix_reprints_full_reviewer_report(runner, tmp_path):
+    """Stage 6 SME review, Finding 5 (2026-08-15): `fix`'s step_cb truncates every
+    step's content to 300 chars, including the Reviewer's full report - unlike
+    `generate`, which reprints res.get("review") in full at the end under its own
+    header, `fix` never did, so the mandatory "How to Run the Application" section
+    and most findings were lost after a 300-char preview scrolled by mid-run with
+    no second chance to see them."""
+    long_review = "## How to Run the Application\n" + ("Detailed instructions. " * 30)
+    assert len(long_review) > 300  # must actually exceed step_cb's truncation length
+    fake_result = dict(_FAKE_GENERATE_RESULT, review=long_review)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(fake_result)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
+
+    assert result.exit_code == 0, result.output
+    assert "=== Reviewer Report & Run Instructions ===" in result.output
+    assert long_review in result.output
+
+
+def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tmp_path):
+    """Independent review caught a real gap in the Finding 5 fix above: a
+    human-rejected approval-gate run sets "review" to a one-line rejection notice
+    ("Rejected by user during approval gate review.") with "files": [] - the same
+    shape `generate`'s own reprint (gated on res.get("files"), not just
+    res.get("review") alone) already knows to suppress. An unguarded reprint would
+    misleadingly label that rejection notice as a "Reviewer Report"."""
+    rejected_result = dict(_FAKE_GENERATE_RESULT, files=[], quality_gates_passed=False,
+                            review="Rejected by user during approval gate review.")
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
+
+    assert result.exit_code == 0, result.output
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
 def test_mark_run_in_progress_writes_honest_status(tmp_path):
     """Regression test for a real live finding, 2026-08-12 (ignite_qpid_protocol via
     spikes/eval_harness, twice in the same session): a knowledge-gap retry that

@@ -224,6 +224,28 @@ def test_review_small_files_still_use_a_single_combined_call(tmp_path):
     assert "a.py" in prompt and "b.py" in prompt
 
 
+def test_review_prompt_frames_absence_of_a_goal(tmp_path):
+    """Stage 6 SME review, Finding 3 (2026-08-15): unlike the embedded pipeline's
+    Reviewer stage, which always prefixes "Goal: {goal}...", the standalone command
+    sent bare file blobs with no framing - a real mismatch with ReviewerAgent's own
+    system prompt, which assumes a goal exists to calibrate its "don't reject for
+    missing tests" leniency against. Must now tell the model explicitly there's no
+    goal, rather than leaving it to guess or invent requirements."""
+    (tmp_path / "app.py").write_text("def add(a, b):\n    return a + b\n")
+
+    mock_complete = AsyncMock(return_value="Looks fine.")
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "app.py")])
+
+    assert res.exit_code == 0, res.output
+    prompt = mock_complete.call_args[0][1]
+    assert "No specific goal or task was provided" in prompt
+    assert "Do not invent or assume requirements" in prompt
+    assert "app.py" in prompt
+
+
 def test_review_stdout_contains_only_the_review_text(tmp_path):
     """Regression test for a real bug found while auditing other commands for
     the same stdout-pollution shape as `prompt generate`: "Scanning

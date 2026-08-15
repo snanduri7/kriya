@@ -1603,16 +1603,41 @@ def review(ctx: click.Context, file_path: str) -> None:
                 fg="yellow", err=True,
             )
 
+        # Stage 6 SME review, Finding 3 (2026-08-15): unlike the embedded pipeline's
+        # Reviewer stage (workflow.py), which always prefixes "Goal: {goal}...", this
+        # standalone command sent bare file blobs with no framing at all - a real
+        # mismatch with ReviewerAgent's own system prompt, which is written assuming a
+        # goal exists to calibrate its "don't reject for missing tests the goal never
+        # asked for" leniency rule against, and assumes one coherent generated
+        # application for its mandatory "How to Run" section. Standalone review has
+        # neither (arbitrary pre-existing code, often just a git-modified subset of a
+        # larger unrelated project) - telling the model that explicitly, rather than
+        # leaving it to guess, is what actually closes the gap (not fabricating a fake
+        # goal, which would just invite it to invent requirements the goal doesn't
+        # state).
+        review_context_header = (
+            "No specific goal or task was provided for this review - this is a general "
+            "code-quality review of existing/arbitrary code, not something generated for "
+            "a stated task. Do not invent or assume requirements; review for correctness, "
+            "clarity, and maintainability on the code's own terms, and do not reject "
+            "solely for missing tests/docs the way you would for an unmet stated goal. "
+            "If this file set is only a partial slice of a larger project (e.g. just the "
+            "files git reports as modified), the 'How to Run the Application' section "
+            "should describe how to run/verify what's shown here to the extent "
+            "determinable from it, or say plainly if that can't be determined from a "
+            "partial file set.\n\n"
+        )
+
         import sys
         def on_stream(token: str):
             click.echo(token, nl=False)
             sys.stdout.flush()
 
         async def run_review():
-            for i, batch_prompt in enumerate(batches, 1):
+            for i, batch in enumerate(batches, 1):
                 label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
                 click.secho(f"\n{label}", bold=True, fg="cyan", err=True)
-                await reviewer.run(batch_prompt, stream_callback=on_stream)
+                await reviewer.run(review_context_header + batch, stream_callback=on_stream)
                 click.echo()
 
         asyncio.run(run_review())
@@ -1960,6 +1985,20 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                     "without redoing Plan/Design.",
                     fg="yellow"
                 )
+        # Stage 6 SME review, Finding 5 (2026-08-15): step_cb above truncates EVERY
+        # step's content to 300 chars, including the Reviewer's full report - unlike
+        # `generate`, which reprints res.get("review") in full at the end under its own
+        # header, `fix` never did, so the mandatory "How to Run the Application"
+        # section and most substantive findings were lost after a 300-char preview
+        # scrolled by mid-run with no second chance to see them. Same reprint `generate`
+        # already has, same guard: gated on res.get("files") too, not just
+        # res.get("review") alone - independent review caught that a human-rejected
+        # approval-gate run sets "review" to a one-line rejection notice ("Rejected by
+        # user during approval gate review.") with "files": [] - an unguarded reprint
+        # would misleadingly label that notice as a "Reviewer Report".
+        if res.get("files") and res.get("review"):
+            click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+            click.echo(res.get("review"))
 
     try:
         asyncio.run(run_fix())
