@@ -1,0 +1,10 @@
+category: Auto-Generated
+description: The repository follows a standard Maven Java project layout with Apache
+  Ignite integration using Spring configuration. The project uses Java 17, includes
+  core Ignite dependencies, and demonstrates basic Ignite cache operations in a main
+  application class. Configuration is handled via XML files following Spring bean
+  conventions.
+name: auto-spring-ignite
+tags:
+- spring-ignite
+- auto-generated

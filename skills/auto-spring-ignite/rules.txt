@@ -1,0 +1,12 @@
+Use spaces for indentation (2 spaces)
+Package names follow reverse domain name convention
+Class names use PascalCase
+Main application class named App
+Configuration files stored in src/main/resources directory
+Maven POM file at project root
+All Ignite operations wrapped in try-with-resources blocks
+Use Spring XML configuration for Ignite setup
+Compiler target set to Java 17
+Dependencies managed via Maven with proper versioning
+Import statements organized alphabetically
+Static imports used sparingly and only for utility methods

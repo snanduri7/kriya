@@ -1,0 +1,10 @@
+category: Auto-Generated
+description: The repository uses a standard Maven Java project structure with Spring
+  Framework for dependency injection. The project includes a basic Spring configuration
+  using XML beans definition and a simple Java class for demonstration. The code follows
+  standard Java conventions with proper indentation using spaces, and the build process
+  utilizes Maven Shade Plugin for creating a fat JAR.
+name: auto-spring-hello
+tags:
+- spring-hello
+- auto-generated

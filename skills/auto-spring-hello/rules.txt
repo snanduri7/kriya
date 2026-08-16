@@ -1,0 +1,10 @@
+Use spaces for indentation (2 spaces recommended)
+Class names must follow PascalCase convention
+Package names must be lowercase with reverse domain naming
+Property names must follow camelCase convention
+Source code files must be located under src/main/java directory
+Resource files must be placed under src/main/resources directory
+All dependencies must be declared in pom.xml file
+Spring XML configuration files must use proper namespace declarations
+Main class must be specified in Maven Shade Plugin for executable JAR creation
+Java version 8 must be targeted for compilation and runtime
