@@ -49,6 +49,7 @@ from kriya.workflow.context_budget import (
 from kriya.workflow.edit_safety import (
     _strip_java_comments_and_strings,
     apply_anchored_edits,
+    atomic_write_file,
     find_structural_corruption,
     normalize_whitespace,
 )
@@ -1465,8 +1466,12 @@ class WorkflowEngine:
                             for filepath, orig_content in state.all_original_contents.items():
                                 actual_file = os.path.join(workspace_path, filepath)
                                 if orig_content:
-                                    with open(actual_file, "w", encoding="utf-8") as fh:
-                                        fh.write(orig_content)
+                                    # Atomic, not plain open(...,"w") - this restores the
+                                    # user's REAL project file directly (no worktree
+                                    # isolation on this path), so a kill mid-write here would
+                                    # corrupt the user's actual pre-existing source, not just
+                                    # a scratch sandbox file.
+                                    atomic_write_file(actual_file, orig_content)
                                 elif os.path.exists(actual_file):
                                     os.remove(actual_file)
                         delete_checkpoint(workspace_path, run_id)

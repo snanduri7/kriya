@@ -27,22 +27,32 @@ from pathlib import Path
 import yaml
 from goals import GOALS
 
-LIVE_LLM_MODEL = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b-a3b-q8_0")
+# 2026-08-15: reverted from qwen3-coder:30b-a3b-q8_0 back to the plain qwen3-coder:30b
+# tag (the pre-Q8 default) at the user's explicit request, after that night's live
+# ignite_qpid_protocol run timed out at 2400s without resolving a real cross-file
+# package-mismatch bug (see docs/kriya_backlog_and_lessons.md for the root cause and
+# the DeveloperAgent fix that addresses it) - not itself evidence Q8 was the cause of
+# that specific timeout, just the user's own call on which model to run primary.
+LIVE_LLM_MODEL = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b")
 LIVE_EMBED_MODEL = os.environ.get("KRIYA_LIVE_EMBED_MODEL", "embeddinggemma:latest")
 LIVE_BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")
-# Kriya's own packaged default_config.yaml ships deepseek-r1:32b (reasoning: true)
-# as the sole llm_chain fallback - a reasonable default for a project's OWN
-# config to pick deliberately, but a real problem for an UNATTENDED harness
-# that never overrode it: confirmed live, 2026-08-06/07 (python_task_tracker,
-# ignite_qpid_person), that escalating to a reasoning model can single-handedly
-# burn the harness's --timeout-per-goal budget - individual completions took
-# 2-5+ minutes each, consistent with the already-cited spike finding
-# (spikes/tool_call_developer/run_spike_reasoning_on_retry.py) that a reasoning
-# model was 13x slower for zero correctness benefit on a fact-recall-class
-# retry. deepseek-coder-v2:16b is the same fast, non-reasoning fallback
-# kriya-protocol-parser-app's own kriya.yaml independently chose and never hit
-# this problem with - not a guess, a model already validated live in this
-# exact fallback role.
+# Kriya's own packaged default_config.yaml ships qwen3.6:35b-a3b-q4_K_M
+# (reasoning: false) as the sole llm_chain fallback (2026-08-15 - previously
+# deepseek-r1:32b, reasoning: true, which was never actually pulled locally: a
+# reasonable-looking default that was silently unreachable the whole time it was
+# configured, confirmed via `ollama list`). A reasoning fallback is a real problem
+# for an UNATTENDED harness in particular: confirmed live, 2026-08-06/07
+# (python_task_tracker, ignite_qpid_person), that escalating to a reasoning model can
+# single-handedly burn the harness's --timeout-per-goal budget - individual
+# completions took 2-5+ minutes each, consistent with the already-cited spike finding
+# (spikes/tool_call_developer/run_spike_reasoning_on_retry.py) that a reasoning model
+# was 13x slower for zero correctness benefit on a fact-recall-class retry, and more
+# recent, more direct think:true/think:false A/B data for THIS exact model
+# (spikes/model_speed_poc/, 2026-08-15) found the same pattern 71-85x, not just 13x.
+# qwen3.6:35b-a3b-q4_K_M is the same fast, non-reasoning fallback
+# kriya-protocol-parser-app's own kriya.yaml independently chose and never hit this
+# problem with - not a guess, a model already validated live in this exact fallback
+# role, for this exact goal.
 LIVE_FALLBACK_MODEL = os.environ.get("KRIYA_LIVE_FALLBACK_MODEL", "qwen3.6:35b-a3b-q4_K_M")
 # Kriya's own kriya/config/config.py::SearchConfig deliberately makes
 # autonomy.web_lookup_enabled and search.base_url two SEPARATE switches - "so

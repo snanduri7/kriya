@@ -1,11 +1,49 @@
 """Deterministic sanity checks applied to an anchored edit or full-file write before it reaches disk - whitespace-tolerant anchor matching and structural corruption detection. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization). The "which file does this edit concern" checks that used to live here (find_misdirected_edit_target, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line) moved to kriya/workflow/attribution.py on 2026-08-14 - see that module's own docstring taxonomy for why. What's left here is purely mechanical edit-safety: does the edit apply cleanly, and does the resulting file look structurally sound - never "which file"."""
 
 import logging
+import os
 import re
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def atomic_write_file(full_path: str, content: str) -> None:
+    """Writes `content` to `full_path` atomically - via a temp file in the SAME
+    directory, then os.replace() (atomic on both POSIX and Windows NTFS) - so a
+    process killed mid-write can never leave `full_path` truncated/corrupted at
+    0 bytes with whatever content was previously there already destroyed.
+
+    Confirmed live, 2026-08-16: a real eval-harness run's `--timeout-per-goal`
+    fired mid-write on a full-set fallback-model regeneration - `subprocess.run`'s
+    own timeout handling calls Popen.kill() (SIGKILL on POSIX), which is
+    uncatchable, so no signal handler or cleanup code could ever run regardless
+    of how this were structured. The one thing that CAN survive an uncatchable
+    kill is making each individual write itself atomic: plain `open(path, "w")`
+    truncates the file to empty BEFORE any new content is written, so a kill in
+    that window leaves 0 bytes on disk - exactly what was found post-mortem,
+    destroying the one piece of evidence (the file's real content at the moment
+    of a still-unexplained recurring compile failure) that would have settled
+    root cause. With this, the file on disk is always EITHER the complete old
+    content OR the complete new content, never an in-between state, regardless
+    of when the kill lands.
+
+    Used by both kriya/workflow/attempt.py (the normal per-attempt write path)
+    and kriya/workflow/self_correction.py (the micro-loop's own tool-driven
+    patch application) - lives here, not in either caller, since both already
+    import from this module and neither should import from the other (attempt.py
+    only imports self_correction.py locally, deferred inside a function, to
+    avoid exactly that).
+
+    The temp file lives in the same directory as the target (not a shared
+    system tmp dir) so os.replace() stays within one filesystem - crossing
+    filesystems silently degrades to a non-atomic copy+delete on some
+    platforms, defeating the whole point."""
+    tmp_path = f"{full_path}.kriya-tmp-{os.getpid()}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    os.replace(tmp_path, full_path)
 
 
 def normalize_whitespace(text: str) -> str:

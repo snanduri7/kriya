@@ -71,6 +71,7 @@ from kriya.workflow.workflow import (
     find_misdirected_edit_target,
     find_missing_expected_files,
     find_structural_corruption,
+    atomic_write_file,
     normalize_written_filepath,
     _resolve_file_locations,
 )
@@ -8363,6 +8364,37 @@ def test_find_structural_corruption_does_not_flag_a_legitimately_named_nested_cl
         "}\n"
     )
     assert find_structural_corruption("Outer.java", valid) is None
+
+def test_atomic_write_file_writes_correct_content(tmp_path):
+    target = tmp_path / "App.java"
+    atomic_write_file(str(target), "public class App {}\n")
+    assert target.read_text() == "public class App {}\n"
+
+def test_atomic_write_file_leaves_no_temp_file_behind(tmp_path):
+    target = tmp_path / "App.java"
+    atomic_write_file(str(target), "content")
+    # Only the real target file should exist - no .kriya-tmp-<pid> leftover.
+    assert [p.name for p in tmp_path.iterdir()] == ["App.java"]
+
+def test_atomic_write_file_overwrites_existing_content_completely():
+    """Regression test for the real bug this exists to fix (2026-08-16, live-
+    observed): plain open(path, "w") truncates the file to empty BEFORE writing
+    new content, so a process killed between the truncate and the write leaves
+    0 bytes on disk with the old content already destroyed - confirmed live as
+    a real eval-harness timeout leaving a previously-written file empty,
+    destroying the one piece of evidence that would have explained a still-
+    unresolved recurring compile failure. Can't directly test "survives an
+    uncatchable SIGKILL mid-write" in a unit test, but this confirms the
+    observable contract atomic_write_file guarantees: old content is replaced
+    wholesale with new content, never left in a partial/mixed state - the
+    os.replace() swap is what makes that atomic in practice."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        target = os.path.join(d, "App.java")
+        atomic_write_file(target, "public class App { /* very long old content */ }\n" * 50)
+        atomic_write_file(target, "public class App {}\n")
+        with open(target) as f:
+            assert f.read() == "public class App {}\n"
 
 
 @pytest.mark.asyncio

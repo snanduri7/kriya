@@ -2,7 +2,7 @@
 
 llm:
   provider: "openai"
-  model: "qwen3-coder:30b-a3b-q8_0"
+  model: "qwen3-coder:30b"
   api_key: "local-key"
   base_url: "http://localhost:11434/v1"
   temperature: 0.7          # Higher temperature prevents MoE repetition loops
@@ -29,9 +29,19 @@ logging:
 mcp: {}
 
 llm_chain:
-  - model: "deepseek-r1:32b"
+  # deepseek-r1:32b (the previous entry here) isn't pulled locally (confirmed via
+  # `ollama list`, 2026-08-15) - this fallback slot was silently unreachable the
+  # whole time it was configured. qwen3.6:35b-a3b-q4_K_M is already the fallback
+  # this session's eval harness independently validated live in this exact role
+  # (spikes/eval_harness/run_harness.py's own LIVE_FALLBACK_MODEL default).
+  # reasoning: false is deliberate, not a placeholder - this session's own real
+  # think:true/think:false A/B data for THIS model (spikes/model_speed_poc/,
+  # docs/kriya_backlog_and_lessons.md 2026-08-15 entries) found reasoning 71-85x
+  # slower with no correctness benefit on Developer-shaped prompts, and the
+  # harder-prompt arm never even finished before exhausting its reasoning budget.
+  - model: "qwen3.6:35b-a3b-q4_K_M"
     base_url: "http://localhost:11434/v1"
-    reasoning: true
+    reasoning: false
     context_window: 32768
     temperature: 0.2
 

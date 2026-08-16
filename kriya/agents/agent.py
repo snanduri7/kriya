@@ -897,11 +897,36 @@ class DeveloperAgent(BaseAgent):
                 "here, and do not prepend or append its content."
             )
 
+            # Live-diagnosed root cause (2026-08-15, ignite_qpid_protocol eval run): a
+            # per-file generation call previously saw ONLY sibling filenames, never their
+            # actual content - even for a sibling already generated earlier in this SAME
+            # batch. Confirmed as the direct, repeated cause of real compile failures:
+            # Protocol.java (package com.example) and ProtocolParser.java (package
+            # com.example.protocol) each independently invented a plausible-but-
+            # inconsistent package with nothing to reconcile them against, and separately
+            # ProtocolApp.java called Protocol's constructor with a signature that didn't
+            # match what Protocol.java actually declared - both are cross-file
+            # consistency failures a completion literally could not have avoided without
+            # seeing what came before it. files_out (accumulated so far in THIS loop, not
+            # yet appended for the current file) already holds every earlier sibling's
+            # real final content - show it. A sibling not yet reached in this same pass
+            # still can't be shown (nothing to show), so still falls back to a bare
+            # filename list for those - the same ordering the Architect's own file list
+            # already tends to produce (a data class like Protocol.java listed, and
+            # therefore generated, before its consumers) closes this for the common case.
             sibling_paths = [p for p in all_paths if p != filepath]
-            sibling_section = (
-                f"=== Other Files In This Batch (context only - do NOT output their content here) ===\n"
-                f"{', '.join(sibling_paths)}\n\n"
-            ) if sibling_paths else ""
+            already_written = {e["filepath"]: e["content"] for e in files_out if e.get("content")}
+            sibling_content_section = "".join(
+                f"=== Already-Written File This Batch (for cross-file consistency - reference "
+                f"its real package/class/method signatures, do NOT repeat or modify it): {sp} ===\n"
+                f"{already_written[sp]}\n\n"
+                for sp in sibling_paths if sp in already_written
+            )
+            not_yet_written = [p for p in sibling_paths if p not in already_written]
+            sibling_section = sibling_content_section + (
+                f"=== Other Files In This Batch, Not Yet Written (context only - do NOT output "
+                f"their content here) ===\n{', '.join(not_yet_written)}\n\n"
+            ) if not_yet_written else sibling_content_section
 
             # Only present on a retry that's directly responding to a real prior
             # Quality Gate failure (targeted retries, and full-set retries after

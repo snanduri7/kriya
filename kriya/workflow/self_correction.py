@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from kriya.core.llm import LLMClient
 from kriya.tools.validate import PolymorphicValidator
-from kriya.workflow.edit_safety import apply_anchored_edits
+from kriya.workflow.edit_safety import apply_anchored_edits, atomic_write_file
 
 logger = logging.getLogger(__name__)
 
@@ -239,8 +239,7 @@ def _dispatch_tool_call(
             return f"ERROR: patch did not apply to '{filepath}': {anchor_ex}"
 
         full_path = os.path.join(worktree_path, filepath)
-        with open(full_path, "w", encoding="utf-8") as fh:
-            fh.write(new_content)
+        atomic_write_file(full_path, new_content)
         modified_files[filepath] = new_content
         return f"Patch applied to '{filepath}'. Call recompile to verify it fixed the failure."
 

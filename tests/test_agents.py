@@ -280,11 +280,54 @@ async def test_fill_missing_content_only_calls_for_missing_entries():
     assert files_by_path["pom.xml"] == "<project>existing</project>"
     assert files_by_path["src/main/java/com/example/App.java"] == "package com.example;\npublic class App {}"
 
-    # The per-file call for App.java should mention pom.xml as a sibling file in this batch.
+    # The per-file call for App.java should show pom.xml's REAL content (already
+    # written earlier in this same batch, via the pass-through path), not just its
+    # bare filename - 2026-08-15 fix: cross-file consistency (packages, class/method
+    # signatures) requires actually seeing a sibling's content, not just knowing it
+    # exists (confirmed live as the root cause of a real, repeated compile failure -
+    # see kriya/agents/agent.py's own comment at this call site).
     second_call_args = llm.complete.call_args_list[1]
     file_prompt = second_call_args[0][1]
-    assert "Other Files In This Batch" in file_prompt
+    assert "Already-Written File This Batch" in file_prompt
     assert "pom.xml" in file_prompt
+    assert "<project>existing</project>" in file_prompt
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_shows_freshly_generated_sibling_content_not_just_name():
+    """Regression test for a real, live-diagnosed bug (2026-08-15, ignite_qpid_protocol
+    eval run): TWO files needing fresh generation in the SAME batch, not just a
+    pass-through entry - Protocol.java generated first, then ProtocolParser.java. The
+    second call must see the FIRST file's actual generated content (its real package
+    declaration), not just its bare filename - confirmed live as the direct cause of
+    a real, repeated compile failure: two independently-generated files each invented
+    a plausible-but-inconsistent package with nothing to reconcile them, because
+    neither ever saw the other's real content."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    protocol_content = "package com.example;\npublic class Protocol {}"
+    llm.complete = AsyncMock(side_effect=[
+        protocol_content,
+        "package com.example.protocol;\npublic class ProtocolParser {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    file_entries = [
+        {"filepath": "Protocol.java", "content": None, "edits": None},
+        {"filepath": "ProtocolParser.java", "content": None, "edits": None},
+    ]
+    await dev._fill_missing_content(
+        file_entries, "Task", "Design", "Existing code", None, None, None, None,
+    )
+
+    second_call_prompt = llm.complete.call_args_list[1][0][1]
+    assert "Already-Written File This Batch" in second_call_prompt
+    assert protocol_content in second_call_prompt
+    # Not yet generated at the time of the FIRST call - must fall back to a bare
+    # filename, since there's genuinely nothing to show yet.
+    first_call_prompt = llm.complete.call_args_list[0][0][1]
+    assert "Other Files In This Batch, Not Yet Written" in first_call_prompt
+    assert "ProtocolParser.java" in first_call_prompt
 
 @pytest.mark.asyncio
 async def test_run_generation_with_known_target_files_skips_file_list_call():
