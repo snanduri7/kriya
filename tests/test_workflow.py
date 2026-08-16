@@ -7968,6 +7968,54 @@ def test_find_edits_ignoring_own_diagnosis_still_flags_a_genuine_multi_edit_no_o
     assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is not None
 
 
+def test_find_edits_ignoring_own_diagnosis_recognizes_a_deletion_shaped_fix():
+    """Regression test for a second, distinct false-positive bug found live,
+    2026-08-16 (ignite_qpid_person, run b-10a) - different from the
+    multi-edit-poisoning bug fixed above. A diagnosis that corrects a WRONG
+    qualified identifier to a RIGHT one (a deletion/substitution, not an
+    addition) never satisfies the additive signal (a)/(b): every quoted
+    fragment of a dotted identifier being shortened - "IgniteCache",
+    "org.apache.ignite.cache", "org.apache.ignite" - is trivially a
+    substring of BOTH the old and new text, so nothing reads as genuinely
+    "new." Real analysis text from the incident, reproduced verbatim -
+    correcting `import org.apache.ignite.cache.IgniteCache;` to
+    `import org.apache.ignite.IgniteCache;` is a completely correct fix and
+    must NOT be flagged as a mismatch."""
+    analysis = (
+        "The error occurs because the code imports `org.apache.ignite.cache.IgniteCache` on "
+        "line 6, but according to the engineering skill conventions for Ignite, `IgniteCache` "
+        "is not located in the `org.apache.ignite.cache` package as incorrectly imported. The "
+        "correct import location for `IgniteCache` is the top-level `org.apache.ignite` "
+        "package. This is a specific, documented fact in the Ignite skill conventions that was "
+        "missed in the original code. The fix requires changing the import statement to use "
+        "the correct package path."
+    )
+    edits = [{
+        "search": "import org.apache.ignite.cache.IgniteCache;",
+        "replace": "import org.apache.ignite.IgniteCache;",
+    }]
+    assert find_edits_ignoring_own_diagnosis(
+        analysis, edits, None, "import org.apache.ignite.cache.IgniteCache;"
+    ) is None
+
+
+def test_find_edits_ignoring_own_diagnosis_deletion_signal_still_flags_a_true_no_op():
+    # Companion negative case - the SAME import left completely unchanged
+    # must still be flagged, not waved through just because the wrong,
+    # fully-qualified quote happens to appear in the (unchanged) search text.
+    analysis = (
+        "The error occurs because the code imports `org.apache.ignite.cache.IgniteCache` on "
+        "line 6. The correct import location is the top-level `org.apache.ignite` package."
+    )
+    edits = [{
+        "search": "import org.apache.ignite.cache.IgniteCache;",
+        "replace": "import org.apache.ignite.cache.IgniteCache;",
+    }]
+    assert find_edits_ignoring_own_diagnosis(
+        analysis, edits, None, "import org.apache.ignite.cache.IgniteCache;"
+    ) is not None
+
+
 # --- find_edits_ignoring_own_diagnosis(): the "removed the old code too" signal ---
 
 def test_find_edits_ignoring_own_diagnosis_flags_a_stale_removal():

@@ -759,7 +759,33 @@ def find_edits_ignoring_own_diagnosis(
         # surrounding statement was JUST that quote, which is exactly the
         # real wrap shape (search: "X", replace: "print(X)") and excludes a
         # multi-token old_text merely containing q somewhere.
-        if any(q in replace and (q not in search or q == search.strip()) for search, replace in pairs):
+        #
+        # THIRD signal (2026-08-16) - a "disappearance" check, sibling to the
+        # ADDITIVE signal above but for the opposite shape: a diagnosis that
+        # names the WRONG value being corrected to a right one (a deletion/
+        # substitution, not an addition) never satisfies signal (a)/(b) at
+        # all, because every quoted fragment of a dotted/qualified identifier
+        # being shortened is trivially a substring of BOTH the old and new
+        # text - there's no genuinely "new" token to find. Found live,
+        # 2026-08-16 (ignite_qpid_person, run b-10a): "the code imports
+        # `org.apache.ignite.cache.IgniteCache`... the correct import
+        # location... is the top-level `org.apache.ignite` package" -
+        # correcting `import org.apache.ignite.cache.IgniteCache;` to
+        # `import org.apache.ignite.IgniteCache;` is a completely correct,
+        # real fix, but flagged as a mismatch because "IgniteCache",
+        # "org.apache.ignite.cache", and "org.apache.ignite" are all
+        # substrings of the ORIGINAL (wrong) import too. The one quote that
+        # DOES prove something happened is the full wrong path itself,
+        # `org.apache.ignite.cache.IgniteCache` - present in this pair's
+        # search, gone from this pair's replace. Scoped to the SAME pair
+        # (not the flat-joined pools, same reasoning as the two signals
+        # above) so an unrelated edit elsewhere can't manufacture a false
+        # "disappearance" either.
+        if any(
+            (q in replace and (q not in search or q == search.strip()))
+            or (q in search and q not in replace)
+            for search, replace in pairs
+        ):
             return None
 
     quoted_desc = ", ".join(f"`{q}`" for q in quoted)
