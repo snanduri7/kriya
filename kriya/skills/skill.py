@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 from pydantic import BaseModel, Field
 
+from kriya.analyzer.analyzer import RepositoryModel
+
 logger = logging.getLogger(__name__)
 
 def get_global_skills_dir() -> str:
@@ -213,15 +215,23 @@ def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> None:
 
 
 def parse_version_parts(v_str: str) -> Tuple[int, int, int]:
-    """Helper to parse a version string into (major, minor, patch) integer tuple."""
+    """Helper to parse a version string into (major, minor, patch) integer tuple.
+
+    Each dot-separated part's own LEADING digit run is used, ignoring
+    whatever comes after it - a pre-release/build qualifier attached
+    directly to a numeric part (e.g. the "3-SNAPSHOT" in "1.2.3-SNAPSHOT",
+    or "0-rc1" in "1.0.0-rc1") must not zero out that whole component.
+    Previously a whole-string trailing-non-digit strip only worked when the
+    qualifier was on the LAST part with nothing but non-digits after it -
+    "1.2.3-SNAPSHOT" ends in a letter, so that strip left "3-SNAPSHOT"
+    attached, int() raised, and the entire patch number silently coerced to
+    0 (2026-08-12 SME review) - not just a precision loss, a genuinely wrong
+    major/minor/patch component."""
     parts = []
     cleaned = re.sub(r'^[^\d]+', '', v_str)
-    cleaned = re.sub(r'[^\d]+$', '', cleaned)
     for part in cleaned.split('.'):
-        try:
-            parts.append(int(part))
-        except ValueError:
-            parts.append(0)
+        match = re.match(r'^(\d+)', part)
+        parts.append(int(match.group(1)) if match else 0)
     while len(parts) < 3:
         parts.append(0)
     return tuple(parts[:3])
@@ -230,13 +240,19 @@ def is_version_supported(ver_str: str, range_str: str) -> bool:
     """
     Checks if ver_str satisfies the range_str.
     Supports operators: >=, <=, >, <, ==, !=, *
-    Example ranges: ">=2.15.0 <3.0.0", "==2.18.0"
+    Example ranges: ">=2.15.0 <3.0.0", ">=2.15.0,<3.0.0", "==2.18.0"
     """
     if not range_str or range_str.strip() == "*":
         return True
-    
+
     version = parse_version_parts(ver_str)
-    conditions = range_str.strip().split()
+    # Split on whitespace OR commas - a comma-separated range with no space
+    # (">=2.15.0,<3.0.0", a natural way to write it) used to become ONE
+    # token; re.match below only ever consumes the FIRST bound from that
+    # token and silently ignores everything after the comma via re.match's
+    # partial-match semantics, so the upper bound never applied at all
+    # (2026-08-12 SME review).
+    conditions = [c for c in re.split(r"[\s,]+", range_str.strip()) if c]
     for cond in conditions:
         match = re.match(r"^([>=<!\s]*)([0-9\.]+)", cond.strip())
         if not match:
@@ -265,6 +281,21 @@ def is_version_supported(ver_str: str, range_str: str) -> bool:
                 return False
     return True
 
+
+def fact_match(skill: "Skill", repo_model: RepositoryModel) -> bool:
+    """Does any of this skill's tags substring-match a dependency or framework the
+    repo analyzer actually found in the target repo? Extracted from the inline check
+    that used to live only in kriya/workflow/workflow.py's skill-activation loop, so
+    other consumers (e.g. the repo-manifest knowledge channel) share one implementation
+    instead of a second copy that could silently drift from it."""
+    for tag in skill.tags:
+        tag_lower = tag.lower()
+        if any(tag_lower in dep.lower() for dep in repo_model.dependencies):
+            return True
+        if any(tag_lower in f.lower() for f in repo_model.frameworks):
+            return True
+    return False
+
 class Skill(BaseModel):
     name: str = Field(description="Name of the skill.")
     description: str = Field(description="Short summary of the skill's purpose.")
@@ -289,25 +320,36 @@ class SkillEngine:
 
     def __init__(self, skills_dir: str, load_global: bool = True) -> None:
         self.skills_dirs = []
-        
+
         # 1. Determine Kriya Installation Directory
         KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         global_skills = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, "skills"))
-        
+
         # 2. Add global skills first (lowest precedence) if load_global is True
         if load_global and os.path.exists(global_skills):
             self.skills_dirs.append(global_skills)
-            
-        # 3. Add local/supplied skills directory
-        supplied_dir = os.path.abspath(skills_dir)
-        if supplied_dir not in self.skills_dirs:
-            self.skills_dirs.append(supplied_dir)
-            
-        # 4. Add CWD-based skills directory if present and different (only if load_global is True)
+
+        # 3. Add the CWD-based skills directory (an IMPLICIT guess, used when
+        # a project's config doesn't set paths.skills explicitly) before the
+        # explicitly supplied directory, not after - found live, 2026-08-12
+        # (SME architecture review): discover_and_load() below documents
+        # "later paths override earlier ones" as deliberate precedence, but
+        # this method previously added supplied_dir BEFORE local_cwd_skills,
+        # so a same-named skill present in both silently let the implicit
+        # CWD guess win over an explicitly configured paths.skills - the
+        # opposite of expected precedence whenever supplied_dir differs from
+        # CWD/skills (e.g. an absolute path elsewhere).
         local_cwd_skills = os.path.abspath(os.path.join(os.getcwd(), "skills"))
         if load_global and os.path.exists(local_cwd_skills) and local_cwd_skills not in self.skills_dirs:
             self.skills_dirs.append(local_cwd_skills)
-            
+
+        # 4. Add the explicitly supplied skills directory LAST (highest
+        # precedence) - an explicit configuration should always win over an
+        # implicit guess.
+        supplied_dir = os.path.abspath(skills_dir)
+        if supplied_dir not in self.skills_dirs:
+            self.skills_dirs.append(supplied_dir)
+
         self.skills_dir = supplied_dir
         self._skills: Dict[str, Skill] = {}
 

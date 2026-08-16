@@ -1,0 +1,41 @@
+[
+  {
+    "backend": "omlx (OpenAI-compatible API)",
+    "prompt_id": "short_fn",
+    "ttft_s": 0.68,
+    "total_time_s": 1.567,
+    "prompt_tokens": 37,
+    "prompt_tps": 54.3,
+    "generation_tokens": 63,
+    "generation_tps": 72.7,
+    "cached_tokens": 0,
+    "peak_memory_gb": null,
+    "output_text": "```python\ndef is_palindrome(s: str) -> bool:\n    # Convert to lowercase and keep only alphanumeric characters\n    cleaned = ''.join(char.lower() for char in s if char.isalnum())\n    \n    # Check if the cleaned string equals its reverse\n    return cleaned == cleaned[::-1]\n```"
+  },
+  {
+    "backend": "omlx (OpenAI-compatible API)",
+    "prompt_id": "medium_refactor",
+    "ttft_s": 0.47,
+    "total_time_s": 2.791,
+    "prompt_tokens": 55,
+    "prompt_tps": 117.9,
+    "generation_tokens": 161,
+    "generation_tps": 69.3,
+    "cached_tokens": 0,
+    "peak_memory_gb": null,
+    "output_text": "```python\nfrom collections import OrderedDict\n\nclass LRUCache:\n    def __init__(self, capacity: int):\n        self.capacity = capacity\n        self.cache = OrderedDict()\n    \n    def get(self, key: int) -> int:\n        if key in self.cache:\n            # Move to end (mark as recently used)\n            self.cache.move_to_end(key)\n            return self.cache[key]\n        return -1\n    \n    def put(self, key: int, value: int) -> None:\n        if key in self.cache:\n            # Update existing key\n            self.cache.move_to_end(key)\n        elif len(self.cache) >= self.capacity:\n            # Remove least recently used (first item)\n            self.cache.popitem(last=False)\n        \n        self.cache[key] = value\n```"
+  },
+  {
+    "backend": "omlx (OpenAI-compatible API)",
+    "prompt_id": "longer_task",
+    "ttft_s": 0.58,
+    "total_time_s": 9.768,
+    "prompt_tokens": 91,
+    "prompt_tps": 155.9,
+    "generation_tokens": 607,
+    "generation_tps": 66.1,
+    "cached_tokens": 0,
+    "peak_memory_gb": null,
+    "output_text": "```python\nfrom dataclasses import dataclass\nfrom typing import Optional, List, Tuple\nimport heapq\nfrom enum import Enum\nfrom typing import List, Tuple\nfrom enum import Enum\n\nclass TaskStatus(Enum):\n    PENDING = \"pending\"\n    IN_PROGRESS = \"in_progress\"\n    DONE = \"done\"\n\n@dataclass\nclass Task:\n    id: str\n    payload: str\n    priority: int\n    status: TaskStatus = TaskStatus.PENDING\n\nclass TaskQueue:\n    def __init__(self):\n        self._queue: List[Tuple[int, int, str, Task]] = []\n        self._tasks: dict[str, Task] = {}\n        self._next_id = 0\n\n    def enqueue(self, payload: str, priority: int = 0) -> str:\n        \"\"\"Add a new task to the queue.\"\"\"\n        task_id = str(self._next_id)\n        self._next_id += 1\n        task = Task(id=task_id, payload=payload, priority=priority, status=TaskStatus.PENDING)\n        self._tasks[task_id] = task\n        heapq.heappush(self._queue, (task.priority, self._next_id, task_id))\n        return task_id\n\n    def dequeue(self) -> Optional[Task]:\n        \"\"\"Get the highest priority task from the queue.\"\"\"\n        if not self._queue:\n            return None\n        priority, _, task_id = heapq.heappop(self._queue)\n        task = self._tasks.get(task_id)\n        if task:\n            task.status = TaskStatus.IN_PROGRESS\n        return task\n\n    def mark_done(self, task_id: str) -> bool:\n        \"\"\"Mark a task as done.\"\"\"\n        task = self._tasks.get(task_id)\n        if task:\n            task.status = TaskStatus.DONE\n            return True\n        return False\n\nif __name__ == \"__main__\":\n    # Example 1: Basic usage\n    tq = TaskQueue()\n    \n    tq.enqueue(\"Process image\", priority=2)\n    tq.enqueue(\"Process text\", priority=1)\n    tq.enqueue(\"Process audio\", priority=3)\n\n    task = tq.dequeue()\n    print(f\"Processing task: {task.payload} (priority {task.priority})\")\n\n    tq.mark_done(task.id)\n    print(f\"Task status: {task.status.value}\")\n\n    # Example 2: Same priority tasks processed in FIFO order\n    tq2 = TaskQueue()\n    tq2.enqueue(\"Task 1\", priority=1)\n    tq2.enqueue(\"Task 2\", priority=1)\n    tq2.enqueue(\"Task 3\", priority=1)\n\n    task1 = tq2.dequeue()\n    task2 = tq2.dequeue()\n    \n    print(f\"First task dequeued: {task1.payload}\")\n    print(f\"Second task dequeued: {task2.payload}\")\n    print(f\"Task IDs: {task1.id}, {task2.id}\")\n```"
+  }
+]

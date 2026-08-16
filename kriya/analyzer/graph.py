@@ -5,9 +5,29 @@ import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
+from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
 from kriya.core.db import get_connection
 
 logger = logging.getLogger(__name__)
+
+# Relative confidence that a relation type reflects genuine relevance for
+# Graph RAG re-ranking (2026-08-12 SME review) - a direct import/inheritance
+# edge is a much stronger relevance signal than a generic call or an
+# annotation reference, so get_neighborhood() weights hits by this table
+# (divided by hop distance) instead of treating every relation type equally.
+_RELATION_WEIGHTS: Dict[str, float] = {
+    "imports": 1.0,
+    "inherits": 1.0,
+    "implements": 1.0,
+    "extends": 1.0,
+    "calls": 0.7,
+    "declares_bean": 0.6,
+    "references_bean": 0.6,
+    "annotated_with": 0.4,
+    "injects": 0.4,
+}
+_DEFAULT_RELATION_WEIGHT = 0.5
+
 
 class DependencyGraph:
     """SQLite-backed AST dependency knowledge graph compiler for multi-language repositories."""
@@ -56,7 +76,22 @@ class DependencyGraph:
                 type TEXT
             )
         """)
-        
+        # source_file: which file's parse produced this relation row - added
+        # after clear_file() (below) was found live to delete a DIFFERENT
+        # file's relations whenever two files happen to define a
+        # same-named symbol, since source/target are bare, unqualified
+        # names with no file scoping. Same defensive ALTER-TABLE pattern
+        # already used for files.hash above (SQLite has no "ADD COLUMN IF
+        # NOT EXISTS"). Pre-existing rows from before this migration have
+        # source_file=NULL - clear_file()'s fallback clause still handles
+        # those with the old (imprecise) name-based match, so a real
+        # re-index migrates them to the precise, file-scoped match.
+        try:
+            cursor.execute("ALTER TABLE relations ADD COLUMN source_file TEXT")
+        except Exception:
+            pass
+
+
         # Create indexes for blazing-fast lookup speeds
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbols_filepath ON symbols(filepath)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name)")
@@ -80,14 +115,30 @@ class DependencyGraph:
         return row[0] if row and row[0] else None
 
     def clear_file(self, filepath: str) -> None:
-        """Delete old symbols and relationships associated with a file."""
+        """Delete old symbols and relationships associated with a file.
+
+        Relations are deleted by source_file when it's populated (precise -
+        only this file's own relation rows) - found live, 2026-08-12 (SME
+        architecture review): the previous NAME-based match (still applied
+        below as a fallback for pre-migration rows) deletes ANY relation row
+        whose source/target matches a symbol name defined in this file, even
+        one that actually belongs to a DIFFERENT file's same-named symbol
+        (e.g. two Java files each defining a method called "handle") -
+        re-indexing one file silently corrupted the other's dependency-graph
+        relations, with no error surfaced."""
         cursor = self.conn.cursor()
         # Delete relations first (while symbols still exist in the database!)
         cursor.execute("""
-            DELETE FROM relations 
-            WHERE source IN (SELECT name FROM symbols WHERE filepath = ?)
-               OR target IN (SELECT name FROM symbols WHERE filepath = ?)
-        """, (filepath, filepath))
+            DELETE FROM relations
+            WHERE source_file = ?
+               OR (
+                    source_file IS NULL
+                    AND (
+                        source IN (SELECT name FROM symbols WHERE filepath = ?)
+                        OR target IN (SELECT name FROM symbols WHERE filepath = ?)
+                    )
+                  )
+        """, (filepath, filepath, filepath))
         cursor.execute("DELETE FROM symbols WHERE filepath = ?", (filepath,))
         cursor.execute("DELETE FROM files WHERE filepath = ?", (filepath,))
         self.conn.commit()
@@ -131,9 +182,9 @@ class DependencyGraph:
             
         for rel in relations:
             cursor.execute("""
-                INSERT INTO relations (source, target, type)
-                VALUES (?, ?, ?)
-            """, (rel["source"], rel["target"], rel["type"]))
+                INSERT INTO relations (source, target, type, source_file)
+                VALUES (?, ?, ?, ?)
+            """, (rel["source"], rel["target"], rel["type"], rel_path))
             
         self.conn.commit()
 
@@ -174,8 +225,34 @@ class DependencyGraph:
         rows = cursor.fetchall()
         return [r[0] for r in rows]
 
-    def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2) -> List[Dict[str, Any]]:
-        """Perform bounded BFS traversal on the symbol relationship graph."""
+    def get_symbols_for_file(self, filepath: str) -> List[str]:
+        """Fetch the real symbol names (classes/methods/functions/beans) this
+        file's own parse produced - the file's actual identity in the graph,
+        rather than a filename-stem guess (2026-08-12 SME review: the
+        previous Graph RAG seeding used `os.path.splitext(basename(f))[0]`,
+        which only happens to match a real symbol for languages/conventions
+        where the public type name equals the filename)."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT name FROM symbols WHERE filepath = ?", (filepath,))
+        return [r[0] for r in cursor.fetchall()]
+
+    def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2, max_results: int = 30) -> List[Dict[str, Any]]:
+        """Perform bounded BFS traversal on the symbol relationship graph.
+
+        Each hit carries a "score" (relation-type weight / hop distance, see
+        _RELATION_WEIGHTS) so callers can prioritize which related files are
+        actually worth keeping when a token budget is tight, instead of
+        treating every hop-2 annotation reference the same as a direct
+        hop-1 import. Results are sorted by score descending, then capped
+        at `max_results` - previously unbounded, so a common method name
+        shared across many unrelated classes (e.g. "process", "save") could
+        pull in every unrelated definition sharing that bare name as
+        "related" context, since BFS matches are keyed on unqualified
+        symbol names with no file/class scoping at all (2026-08-12 SME
+        review). The cap applies to the final, score-sorted output, not the
+        internal traversal itself - the BFS still explores as far as
+        max_hops allows to find the genuinely highest-scoring hits, only
+        the returned list is bounded."""
         if not seed_symbols:
             return []
             
@@ -216,15 +293,18 @@ class DependencyGraph:
                     queue.append((neighbor, hop + 1))
                     
                 if filepath:
+                    weight = _RELATION_WEIGHTS.get(rel_type, _DEFAULT_RELATION_WEIGHT)
                     results.append({
                         "name": neighbor,
                         "filepath": filepath,
                         "relation_type": rel_type,
                         "symbol_type": sym_type,
-                        "hop": hop + 1
+                        "hop": hop + 1,
+                        "score": weight / (hop + 1)
                     })
-                    
-        return results
+
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results[:max_results]
 
     def close(self) -> None:
         if hasattr(self, "conn") and self.conn:
@@ -304,7 +384,7 @@ class DependencyGraph:
             r"(?:\s+extends\s+(\w+))?"
             r"(?:\s+implements\s+([\w\s,]+))?"
         )
-        method_regex = re.compile(r"(?:public|protected|private|static|\s)+[\w<>]+\s+(\w+)\s*\([^\)]*\)\s*\{?")
+        method_regex = re.compile(JAVA_METHOD_SIGNATURE_CORE + r"\s*\{?")
         import_regex = re.compile(r"import\s+([\w\.\*]+);")
         field_regex = re.compile(r"(?:public|protected|private|static|final|\s)*([\w<>\?]+)\s+(\w+)\s*;")
         

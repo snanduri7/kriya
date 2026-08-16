@@ -100,11 +100,26 @@ class PluginManager:
                     logger.warning(f"Module '{folder}' loaded, but no subclass of BasePlugin was found.")
                     
             except Exception as e:
+                # Fault-isolated: one plugin folder failing to import (a
+                # syntax error, a bad dependency) must not prevent every
+                # OTHER folder from being discovered - unlike initialize()
+                # (see _initialize_plugins_tolerant() in cli.py), nothing
+                # wraps this call at any real call site, so a re-raise here
+                # previously meant a single broken plugin could silently
+                # take down discovery of Kriya's own built-in tools plugin
+                # too (2026-08-12 SME review).
                 logger.error(f"Failed to load plugin from '{folder}': {e}", exc_info=True)
-                raise e
+                continue
 
     async def initialize_all(self) -> None:
-        """Initialize all loaded plugins."""
+        """Initialize all loaded plugins, fail-fast: the first plugin whose
+        initialize() raises aborts every later plugin's initialize() too.
+        Deliberately not the behavior used anywhere in production today -
+        every real cli.py call site uses _initialize_plugins_tolerant()
+        instead (fault-isolated, one plugin's failure doesn't affect
+        others). Kept as a fail-fast option for a caller that genuinely
+        wants "all plugins must succeed or none are considered ready", not
+        currently exercised outside its own test."""
         for name, plugin in self._plugins.items():
             try:
                 logger.info(f"Initializing plugin '{name}'...")

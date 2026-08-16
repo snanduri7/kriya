@@ -182,9 +182,10 @@ def test_review_multiple_files_over_budget_splits_into_batches(tmp_path):
     to multiple separate review calls (each within budget) rather than either
     silently truncating the combined prompt or crashing - every file must
     actually reach the model in some call, clearly labeled which batch."""
-    (tmp_path / "kriya.yaml").write_text("llm:\n  context_window: 500\n")
-    # ~30 lines / ~150 words / ~195 estimated tokens each - comfortably under
-    # the 375-token budget alone, but two of them combined (~390) exceed it.
+    (tmp_path / "kriya.yaml").write_text("llm:\n  context_window: 310\n")
+    # ~30 lines, one file's wrapped review blob estimates to ~157 tokens -
+    # comfortably under the 232-token budget (0.75 * 310) alone, but two of
+    # them combined (~314) exceed it.
     padding = "\n".join(f"x_{i} = {i}  # padding" for i in range(30))
     (tmp_path / "a.py").write_text(padding)
     (tmp_path / "b.py").write_text(padding.replace("x_", "y_"))
@@ -221,6 +222,28 @@ def test_review_small_files_still_use_a_single_combined_call(tmp_path):
     assert mock_complete.await_count == 1
     prompt = mock_complete.await_args_list[0][0][1]
     assert "a.py" in prompt and "b.py" in prompt
+
+
+def test_review_prompt_frames_absence_of_a_goal(tmp_path):
+    """Stage 6 SME review, Finding 3 (2026-08-15): unlike the embedded pipeline's
+    Reviewer stage, which always prefixes "Goal: {goal}...", the standalone command
+    sent bare file blobs with no framing - a real mismatch with ReviewerAgent's own
+    system prompt, which assumes a goal exists to calibrate its "don't reject for
+    missing tests" leniency against. Must now tell the model explicitly there's no
+    goal, rather than leaving it to guess or invent requirements."""
+    (tmp_path / "app.py").write_text("def add(a, b):\n    return a + b\n")
+
+    mock_complete = AsyncMock(return_value="Looks fine.")
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "app.py")])
+
+    assert res.exit_code == 0, res.output
+    prompt = mock_complete.call_args[0][1]
+    assert "No specific goal or task was provided" in prompt
+    assert "Do not invent or assume requirements" in prompt
+    assert "app.py" in prompt
 
 
 def test_review_stdout_contains_only_the_review_text(tmp_path):

@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+from typing import Optional
 
 from kriya.core.db import get_connection
 
@@ -31,40 +32,47 @@ class TraceLogger:
                 model_hops TEXT
             )
         """)
+        try:
+            cursor.execute("ALTER TABLE runs ADD COLUMN failure_category TEXT")
+        except Exception:
+            pass
         self.conn.commit()
 
     def log_run(
-        self, 
-        run_id: str, 
-        goal: str, 
-        duration_sec: float, 
-        attempts: int, 
-        status: str, 
+        self,
+        run_id: str,
+        goal: str,
+        duration_sec: float,
+        attempts: int,
+        status: str,
         files_modified: list,
         retrieved_chunks: list = None,
         active_skills: list = None,
         prompt_rendered: str = "",
         gate_outcomes: list = None,
-        model_hops: list = None
+        model_hops: list = None,
+        failure_category: Optional[str] = None
     ) -> None:
         cursor = self.conn.cursor()
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         files_str = ",".join(files_modified)
-        
+
         chunks_json = json.dumps(retrieved_chunks or [])
         skills_str = ",".join(active_skills or [])
         gates_json = json.dumps(gate_outcomes or [])
         hops_json = json.dumps(model_hops or [])
-        
+
         cursor.execute("""
             INSERT OR REPLACE INTO runs (
                 run_id, timestamp, goal, duration_sec, attempts, status, files_modified,
-                retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops
+                retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops,
+                failure_category
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             run_id, timestamp, goal, duration_sec, attempts, status, files_str,
-            chunks_json, skills_str, prompt_rendered, gates_json, hops_json
+            chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
+            failure_category
         ))
         self.conn.commit()
 

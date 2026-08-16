@@ -53,3 +53,40 @@ class TestPlugin(BasePlugin):
     await pm.shutdown_all()
     with pytest.raises(Exception):
         kernel.registry.get("test_cat", "test_item")
+
+
+def test_discover_and_load_isolates_a_broken_plugin_folder(tmp_path):
+    """Regression test for a finding from the 2026-08-12 SME review: a
+    plugin folder that fails to import (a real syntax error, a bad
+    dependency) previously re-raised and aborted discovery of every OTHER
+    folder too - and unlike initialize(), nothing wraps discover_and_load()
+    at any real cli.py call site, so this could silently prevent Kriya's own
+    built-in tools plugin from ever being registered."""
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+
+    broken_pkg = plugin_dir / "broken_plugin"
+    broken_pkg.mkdir()
+    (broken_pkg / "__init__.py").write_text("this is not valid python(\n")
+
+    good_pkg = plugin_dir / "good_plugin"
+    good_pkg.mkdir()
+    (good_pkg / "__init__.py").write_text(
+        "from kriya.plugins.plugin import BasePlugin\n\n"
+        "class GoodPlugin(BasePlugin):\n"
+        "    @property\n"
+        "    def name(self) -> str:\n"
+        "        return 'good_plugin'\n\n"
+        "    @property\n"
+        "    def version(self) -> str:\n"
+        "        return '1.0.0'\n"
+    )
+
+    kernel = Kernel()
+    pm = PluginManager(kernel, str(plugin_dir))
+
+    pm.discover_and_load(enabled_plugins=[])
+
+    loaded = pm.list_plugins()
+    assert len(loaded) == 1
+    assert loaded[0].name == "good_plugin"

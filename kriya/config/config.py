@@ -19,6 +19,20 @@ class LLMConfig(BaseModel):
     context_window: int = Field(default=32768)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
+    # Applied ONLY to Developer generation calls that are directly responding to a
+    # real prior Quality Gate failure (the same scope as prior_error_context's
+    # fix-analysis instruction) - None (default) means no override, unchanged
+    # behavior. A real, cited finding motivated this as opt-in rather than
+    # lowering `temperature` globally: code-gen success rate measured dropping
+    # ~25.7% going from 0.0->0.2 temperature for only a ~9.6% diversity gain
+    # (AAAI-38 adaptive-temperature-sampling study) - the opposite of "add
+    # randomness to shake a stuck retry loose." Deliberately NOT changed as the
+    # global default: `temperature` defaults to 0.7 in default_config.yaml with
+    # its own documented rationale (avoiding MoE repetition loops on longer,
+    # from-scratch attempt-1 generations) that this finding doesn't touch or
+    # contradict - a retry's typically-shorter, narrower regeneration is a
+    # different case, not evidence the global default should change too.
+    retry_temperature: Optional[float] = Field(default=None)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
@@ -69,6 +83,32 @@ class AutonomyConfig(BaseModel):
     # firing it anyway and silently discarding the result. Set True only if you've
     # accepted unattended outbound search as part of your threat model.
     web_lookup_auto_approve: bool = Field(default=False)
+    # Off by default for the same reason as web_lookup_enabled above: this activates
+    # a genuinely new capability (the Developer's own model gets a bounded native
+    # tool-calling loop against the sandbox worktree on a compile failure, before
+    # falling back to today's full-regeneration retry) rather than tuning an existing
+    # one. Native tool-calling is confirmed reliable only for SMALL tool-call
+    # arguments on local models (spikes/tool_call_developer/README.md) - the loop's
+    # toolset (kriya/workflow/self_correction.py) is deliberately restricted to
+    # small-argument-only actions on files already in the sandbox, never full file
+    # content and never a new file, so this stays a narrow, additive recovery path,
+    # not a parallel generation architecture.
+    self_correction_loop_enabled: bool = Field(default=False)
+    self_correction_loop_max_turns: int = Field(default=4)
+    # Default 1 = today's exact behavior (a single first attempt, unchanged). A value
+    # above 1 tries that many INDEPENDENT full-set candidates for the very first
+    # generation attempt only (never on later retries, which already have real error
+    # grounding to react to) before falling into the normal retry loop - see
+    # kriya/workflow/best_of_n.py. Deliberately sequential, never parallel: a goal
+    # binding real fixed resources (an embedded broker's port, an Ignite node's
+    # discovery/comm ports) would have two candidates' generated apps port-conflict
+    # under real parallel execution, and local model serving typically doesn't
+    # meaningfully parallelize multiple requests against one loaded model anyway - so
+    # peak resource usage at any moment stays identical to a normal single-attempt
+    # run; the only cost is added wall-clock in the bounded worst case. Only takes
+    # effect when a real isolated worktree sandbox exists (see best_of_n.py's own
+    # guard) - never risks writing a discarded candidate's files into the real project.
+    best_of_n_first_attempt: int = Field(default=1)
 
 class SearchConfig(BaseModel):
     # Empty by default - live lookup stays fully inert unless a project explicitly

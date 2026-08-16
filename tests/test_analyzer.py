@@ -23,6 +23,53 @@ def test_analyzer_python_project(tmp_path):
     assert model.languages == {"Python": 100.0}
     assert "FastAPI" in model.frameworks
     assert "pytest" in model.testing_frameworks
+
+
+def test_analyzer_captures_dependency_versions_across_manifest_formats(tmp_path):
+    """dependency_versions is additive - requirements.txt/package.json/pom.xml/
+    build.gradle all already parsed versions and threw them away before this field
+    existed; this locks in that they're now captured without changing the existing
+    name-only `dependencies` field's behavior."""
+    project_dir = tmp_path / "multi_manifest_project"
+    project_dir.mkdir()
+
+    (project_dir / "requirements.txt").write_text("requests>=2.28,<3.0\npytest==7.4.0\n")
+    (project_dir / "package.json").write_text('{"dependencies": {"react": "^18.2.0"}}')
+    (project_dir / "pom.xml").write_text(
+        "<project><dependencies>"
+        "<dependency><groupId>org.apache.ignite</groupId><artifactId>ignite-core</artifactId>"
+        "<version>2.18.0</version></dependency>"
+        "</dependencies></project>"
+    )
+    (project_dir / "build.gradle").write_text(
+        "dependencies { implementation 'org.apache.qpid:qpid-jms-client:1.9.0' }"
+    )
+
+    analyzer = RepositoryAnalyzer(str(project_dir))
+    model = analyzer.analyze()
+
+    # dependencies (name-only) is untouched, existing behavior - note its pre-existing
+    # build.gradle regex never matched a 3-part 'group:artifact:version' coordinate at
+    # all (confirmed separately), so qpid-jms-client legitimately isn't in this set;
+    # dependency_versions uses its own, more precise triple-capturing regex below.
+    assert set(model.dependencies) >= {"requests", "pytest", "react", "ignite-core"}
+    assert model.dependency_versions["requests"] == "2.28"
+    assert model.dependency_versions["pytest"] == "7.4.0"
+    assert model.dependency_versions["react"] == "^18.2.0"
+    assert model.dependency_versions["ignite-core"] == "2.18.0"
+    assert model.dependency_versions["qpid-jms-client"] == "1.9.0"
+
+
+def test_analyzer_dependency_versions_empty_when_no_version_present(tmp_path):
+    project_dir = tmp_path / "bare_requirements_project"
+    project_dir.mkdir()
+    (project_dir / "requirements.txt").write_text("requests\n")
+
+    analyzer = RepositoryAnalyzer(str(project_dir))
+    model = analyzer.analyze()
+
+    assert "requests" in model.dependencies
+    assert "requests" not in model.dependency_versions
     assert "Flat/Modular Package layout" in model.architecture or "Standard Source" in model.architecture
 
 def test_analyzer_node_project(tmp_path):
@@ -56,6 +103,71 @@ def test_analyzer_node_project(tmp_path):
     assert "React" in model.frameworks
     assert "jest" in model.testing_frameworks
     assert "MVC (Model-View-Controller)" in model.architecture
+
+def test_analyzer_ignores_empty_top_level_directories(tmp_path):
+    """Regression test for a real bug found live (2026-08-07,
+    django_healthcheck_gap): an EMPTY directory used to be reported as a
+    "top_level_folder" purely by being walked into, with no check for
+    whether it actually contained anything. Architect's own reasoning
+    (visible in the log) explicitly cited "there's a skills directory" as
+    evidence a Django app already existed in a fresh, otherwise-empty repo -
+    it didn't, the directory was completely empty, and the model went on to
+    also assume manage.py existed and tried extending a project that was
+    never created. An empty directory must never be reported as meaningful
+    project structure."""
+    project_dir = tmp_path / "fresh_project"
+    project_dir.mkdir()
+    (project_dir / "README.md").write_text("placeholder\n")
+    (project_dir / "empty_folder").mkdir()
+
+    model = RepositoryAnalyzer(str(project_dir)).analyze()
+
+    assert model.project_structure["top_level_folders"] == []
+
+def test_analyzer_excludes_kriyas_own_reserved_directories(tmp_path):
+    """Kriya's own paths.skills/memory/logs directories (default names) must
+    never be presented to the model as if they were the user's application
+    structure, even when they genuinely contain real content (e.g. skill
+    rule files after a first successful run) - they're Kriya's own
+    bookkeeping, not part of the project being generated. Directly
+    motivated by the same live bug as the empty-directory case above: the
+    model concluded a "skills" Django app already existed there."""
+    project_dir = tmp_path / "fresh_project"
+    project_dir.mkdir()
+    (project_dir / "README.md").write_text("placeholder\n")
+    for reserved in ("skills", "memory", "logs"):
+        reserved_dir = project_dir / reserved
+        reserved_dir.mkdir()
+        (reserved_dir / "some_real_file.txt").write_text("real content\n")
+    (project_dir / "myapp").mkdir()
+    (project_dir / "myapp" / "views.py").write_text("# real application code\n")
+
+    model = RepositoryAnalyzer(str(project_dir)).analyze()
+
+    assert model.project_structure["top_level_folders"] == ["myapp"]
+
+def test_chunk_file_with_metadata_headers_java_ignores_braces_inside_string_literals():
+    """Regression test for a finding from the 2026-08-12 SME review: the
+    Java method-body brace counter was line.count("{")/line.count("}") with
+    no comment/string awareness, so a brace character INSIDE a string
+    literal (or comment) miscounted and could end a method chunk too early,
+    truncating the rest of the real method body."""
+    from kriya.analyzer.analyzer import chunk_file_with_metadata_headers
+
+    content = (
+        "package com.example;\n\n"
+        "public class Foo {\n"
+        "    public void bar() {\n"
+        '        String s = "unexpected } brace";\n'
+        "        int x = 1;\n"
+        "    }\n"
+        "}\n"
+    )
+    chunks = chunk_file_with_metadata_headers(content, "Foo.java")
+    method_chunks = [c for c in chunks if "Method: bar" in c["text"]]
+    assert len(method_chunks) == 1
+    assert "int x = 1;" in method_chunks[0]["text"]
+
 
 def test_chunk_file_syntactically():
     from kriya.analyzer.analyzer import chunk_file_syntactically

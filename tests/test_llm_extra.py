@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kriya.config import AppConfig
-from kriya.core.llm import LLMClient
+from kriya.core.llm import LLMClient, is_local_url
 
 
 @pytest.mark.asyncio
@@ -154,3 +154,147 @@ async def test_reasoning_model_retry_failure_propagates_original_style_error():
         with pytest.raises(Exception, match="second failure"):
             await llm.complete("system", "user", json_mode=True)
         assert mock_create.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_reasoning_model_does_not_retry_on_a_connection_or_auth_error():
+    """Regression test for a finding from the 2026-08-12 SME review: the
+    retry-without-response_format path previously triggered on ANY exception
+    from the first request, not just one that plausibly indicates
+    response_format/reasoning incompatibility - a connection-refused or
+    auth error got silently "retried" too, adding latency and reporting a
+    misleading root cause (the retry's own log message claims "may not
+    support JSON mode with reasoning", which isn't what actually failed)."""
+    import openai
+
+    cfg = AppConfig()
+    cfg.llm.reasoning = True
+    llm = LLMClient(cfg)
+
+    connection_error = openai.APIConnectionError(request=MagicMock())
+    mock_create = AsyncMock(side_effect=connection_error)
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        with pytest.raises(openai.APIConnectionError):
+            await llm.complete("system", "user", json_mode=True)
+        assert mock_create.call_count == 1  # no retry attempted
+
+
+@pytest.mark.asyncio
+async def test_reasoning_model_still_retries_on_an_unrecognized_exception():
+    """The exclusion list only rules out exception types clearly unrelated to
+    response_format (connection/timeout/auth/rate-limit/server errors) - an
+    unrecognized exception (e.g. a genuine backend rejection of the
+    combination) still gets the benefit of the doubt and retries, matching
+    test_reasoning_model_retries_once_without_response_format_on_failure
+    above but confirming this explicitly survives the new exclusion logic."""
+    cfg = AppConfig()
+    cfg.llm.reasoning = True
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(side_effect=[
+        ValueError("some other unexpected failure shape"),
+        _mock_response('["a.txt"]'),
+    ])
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete("system", "user", json_mode=True)
+        assert res == '["a.txt"]'
+        assert mock_create.call_count == 2
+
+
+def test_is_local_url_fails_closed_on_hostname_less_url():
+    """Regression test for a real bug found live, 2026-08-12 (SME architecture
+    review): a URL with no parseable hostname (e.g. a malformed/typo'd
+    base_url missing "http://") used to return True (treated as local/
+    allowed) - the opposite of the fail-closed behavior this function's own
+    except block already implements for every other failure mode, and a
+    direct contradiction of its role as a hard egress safety boundary."""
+    assert is_local_url("not-a-valid-url-at-all") is False
+    assert is_local_url("") is False
+    assert is_local_url("localhost:11434/v1") is False  # missing scheme -> no hostname parsed
+
+
+def test_is_local_url_still_allows_real_local_hosts():
+    assert is_local_url("http://localhost:11434/v1") is True
+    assert is_local_url("http://127.0.0.1:11434/v1") is True
+    assert is_local_url("http://my-machine.local:11434/v1") is True
+
+
+def test_is_local_url_still_rejects_real_remote_hosts():
+    assert is_local_url("http://api.openai.com/v1") is False
+
+
+def _mock_tool_call_response(tool_calls=None, content=""):
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = content
+    mock_response.choices[0].message.tool_calls = tool_calls
+    return mock_response
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_returns_tool_calls():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    raw_call = MagicMock()
+    raw_call.id = "call_1"
+    raw_call.function.name = "recompile"
+    raw_call.function.arguments = '{"foo": "bar"}'
+
+    mock_create = AsyncMock(return_value=_mock_tool_call_response(tool_calls=[raw_call]))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete_with_tools(
+            [{"role": "user", "content": "fix it"}],
+            [{"type": "function", "function": {"name": "recompile", "parameters": {}}}],
+        )
+        assert res["content"] == ""
+        assert res["tool_calls"] == [{"id": "call_1", "name": "recompile", "arguments": {"foo": "bar"}}]
+        assert mock_create.call_args[1].get("tools") is not None
+        assert mock_create.call_args[1].get("tool_choice") == "auto"
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_handles_empty_tool_calls():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_tool_call_response(tool_calls=None, content="all done"))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete_with_tools([{"role": "user", "content": "status?"}], [])
+        assert res == {"content": "all done", "tool_calls": []}
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_respects_egress_policy():
+    from kriya.core.llm import EgressViolationError
+
+    cfg = AppConfig()
+    cfg.autonomy.egress_policy = "local_only"
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock()
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        with pytest.raises(EgressViolationError):
+            await llm.complete_with_tools(
+                [{"role": "user", "content": "x"}], [], base_url_override="https://api.deepseek.com/v1",
+            )
+        mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_malformed_arguments_does_not_crash():
+    """Echoes this session's confirmed local-model failure mode - malformed/
+    truncated JSON even at small tool-call-argument scale - falling back to
+    {} rather than raising keeps one bad tool call from crashing the loop."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    raw_call = MagicMock()
+    raw_call.id = "call_1"
+    raw_call.function.name = "apply_patch"
+    raw_call.function.arguments = '{"filepath": "a.py", "edits": [truncated...'
+
+    mock_create = AsyncMock(return_value=_mock_tool_call_response(tool_calls=[raw_call]))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete_with_tools([{"role": "user", "content": "fix it"}], [])
+        assert res["tool_calls"] == [{"id": "call_1", "name": "apply_patch", "arguments": {}}]

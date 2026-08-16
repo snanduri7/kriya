@@ -6,7 +6,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 
@@ -56,11 +56,14 @@ async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dic
     """Attempts each discovered plugin's initialize() independently, so one
     broken plugin can't prevent the others - or their tools - from becoming
     available. Deliberately not PluginManager.initialize_all(), which raises
-    on the first failure and aborts before later plugins are even attempted;
-    that's the right behavior for the kernel-startup call sites that keep
-    using initialize_all() directly, but every command here needs to keep
-    working around one bad plugin. Returns {plugin_name: None-or-exception}
-    so a caller can report per-plugin status or just log failures and move on."""
+    on the first failure and aborts before later plugins are even attempted -
+    every real call site in this file uses this tolerant wrapper instead
+    (initialize_all() is fail-fast by design for a hypothetical caller that
+    wants it, not something anything in production actually calls today;
+    confirmed via a repo-wide search, corrected here 2026-08-12 after this
+    docstring previously claimed real "kernel-startup call sites" for it that
+    don't exist). Returns {plugin_name: None-or-exception} so a caller can
+    report per-plugin status or just log failures and move on."""
     results: Dict[str, Optional[Exception]] = {}
     for p in pm.list_plugins():
         try:
@@ -131,6 +134,29 @@ def main(ctx: click.Context, config: Optional[str]) -> None:
 def version() -> None:
     """Print the Kriya platform version."""
     click.echo(f"Kriya version: {__version__}")
+
+@main.command()
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
+def completion(shell: str) -> None:
+    """Print shell completion setup instructions for SHELL (bash/zsh/fish).
+
+    Click (this CLI's underlying framework) already generates a working
+    completion script for free via a magic env var - `kriya` itself needs no
+    completion-specific code at all. This command exists purely for
+    discoverability, since nothing else in the CLI surfaces that the
+    capability is already there. Architectural add-on from a 2026-08-12 SME
+    review."""
+    if shell == "fish":
+        eval_line = "_KRIYA_COMPLETE=fish_source kriya | source"
+        rc_file = "~/.config/fish/completions/kriya.fish"
+        install_cmd = f"_KRIYA_COMPLETE=fish_source kriya > {rc_file}"
+    else:
+        eval_line = f'eval "$(_KRIYA_COMPLETE={shell}_source kriya)"'
+        rc_file = "~/.bashrc" if shell == "bash" else "~/.zshrc"
+        install_cmd = f"echo '{eval_line}' >> {rc_file}"
+
+    click.echo(f"# Run this once in your current shell to enable completion immediately:\n{eval_line}\n")
+    click.echo(f"# To make it permanent, add it to {rc_file}:\n{install_cmd}")
 
 @main.command()
 @click.pass_context
@@ -267,6 +293,28 @@ def doctor(ctx: click.Context) -> None:
         else:
             click.secho("  - [SUCCESS] No version mismatch detected.", fg="green")
 
+    # Optional, Java-only - a missing jdtls is never an error, just a
+    # capability Kriya proceeds without (LSP grounding degrades cleanly to
+    # today's behavior). Manual install only (e.g. `brew install jdtls`),
+    # matching how mvn/java/Ollama are already treated - never auto-
+    # downloaded. jdtls itself needs a modern JVM to RUN, separate from
+    # whatever JDK the analyzed project targets - a real, previously-hit
+    # pitfall elsewhere (a tool assuming "17+" here hit a silent LSP init
+    # timeout in the wild) worth flagging explicitly rather than assuming
+    # the reader already knows.
+    from kriya.tools.lsp import JDTLS_MIN_JAVA_MAJOR_VERSION, find_jdtls
+    jdtls_path = find_jdtls()
+    click.echo("\nChecking optional LSP grounding (Java retry-loop diagnostics):")
+    if jdtls_path:
+        click.secho(f"  - [FOUND] jdtls at {jdtls_path}", fg="green")
+        click.echo(
+            f"    Note: jdtls itself needs JDK {JDTLS_MIN_JAVA_MAJOR_VERSION}+ to RUN - "
+            "separate from whatever JDK your project targets."
+        )
+    else:
+        click.echo("  - Not found on PATH - optional, generation proceeds without LSP grounding.")
+        click.echo("    Install with `brew install jdtls` (or equivalent) to enable it.")
+
     if errors_found:
         click.echo()
         click.secho("One or more checks failed - see [ERROR] lines above.", fg="red", bold=True)
@@ -396,23 +444,29 @@ def prompt_generate(ctx: click.Context, description: str) -> None:
         "Output ONLY the optimized prompt itself, formatted cleanly in Markdown. Do not include introductory or concluding conversational filler."
     )
     
+    # Streamed tokens go straight to stdout (nl=False) as they arrive - same
+    # split as before still holds, since the banner/status chrome below stays
+    # on stderr: `kriya prompt generate "x" | kriya generate -y` still gets a
+    # clean goal on stdout, it just now arrives incrementally instead of all
+    # at once after the model finishes (which, for a large local reasoning
+    # model with no progress indication, could look indistinguishable from a
+    # hang - confirmed live against a 27B model on a long prompt).
+    def on_stream(token: str):
+        click.echo(token, nl=False)
+        sys.stdout.flush()
+
     async def run_gen():
         click.secho("Generating optimized prompt...", fg="cyan", err=True)
+        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green", err=True)
         return await llm.complete(
             system_prompt=system_prompt,
-            user_prompt=f"Create a developer prompt for: {description}"
+            user_prompt=f"Create a developer prompt for: {description}",
+            stream_callback=on_stream,
         )
 
     try:
         res = asyncio.run(run_gen())
-        # Status/header chrome goes to stderr, err=True - stdout carries ONLY
-        # the generated prompt text, so `kriya prompt generate "x" | kriya
-        # generate -y` (real shell piping, standalone CLI use) gets a clean
-        # goal rather than the two lines above mixed into it. Verified live
-        # before this fix: both lines appeared in stdout, which would have
-        # been fed to `generate` as if they were part of the actual goal.
-        click.secho("\n=== GENERATED DEVELOPER PROMPT ===\n", bold=True, fg="green", err=True)
-        click.echo(res)
+        click.echo()
 
         # Inside `kriya repl` there's no shell pipe between two typed lines -
         # each dispatches independently and control returns to the prompt
@@ -661,7 +715,13 @@ def skills_list(ctx: click.Context) -> None:
                 if lines:
                     click.secho(f"    [STAGED RULES PENDING REVIEW ({len(lines)})]:", fg="yellow")
                     for line in lines:
-                        click.echo(f"      * {line}")
+                        # A "[CONFLICT]" line is a flagged contradiction, not a plain
+                        # staged rule - 'skills approve' won't auto-promote it (needs a
+                        # manual decision), so call it out distinctly here too.
+                        if line.startswith("[CONFLICT]"):
+                            click.secho(f"      * {line}", fg="red")
+                        else:
+                            click.echo(f"      * {line}")
             except Exception as e:
                 logger.debug(f"Failed to read staged rules file '{staged_file}': {e}")
 
@@ -715,6 +775,80 @@ def skills_show(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Skill '{skill_name}' not found.", fg="red")
         sys.exit(1)
 
+@skills_group.command(name="readiness")
+@click.argument('skill_name')
+@click.pass_context
+def skills_readiness(ctx: click.Context, skill_name: str) -> None:
+    """Score a skill's knowledge against the 10-category readiness rubric (0-4 per
+    category, scoring both staged and already-approved structured facts together)."""
+    cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
+    se = SkillEngine(cfg.paths.skills)
+    se.discover_and_load()
+
+    try:
+        s = se.get_skill(skill_name)
+    except KeyError:
+        click.secho(f"Skill '{skill_name}' not found.", fg="red")
+        sys.exit(1)
+        return
+
+    from kriya.knowledge import staging
+    from kriya.knowledge.rubric import score_skill
+
+    facts = staging.load_staged(s.source_path) + staging.load_knowledge(s.source_path)
+    readiness = score_skill(s.name, facts)
+
+    click.secho(f"=== Readiness: {s.name} ===", bold=True, fg="cyan")
+    click.echo(f"Overall level: {readiness.overall_level}/4 (a skill is only as ready as its weakest category)")
+    for category, level in readiness.category_levels.items():
+        fg = "green" if level >= 3 else ("yellow" if level > 0 else "red")
+        click.secho(f"  {category:<15} Level {level}/4", fg=fg)
+    if readiness.missing_categories:
+        click.secho(f"\nMissing entirely: {', '.join(readiness.missing_categories)}", fg="red")
+    click.echo("\nRun 'kriya skills gaps " + skill_name + "' for targeted questions on what's still thin.")
+
+@skills_group.command(name="gaps")
+@click.argument('skill_name')
+@click.option('--interactive', is_flag=True, help="Prompt for an answer to each gap question and record it immediately.")
+@click.pass_context
+def skills_gaps(ctx: click.Context, skill_name: str, interactive: bool) -> None:
+    """Show targeted questions for whatever the readiness rubric says is still thin,
+    instead of a blank rules.txt - optionally answer them right here with --interactive."""
+    cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
+    se = SkillEngine(cfg.paths.skills)
+    se.discover_and_load()
+
+    try:
+        s = se.get_skill(skill_name)
+    except KeyError:
+        click.secho(f"Skill '{skill_name}' not found.", fg="red")
+        sys.exit(1)
+        return
+
+    from kriya.knowledge import scaffold, staging
+    from kriya.knowledge.rubric import score_skill
+
+    facts = staging.load_staged(s.source_path) + staging.load_knowledge(s.source_path)
+    readiness = score_skill(s.name, facts)
+    questions = scaffold.generate_gap_questions(readiness)
+
+    if not questions:
+        click.secho(f"'{s.name}' already clears the readiness threshold in every category.", fg="green")
+        return
+
+    click.secho(f"=== Knowledge gaps: {s.name} ===", bold=True, fg="cyan")
+    for i, question in enumerate(questions, 1):
+        click.echo(f"  {i}. {question}")
+        if interactive:
+            category = question.split(":", 1)[0].lstrip("[")
+            answer = click.prompt("     Answer (blank to skip)", default="", show_default=False)
+            if answer.strip():
+                written = scaffold.record_scaffold_answer(s.source_path, category, answer.strip())
+                if written:
+                    click.secho("     Recorded.", fg="green")
+                else:
+                    click.secho("     Skipped - duplicates an existing rule.", fg="yellow")
+
 @skills_group.command(name="create")
 @click.argument('skill_name')
 @click.pass_context
@@ -747,34 +881,69 @@ def skills_create(ctx: click.Context, skill_name: str) -> None:
 @click.argument('skill_name')
 @click.pass_context
 def skills_approve(ctx: click.Context, skill_name: str) -> None:
-    """Approve all staged rules for a specific skill, promoting them to rules.txt."""
+    """Approve all staged rules/knowledge facts for a specific skill, promoting them
+    to rules.txt (and, for structured facts, knowledge.json)."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
     skill_folder = os.path.join(cfg.paths.skills, skill_name.lower())
     if not os.path.exists(skill_folder):
         skill_folder = os.path.join(cfg.paths.skills, skill_name)
     staged_file = os.path.join(skill_folder, "staged_rules.txt")
     rules_file = os.path.join(skill_folder, "rules.txt")
-    
-    if not os.path.exists(staged_file):
-        click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
-        return
-        
-    try:
-        with open(staged_file, "r", encoding="utf-8") as sf:
-            staged_lines = [line.strip() for line in sf if line.strip()]
-            
-        if not staged_lines:
-            click.secho(f"No staged rules found for skill '{skill_name}'.", fg="yellow")
-            return
-            
-        with open(rules_file, "a", encoding="utf-8") as rf:
-            for line in staged_lines:
-                rf.write(f"\n{line}")
-                
-        os.remove(staged_file)
-        click.secho(f"Successfully approved and promoted {len(staged_lines)} rule(s) to rules.txt for skill '{skill_name}'!", fg="green")
-    except Exception as e:
-        click.secho(f"Failed to approve staged rules: {e}", fg="red")
+
+    approved_anything = False
+
+    if os.path.exists(staged_file):
+        try:
+            with open(staged_file, "r", encoding="utf-8") as sf:
+                staged_lines = [line.strip() for line in sf if line.strip()]
+
+            # A "[CONFLICT] ..." line (written by _stage_skill_conflicts, the only
+            # writer of this file today) records a genuine contradiction between a
+            # candidate rule and one already in rules.txt - it needs a human to pick
+            # a side, not a blind append. Promoting it as-is would write the raw
+            # diagnostic sentence (marker, losing candidate, contradicted rule, and
+            # the model's reasoning all together) into rules.txt as if it were a
+            # trusted engineering rule, feeding straight into every future
+            # generation prompt - defeating the entire reason this staging exists
+            # (2026-08-15 SME review, stage 5, Finding 1). Only plain staged rules
+            # get auto-promoted; conflicts stay staged for manual resolution.
+            promotable = [line for line in staged_lines if not line.startswith("[CONFLICT]")]
+            unresolved_conflicts = [line for line in staged_lines if line.startswith("[CONFLICT]")]
+
+            if promotable:
+                with open(rules_file, "a", encoding="utf-8") as rf:
+                    for line in promotable:
+                        rf.write(f"\n{line}")
+                approved_anything = True
+                click.secho(f"Approved and promoted {len(promotable)} rule(s) to rules.txt for skill '{skill_name}'.", fg="green")
+
+            if unresolved_conflicts:
+                with open(staged_file, "w", encoding="utf-8") as sf:
+                    for line in unresolved_conflicts:
+                        sf.write(f"{line}\n")
+                click.secho(
+                    f"{len(unresolved_conflicts)} flagged conflict(s) for skill '{skill_name}' were NOT "
+                    "auto-promoted - each needs a manual decision. Review them and edit rules.txt/"
+                    "staged_rules.txt directly to resolve.",
+                    fg="yellow",
+                )
+            else:
+                os.remove(staged_file)
+        except Exception as e:
+            click.secho(f"Failed to approve staged rules: {e}", fg="red")
+
+    from kriya.knowledge import staging
+    staged_facts = staging.load_staged(skill_folder)
+    if staged_facts:
+        try:
+            promoted = staging.promote_staged(skill_folder)
+            approved_anything = True
+            click.secho(f"Approved and promoted {len(promoted)} structured knowledge fact(s) for skill '{skill_name}'.", fg="green")
+        except Exception as e:
+            click.secho(f"Failed to approve staged knowledge facts: {e}", fg="red")
+
+    if not approved_anything:
+        click.secho(f"No staged rules or knowledge facts found for skill '{skill_name}'.", fg="yellow")
 
 @skills_group.command(name="promote")
 @click.argument('source_skill')
@@ -912,6 +1081,44 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Failed to update skill '{skill_name}'.", fg="red")
         sys.exit(1)
 
+def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> None:
+    """Overwrites a transient `knowledge_gap` trace row with an honest `in_progress`
+    marker the instant a knowledge-gap retry actually starts executing the real
+    generation run - so if that retry itself gets killed or times out (e.g. an eval
+    harness's outer subprocess timeout) before ever reaching its own final `log_run()`
+    call, the trace shows a real run that didn't finish, not the stale, terminal-
+    sounding `knowledge_gap` status left behind by the initial gate check.
+
+    Found live, 2026-08-12 (ignite_qpid_protocol via spikes/eval_harness): a real run
+    that auto-confirmed past the knowledge gate, ran for the full 20-minute harness
+    timeout (reaching multiple targeted retries and a fallback-model attempt) still
+    left `report.py` showing "knowledge_gap, 0 attempts, 8.5s" as the only trace -
+    genuinely misleading, not just imprecise, since it looks identical to a run that
+    never proceeded past the gate at all. This is a narrower, still-open edge of the
+    `trace_id_override` fix from 2026-08-07 (docs/design.md) - that fix makes the
+    retry's own real trace row correctly supersede the transient one WHEN the retry
+    completes; it does nothing for a retry that's killed before completing, which is
+    exactly what happened here (twice, in the same session).
+
+    Best-effort like every other trace write in this codebase - a failure here must
+    never block the actual retry from proceeding."""
+    if not run_id:
+        return
+    try:
+        from kriya.core.trace import TraceLogger
+        trace_db = os.path.join(cfg.paths.logs, "traces.db")
+        TraceLogger(trace_db).log_run(
+            run_id=run_id,
+            goal=goal,
+            duration_sec=0.0,
+            attempts=0,
+            status="in_progress",
+            files_modified=[],
+        )
+    except Exception as trace_ex:
+        logger.warning(f"Failed to mark run '{run_id}' in_progress: {trace_ex}")
+
+
 @main.command()
 @click.argument('goal', required=False)
 @click.option('--file', '-f', type=click.Path(exists=True), help="Path to a text/markdown file containing the goal/prompt.")
@@ -920,8 +1127,9 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
 @click.option('--ack-knowledge-gap', multiple=True, help="Acknowledge specific coordinates (e.g. org.apache.ignite:ignite-core) to bypass check.")
 @click.option('--resume', is_flag=True, default=False, help="Resume the most recently saved checkpoint for this workspace (only exists if a prior run was interrupted mid-Plan/Design/Developer).")
 @click.option('--resume-id', default=None, help="Resume a specific checkpoint by run_id instead of the latest one.")
+@click.option('--json', 'json_output', is_flag=True, default=False, help="Print only the final result as JSON on stdout - all progress/narrative output goes to stderr instead. For CI/scripting use.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str]) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     if file:
         try:
@@ -938,7 +1146,21 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             sys.exit(1)
 
     cfg: AppConfig = ctx.obj['config']
-    
+
+    # --json: swap sys.stdout to stderr for the rest of this command, so
+    # every one of the many existing click.echo/secho calls below (streaming
+    # tokens, approval prompts, warnings, the human-formatted final summary)
+    # is redirected with zero per-call-site changes - click resolves
+    # sys.stdout dynamically at call time (confirmed live), so this one swap
+    # covers all of them. Restored just before printing the final JSON.
+    # Subprocess output (compile/test/run commands) is unaffected -
+    # PolymorphicValidator always captures via pipes into Python strings,
+    # never lets a child process's own stdout flow directly to the terminal.
+    # Architectural add-on from a 2026-08-12 SME review.
+    real_stdout = sys.stdout
+    if json_output:
+        sys.stdout = sys.stderr
+
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
     we = WorkflowEngine(kernel, llm)
@@ -1080,6 +1302,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     unacked_gaps.append(g)
 
             if not unacked_gaps or knowledge_policy == 'permissive':
+                _mark_run_in_progress(cfg, res.get("run_id"), goal)
                 res = await we.run_generation_workflow(
                     goal=goal,
                     workspace_path=os.getcwd(),
@@ -1091,7 +1314,12 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     web_lookup_query_callback=on_web_lookup_query,
                     knowledge_risk_confirmed=True,
                     resume=resume,
-                    resume_id=resume_id
+                    resume_id=resume_id,
+                    # Reuse the just-returned run_id so this retry's own eventual
+                    # trace row supersedes (via traces.db's INSERT OR REPLACE on
+                    # run_id, its primary key) the transient knowledge_gap row just
+                    # written above, instead of leaving two independent rows behind.
+                    trace_id_override=res.get("run_id"),
                 )
             elif knowledge_policy == 'strict':
                 click.secho("\n[KRIYA BLOCKED] Knowledge gap detected in strict mode:", bold=True, fg="red")
@@ -1120,6 +1348,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     confirm = click.confirm("Do you want to proceed anyway despite the knowledge risk?")
 
                 if confirm:
+                    _mark_run_in_progress(cfg, res.get("run_id"), goal)
                     res = await we.run_generation_workflow(
                         goal=goal,
                         workspace_path=os.getcwd(),
@@ -1131,7 +1360,12 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         web_lookup_query_callback=on_web_lookup_query,
                         knowledge_risk_confirmed=True,
                         resume=resume,
-                        resume_id=resume_id
+                        resume_id=resume_id,
+                        # Same reasoning as the permissive/acked retry above - reuse
+                        # the just-returned run_id so this retry's own trace row
+                        # supersedes the transient knowledge_gap one instead of
+                        # leaving two independent rows behind.
+                        trace_id_override=res.get("run_id"),
                     )
                 else:
                     if click.confirm("Would you like Kriya to scaffold skill templates for these libraries?"):
@@ -1164,6 +1398,29 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             # THIS goal may still bite on a different machine or a later,
             # JVM-flag-sensitive one.
             click.secho(f"[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
+        if res.get("lsp_warning"):
+            # Same reasoning as toolchain_warning above - a run that silently
+            # got no LSP grounding when it should have is worth knowing about
+            # regardless of whether the run otherwise passed.
+            click.secho(f"[LSP WARNING] {res['lsp_warning']}", fg="yellow")
+        if res.get("unresolved_skill_gaps"):
+            # Shown regardless of pass/fail - a shaky success is exactly the case
+            # this matters most for: nothing else would ever tell you the result
+            # rests on a technology Kriya has no verified information for.
+            click.secho(
+                "[UNVERIFIED KNOWLEDGE] Generation proceeded without verified information for: "
+                f"{', '.join(res['unresolved_skill_gaps'])}. Consider `kriya skills show <name>` "
+                "or supplying reference material via a future run.",
+                fg="yellow",
+            )
+        if res.get("skill_staleness_warnings"):
+            # A skill CAN be verified and still be stale - verified_context
+            # records what version it was actually proven against, and a
+            # later goal naming a different version of the same library is
+            # exactly the case a passing Runtime Verification run gives no
+            # signal about on its own.
+            for warning in res["skill_staleness_warnings"]:
+                click.secho(f"[SKILL STALENESS] {warning}", fg="yellow")
         if res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
@@ -1197,9 +1454,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 click.echo(res.get("review"))
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
-        
+
+        return res
+
     try:
-        asyncio.run(run_workflow())
+        final_res = asyncio.run(run_workflow())
     except Exception as e:
         click.secho(f"Workflow error: {e}", fg="red")
         click.secho(
@@ -1207,7 +1466,20 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             "re-run the same command with --resume to pick up where it left off instead of starting over.",
             fg="yellow"
         )
+        if json_output:
+            sys.stdout = real_stdout
+            click.echo(json.dumps({"error": str(e)}, indent=2))
         sys.exit(1)
+
+    if json_output:
+        sys.stdout = real_stdout
+        click.echo(json.dumps(final_res, indent=2))
+        # Some early-exit paths inside run_workflow() (a strict-mode
+        # knowledge-gap block, or a declined-then-scaffolded one) call
+        # sys.exit() directly and never reach here at all - known,
+        # documented gap for a v1: those paths don't get JSON output,
+        # matching their pre-existing narrower, non-structured signal today.
+        sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
 
 @main.command()
 @click.argument('file_path', type=click.Path(exists=True))
@@ -1300,72 +1572,61 @@ def review(ctx: click.Context, file_path: str) -> None:
             return
 
         click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan", err=True)
-        from kriya.analyzer.analyzer import chunk_file_syntactically
-        from kriya.workflow.workflow import estimate_tokens
+        from kriya.workflow.review_context import build_review_batches
 
-        # Budget-aware batching. Confirmed live as a real, severe bug: with no
-        # size control at all, a file (or file set) exceeding the model's context
-        # window got silently truncated from the FRONT by the backend, cutting
+        # Budget-aware batching (kriya/workflow/review_context.py - shared with the
+        # generation workflow's own Reviewer stage). Confirmed live as a real, severe
+        # bug: with no size control at all, a file (or file set) exceeding the model's
+        # context window got silently truncated from the FRONT by the backend, cutting
         # off every "=== File: ... ===" framing marker along with it - the model
-        # received an unlabeled fragment of raw code with no indication it was
-        # even being asked to review anything, produced a confused non-review
-        # response, and Kriya still reported success (exit 0) with no warning
-        # at all. Same context_window * 0.75 budget convention used throughout
-        # workflow.py, via the same estimate_tokens() heuristic - not a new one.
+        # received an unlabeled fragment of raw code with no indication it was even
+        # being asked to review anything, produced a confused non-review response, and
+        # Kriya still reported success (exit 0) with no warning at all.
         budget = int(cfg.llm.context_window * 0.75)
-        file_blobs = []  # (rel, blob_text, token_estimate)
+        file_contents: List[Tuple[str, str]] = []
         for rel, full in files_to_review:
             try:
                 with open(full, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
-
-                chunks = chunk_file_syntactically(content, max_lines=150, overlap=15)
-                blob = ""
-                for c_idx, chunk_data in enumerate(chunks, 1):
-                    suffix = f" (Part {c_idx})" if len(chunks) > 1 else ""
-                    blob += f"\n=== File: {rel}{suffix} ===\n{chunk_data['text']}\n"
-
-                if estimate_tokens(blob) > budget:
-                    # Even this one file alone doesn't fit - keep as many whole
-                    # chunks as fit and say so explicitly, both to the model (so
-                    # it knows it's working from a partial view, not confidently
-                    # reviewing what it thinks is the complete file) and to the
-                    # user.
-                    click.secho(
-                        f"Warning: '{rel}' is too large to review in full within the "
-                        f"configured context window - reviewing only the portion that fits.",
-                        fg="yellow", err=True,
-                    )
-                    kept = ""
-                    for c_idx, chunk_data in enumerate(chunks, 1):
-                        suffix = f" (Part {c_idx})" if len(chunks) > 1 else ""
-                        candidate = kept + f"\n=== File: {rel}{suffix} ===\n{chunk_data['text']}\n"
-                        if estimate_tokens(candidate) > budget:
-                            break
-                        kept = candidate
-                    blob = kept + f"\n=== File: {rel} - TRUNCATED: remainder omitted, file exceeds the review token budget ===\n"
-
-                file_blobs.append((rel, blob, estimate_tokens(blob)))
+                    file_contents.append((rel, f.read()))
             except Exception as e:
                 click.secho(f"Failed to read file {rel}: {e}", fg="yellow", err=True)
 
-        # Greedily group files into batches that each fit the budget - the
-        # common case (a handful of small/medium files) still produces exactly
-        # ONE batch, unchanged behavior: one combined call, full cross-file
-        # architectural context for the reviewer. Only degrades to multiple
-        # separate calls when the combined content genuinely wouldn't fit.
-        batches: List[str] = []
-        current_batch = ""
-        current_tokens = 0
-        for _rel, blob, tokens in file_blobs:
-            if current_batch and current_tokens + tokens > budget:
-                batches.append(current_batch)
-                current_batch = ""
-                current_tokens = 0
-            current_batch += blob
-            current_tokens += tokens
-        if current_batch:
-            batches.append(current_batch)
+        batches, truncated_relpaths = build_review_batches(file_contents, budget)
+        for rel in truncated_relpaths:
+            # Even this one file alone doesn't fit - keep as many whole chunks as fit
+            # and say so explicitly, both to the model (so it knows it's working from a
+            # partial view, not confidently reviewing what it thinks is the complete
+            # file) and to the user.
+            click.secho(
+                f"Warning: '{rel}' is too large to review in full within the "
+                f"configured context window - reviewing only the portion that fits.",
+                fg="yellow", err=True,
+            )
+
+        # Stage 6 SME review, Finding 3 (2026-08-15): unlike the embedded pipeline's
+        # Reviewer stage (workflow.py), which always prefixes "Goal: {goal}...", this
+        # standalone command sent bare file blobs with no framing at all - a real
+        # mismatch with ReviewerAgent's own system prompt, which is written assuming a
+        # goal exists to calibrate its "don't reject for missing tests the goal never
+        # asked for" leniency rule against, and assumes one coherent generated
+        # application for its mandatory "How to Run" section. Standalone review has
+        # neither (arbitrary pre-existing code, often just a git-modified subset of a
+        # larger unrelated project) - telling the model that explicitly, rather than
+        # leaving it to guess, is what actually closes the gap (not fabricating a fake
+        # goal, which would just invite it to invent requirements the goal doesn't
+        # state).
+        review_context_header = (
+            "No specific goal or task was provided for this review - this is a general "
+            "code-quality review of existing/arbitrary code, not something generated for "
+            "a stated task. Do not invent or assume requirements; review for correctness, "
+            "clarity, and maintainability on the code's own terms, and do not reject "
+            "solely for missing tests/docs the way you would for an unmet stated goal. "
+            "If this file set is only a partial slice of a larger project (e.g. just the "
+            "files git reports as modified), the 'How to Run the Application' section "
+            "should describe how to run/verify what's shown here to the extent "
+            "determinable from it, or say plainly if that can't be determined from a "
+            "partial file set.\n\n"
+        )
 
         import sys
         def on_stream(token: str):
@@ -1373,10 +1634,10 @@ def review(ctx: click.Context, file_path: str) -> None:
             sys.stdout.flush()
 
         async def run_review():
-            for i, batch_prompt in enumerate(batches, 1):
+            for i, batch in enumerate(batches, 1):
                 label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
                 click.secho(f"\n{label}", bold=True, fg="cyan", err=True)
-                await reviewer.run(batch_prompt, stream_callback=on_stream)
+                await reviewer.run(review_context_header + batch, stream_callback=on_stream)
                 click.echo()
 
         asyncio.run(run_review())
@@ -1692,6 +1953,17 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         )
         if res.get("toolchain_warning"):
             click.secho(f"\n[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
+        if res.get("lsp_warning"):
+            click.secho(f"\n[LSP WARNING] {res['lsp_warning']}", fg="yellow")
+        if res.get("unresolved_skill_gaps"):
+            click.secho(
+                "\n[UNVERIFIED KNOWLEDGE] Generation proceeded without verified information for: "
+                f"{', '.join(res['unresolved_skill_gaps'])}.",
+                fg="yellow",
+            )
+        if res.get("skill_staleness_warnings"):
+            for warning in res["skill_staleness_warnings"]:
+                click.secho(f"\n[SKILL STALENESS] {warning}", fg="yellow")
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         else:
@@ -1713,6 +1985,20 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                     "without redoing Plan/Design.",
                     fg="yellow"
                 )
+        # Stage 6 SME review, Finding 5 (2026-08-15): step_cb above truncates EVERY
+        # step's content to 300 chars, including the Reviewer's full report - unlike
+        # `generate`, which reprints res.get("review") in full at the end under its own
+        # header, `fix` never did, so the mandatory "How to Run the Application"
+        # section and most substantive findings were lost after a 300-char preview
+        # scrolled by mid-run with no second chance to see them. Same reprint `generate`
+        # already has, same guard: gated on res.get("files") too, not just
+        # res.get("review") alone - independent review caught that a human-rejected
+        # approval-gate run sets "review" to a one-line rejection notice ("Rejected by
+        # user during approval gate review.") with "files": [] - an unguarded reprint
+        # would misleadingly label that notice as a "Reviewer Report".
+        if res.get("files") and res.get("review"):
+            click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+            click.echo(res.get("review"))
 
     try:
         asyncio.run(run_fix())
@@ -1741,7 +2027,7 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
     conn = get_connection(db_path)
     cursor = conn.cursor()
     total = cursor.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified FROM runs ORDER BY timestamp DESC"
+    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified, failure_category FROM runs ORDER BY timestamp DESC"
     if not show_all:
         query += " LIMIT ?"
         cursor.execute(query, (limit,))
@@ -1754,13 +2040,14 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
         click.echo("No run traces recorded yet.")
         return
 
-    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
-    click.echo("-" * 100)
-    for _r_id, ts, goal, dur, att, status, _files in rows:
+    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'CATEGORY':<22} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
+    click.echo("-" * 120)
+    for _r_id, ts, goal, dur, att, status, _files, category in rows:
         dur_str = f"{dur:.2f}s"
         status_color = "green" if status.lower() == "success" else "red"
         status_styled = click.style(f"{status:<10}", fg=status_color)
-        click.echo(f"{ts:<20} | {status_styled} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
+        category_str = category or ""
+        click.echo(f"{ts:<20} | {status_styled} | {category_str:<22} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
 
     if not show_all and total > len(rows):
         click.echo(f"\nShowing {len(rows)} of {total} recorded runs. Use -n/--limit or --all to see more.")

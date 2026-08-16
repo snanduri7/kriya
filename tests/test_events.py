@@ -63,3 +63,46 @@ async def test_event_handler_errors():
     # Our implementation propagates the exception to help troubleshoot.
     with pytest.raises(ValueError, match="Something went wrong"):
         await emitter.emit("broken_event", {})
+
+
+@pytest.mark.asyncio
+async def test_event_handler_error_does_not_skip_later_handlers():
+    """Regression test for a finding from the 2026-08-12 SME review: a
+    broken handler previously re-raised immediately inside the loop, so any
+    handler registered AFTER it for the same event never ran at all. Every
+    handler must still get a chance to run - emit() still raises afterward
+    (test_event_handler_errors above), just not before every subscriber has
+    been notified."""
+    emitter = EventSystem()
+    received = []
+
+    def broken_handler(data):
+        raise ValueError("Something went wrong")
+
+    def later_handler(data):
+        received.append(data)
+
+    emitter.subscribe("broken_event", broken_handler)
+    emitter.subscribe("broken_event", later_handler)
+
+    with pytest.raises(ValueError, match="Something went wrong"):
+        await emitter.emit("broken_event", {"payload": 1})
+
+    assert received == [{"payload": 1}]
+
+
+@pytest.mark.asyncio
+async def test_event_handler_error_raises_the_first_exception_not_the_last():
+    emitter = EventSystem()
+
+    def first_broken(data):
+        raise ValueError("first")
+
+    def second_broken(data):
+        raise ValueError("second")
+
+    emitter.subscribe("broken_event", first_broken)
+    emitter.subscribe("broken_event", second_broken)
+
+    with pytest.raises(ValueError, match="first"):
+        await emitter.emit("broken_event", {})

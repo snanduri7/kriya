@@ -7,7 +7,7 @@ from kriya.config import AppConfig
 from kriya.core.trace import TraceLogger
 
 
-def _seed_traces(db_path: str, count: int) -> None:
+def _seed_traces(db_path: str, count: int, failure_category: str = None) -> None:
     logger = TraceLogger(db_path)
     for i in range(count):
         logger.log_run(
@@ -17,6 +17,7 @@ def _seed_traces(db_path: str, count: int) -> None:
             attempts=1,
             status="success" if i % 2 == 0 else "failure",
             files_modified=["a.py"],
+            failure_category=failure_category if i % 2 != 0 else None,
         )
 
 
@@ -107,3 +108,24 @@ def test_traces_custom_limit_option(tmp_path):
     assert res.exit_code == 0
     assert res.output.count("Goal number") == 5
     assert "Showing 5 of 30 recorded runs" in res.output
+
+
+def test_traces_shows_failure_category_column(tmp_path):
+    """failure_category is persisted (kriya/core/trace.py) so an eval harness
+    reading traces.db can aggregate by it - confirm `kriya traces` itself
+    surfaces it too, not just the raw DB."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    db_path = str(logs_dir / "traces.db")
+    _seed_traces(db_path, 2, failure_category="quality_gates_exhausted")
+
+    cfg = AppConfig()
+    cfg.paths.logs = str(logs_dir)
+
+    runner = CliRunner()
+    with patch("kriya.cli.load_config", return_value=cfg):
+        res = runner.invoke(main, ["traces"])
+
+    assert res.exit_code == 0
+    assert "CATEGORY" in res.output
+    assert "quality_gates_exhausted" in res.output

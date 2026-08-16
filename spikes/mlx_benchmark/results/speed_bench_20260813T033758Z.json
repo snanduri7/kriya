@@ -1,0 +1,113 @@
+[
+  {
+    "backend": "mlx-lm (direct)",
+    "prompt_id": "short_fn",
+    "ttft_s": 2.133,
+    "total_time_s": 3.048,
+    "prompt_tokens": 37,
+    "prompt_tps": 18.0,
+    "generation_tokens": 64,
+    "generation_tps": 70.5,
+    "peak_memory_gb": 17.27,
+    "output_text": "```python\ndef is_palindrome(s: str) -> bool:\n    # Convert to lowercase and keep only alphanumeric characters\n    cleaned = ''.join(char.lower() for char in s if char.isalnum())\n    \n    # Check if the cleaned string equals its reverse\n    return cleaned == cleaned[::-1]\n```"
+  },
+  {
+    "backend": "ollama qwen3-coder:30b",
+    "prompt_id": "short_fn",
+    "ttft_s": 14.243,
+    "total_time_s": 15.206,
+    "prompt_tokens": 37,
+    "prompt_tps": 182.5,
+    "generation_tokens": 64,
+    "generation_tps": 66.3,
+    "peak_memory_gb": null,
+    "output_text": "```python\ndef is_palindrome(s: str) -> bool:\n    # Convert to lowercase and keep only alphanumeric characters\n    cleaned = ''.join(char.lower() for char in s if char.isalnum())\n    \n    # Check if the cleaned string equals its reverse\n    return cleaned == cleaned[::-1]\n```"
+  },
+  {
+    "backend": "omlx (OpenAI-compatible API)",
+    "prompt_id": "short_fn",
+    "ttft_s": 23.41,
+    "total_time_s": 24.281,
+    "prompt_tokens": 37,
+    "prompt_tps": 1.6,
+    "generation_tokens": 63,
+    "generation_tps": 74.5,
+    "cached_tokens": 0,
+    "peak_memory_gb": null,
+    "output_text": "```python\ndef is_palindrome(s: str) -> bool:\n    # Convert to lowercase and keep only alphanumeric characters\n    cleaned = ''.join(char.lower() for char in s if char.isalnum())\n    \n    # Check if the cleaned string equals its reverse\n    return cleaned == cleaned[::-1]\n```"
+  },
+  {
+    "backend": "mlx-lm (direct)",
+    "prompt_id": "medium_refactor",
+    "ttft_s": 29.953,
+    "total_time_s": 32.209,
+    "prompt_tokens": 55,
+    "prompt_tps": 1.8,
+    "generation_tokens": 154,
+    "generation_tps": 68.5,
+    "peak_memory_gb": 17.31,
+    "output_text": "```python\nfrom collections import OrderedDict\n\nclass LRUCache:\n    def __init__(self, capacity: int):\n        self.capacity = capacity\n        self.cache = OrderedDict()\n    \n    def get(self, key) -> int:\n        if key in self.cache:\n            # Move to end (mark as recently used)\n            self.cache.move_to_end(key)\n            return self.cache[key]\n        return -1\n    \n    def put(self, key, value) -> None:\n        if key in self.cache:\n            # Update existing key\n            self.cache.move_to_end(key)\n        elif len(self.cache) >= self.capacity:\n            # Remove least recently used item\n            self.cache.popitem(last=False)\n        \n        self.cache[key] = value\n```"
+  },
+  {
+    "backend": "ollama qwen3-coder:30b",
+    "prompt_id": "medium_refactor",
+    "ttft_s": 0.379,
+    "total_time_s": 2.697,
+    "prompt_tokens": 55,
+    "prompt_tps": 250.1,
+    "generation_tokens": 171,
+    "generation_tps": 73.8,
+    "peak_memory_gb": null,
+    "output_text": "```python\nfrom collections import OrderedDict\nfrom typing import Optional, Any\n\nclass LRUCache:\n    def __init__(self, capacity: int):\n        self.capacity = capacity\n        self.cache = OrderedDict()\n    \n    def get(self, key: Any) -> Optional[Any]:\n        if key not in self.cache:\n            return None\n        \n        # Move to end (mark as recently used)\n        self.cache.move_to_end(key)\n        return self.cache[key]\n    \n    def put(self, key: Any, value: Any) -> None:\n        if key in self.cache:\n            # Update existing key\n            self.cache.move_to_end(key)\n        elif len(self.cache) >= self.capacity:\n            # Remove least recently used (first item)\n            self.cache.popitem(last=False)\n        \n        self.cache[key] = value\n```"
+  },
+  {
+    "backend": "omlx (OpenAI-compatible API)",
+    "prompt_id": "medium_refactor",
+    "ttft_s": 14.62,
+    "total_time_s": 17.204,
+    "prompt_tokens": 55,
+    "prompt_tps": 3.8,
+    "generation_tokens": 174,
+    "generation_tps": 68.0,
+    "cached_tokens": 0,
+    "peak_memory_gb": null,
+    "output_text": "```python\nfrom collections import OrderedDict\nfrom typing import Optional\n\nclass LRUCache:\n    def __init__(self, capacity: int):\n        self.capacity = capacity\n        self.cache = OrderedDict()\n    \n    def get(self, key) -> Optional[int]:\n        if key in self.cache:\n            # Move to end (mark as recently used)\n            self.cache.move_to_end(key)\n            return self.cache[key]\n        return None\n    \n    def put(self, key, value) -> None:\n        if key in self.cache:\n            # Update existing key\n            self.cache.move_to_end(key)\n            self.cache[key] = value\n        else:\n            # Add new key\n            if len(self.cache) >= self.capacity:\n                # Remove least recently used item\n                self.cache.popitem(last=False)\n            self.cache[key] = value\n```"
+  },
+  {
+    "backend": "mlx-lm (direct)",
+    "prompt_id": "longer_task",
+    "ttft_s": 23.911,
+    "total_time_s": 33.927,
+    "prompt_tokens": 91,
+    "prompt_tps": 3.8,
+    "generation_tokens": 668,
+    "generation_tps": 66.8,
+    "peak_memory_gb": 17.35,
+    "output_text": "```python\nfrom dataclasses import dataclass\nfrom typing import List, Optional, Dict\nfrom enum import Enum\nfrom typing import List, Optional, Dict\nfrom enum import Enum\nimport heapq\nfrom typing import List, Optional, Dict\n\nclass TaskStatus(Enum):\n    PENDING = \"pending\"\n    IN_PROGRESS = \"in_progress\"\n    DONE = \"done\"\n\n@dataclass\nclass Task:\n    id: str\n    payload: str\n    priority: int\n    status: TaskStatus = TaskStatus.PENDING\n\nclass TaskQueue:\n    def __init__(self):\n        self._queue: List[tuple] = []\n        self._task_map: Dict[str, Task] = {}\n        self._next_id = 0\n\n    def enqueue(self, payload: str, priority: int = 0) -> str:\n        task_id = f\"task_{self._next_id}\"\n        self._next_id += 1\n        task = Task(id=task_id, payload=payload, priority=priority, status=TaskStatus.PENDING)\n        self._task_map[task_id] = task\n        heapq.heappush(self._queue, (task.priority, task_id))\n        return task_id\n\n    def dequeue(self) -> Optional[Task]:\n        if not self._queue:\n            return None\n        priority, task_id = heapq.heappop(self._queue)\n        task = self._task_map[task_id]\n        task.status = TaskStatus.IN_PROGRESS\n        return task\n\n    def mark_done(self, task_id: str) -> bool:\n        if task_id not in self._task_map:\n            return False\n        task = self._task_map[task_id]\n        task.status = TaskStatus.DONE\n        del self._task_map[task_id]\n        return True\n\nif __name__ == \"__main__\":\n    # Example 1: Basic usage\n    tq = TaskQueue()\n    \n    # Enqueue some tasks\n    task1 = tq.enqueue(\"Process data\", priority=2)\n    task2 = tq.enqueue(\"Send email\", priority=1)\n    task3 = tq.enqueue(\"Backup database\", priority=3)\n    \n    # Dequeue tasks in priority order\n    task = tq.dequeue()\n    print(f\"Dequeued: {task.payload} (priority: {task.priority})\")\n    \n    task = tq.dequeue()\n    print(f\"Dequeued: {task.payload} (priority: {task.priority})\")\n    \n    task = tq.dequeue()\n    print(f\"Dequeued: {task.payload} (priority: {task.priority})\")\n    \n    # Example 2: Same priority tasks processed in FIFO order\n    tq2 = TaskQueue()\n    task_a = tq2.enqueue(\"Task A\", priority=1)\n    task_b = tq2.enqueue(\"Task B\", priority=1)\n    task_c = tq2.enqueue(\"Task C\", priority=2)\n    \n    print(\"\\nSame priority FIFO order:\")\n    task = tq2.dequeue()\n    print(f\"Dequeued: {task.payload}\")\n    \n    task = tq2.dequeue()\n    print(f\"Dequeued: {task.payload}\")\n    \n    task = tq2.dequeue()\n    print(f\"Dequeued: {task.payload}\")\n```"
+  },
+  {
+    "backend": "ollama qwen3-coder:30b",
+    "prompt_id": "longer_task",
+    "ttft_s": 0.503,
+    "total_time_s": 10.348,
+    "prompt_tokens": 91,
+    "prompt_tps": 271.5,
+    "generation_tokens": 708,
+    "generation_tps": 71.9,
+    "peak_memory_gb": null,
+    "output_text": "```python\nfrom dataclasses import dataclass, field\nfrom typing import List, Optional\nimport heapq\nfrom enum import Enum\n\nclass TaskStatus(Enum):\n    PENDING = \"pending\"\n    DONE = \"done\"\n\n@dataclass\nclass Task:\n    id: str\n    payload: str\n    priority: int\n    status: TaskStatus = TaskStatus.PENDING\n    _heap_key: tuple = field(init=False, repr=False)\n\n    def __post_init__(self):\n        self._heap_key = (self.priority, id(self))\n\n@dataclass\nclass TaskQueue:\n    _queue: List[Task] = field(default_factory=list)\n    _task_map: dict = field(default_factory=dict)\n\n    def enqueue(self, task: Task) -> None:\n        \"\"\"Add a task to the queue.\"\"\"\n        heapq.heappush(self._queue, task)\n        self._task_map[task.id] = task\n\n    def dequeue(self) -> Optional[Task]:\n        \"\"\"Remove and return the highest priority task (FIFO within same priority).\"\"\"\n        while self._queue:\n            task = heapq.heappop(self._queue)\n            if task.status != TaskStatus.DONE:\n                task.status = TaskStatus.PENDING\n                return task\n        return None\n\n    def mark_done(self, task_id: str) -> bool:\n        \"\"\"Mark a task as done.\"\"\"\n        if task_id in self._task_map:\n            self._task_map[task_id].status = TaskStatus.DONE\n            return True\n        return False\n\nif __name__ == \"__main__\":\n    # Example 1: Basic usage\n    tq = TaskQueue()\n    \n    # Create and enqueue some tasks\n    task1 = Task(\"1\", \"Process data\", 2)\n    task2 = Task(\"2\", \"Send email\", 1)\n    task3 = Task(\"3\", \"Backup files\", 3)\n    task4 = Task(\"4\", \"Run tests\", 2)\n    \n    tq.enqueue(task1)\n    tq.enqueue(task2)\n    tq.enqueue(task3)\n    tq.enqueue(task4)\n    \n    # Dequeue tasks (should be in priority order: 3, 1, 4, 2)\n    print(\"Dequeueing tasks:\")\n    while True:\n        task = tq.dequeue()\n        if not task:\n            break\n        print(f\"Task {task.id}: {task.payload} (priority {task.priority})\")\n    \n    # Example 2: Marking tasks as done\n    print(\"\\nExample with marking as done:\")\n    tq2 = TaskQueue()\n    \n    task_a = Task(\"a\", \"Write report\", 1)\n    task_b = Task(\"b\", \"Review code\", 2)\n    task_c = Task(\"c\", \"Fix bug\", 1)\n    \n    tq2.enqueue(task_a)\n    tq2.enqueue(task_b)\n    tq2.enqueue(task_c)\n    \n    # Dequeue and mark some as done\n    task = tq2.dequeue()\n    print(f\"Processing: {task.payload}\")\n    tq2.mark_done(task.id)\n    \n    task = tq2.dequeue()\n    print(f\"Processing: {task.payload}\")\n    tq2.mark_done(task.id)\n    \n    # Try to get remaining task\n    task = tq2.dequeue()\n    if task:\n        print(f\"Processing: {task.payload}\")\n    else:\n        print(\"No more tasks\")\n```"
+  },
+  {
+    "backend": "omlx (OpenAI-compatible API)",
+    "prompt_id": "longer_task",
+    "ttft_s": 8.92,
+    "total_time_s": 15.875,
+    "prompt_tokens": 91,
+    "prompt_tps": 10.2,
+    "generation_tokens": 460,
+    "generation_tps": 66.4,
+    "cached_tokens": 0,
+    "peak_memory_gb": null,
+    "output_text": "```python\nfrom dataclasses import dataclass\nfrom typing import Optional, List\nimport heapq\nfrom enum import Enum\nfrom typing import List\n\nclass TaskStatus(Enum):\n    PENDING = \"pending\"\n    IN_PROGRESS = \"in_progress\"\n    DONE = \"done\"\n\n@dataclass\nclass Task:\n    id: str\n    payload: str\n    priority: int\n    status: TaskStatus = TaskStatus.PENDING\n\nclass TaskQueue:\n    def __init__(self):\n        self._queue: List[tuple] = []\n        self._task_map = {}\n        self._next_id = 1\n\n    def enqueue(self, payload: str, priority: int = 0) -> Task:\n        task_id = str(self._next_id)\n        self._next_id += 1\n        task = Task(task_id, payload, priority, TaskStatus.PENDING)\n        heapq.heappush(self._queue, (task.priority, task.id, task))\n        self._task_map[task.id] = task\n        return task\n\n    def dequeue(self) -> Optional[Task]:\n        if not self._queue:\n            return None\n        _, _, task = heapq.heappop(self._queue)\n        task.status = TaskStatus.IN_PROGRESS\n        return task\n\n    def mark_done(self, task_id: str) -> bool:\n        task = self._task_map.get(task_id)\n        if not task:\n            return False\n        task.status = TaskStatus.DONE\n        del self._task_map[task_id]\n        return True\n\ndef main():\n    queue = TaskQueue()\n    \n    # Example 1: Basic usage\n    task1 = queue.enqueue(\"Process data\", 1)\n    task2 = queue.enqueue(\"Send email\", 3)\n    task3 = queue.enqueue(\"Backup database\", 2)\n    \n    print(f\"Enqueued tasks: {task1.id}, {task2.id}, {task3.id}\")\n    \n    # Process tasks\n    task = queue.dequeue()\n    print(f\"Processing: {task.payload} (priority: {task.priority})\")\n    \n    queue.mark_done(task.id)\n    print(f\"Task marked as done\")\n\nif __name__ == \"__main__\":\n    main()\n```"
+  }
+]

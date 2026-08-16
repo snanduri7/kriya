@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from unittest.mock import AsyncMock, patch
@@ -57,7 +58,7 @@ async def test_staged_skill_accrual(tmp_path):
         "Design description",
         '[{"filepath": "sample.py", "content": "print(1)"}]',
         '[{"filepath": "sample.py", "content": "print(1)"}]',
-        "Rule: Always use print with integer constants.", # Extracted lesson
+        '[{"category": "Rules", "value": "Rule: Always use print with integer constants.", "quote": "SyntaxError: invalid syntax"}]',  # Extracted lesson
         "Approved review"
     ])
     
@@ -82,13 +83,13 @@ async def test_staged_skill_accrual(tmp_path):
         )
         
     assert res["quality_gates_passed"] is True
-    
-    # Verify rules are staged under staged_rules.txt
-    staged_rules_path = tmp_path / "skills" / "auto-test_staged_skill_accrual0" / "staged_rules.txt"
-    assert os.path.exists(staged_rules_path) is True
-    with open(staged_rules_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    assert "Always use print with" in content
+
+    # Verify structured knowledge facts are staged under staged_knowledge.json
+    staged_knowledge_path = tmp_path / "skills" / "auto-test_staged_skill_accrual0" / "staged_knowledge.json"
+    assert os.path.exists(staged_knowledge_path) is True
+    with open(staged_knowledge_path, "r", encoding="utf-8") as f:
+        staged_facts = json.load(f)
+    assert any("Always use print with" in fact["value"] for fact in staged_facts)
     
     # Verify trace logger wrote SQLite log
     trace_db = tmp_path / "logs" / "traces.db"

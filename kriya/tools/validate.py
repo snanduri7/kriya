@@ -2,10 +2,11 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
@@ -68,6 +69,21 @@ def get_pom_own_coordinate(pom_path: str) -> Optional[str]:
         return None
 
 
+def _has_real_requirements(requirements_path: str) -> bool:
+    """A requirements.txt with no real entries (empty, or comments only) isn't
+    worth the cost of creating a venv and running pip over - module-level since
+    it's a pure text check, no PolymorphicValidator state needed."""
+    try:
+        with open(requirements_path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
@@ -76,31 +92,165 @@ class PolymorphicValidator:
         workspace_path: str,
         original_workspace_path: Optional[str] = None,
         autonomy_cfg: Optional[AutonomyConfig] = None,
+        java_home_override: Optional[str] = None,
     ) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
+        # When set (kriya/workflow/workflow.py's _resolve_java_home_override),
+        # forces every subprocess this validator launches (mvn compile/test/exec,
+        # javac fallback) to run under this specific JDK home via the JAVA_HOME
+        # env var - the same mechanism Maven's own launcher script already uses
+        # to decide which JDK to run itself under. Closes a real gap: the
+        # 'maven.compiler.source/target' pom.xml settings control what Java
+        # LANGUAGE version javac targets, not which actual JDK 'mvn' runs under
+        # - those are independent, and a machine with more than one JDK
+        # installed can easily have 'mvn' default to a different, genuinely
+        # incompatible one (confirmed live: JDK 26 removed the Security Manager
+        # entirely, breaking a Qpid Broker-J API call no goal-stated Java
+        # version could have anticipated).
+        self.java_home_override = java_home_override
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
 
+    def _ensure_project_venv(self, requirements_path: str) -> Tuple[Optional[str], Optional[str]]:
+        """Creates (if not already present) a project-local virtual environment
+        under .kriya/venv and installs requirements.txt into it, so a Python
+        goal needing a real third-party package can actually be tested -
+        PolymorphicValidator otherwise runs tests via sys.executable (KRIYA'S
+        OWN interpreter), which only has whatever Kriya itself depends on
+        installed. The same class of gap Ruby's `bundle install` fix closed for
+        that stack (2026-08-04) - a structurally unwinnable quality gate the
+        model's own code correctness can never fix.
+
+        Deliberately installs into an ISOLATED venv, not sys.executable
+        directly: pip-installing an arbitrary generated project's dependencies
+        straight into Kriya's OWN environment risks breaking Kriya itself (e.g.
+        downgrading a package version Kriya's own pyproject.toml needs).
+
+        Lives inside the (already git-untracked, worktree-scoped) .kriya/
+        directory - reused across retries within the same run the same way the
+        worktree itself is, and cleaned up the same way (git clean -fd) once
+        the worktree is reset for reuse by a later, unrelated run.
+
+        Returns (venv_python_path, None) on success. Returns (None, None) if
+        venv CREATION itself fails - an infrastructure problem, not something
+        a code retry can fix, so the caller falls back to sys.executable
+        (today's pre-existing behavior) rather than failing the gate. Returns
+        (None, error_message) if the actual `pip install` fails - a real
+        dependency problem (e.g. a nonexistent package/version the model
+        wrote), which the caller fails the gate on so the retry loop sees it,
+        mirroring the Ruby bundle-install precedent exactly."""
+        venv_dir = os.path.join(self.workspace_path, ".kriya", "venv")
+        venv_python = os.path.join(venv_dir, "bin", "python")
+        if not os.path.exists(venv_python):
+            try:
+                create_res = self._run_cmd_with_timeout(
+                    [sys.executable, "-m", "venv", venv_dir], cwd=self.workspace_path, timeout=60,
+                )
+                if create_res["returncode"] != 0 or not os.path.exists(venv_python):
+                    logger.warning(
+                        f"Failed to create project-local venv at {venv_dir} - falling back to "
+                        f"Kriya's own interpreter for this test run: {create_res['stderr']}"
+                    )
+                    return None, None
+            except Exception as e:
+                logger.warning(
+                    f"Failed to create project-local venv at {venv_dir} - falling back to "
+                    f"Kriya's own interpreter for this test run: {e}"
+                )
+                return None, None
+
+        # Re-run on every call, even when the venv already existed - a retry
+        # may have just edited requirements.txt, and pip itself is a fast
+        # no-op when nothing actually changed since the last install.
+        install_res = self._run_cmd_with_timeout(
+            [venv_python, "-m", "pip", "install", "-q", "-r", requirements_path, "pytest"],
+            cwd=self.workspace_path, timeout=300,
+        )
+        if install_res["returncode"] != 0:
+            return None, (
+                f"'pip install -r requirements.txt' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
+            )
+        return venv_python, None
+
+    def _resolve_python_interpreter(self) -> Tuple[str, Optional[str]]:
+        """Resolves which Python interpreter Python subprocesses for this
+        workspace should use - shared by run_tests() and run_app_sequence()/
+        run_app() so a goal needing a real third-party package (e.g. Django)
+        gets the SAME isolated, dependency-installed interpreter for both its
+        test gate and its Runtime Verification gate, not just the test gate.
+        Confirmed live, 2026-08-07 (django_healthcheck_gap, after the
+        RepositoryAnalyzer manage.py-hallucination fix let this goal reach
+        Runtime Verification for the first time): the isolated venv from
+        run_tests()'s own fix was never reused here - run_verification still
+        ran via sys.executable directly, hitting the identical
+        'No module named django' failure one gate later.
+
+        Returns (interpreter_path, install_error). interpreter_path is
+        sys.executable when there's no requirements.txt, or when venv
+        CREATION itself failed (an infrastructure problem, not something a
+        retry can fix - degrades silently, same reasoning as
+        _ensure_project_venv()'s own docstring). install_error is set ONLY
+        when `pip install` of THIS project's own requirements.txt genuinely
+        failed (a real, potentially code-fixable dependency problem, e.g. a
+        bad package pin) - the caller should treat that as a hard failure
+        rather than silently proceeding with an interpreter missing the
+        dependencies the goal actually needs."""
+        requirements_path = os.path.join(self.workspace_path, "requirements.txt")
+        if os.path.exists(requirements_path) and _has_real_requirements(requirements_path):
+            venv_python, install_error = self._ensure_project_venv(requirements_path)
+            if install_error:
+                return sys.executable, install_error
+            if venv_python:
+                return venv_python, None
+        return sys.executable, None
+
     def _detect_stack(self) -> str:
-        """Determines if the workspace uses Python, Java, or Ruby."""
+        """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
+        for anything else (JS/TS, Go, Rust, C#, ...). Python used to be the blind
+        default for anything not Java/Ruby, which meant a genuinely unsupported
+        stack silently ran the Python compile-check branch, matched zero .py
+        files, and reported a false-positive "Python files compiled successfully"
+        - a quality gate that never actually checked anything. Python is now
+        detected the same way Java/Ruby are, by real markers, so "no markers
+        matched" is distinguishable from "this is a Python project"."""
         # 1. Check for Java
-        if (os.path.exists(os.path.join(self.workspace_path, "pom.xml")) or 
+        if (os.path.exists(os.path.join(self.workspace_path, "pom.xml")) or
             os.path.exists(os.path.join(self.workspace_path, "build.gradle")) or
             os.path.exists(os.path.join(self.workspace_path, "src", "main", "java"))):
             return "java"
-            
+
         # 2. Check for Ruby
-        if (os.path.exists(os.path.join(self.workspace_path, "Gemfile")) or 
+        if (os.path.exists(os.path.join(self.workspace_path, "Gemfile")) or
             os.path.exists(os.path.join(self.workspace_path, "Rakefile")) or
             os.path.exists(os.path.join(self.workspace_path, "spec"))):
             return "ruby"
-            
-        # Default fallback to Python
-        return "python"
+
+        # 3. Check for Python
+        if (os.path.exists(os.path.join(self.workspace_path, "requirements.txt")) or
+            os.path.exists(os.path.join(self.workspace_path, "pyproject.toml")) or
+            os.path.exists(os.path.join(self.workspace_path, "setup.py")) or
+            os.path.exists(os.path.join(self.workspace_path, "setup.cfg")) or
+            os.path.exists(os.path.join(self.workspace_path, "Pipfile")) or
+            self._has_any_py_file()):
+            return "python"
+
+        return "unknown"
+
+    def _has_any_py_file(self) -> bool:
+        """Bounded recursive fallback for a Python project with none of the
+        standard marker files (e.g. a single-script goal with no packaging
+        metadata yet) - stops at the first hit, skips common non-source/
+        dependency directories so it doesn't walk a huge vendored tree."""
+        skip_dirs = {".git", "node_modules", "venv", ".venv", "__pycache__", "build", "dist", ".kriya"}
+        for _root, dirs, filenames in os.walk(self.workspace_path):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            if any(f.endswith(".py") for f in filenames):
+                return True
+        return False
 
     def _run_cmd_with_timeout(self, cmd: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
         env = None
@@ -110,20 +260,65 @@ class PolymorphicValidator:
             preexec_fn = posix_resource_limits_preexec_fn(
                 self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
             )
+        if self.java_home_override:
+            # env is None here means "inherit the parent process's environment
+            # unchanged" (subprocess.Popen's own default) - that's no longer
+            # correct once we need to ADD one override on top of it, so make
+            # the inheritance explicit before overriding just the two JDK-
+            # selection variables. Setting both JAVA_HOME (what mvn's own
+            # launcher script checks first) and PATH (so a plain 'java'/'javac'
+            # invocation resolves the same way, in case anything downstream
+            # doesn't consult JAVA_HOME) covers both real mechanisms a JDK
+            # gets selected by.
+            env = dict(env) if env is not None else dict(os.environ)
+            env["JAVA_HOME"] = self.java_home_override
+            env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
+        # start_new_session=True (POSIX setsid) puts the child in its own
+        # process group - required for the timeout-kill below to actually
+        # work for a command like `mvn exec:exec`, which forks its own
+        # separate `java` child process to run the app (that's the entire
+        # point of exec:exec over exec:java). Confirmed live, 2026-08-03:
+        # subprocess.run()'s own built-in timeout handling only kills the
+        # DIRECT child (mvn) - the grandchild java process it forked
+        # survived the kill, kept an embedded Qpid broker bound to its port
+        # for over an hour, and silently broke a LATER, completely
+        # unrelated validation run that happened to need the same port.
+        # Killing the whole process group on timeout is the only way to
+        # actually terminate what a command like this really started.
+        process = subprocess.Popen(
+            cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=env, preexec_fn=preexec_fn, start_new_session=True,
+        )
         try:
-            res = subprocess.run(
-                cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
-                env=env, preexec_fn=preexec_fn,
-            )
-            return {"returncode": res.returncode, "stdout": res.stdout, "stderr": res.stderr, "timeout": False}
-        except subprocess.TimeoutExpired as te:
-            stdout = te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else (te.stdout or "")
-            stderr = te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else (te.stderr or "")
+            stdout, stderr = process.communicate(timeout=timeout)
+            return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr, "timeout": False}
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # already exited between the timeout firing and this kill
+            try:
+                # Reap the process, collect whatever output exists. SIGKILL
+                # doesn't guarantee IMMEDIATE death - a child stuck in
+                # uninterruptible I/O sleep (D-state, real under slow/
+                # networked storage) can't be reaped until that I/O
+                # completes, so this call needs its own timeout too or it
+                # can hang indefinitely, defeating the whole point of the
+                # outer timeout (2026-08-12 SME review).
+                stdout, stderr = process.communicate(timeout=10)
+            except subprocess.TimeoutExpired as reap_ex:
+                # .output/.stderr are populated even on a second timeout -
+                # return whatever was captured rather than hang forever.
+                stdout = reap_ex.output or ""
+                stderr = (reap_ex.stderr or "") + (
+                    "\n[REAP TIMEOUT] Process could not be reaped after SIGKILL "
+                    "(possibly stuck in uninterruptible I/O)."
+                )
             return {
-                "returncode": -1, 
-                "stdout": stdout, 
-                "stderr": stderr + f"\n[TIMEOUT] Command timed out after {timeout} seconds.", 
-                "timeout": True
+                "returncode": -1,
+                "stdout": stdout,
+                "stderr": stderr + f"\n[TIMEOUT] Command timed out after {timeout} seconds.",
+                "timeout": True,
             }
 
     def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
@@ -165,7 +360,26 @@ class PolymorphicValidator:
             # 2. Run Maven compile if pom.xml exists
             if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                 try:
-                    res = self._run_cmd_with_timeout(["mvn", "clean", "compile"], cwd=self.workspace_path)
+                    # showWarnings + compilerArgument enable javac's -Xlint:rawtypes,
+                    # unchecked diagnostics with real file:line pointers (javac's
+                    # default one-line "uses unchecked or unsafe operations" summary
+                    # has no location info at all) - these are standard, portable
+                    # maven-compiler-plugin CLI properties, no pom.xml cooperation
+                    # needed. On a real compile FAILURE, this text is already
+                    # captured into error_output below for free - a raw-type mistake
+                    # (e.g. `ignite.cache(name)` used without generics, causing a
+                    # later "incompatible types: Object cannot be converted to X"
+                    # error) now shows up as an explicit, precisely-located "rawtypes"
+                    # warning alongside the hard error, rather than the model having
+                    # to infer the root cause from the type-mismatch message alone.
+                    res = self._run_cmd_with_timeout(
+                        [
+                            "mvn", "clean", "compile",
+                            "-Dmaven.compiler.showWarnings=true",
+                            "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked",
+                        ],
+                        cwd=self.workspace_path,
+                    )
                     if res["returncode"] == 0:
                         return {"success": True, "output": "Maven compilation succeeded."}
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
@@ -242,7 +456,17 @@ class PolymorphicValidator:
                 return {"success": False, "output": "\n".join(errors)}
             return {"success": True, "output": "Ruby files syntax check passed."}
 
-        return {"success": True, "output": "Unsupported tech stack compilation check skipped."}
+        # "unknown" - no Java/Python/Ruby markers matched. success: True so an
+        # unsupported stack doesn't fail the retry loop forever over a gate that
+        # was never going to pass, but the message is honest about zero real
+        # validation having happened - never claim a check that didn't run.
+        return {
+            "success": True,
+            "output": (
+                "No compile check available: workspace does not match a supported "
+                "stack (Java/Python/Ruby). Quality gate skipped, NOT confirmed to compile."
+            ),
+        }
 
     def run_tests(self, target_test: Optional[str] = None) -> Dict[str, Any]:
         """Runs tech-stack specific test execution suite."""
@@ -265,8 +489,45 @@ class PolymorphicValidator:
                 src_dir = os.path.join(self.workspace_path, "src")
                 if os.path.isdir(src_dir):
                     extra_roots.append(src_dir)
+                # The Developer Agent keeps inventing a Maven/Gradle-style
+                # src/main/<lang> (and src/test/<lang>) nesting for pure-Python
+                # goals despite an explicit, correctly-worded prompt instruction
+                # against it (ECOSYSTEM_INVARIANT_HEADER in workflow.py names this
+                # exact anti-pattern verbatim) - confirmed live, 2026-08-07
+                # (python_task_tracker): 7/7 attempts across TWO different models
+                # wrote to src/main/python/, and every one of the resulting
+                # ModuleNotFoundError failures was misdiagnosed by the model's own
+                # fix-analysis as a sys.path problem rather than a layout problem,
+                # so retries never escaped the pattern. A genuine prompting-ceiling
+                # case, not an under-specified one - the same class already hit for
+                # Ignite's Security Manager flag (see _strip_jdk_incompatible_jvm_
+                # flags). Rather than keep fighting the model's habit at the prompt
+                # level, make test collection robust to the specific nesting shape
+                # actually observed - the same "meet the model where it is"
+                # philosophy already used for Java's classpath-based test-class
+                # resolution (java_test_class in run_tests below, resolves
+                # regardless of package/src-root convention). Conditioned on the
+                # directory actually existing, so this is a no-op for every
+                # correctly-flat-laid-out project.
+                for maven_style_root in ("src/main/python", "src/main", "src/test/python", "src/test"):
+                    candidate = os.path.join(self.workspace_path, *maven_style_root.split("/"))
+                    if os.path.isdir(candidate):
+                        extra_roots.append(candidate)
+
+                # A goal needing a real third-party package (e.g. Django) can only
+                # ever pass this gate if that package happens to already be
+                # installed in KRIYA'S OWN interpreter (sys.executable) - there was
+                # no per-project dependency install step for Python, unlike Ruby's
+                # `bundle install` fix. Confirmed live, 2026-08-07
+                # (django_healthcheck_gap): every attempt failed identically with
+                # ModuleNotFoundError: No module named 'django', regardless of the
+                # generated code's correctness - a structurally unwinnable gate.
+                python_interpreter, install_error = self._resolve_python_interpreter()
+                if install_error:
+                    return {"success": False, "output": install_error}
+
                 cmd = [
-                    sys.executable,
+                    python_interpreter,
                     "-c",
                     "import sys, os; "
                     "sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; "
@@ -280,22 +541,68 @@ class PolymorphicValidator:
                 return {"success": res["returncode"] in (0, 5), "output": res["stdout"] + "\n" + res["stderr"]}
  
             elif self.stack == "java":
+                # target_test comes from extract_target_test() as a raw file path
+                # (e.g. "src/test/java/com/example/ProtocolTest.java") - Maven's
+                # -Dtest= and Gradle's --tests both expect a class name, not a
+                # path, and silently match nothing if given one. Confirmed live,
+                # 2026-08-07 (kriya-protocol-parser-app): passing the raw path
+                # verbatim made the targeted-test gate structurally unable to
+                # ever pass ("No tests matching pattern ... were executed!"),
+                # burning the entire retry budget on a Kriya-side invocation bug
+                # the generated code had no way to fix - the model's own fix-
+                # analysis correctly noticed the pattern was wrong every time but
+                # could only ever regenerate ITS OWN files, not Kriya's command
+                # construction. The bare (unqualified) class name is enough -
+                # both Surefire and Gradle's test filter resolve it via classpath
+                # scanning regardless of package, avoiding any need to guess the
+                # src-root convention (which isn't always the same layout - see
+                # the src/main/python vs flat layout drift documented elsewhere
+                # in this project).
+                java_test_class = (
+                    os.path.splitext(os.path.basename(target_test))[0] if target_test else None
+                )
                 if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                     cmd = ["mvn", "test"]
-                    if target_test:
-                        cmd.append(f"-Dtest={target_test}")
+                    if java_test_class:
+                        cmd.append(f"-Dtest={java_test_class}")
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                     return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
                     cmd = [gradle_cmd, "test"]
-                    if target_test:
-                        cmd.extend(["--tests", target_test])
+                    if java_test_class:
+                        cmd.extend(["--tests", java_test_class])
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                     return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
  
             elif self.stack == "ruby":
+                # A fresh sandbox never has gems installed, so `bundle exec rspec`
+                # fails with "bundler: command not found: rspec" regardless of what
+                # the model writes - confirmed live (eval harness batch
+                # 20260804-115621) burning a full retry budget on correct Ruby code
+                # for exactly this reason. `bundle install` needs a real Gemfile to
+                # act on; without one, skip straight to the exec attempt below,
+                # which still gets a chance via its own fallback.
+                if os.path.exists(os.path.join(self.workspace_path, "Gemfile")):
+                    # --path installs gems into a project-local, sandbox-writable
+                    # directory instead of the host Ruby's own gem path - confirmed
+                    # live (eval harness batch 20260804-151655) that a plain
+                    # `bundle install` fails outright on an unmodified macOS system
+                    # Ruby (no rbenv/rvm), whose gem directory is permission-
+                    # protected and requires sudo the install can never provide
+                    # non-interactively (Bundler::SudoNotPermittedError). --path is
+                    # portable across Bundler 1.x/2.x and, once set, is remembered
+                    # via .bundle/config for the `bundle exec` call below too - no
+                    # other plumbing needed.
+                    install_res = self._run_cmd_with_timeout(
+                        ["bundle", "install", "--path", "vendor/bundle"], cwd=self.workspace_path
+                    )
+                    if install_res["returncode"] != 0:
+                        return {
+                            "success": False,
+                            "output": f"'bundle install' failed:\n{install_res['stdout']}\n{install_res['stderr']}",
+                        }
                 cmd = ["bundle", "exec", "rspec"]
                 if target_test:
                     cmd.append(target_test)
@@ -308,11 +615,59 @@ class PolymorphicValidator:
                         cmd.append(target_test)
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
- 
+
+            # "unknown" stack - same reasoning as run_compile_check: succeed so
+            # the retry loop doesn't fail forever on a gate that can never run,
+            # but say plainly that nothing was actually tested.
+            return {
+                "success": True,
+                "output": (
+                    "No test runner available: workspace does not match a supported "
+                    "stack (Java/Python/Ruby). Quality gate skipped, NOT confirmed to pass."
+                ),
+            }
+
         except Exception as e:
             return {"success": False, "output": f"Failed to execute local test suite: {e}"}
 
         return {"success": True, "output": "Stack test execution skipped."}
+
+    def _substitute_python_interpreter(
+        self, commands: List[List[str]]
+    ) -> Tuple[Optional[List[List[str]]], Optional[str]]:
+        """Rewrites any command's executable (index 0) from a bare "python" or
+        Kriya's own sys.executable to the isolated project-local venv's
+        interpreter (_resolve_python_interpreter()) when this workspace is
+        Python and needs one - shared by run_app()/run_app_sequence() so
+        Runtime Verification gets the SAME isolated, dependency-installed
+        interpreter run_tests() already resolves for the test gate, instead
+        of diverging and hitting the identical missing-dependency failure one
+        gate later. Confirmed live, 2026-08-07 (django_healthcheck_gap, after
+        the RepositoryAnalyzer manage.py-hallucination fix let this goal
+        reach Runtime Verification for the first time): it did exactly that -
+        'No module named django' via sys.executable, despite run_tests()'s
+        own isolated venv already existing for this same workspace.
+
+        A no-op (commands unchanged) for every non-Python stack, and for a
+        Python workspace with no real requirements.txt.
+
+        Returns (commands, None) on success, or (None, error_message) if
+        resolving the interpreter itself hit a real pip install failure -
+        treated as a hard failure here too (matching run_tests()'s own
+        handling), since every command in the sequence would fail
+        identically against a confusing 'module not found' symptom
+        otherwise, rather than the real, potentially code-fixable
+        dependency problem underneath it."""
+        if self.stack != "python":
+            return commands, None
+        interpreter, install_error = self._resolve_python_interpreter()
+        if install_error:
+            return None, install_error
+        rewritten = [
+            ([interpreter] + cmd[1:]) if cmd and cmd[0] in ("python", sys.executable) else cmd
+            for cmd in commands
+        ]
+        return rewritten, None
 
     def run_app(self, command: List[str], timeout: int = 90) -> Dict[str, Any]:
         """Executes an already-resolved run command for a self-terminating/batch entrypoint
@@ -323,6 +678,10 @@ class PolymorphicValidator:
         against the goal."""
         if not command:
             return {"success": False, "timed_out": False, "returncode": None, "output": "No run command provided."}
+        commands, install_error = self._substitute_python_interpreter([command])
+        if install_error:
+            return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
+        command = commands[0]
         try:
             res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
         except Exception as e:
@@ -353,6 +712,10 @@ class PolymorphicValidator:
         its own timeout budget, not a shared one."""
         if not commands:
             return {"success": False, "timed_out": False, "returncode": None, "output": "No run commands provided."}
+
+        commands, install_error = self._substitute_python_interpreter(commands)
+        if install_error:
+            return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
 
         output_parts = []
         overall_success = True

@@ -1,0 +1,15 @@
+category: Serialization
+description: Encoding/decoding fixed-width binary wire protocols in Java, where a
+  field's declared byte width may be narrower than its natural Java primitive type
+  (e.g. a 3-byte field holding an int).
+name: binary-wire-protocol
+tags:
+- wire format
+- big-endian
+- little-endian
+- binary protocol
+- byte-level protocol
+verification_gap_acknowledged: false
+verified: true
+verified_at: '2026-08-16'
+verified_context: version unspecified

@@ -5,6 +5,19 @@ from click.testing import CliRunner
 from kriya.cli import main
 
 
+def _streaming_mock(text: str) -> AsyncMock:
+    """`prompt generate` now streams via stream_callback (kriya/cli.py's
+    prompt_generate), same as LLMClient.complete does for real - a plain
+    AsyncMock(return_value=...) never invokes that callback, so stdout would
+    come up empty under a naive mock even though the command still returns
+    the right text. Mirror the real method's callback contract instead."""
+    async def fake_complete(*args, stream_callback=None, **kwargs):
+        if stream_callback:
+            stream_callback(text)
+        return text
+    return AsyncMock(side_effect=fake_complete)
+
+
 def test_prompt_render_supports_custom_template_dir(tmp_path):
     """Regression test for a real bug found via code review: PromptEngine has
     always supported a template_dir constructor arg for custom '<name>.jinja'
@@ -44,7 +57,7 @@ def test_prompt_render_default_templates_still_work_without_template_dir_option(
 def test_prompt_generate_command(tmp_path):
     runner = CliRunner()
 
-    mock_complete = AsyncMock(return_value="### Optimized Prompt\nCreate an Ignite server node...")
+    mock_complete = _streaming_mock("### Optimized Prompt\nCreate an Ignite server node...")
 
     with patch("os.getcwd", return_value=str(tmp_path)), \
          patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
@@ -68,7 +81,7 @@ def test_prompt_generate_stdout_contains_only_the_generated_prompt(tmp_path):
     Status/header chrome now goes to stderr; stdout must contain ONLY the
     model's actual output."""
     runner = CliRunner()
-    mock_complete = AsyncMock(return_value="### Optimized Prompt\nBuild a todo REST API.")
+    mock_complete = _streaming_mock("### Optimized Prompt\nBuild a todo REST API.")
 
     with patch("os.getcwd", return_value=str(tmp_path)), \
          patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
@@ -89,7 +102,7 @@ def test_prompt_generate_auto_saves_for_repl_chaining(tmp_path):
     predictable path and print a copy-pasteable next step reusing generate's
     EXISTING --file flag."""
     runner = CliRunner()
-    mock_complete = AsyncMock(return_value="### Optimized Prompt\nBuild a todo REST API.")
+    mock_complete = _streaming_mock("### Optimized Prompt\nBuild a todo REST API.")
 
     with patch("os.getcwd", return_value=str(tmp_path)), \
          patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
@@ -114,7 +127,7 @@ def test_prompt_generate_warns_instead_of_silently_failing_when_autosave_fails(t
     invocation (config loading, logging setup)."""
     runner = CliRunner()
     (tmp_path / ".kriya").write_text("not a directory")
-    mock_complete = AsyncMock(return_value="### Optimized Prompt\nBuild a todo REST API.")
+    mock_complete = _streaming_mock("### Optimized Prompt\nBuild a todo REST API.")
 
     with patch("os.getcwd", return_value=str(tmp_path)), \
          patch("kriya.core.llm.LLMClient.complete", new=mock_complete):

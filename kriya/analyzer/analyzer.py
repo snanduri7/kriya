@@ -34,6 +34,16 @@ EXTENSION_MAP = {
     ".swift": "Swift"
 }
 
+# Shared core of a Java method signature (modifiers, return type, captured
+# method name, parameter list) - independently duplicated three times before
+# this (here, kriya/analyzer/graph.py, kriya/workflow/context_budget.py),
+# each with its own trailing-anchor variant (a literal "{", an optional
+# "{?", or "$" for end-of-buffer) - a fix to the shared core (e.g. handling
+# multi-line signatures or generic return types) previously wouldn't
+# propagate to the other two call sites at all (2026-08-12 SME review).
+# Each caller appends its own trailing anchor on top of this.
+JAVA_METHOD_SIGNATURE_CORE = r'(?:public|protected|private|static|\s)+[\w<>]+\s+(\w+)\s*\([^\)]*\)'
+
 def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[str, Any]]:
     _, ext = os.path.splitext(rel_path)
     ext = ext.lower()
@@ -120,10 +130,27 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
         pkg_match = re.search(r"package\s+([\w\.]+);", content)
         package = pkg_match.group(1) if pkg_match else "default"
         
+        # Local import: kriya.workflow's package __init__ pulls in
+        # workflow.py, which itself imports RepositoryAnalyzer from this
+        # module - a module-level import here would be a circular import
+        # (analyzer.py -> kriya.workflow -> workflow.py -> analyzer.py,
+        # mid-initialization). Deferred to first actual use instead, by
+        # which point both modules are fully loaded.
+        from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+
         lines = content.splitlines()
+        # Comment/string-stripped mirror (same line count, same length per
+        # line - _strip_java_comments_and_strings() blanks comment/string
+        # spans to whitespace rather than deleting them) used ONLY for the
+        # brace-counting below, so a '{'/'}' inside a Java string literal or
+        # // or /* */ comment doesn't miscount and truncate or merge method
+        # body chunks - the exact bug class edit_safety.py's own
+        # _strip_java_comments_and_strings() was built to avoid, not
+        # previously extended to this call site (2026-08-12 SME review).
+        brace_count_lines = _strip_java_comments_and_strings(content).splitlines()
         current_class = ""
         current_class_javadoc = ""
-        
+
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -151,7 +178,7 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
                 i += 1
                 continue
                 
-            method_match = re.search(r'(?:public|protected|private|static|\s)+[\w<>]+\s+(\w+)\s*\([^\)]*\)(?:\s+throws\s+[\w\s,]+)?\s*\{', line_strip)
+            method_match = re.search(JAVA_METHOD_SIGNATURE_CORE + r'(?:\s+throws\s+[\w\s,]+)?\s*\{', line_strip)
             if method_match and current_class:
                 method_name = method_match.group(1)
                 if method_name not in {"class", "interface", "enum", "if", "for", "while", "switch", "catch"}:
@@ -163,7 +190,7 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
                     while i < len(lines) and brace_count > 0:
                         line = lines[i]
                         method_lines.append(line)
-                        brace_count += line.count("{") - line.count("}")
+                        brace_count += brace_count_lines[i].count("{") - brace_count_lines[i].count("}")
                         i += 1
                         
                     header = f"File: {rel_path}\nPackage: {package}\nClass: {current_class}\nClass Javadoc: {current_class_javadoc}\nMethod: {method_name}\n=== Method Body ===\n"
@@ -250,6 +277,13 @@ class RepositoryModel(BaseModel):
     frameworks: List[str] = Field(default_factory=list, description="Detected frameworks.")
     architecture: str = Field(default="Unknown", description="Inferred codebase architecture style.")
     dependencies: List[str] = Field(default_factory=list, description="Key discovered project dependencies.")
+    dependency_versions: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Best-effort exact version string per dependency name, where the manifest format carries one "
+                     "(requirements.txt pins, package.json, pom.xml <version>, build.gradle 'group:artifact:version'). "
+                     "May be a range lower-bound or an unresolved Maven property reference rather than a fully-"
+                     "resolved pin - downstream consumers should treat this as a hint, not a guarantee."
+    )
     testing_frameworks: List[str] = Field(default_factory=list, description="Testing framework identifiers.")
     project_structure: Dict[str, Any] = Field(default_factory=dict, description="Basic folder structure hierarchy.")
     coding_style: Dict[str, Any] = Field(default_factory=dict, description="Detected coding style metrics.")
@@ -303,16 +337,37 @@ class RepositoryAnalyzer:
         directories = set()
 
         ignore_dirs = {
-            ".git", ".venv", "venv", "node_modules", "__pycache__", 
-            ".pytest_cache", "build", "dist", ".egg-info", "eggs", "bin", "obj"
+            ".git", ".venv", "venv", "node_modules", "__pycache__",
+            ".pytest_cache", "build", "dist", ".egg-info", "eggs", "bin", "obj",
+            # Kriya's own reserved paths.* directories (default names - a
+            # differently-configured project's own paths.skills/memory/logs
+            # would need this list threaded through from AppConfig to match,
+            # same known limitation as _has_any_py_file()'s hardcoded
+            # .kriya exclusion elsewhere in this codebase). These are
+            # Kriya's own bookkeeping, never the user's application
+            # structure, and must never be presented to the model as if
+            # they were - confirmed live, 2026-08-07: an Architect prompt
+            # reported an empty "skills" directory as an existing top-level
+            # project folder, and the model concluded a Django app already
+            # existed there (plus a manage.py it never actually saw), then
+            # tried to extend a project that was never created instead of
+            # building one from scratch.
+            "skills", "memory", "logs",
         }
 
         for root, dirs, files in os.walk(self.root_path):
             # Modify dirs in-place to skip ignored directories
             dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
-            
+
             rel_path = os.path.relpath(root, self.root_path)
-            if rel_path != ".":
+            # Only report a top-level folder as real project structure if it
+            # actually contains at least one real (non-dotfile) file - an
+            # empty directory being WALKED INTO used to be enough to report
+            # it as an existing "top_level_folder" regardless of whether
+            # anything was ever in it, which is exactly the false signal
+            # that caused the skills/manage.py hallucination above.
+            real_files_here = [f for f in files if not f.startswith(".")]
+            if rel_path != "." and real_files_here:
                 directories.add(rel_path.split(os.sep)[0])
 
             for file in files:
@@ -354,6 +409,7 @@ class RepositoryAnalyzer:
         frameworks = set()
         dependencies = set()
         testing = set()
+        dependency_versions: Dict[str, str] = {}
 
         # Python requirement checks
         pyproject_path = os.path.join(self.root_path, "pyproject.toml")
@@ -396,6 +452,12 @@ class RepositoryAnalyzer:
                         # Remove version specifiers
                         pkg = re.split(r"[=<>]", line)[0].strip()
                         dependencies.add(pkg)
+                        # Also keep the pin/bound itself where the line carries one
+                        # (e.g. "ignite-core==2.18.0" or "requests>=2.28,<3.0") - best-
+                        # effort, may be a range lower-bound rather than an exact pin.
+                        ver_match = re.match(r"^[A-Za-z0-9_.\-]+\s*(?:==|>=|<=|~=|!=|>|<)\s*([A-Za-z0-9_.\-]+)", line)
+                        if ver_match:
+                            dependency_versions[pkg] = ver_match.group(1).strip()
             except Exception as e:
                 logger.debug(f"Failed to parse '{req_path}': {e}")
 
@@ -406,8 +468,10 @@ class RepositoryAnalyzer:
                 with open(package_json_path, "r", errors="replace") as f:
                     data = json.load(f)
                     all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
-                    for dep in all_deps.keys():
+                    for dep, ver in all_deps.items():
                         dependencies.add(dep)
+                        if isinstance(ver, str) and ver.strip():
+                            dependency_versions[dep] = ver.strip()
             except Exception as e:
                 logger.debug(f"Failed to parse '{package_json_path}': {e}")
 
@@ -448,6 +512,14 @@ class RepositoryAnalyzer:
                     deps = re.findall(r"<artifactId>([^<]+)</artifactId>", content)
                     for d in deps:
                         dependencies.add(d.strip())
+                    # Pair each <dependency> block's artifactId with its own <version>
+                    # (may be an unresolved ${property} reference rather than a literal
+                    # pin - best-effort, same caveat as everywhere else in this method).
+                    for block in re.findall(r"<dependency>(.*?)</dependency>", content, re.DOTALL):
+                        artifact_match = re.search(r"<artifactId>([^<]+)</artifactId>", block)
+                        version_match = re.search(r"<version>([^<]+)</version>", block)
+                        if artifact_match and version_match:
+                            dependency_versions[artifact_match.group(1).strip()] = version_match.group(1).strip()
             except Exception as e:
                 logger.debug(f"Failed to parse '{pom_path}': {e}")
 
@@ -462,6 +534,16 @@ class RepositoryAnalyzer:
                     deps = re.findall(r"(?:implementation|compileOnly|runtimeOnly|testImplementation)\s+['\"](?:[^:]+:)?([^:']+)['\"]", content)
                     for d in deps:
                         dependencies.add(d.strip())
+                    # Separately capture full group:artifact:version triples for the version map -
+                    # the regex above only keeps the last colon-delimited segment, which is the
+                    # version itself when a triple is given, not the artifact id, so it can't be
+                    # reused for this without changing existing dependency-name behavior.
+                    triples = re.findall(
+                        r"(?:implementation|compileOnly|runtimeOnly|testImplementation)\s+['\"]([^:'\"]+):([^:'\"]+):([^'\"]+)['\"]",
+                        content,
+                    )
+                    for _group, artifact, version in triples:
+                        dependency_versions[artifact.strip()] = version.strip()
                     if "spring-boot" in content:
                         frameworks.add("Spring Boot")
                     if "junit" in content:
@@ -481,6 +563,7 @@ class RepositoryAnalyzer:
 
         model.frameworks = sorted(list(frameworks))
         model.dependencies = sorted(list(dependencies))
+        model.dependency_versions = dependency_versions
         model.testing_frameworks = sorted(list(testing))
 
     def _detect_architecture(self, model: RepositoryModel, directories: set) -> None:
@@ -580,7 +663,21 @@ class RepositoryAnalyzer:
                 raise e
         
         # 2. Find target files (respecting nested gitignores and system ignore filters)
-        target_extensions = {".py", ".java", ".xml", ".rb"}
+        # RepositoryAnalyzer.analyze() already detects far more languages via
+        # EXTENSION_MAP (JS/TS/Go/Rust/C#/etc.), but this set previously only
+        # ever indexed 4 of them for Graph RAG - every other detected
+        # language was structurally a no-op for retrieval, embedded zero
+        # chunks regardless of how much of the repo was written in it
+        # (2026-08-12 SME review). chunk_file_with_metadata_headers() already
+        # falls back to generic syntactic chunking for any extension without
+        # a dedicated branch (only .py/.java/.xml get language-aware
+        # handling), so extending coverage here is a safe, mechanical
+        # expansion - not a chunking-quality regression for the newly-added
+        # extensions, just real embeddings instead of none at all. ".xml"
+        # is unioned in separately since chunk_file_with_metadata_headers()
+        # has dedicated Spring-bean-aware handling for it but EXTENSION_MAP
+        # itself doesn't track XML as a "language" at all.
+        target_extensions = set(EXTENSION_MAP.keys()) | {".xml"}
         
         files_to_index = []
         gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
@@ -618,8 +715,15 @@ class RepositoryAnalyzer:
             import subprocess
             try:
                 res = subprocess.run(["git", "diff", "--name-only"], cwd=self.root_path, capture_output=True, text=True)
+                # `git diff --name-only` alone only ever shows UNSTAGED
+                # changes (working tree vs. index) - a file that's been
+                # `git add`ed but not modified again since staging shows up
+                # in neither this nor the untracked-files listing below, so
+                # it was silently excluded from --changed entirely
+                # (2026-08-12 SME review).
+                res_staged = subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=self.root_path, capture_output=True, text=True)
                 res_untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=self.root_path, capture_output=True, text=True)
-                if res.returncode != 0 or res_untracked.returncode != 0:
+                if res.returncode != 0 or res_staged.returncode != 0 or res_untracked.returncode != 0:
                     # Confirmed live: on a non-git directory, both commands fail
                     # (returncode != 0, not an exception) - the OLD code silently
                     # left git_files empty either way, which filtered
@@ -628,7 +732,7 @@ class RepositoryAnalyzer:
                     # rather than because there really were zero changes. Warn
                     # clearly and fall back to indexing everything instead of
                     # silently indexing nothing.
-                    stderr = (res.stderr or res_untracked.stderr or "").strip()
+                    stderr = (res.stderr or res_staged.stderr or res_untracked.stderr or "").strip()
                     logger.warning(
                         f"--changed requires a git repository, but git reported an error at "
                         f"'{self.root_path}'{f': {stderr}' if stderr else ''} - indexing all files "
@@ -636,12 +740,10 @@ class RepositoryAnalyzer:
                     )
                 else:
                     git_files = set()
-                    for line in res.stdout.splitlines():
-                        if line.strip():
-                            git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
-                    for line in res_untracked.stdout.splitlines():
-                        if line.strip():
-                            git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
+                    for res_lines in (res.stdout, res_staged.stdout, res_untracked.stdout):
+                        for line in res_lines.splitlines():
+                            if line.strip():
+                                git_files.add(os.path.abspath(os.path.join(self.root_path, line.strip())))
                     files_to_index = [f for f in files_to_index if os.path.abspath(f) in git_files]
             except Exception as e:
                 logger.warning(f"Failed to query git for changes: {e} - indexing all files instead of only changed ones.")
@@ -684,32 +786,86 @@ class RepositoryAnalyzer:
                 if progress_callback:
                     progress_callback(rel_path, idx, total_files)
 
-                # Wrap changes in explicit transaction
-                with store.conn, graph.conn:
-                    # Clear old chunks first to support re-indexing clean
-                    store.remove_file(rel_path)
-                    
-                    # Index in dependency graph
-                    graph.index_file(rel_path, content, mtime, file_hash)
-                    
-                    # Chunk file with metadata headers
-                    chunks = chunk_file_with_metadata_headers(content, rel_path)
-                    
-                    chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
-                    if chunk_texts:
-                        # Generate all embeddings concurrently
-                        embs = await client.get_embeddings(chunk_texts)
-                        
-                        for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs, strict=True)):
-                            store.add_document(
-                                filepath=rel_path,
-                                text=chunk_text,
-                                embedding=emb,
-                                chunk_index=chunk_idx,
-                                model_name=cfg.embedding.model,
-                                dimensions=len(emb)
-                            )
-                    # Store new cache metadata (including hash and mtime)
+                # NOT an atomic transaction, despite appearances - removed the
+                # `with store.conn, graph.conn:` wrapper that used to sit here
+                # (2026-08-12 SME review). store.remove_file()/add_document()
+                # and graph.index_file() each call their own conn.commit()
+                # internally (so they stay independently durable for every
+                # OTHER caller that invokes them standalone, e.g. `kriya
+                # learn`) - every write below commits immediately as it
+                # happens, regardless of any wrapping `with` block, so a
+                # failure partway through this file's re-index (e.g. the
+                # embeddings call raising) leaves store.remove_file()'s
+                # deletion and graph.index_file()'s write already permanently
+                # committed. Not fixed here: doing so would mean changing
+                # remove_file()/add_document()/index_file()'s own commit
+                # behavior, a broader change affecting every other call site
+                # that relies on their current standalone durability. The
+                # blast radius is bounded to this one file - the outer
+                # try/except below already isolates a per-file failure from
+                # the rest of the run, and file_metadata is deliberately left
+                # unset on any failure path (see below), so a later
+                # non-`--force` run naturally retries this exact file.
+                # Clear old chunks first to support re-indexing clean
+                store.remove_file(rel_path)
+
+                # Index in dependency graph
+                graph.index_file(rel_path, content, mtime, file_hash)
+
+                # Chunk file with metadata headers
+                chunks = chunk_file_with_metadata_headers(content, rel_path)
+
+                chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
+                embedding_failed = False
+                if chunk_texts:
+                    # Generate all embeddings concurrently
+                    embs = await client.get_embeddings(chunk_texts)
+
+                    for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs, strict=True)):
+                        # get_embeddings() silently substitutes an all-zero
+                        # "dummy" vector on any failure (embedding server
+                        # unreachable, malformed response) to degrade
+                        # gracefully - reasonable for a query-time caller,
+                        # where a dummy query vector naturally scores
+                        # near-zero and gets filtered out, but not here: a
+                        # zero-vector chunk is genuinely unsearchable
+                        # forever once written.
+                        if not any(v != 0.0 for v in emb):
+                            embedding_failed = True
+                        store.add_document(
+                            filepath=rel_path,
+                            text=chunk_text,
+                            embedding=emb,
+                            chunk_index=chunk_idx,
+                            model_name=cfg.embedding.model,
+                            dimensions=len(emb)
+                        )
+                # Store new cache metadata (including hash and mtime) -
+                # but NOT when any chunk's embedding silently degraded to
+                # a zero-vector above. Found live, 2026-08-12 (SME
+                # architecture review): a transient embedding-API failure
+                # during indexing previously got cached as a normal
+                # successful mtime/hash match, so a later non-`--force`
+                # `kriya analyze` would see the file as already
+                # up-to-date (per the fast-path skip check above) and
+                # never retry it - permanent, silent corruption of that
+                # file's RAG entries, recoverable only via `--force`.
+                # Deliberately leaving file_metadata unset here (the
+                # dependency graph's own cached mtime/hash, written
+                # above via graph.index_file, is NOT similarly gated -
+                # graph indexing has no embedding step to fail) means
+                # the fast-path skip's `cached_mtime == mtime` check
+                # will not match on the next run, so it naturally
+                # retries this file instead of skipping it forever.
+                if embedding_failed:
+                    logger.warning(
+                        f"Embedding generation failed for one or more chunks of '{rel_path}' "
+                        "(embedding server unreachable or returned an error) - indexed with a "
+                        "placeholder vector for those chunks, which will NOT be findable via "
+                        "similarity search. This file's cache metadata was deliberately not "
+                        "updated, so the next 'kriya analyze' run will retry it automatically."
+                    )
+                else:
                     store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
             except Exception as e:
                 logger.error(f"Failed to index file {rel_path}: {e}")

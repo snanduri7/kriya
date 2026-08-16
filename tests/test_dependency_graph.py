@@ -107,7 +107,7 @@ def test_xml_bean_indexing(tmp_path):
 </beans>
 """
     graph.index_file("beans.xml", xml_content, 400.0)
-    
+
     import sqlite3
     c = sqlite3.connect(graph.db_path)
     cursor = c.cursor()
@@ -115,3 +115,210 @@ def test_xml_bean_indexing(tmp_path):
     syms = cursor.fetchall()
     assert ("myService", "spring_bean") in syms
     c.close()
+
+
+def test_clear_file_does_not_delete_a_different_files_relations(tmp_path):
+    """Regression test for a real bug found live, 2026-08-12 (SME
+    architecture review): relations.source/target are bare, unqualified
+    symbol names with no file scoping - clear_file() used to delete ANY
+    relation matching a symbol name defined in the file being cleared, even
+    one that actually belongs to a DIFFERENT file's same-named symbol (e.g.
+    two Java files each defining a method called "handle"). Re-indexing (or
+    clearing) one file silently corrupted the other, untouched file's
+    relations too, with no error surfaced. Fixed by tracking which file's
+    parse produced each relation row (source_file) and deleting by that
+    instead of by name.
+
+    Constructed directly at the data layer (not through a language parser)
+    so the test is precise about exactly which collision it's proving fixed,
+    independent of any one parser's symbol-naming quirks."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("A.java", "handle", "function", 1, 5),
+    )
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("B.java", "handle", "function", 1, 5),
+    )
+    # B's own relation, referencing "handle" as a call target - correctly
+    # attributed to B via source_file.
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+        ("B.trigger", "handle", "calls", "B.java"),
+    )
+    cursor.execute("INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", ("A.java", 100.0, "h1"))
+    cursor.execute("INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", ("B.java", 200.0, "h2"))
+    graph.conn.commit()
+
+    graph.clear_file("A.java")
+
+    callers = graph.get_callers("handle")
+    assert len(callers) == 1
+    assert callers[0]["source"] == "B.trigger"
+
+    # A's own symbols/file row are still correctly gone.
+    cursor.execute("SELECT COUNT(*) FROM symbols WHERE filepath = 'A.java'")
+    assert cursor.fetchone()[0] == 0
+    cursor.execute("SELECT COUNT(*) FROM files WHERE filepath = 'A.java'")
+    assert cursor.fetchone()[0] == 0
+
+
+def test_clear_file_still_removes_a_legacy_pre_migration_relation_by_name(tmp_path):
+    """A relation row inserted before the source_file column existed
+    (source_file IS NULL) must still be cleaned up by clear_file() via the
+    name-based fallback - not left as a permanent orphan."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("A.java", "handle", "function", 1, 5),
+    )
+    # Simulates a row from before the source_file migration.
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, NULL)",
+        ("A.trigger", "handle", "calls"),
+    )
+    cursor.execute("INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", ("A.java", 100.0, "h1"))
+    graph.conn.commit()
+
+    graph.clear_file("A.java")
+
+    assert graph.get_callers("handle") == []
+
+
+def test_get_symbols_for_file_returns_real_indexed_names(tmp_path):
+    """Architectural add-on from a 2026-08-12 SME review (re-ranking
+    retrieval): Graph RAG seeding used to guess a file's symbol from its
+    filename stem - this is the real lookup that replaced it."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    graph.index_file("my_engine.py", "class MyEngine:\n    def execute(self):\n        pass\n", 100.0)
+
+    symbols = graph.get_symbols_for_file("my_engine.py")
+
+    assert "MyEngine" in symbols
+    assert "execute" in symbols
+
+
+def test_get_symbols_for_file_returns_empty_list_for_unknown_file(tmp_path):
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    assert graph.get_symbols_for_file("nope.py") == []
+
+
+def test_get_neighborhood_scores_direct_import_above_deeper_annotation_hit(tmp_path):
+    """A hop-1 'imports' hit should outscore a hop-2 'annotated_with' hit -
+    the whole point of scoring get_neighborhood()'s output is to let callers
+    tell a strong direct relation apart from a weak, distant one instead of
+    treating every hit identically."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    # Seed --imports--> Direct (hop 1)
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("Direct.java", "Direct", "class", 1, 1),
+    )
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+        ("Seed", "Direct", "imports", "Seed.java"),
+    )
+    # Direct --annotated_with--> Distant (hop 2 from Seed)
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("Distant.java", "Distant", "class", 1, 1),
+    )
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+        ("Direct", "Distant", "annotated_with", "Direct.java"),
+    )
+    graph.conn.commit()
+
+    results = graph.get_neighborhood(["Seed"], max_hops=2)
+
+    # Mirrors how kriya/workflow/workflow.py actually consumes this: the
+    # BEST (max) score seen for a given file across however many neighbor
+    # hits mention it, not "whichever result happened to come last."
+    best_by_file: dict = {}
+    for r in results:
+        fp = r["filepath"]
+        best_by_file[fp] = max(best_by_file.get(fp, 0.0), r["score"])
+
+    assert best_by_file["Direct.java"] > best_by_file["Distant.java"]
+    # Sorted descending by score - the strongest hit comes first.
+    assert results[0]["filepath"] == "Direct.java"
+    assert results[0]["score"] == best_by_file["Direct.java"]
+
+
+def test_get_neighborhood_caps_results_instead_of_returning_every_hit(tmp_path):
+    """Regression test for a finding from the 2026-08-12 SME review:
+    get_neighborhood()'s BFS is keyed on bare, unqualified symbol names with
+    no per-result cap - a common method name shared across many unrelated
+    classes (e.g. "process", "save") previously pulled in every unrelated
+    definition as "related" context, unbounded. Now capped, keeping the
+    highest-scoring hits (a direct import) over lower-scoring ones
+    (generic calls) rather than an arbitrary truncation."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    # One genuinely strong signal: Seed directly imports RealTarget.
+    cursor.execute(
+        "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+        ("RealTarget.java", "process", "function", 1, 1),
+    )
+    cursor.execute(
+        "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+        ("Seed", "process", "imports", "Seed.java"),
+    )
+    # Many unrelated classes that happen to define a same-named "process"
+    # method, reachable only via a weak generic "calls" relation - the
+    # noise this cap is meant to bound.
+    for i in range(40):
+        filepath = f"Unrelated{i}.java"
+        cursor.execute(
+            "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+            (filepath, f"process{i}", "function", 1, 1),
+        )
+        cursor.execute(
+            "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+            ("process", f"process{i}", "calls", "RealTarget.java"),
+        )
+    graph.conn.commit()
+
+    results = graph.get_neighborhood(["Seed"], max_hops=2, max_results=10)
+
+    assert len(results) == 10
+    # The strong direct-import hit must survive the cap, not be crowded out
+    # by an arbitrary subset of the 40 weak "calls" hits.
+    assert any(r["filepath"] == "RealTarget.java" for r in results)
+
+
+def test_get_neighborhood_default_max_results_bounds_a_large_fan_out(tmp_path):
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    cursor = graph.conn.cursor()
+    for i in range(50):
+        filepath = f"File{i}.java"
+        cursor.execute(
+            "INSERT INTO symbols (filepath, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)",
+            (filepath, f"sym{i}", "function", 1, 1),
+        )
+        cursor.execute(
+            "INSERT INTO relations (source, target, type, source_file) VALUES (?, ?, ?, ?)",
+            ("Seed", f"sym{i}", "calls", "Seed.java"),
+        )
+    graph.conn.commit()
+
+    results = graph.get_neighborhood(["Seed"], max_hops=2)  # default max_results
+
+    assert len(results) <= 30
+    assert len(results) < 50  # confirms it's actually bounded, not coincidentally equal

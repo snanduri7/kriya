@@ -273,17 +273,39 @@ class LocalVectorStore:
         self.conn.commit()
 
     def verify_model(self, model_name: str, dimensions: int) -> None:
+        """Confirms the vector index was built with the model/dimensions the
+        caller now expects. Previously checked only ONE arbitrary row
+        (LIMIT 1) - a partially-mismatched index (e.g. after the zero-
+        vector-on-embedding-failure bug, or a mid-migration model switch)
+        could pass this check while still containing rows from a DIFFERENT
+        model/dimensions, which query() then silently drops with no warning
+        at all (2026-08-12 SME review). Now checks every DISTINCT (model,
+        dimensions) combination actually present: raises only if NONE of
+        them match (the original hard-fail case, re-indexing is required
+        either way); warns instead if some rows match and others don't (a
+        mixed index still has usable content, but the mismatched rows are
+        being silently skipped)."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT DISTINCT model_name, dimensions FROM vector_chunks LIMIT 1")
-        row = cursor.fetchone()
-        if row:
-            db_model, db_dims = row[0], row[1]
-            if db_model != model_name or db_dims != dimensions:
-                raise ValueError(
-                    f"Index model mismatch: Database index was built with model '{db_model}' (dim: {db_dims}), "
-                    f"but configuration specifies model '{model_name}' (dim: {dimensions}). "
-                    f"Please re-index the repository using 'kriya analyze'."
-                )
+        cursor.execute("SELECT DISTINCT model_name, dimensions FROM vector_chunks")
+        rows = cursor.fetchall()
+        if not rows:
+            return
+        matching = [(m, d) for m, d in rows if m == model_name and d == dimensions]
+        mismatched = [(m, d) for m, d in rows if m != model_name or d != dimensions]
+        if mismatched and not matching:
+            db_model, db_dims = mismatched[0]
+            raise ValueError(
+                f"Index model mismatch: Database index was built with model '{db_model}' (dim: {db_dims}), "
+                f"but configuration specifies model '{model_name}' (dim: {dimensions}). "
+                f"Please re-index the repository using 'kriya analyze'."
+            )
+        elif mismatched:
+            logger.warning(
+                f"Vector index at '{self.db_path}' contains rows from {len(mismatched)} other "
+                f"model/dimension combination(s) besides the configured '{model_name}' (dim: {dimensions}) "
+                f"- those rows will be silently skipped during search. Consider re-indexing with "
+                f"'kriya analyze --force'."
+            )
 
     def load(self) -> None:
         pass

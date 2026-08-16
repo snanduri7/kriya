@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -279,11 +280,54 @@ async def test_fill_missing_content_only_calls_for_missing_entries():
     assert files_by_path["pom.xml"] == "<project>existing</project>"
     assert files_by_path["src/main/java/com/example/App.java"] == "package com.example;\npublic class App {}"
 
-    # The per-file call for App.java should mention pom.xml as a sibling file in this batch.
+    # The per-file call for App.java should show pom.xml's REAL content (already
+    # written earlier in this same batch, via the pass-through path), not just its
+    # bare filename - 2026-08-15 fix: cross-file consistency (packages, class/method
+    # signatures) requires actually seeing a sibling's content, not just knowing it
+    # exists (confirmed live as the root cause of a real, repeated compile failure -
+    # see kriya/agents/agent.py's own comment at this call site).
     second_call_args = llm.complete.call_args_list[1]
     file_prompt = second_call_args[0][1]
-    assert "Other Files In This Batch" in file_prompt
+    assert "Already-Written File This Batch" in file_prompt
     assert "pom.xml" in file_prompt
+    assert "<project>existing</project>" in file_prompt
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_shows_freshly_generated_sibling_content_not_just_name():
+    """Regression test for a real, live-diagnosed bug (2026-08-15, ignite_qpid_protocol
+    eval run): TWO files needing fresh generation in the SAME batch, not just a
+    pass-through entry - Protocol.java generated first, then ProtocolParser.java. The
+    second call must see the FIRST file's actual generated content (its real package
+    declaration), not just its bare filename - confirmed live as the direct cause of
+    a real, repeated compile failure: two independently-generated files each invented
+    a plausible-but-inconsistent package with nothing to reconcile them, because
+    neither ever saw the other's real content."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    protocol_content = "package com.example;\npublic class Protocol {}"
+    llm.complete = AsyncMock(side_effect=[
+        protocol_content,
+        "package com.example.protocol;\npublic class ProtocolParser {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    file_entries = [
+        {"filepath": "Protocol.java", "content": None, "edits": None},
+        {"filepath": "ProtocolParser.java", "content": None, "edits": None},
+    ]
+    await dev._fill_missing_content(
+        file_entries, "Task", "Design", "Existing code", None, None, None, None,
+    )
+
+    second_call_prompt = llm.complete.call_args_list[1][0][1]
+    assert "Already-Written File This Batch" in second_call_prompt
+    assert protocol_content in second_call_prompt
+    # Not yet generated at the time of the FIRST call - must fall back to a bare
+    # filename, since there's genuinely nothing to show yet.
+    first_call_prompt = llm.complete.call_args_list[0][0][1]
+    assert "Other Files In This Batch, Not Yet Written" in first_call_prompt
+    assert "ProtocolParser.java" in first_call_prompt
 
 @pytest.mark.asyncio
 async def test_run_generation_with_known_target_files_skips_file_list_call():
@@ -332,6 +376,17 @@ def test_split_fix_analysis_is_case_insensitive():
     analysis, content = DeveloperAgent._split_fix_analysis(text)
     assert analysis == "short reason"
     assert content == "class X {}"
+
+def test_split_fix_analysis_truncates_prose_phrased_marker():
+    # Same real 2026-08-08 phrasing as
+    # test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content,
+    # exercised directly against _split_fix_analysis (the fallback path
+    # _split_fix_analysis_edit itself defers to when no SEARCH:/REPLACE:
+    # markers are present).
+    text = "FIX ANALYSIS: reason here.\nCorrected file content for 'App.java':\npublic class App {}"
+    analysis, content = DeveloperAgent._split_fix_analysis(text)
+    assert analysis == "reason here."
+    assert content == "public class App {}"
 
 def test_split_fix_analysis_falls_back_when_marker_missing():
     # A non-compliant response (no marker at all) must degrade to the plain
@@ -433,6 +488,879 @@ async def test_fill_missing_content_scopes_fix_analysis_to_implicated_files_only
     assert files_by_path["Broken.java"] == "class Broken {}"
     assert files_by_path["Unrelated.java"] == "class Unrelated {}"
 
+def test_split_fix_analysis_edit_extracts_search_replace():
+    text = (
+        "FIX ANALYSIS: Person needs to implement Serializable for ObjectMessage.\n"
+        "SEARCH:\n"
+        "public class Person {\n"
+        "REPLACE:\n"
+        "public class Person implements java.io.Serializable {"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert analysis == "Person needs to implement Serializable for ObjectMessage."
+    assert edits == [{
+        "search": "public class Person {",
+        "replace": "public class Person implements java.io.Serializable {",
+    }]
+    assert content is None
+
+def test_split_fix_analysis_edit_falls_back_to_file_content_when_no_markers():
+    text = "FIX ANALYSIS: broader change needed.\nFILE CONTENT:\npublic class App {}"
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert analysis == "broader change needed."
+    assert edits is None
+    assert content == "public class App {}"
+
+def test_split_fix_analysis_edit_falls_back_when_no_markers_at_all():
+    text = "public class App {}"
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert analysis is None
+    assert edits is None
+    assert content == text
+
+def test_split_fix_analysis_edit_truncates_redundant_trailing_file_content():
+    """Regression test for a real bug found live, 2026-08-04: a model asked
+    to prefer an anchored edit sometimes ALSO appends a redundant, unasked-
+    for FILE CONTENT: block after its SEARCH/REPLACE - without truncating
+    replace_block there, the entire redundant full-file content (plus the
+    literal "FILE CONTENT:" marker text) got swallowed into the applied
+    patch. Confirmed live: this exact shape (a correct 3-line import fix,
+    plus a redundant trailing FILE CONTENT: block) corrupted a real file
+    with a duplicated package/class declaration, producing "class,
+    interface, enum, or record expected" - not a model mistake, since the
+    SEARCH/REPLACE portion alone was entirely correct."""
+    text = (
+        "FIX ANALYSIS: IgniteCache is imported from the wrong package.\n"
+        "SEARCH:\n"
+        "import org.apache.ignite.cache.IgniteCache;\n"
+        "REPLACE:\n"
+        "import org.apache.ignite.IgniteCache;\n"
+        "\n"
+        "FILE CONTENT:\n"
+        "package com.example;\n"
+        "import org.apache.ignite.IgniteCache;\n"
+        "public class App { /* redundant full regeneration the model wasn't asked for */ }"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits == [{
+        "search": "import org.apache.ignite.cache.IgniteCache;",
+        "replace": "import org.apache.ignite.IgniteCache;",
+    }]
+    assert content is None
+
+def test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content():
+    """Regression test for a real bug found live, 2026-08-08
+    (ignite_qpid_protocol, run 20260808-053604): the truncation above only
+    ever recognized the literal marker line "FILE CONTENT:" - this response
+    instead phrased its redundant trailing dump as "Corrected file content
+    for '...':", no colon immediately after "content", so the old exact-
+    marker regex didn't match it at all and the entire duplicate
+    package/class declaration got folded verbatim into the applied edit's
+    replace text. Confirmed live via direct replay of the real captured
+    model response: applying that edit produced a file with two package
+    statements and two class declarations, a real 23-error "illegal start
+    of expression"/"class expected" javac cascade."""
+    text = (
+        "FIX ANALYSIS: buffer overflow on write.\n"
+        "SEARCH:\n"
+        "        buffer.putInt(protocol.getDataLength());\n"
+        "REPLACE:\n"
+        "        buffer.put((byte)(protocol.getDataLength() >> 16));\n"
+        "\n"
+        "Corrected file content for 'src/main/java/com/example/ProtocolParser.java':\n"
+        "```java\n"
+        "package com.example;\n"
+        "\n"
+        "public class ProtocolParser {\n"
+        "    // duplicated, unasked-for full file dump\n"
+        "}\n"
+        "```\n"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert analysis == "buffer overflow on write."
+    assert edits == [{
+        "search": "        buffer.putInt(protocol.getDataLength());",
+        "replace": "        buffer.put((byte)(protocol.getDataLength() >> 16));",
+    }]
+    assert content is None
+
+def test_split_fix_analysis_edit_strips_copied_error_source_gutter():
+    """Regression test for a real bug found live, 2026-08-04: a model shown
+    _build_error_source_context()'s own display format (">> N: <line>" for
+    the reported error line) copied that gutter directly into its SEARCH
+    block instead of the bare source line - confirmed live, the real SEARCH
+    text was literally ">> import org.apache.ignite.cache.IgniteCache;"
+    (kept the ">>" marker, dropped the line number). That can never match
+    the real file's plain "import ...;" line, guaranteeing "Anchor matching
+    failed... matched 0 times" regardless of whether the model's intended
+    fix was otherwise correct - a real, self-inflicted retry-budget waste,
+    not a model reasoning failure."""
+    text = (
+        "FIX ANALYSIS: wrong package for IgniteCache.\n"
+        "SEARCH:\n"
+        "```java\n"
+        "import org.apache.ignite.Ignite;\n"
+        "import org.apache.ignite.Ignition;\n"
+        ">> import org.apache.ignite.cache.IgniteCache;\n"
+        "import org.slf4j.Logger;\n"
+        "```\n"
+        "REPLACE:\n"
+        "```java\n"
+        "import org.apache.ignite.Ignite;\n"
+        "import org.apache.ignite.Ignition;\n"
+        "import org.apache.ignite.IgniteCache;\n"
+        "import org.slf4j.Logger;\n"
+        "```"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits == [{
+        "search": (
+            "import org.apache.ignite.Ignite;\n"
+            "import org.apache.ignite.Ignition;\n"
+            "import org.apache.ignite.cache.IgniteCache;\n"
+            "import org.slf4j.Logger;"
+        ),
+        "replace": (
+            "import org.apache.ignite.Ignite;\n"
+            "import org.apache.ignite.Ignition;\n"
+            "import org.apache.ignite.IgniteCache;\n"
+            "import org.slf4j.Logger;"
+        ),
+    }]
+
+def test_split_fix_analysis_edit_strips_gutter_with_line_number_preserved():
+    # The other real gutter shape (surrounding, non-highlighted context
+    # lines): "   N: <line>" (three leading spaces), also emitted by
+    # _build_error_source_context.
+    text = (
+        "SEARCH:\n"
+        "   9: import org.apache.ignite.Ignite;\n"
+        ">> 10: import org.apache.ignite.cache.IgniteCache;\n"
+        "REPLACE:\n"
+        "import org.apache.ignite.Ignite;\n"
+        "import org.apache.ignite.IgniteCache;"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits[0]["search"] == (
+        "import org.apache.ignite.Ignite;\n"
+        "import org.apache.ignite.cache.IgniteCache;"
+    )
+
+def test_split_fix_analysis_edit_strips_the_real_three_space_gutter_format(tmp_path):
+    """Regression test for a real bug found live, 2026-08-07
+    (kriya-protocol-parser-app), diagnosed directly from
+    Failure.attempted_edits once that started being persisted:
+    _build_error_source_context()'s actual non-highlighted gutter format is
+    THREE leading spaces ("   N: "), not two - the format string is
+    f"{'>>' if ... else '  '} {i+1}: ...", so the two-space placeholder plus
+    the f-string's own literal separator space adds up to three. The gutter
+    regex only ever matched an exact two-space prefix, so a real SEARCH
+    block that copied this exact format verbatim went unstripped,
+    guaranteeing "matched 0 times" regardless of whether the model's
+    intended edit was otherwise correct. Generates the gutter via the REAL
+    _build_error_source_context() (not a hand-typed guess at its format,
+    which is exactly how the original 2-vs-3-space mismatch went unnoticed)
+    so this test breaks immediately if the two ever drift apart again."""
+    from kriya.workflow.workflow import _build_error_source_context
+
+    (tmp_path / "Calc.java").write_text(
+        "\n".join(f"line {i}" for i in range(1, 10))
+    )
+    error = "at com.example.Calc.divide(Calc.java:5)"
+    context = _build_error_source_context(str(tmp_path), error, known_files=["Calc.java"])
+    real_gutter_snippet = context["Calc.java"].strip()
+    assert real_gutter_snippet.startswith("=== Source context")
+    # Pull just the gutter-formatted lines (skip the header line above) to
+    # use as a real SEARCH block, exactly as a model copying them verbatim
+    # would produce.
+    gutter_lines = "\n".join(real_gutter_snippet.splitlines()[1:])
+    assert "   4: line 4" in gutter_lines  # confirms the real format IS 3 spaces, not 2
+
+    text = f"SEARCH:\n{gutter_lines}\nREPLACE:\nreplacement"
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits is not None
+    search_block = edits[0]["search"]
+    for line_no in range(2, 9):
+        assert f"line {line_no}" in search_block
+    assert "   " not in search_block  # no unstripped 3-space gutter survives
+    assert ">>" not in search_block   # the highlighted-line marker is also gone
+
+def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
+    # Must NOT strip legitimate 2-space (or deeper) indentation on real code
+    # that has no line-number gutter - only the exact ">>"/"  N:" shapes
+    # Kriya itself emits are stripped.
+    text = (
+        "SEARCH:\n"
+        "public class App {\n"
+        "  public static void main(String[] args) {\n"
+        "REPLACE:\n"
+        "public class App implements Serializable {\n"
+        "  public static void main(String[] args) {"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits[0]["search"] == (
+        "public class App {\n"
+        "  public static void main(String[] args) {"
+    )
+
+def test_split_fix_analysis_edit_parses_multiple_search_replace_pairs():
+    """Regression test for a real bug found live, 2026-08-07
+    (ignite_qpid_person): despite the prompt saying "include only the lines
+    that actually need to change" (singular), a real response returned THREE
+    separate SEARCH/REPLACE pairs for one file, plus a trailing FILE CONTENT:
+    block it wasn't asked for either. The old implementation only recognized
+    the FIRST search:/replace: pair and took everything up to FILE CONTENT:
+    as one giant replace_block - swallowing pairs 2 and 3 (markers and all)
+    into pair 1's own replacement text. apply_anchored_edits() already
+    applies a LIST of edits in sequence, so the fix is to actually return all
+    three as separate edits instead of corrupting the first one with the
+    other two's raw text."""
+    text = (
+        "FIX ANALYSIS: Multiple related fixes needed across this file.\n"
+        "SEARCH:\n"
+        "Ignite ignite = (Ignite) context.getBean(\"igniteNode\");\n"
+        "REPLACE:\n"
+        "Ignite ignite = (Ignite) context.getBean(\"igniteNode\");\n"
+        "SEARCH:\n"
+        "ConnectionFactory factory = (ConnectionFactory) context.getBean(\"qpidConnectionFactory\");\n"
+        "REPLACE:\n"
+        "ConnectionFactory factory = (ConnectionFactory) context.getBean(\"qpidFactory\");\n"
+        "SEARCH:\n"
+        "IgniteCache<String, Person> cache = ignite.getOrCreateCache(\"person-cache\");\n"
+        "REPLACE:\n"
+        "IgniteCache<String, Person> cache = ignite.getOrCreateCache(\"people-cache\");\n"
+        "\n"
+        "FILE CONTENT:\n"
+        "package com.example;\npublic class App { /* redundant, unasked-for full file */ }"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert content is None
+    assert edits == [
+        {
+            "search": 'Ignite ignite = (Ignite) context.getBean("igniteNode");',
+            "replace": 'Ignite ignite = (Ignite) context.getBean("igniteNode");',
+        },
+        {
+            "search": 'ConnectionFactory factory = (ConnectionFactory) context.getBean("qpidConnectionFactory");',
+            "replace": 'ConnectionFactory factory = (ConnectionFactory) context.getBean("qpidFactory");',
+        },
+        {
+            "search": 'IgniteCache<String, Person> cache = ignite.getOrCreateCache("person-cache");',
+            "replace": 'IgniteCache<String, Person> cache = ignite.getOrCreateCache("people-cache");',
+        },
+    ]
+    # No stray marker text leaked into any replace block - the exact
+    # corruption the real live failure produced.
+    for edit in edits:
+        assert "SEARCH:" not in edit["replace"]
+        assert "REPLACE:" not in edit["replace"]
+
+def test_split_fix_analysis_edit_stops_at_trailing_search_with_no_replace():
+    # A malformed sequence (a dangling SEARCH with no REPLACE after it)
+    # degrades to whatever complete pairs were found, rather than raising or
+    # misparsing the dangling block as part of an earlier pair.
+    text = (
+        "SEARCH:\nfoo();\n"
+        "REPLACE:\nbar();\n"
+        "SEARCH:\nincomplete, no replace follows"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits == [{"search": "foo();", "replace": "bar();"}]
+
+def test_build_incompatible_types_scaffold_names_the_reported_types():
+    """Regression test for a real bug found live, 2026-08-07
+    (ignite_qpid_person): the model's own FIX ANALYSIS correctly said
+    "properly handle the generic types" but the actual diff only renamed a
+    method call, never touching the reported line - the identical
+    "incompatible types: java.lang.Object cannot be converted to
+    com.example.Person" error recurred verbatim on the next attempt. Real
+    captured error text (two identical lines, as javac repeats itself across
+    build phases) - dedup must collapse them to one described pair."""
+    error = (
+        "[ERROR] /Users/.../PersonApp.java:[111,38] incompatible types: "
+        "java.lang.Object cannot be converted to com.example.Person\n"
+        "[ERROR] /Users/.../PersonApp.java:[111,38] incompatible types: "
+        "java.lang.Object cannot be converted to com.example.Person\n"
+    )
+    scaffold = DeveloperAgent._build_incompatible_types_scaffold(error)
+    assert '"java.lang.Object" cannot be converted to "com.example.Person"' in scaffold
+    assert scaffold.count('cannot be converted to "com.example.Person"') == 1  # deduped
+    assert "explicit cast" in scaffold
+    assert "generic type parameters" in scaffold
+
+def test_build_incompatible_types_scaffold_empty_when_no_match():
+    assert DeveloperAgent._build_incompatible_types_scaffold(None) == ""
+    assert DeveloperAgent._build_incompatible_types_scaffold("cannot find symbol: class Foo") == ""
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_prompt_includes_incompatible_types_scaffold():
+    """Integration check: when prior_error_context carries the javac
+    'incompatible types' shape, the actual prompt sent to the model (not just
+    the standalone builder) includes the scaffold - confirms it's really
+    wired into _fill_missing_content, not just unit-tested in isolation."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();"
+    ))
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["PersonApp.java"],
+        prior_error_context=(
+            "PersonApp.java:[111,38] incompatible types: java.lang.Object "
+            "cannot be converted to com.example.Person"
+        ),
+        error_source_context={"PersonApp.java": "\n>> 111: Person p = cache.get(1);\n"},
+    )
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert '"java.lang.Object" cannot be converted to "com.example.Person"' in file_prompt
+    assert "explicit cast" in file_prompt
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_repeats_verification_contract_reminder_at_end():
+    """Regression test for a real compliance gap found live this session:
+    VERIFICATION_CONTRACT_HEADER reaches the prompt (folded into
+    task_description, near the top) but two real eval-harness runs whose
+    goal was exactly the shape it describes still produced zero
+    "[VERIFICATION]" markers - the instruction was stated once, early, then
+    buried under everything the prompt adds after it. Same failure shape the
+    "only this file" instruction already solved by being repeated at the very
+    end, right before generation - this reminder must land there too, after
+    the "only this file" line."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+    )
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    only_this_file_pos = file_prompt.index("Return ONLY the content of")
+    reminder_pos = file_prompt.index("[VERIFICATION] PASS")
+    assert reminder_pos > only_this_file_pos
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_repeats_skill_conventions_reminder_at_end():
+    """Regression test for the same shape one section earlier (2026-08-14):
+    skills/binary-wire-protocol is confirmed LOADED and injected into
+    existing_code_context on every live ignite_qpid_protocol run this
+    session, its content is already correct and complete, yet the model
+    still writes the exact bug the skill documents. Its rules sit even
+    EARLIER than VERIFICATION_CONTRACT_HEADER did (the very FIRST section of
+    this prompt) - same "stated once, buried under everything after it"
+    shape, closed the same way: repeated as a short reminder at the very
+    end, right before generation."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+    dev = DeveloperAgent("developer", llm)
+    existing_code_context = (
+        "=== Engineering Skill Conventions: binary-wire-protocol ===\n"
+        "Rules:\n- do NOT use ByteBuffer.putInt() for a narrower-than-native field\n"
+    )
+    await dev.run_generation(
+        "Task", "Design", existing_code_context,
+        known_target_files=["App.java"],
+    )
+    file_prompt = dev.llm.complete.call_args_list[0][0][1]
+    only_this_file_pos = file_prompt.index("Return ONLY the content of")
+    reminder_pos = file_prompt.index("Engineering Skill Conventions in the Existing Code Base")
+    assert reminder_pos > only_this_file_pos
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_skill_reminder_without_active_skills():
+    # No-op when no skill matched this generation at all - never pay for a
+    # reminder pointing at content that isn't there.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code, no skills active",
+        known_target_files=["App.java"],
+    )
+    file_prompt = dev.llm.complete.call_args_list[0][0][1]
+    assert "Engineering Skill Conventions in the Existing Code Base" not in file_prompt
+
+def test_build_buffer_capacity_scaffold_names_overflow_direction():
+    """Regression test for a real bug found live, 2026-08-08
+    (ignite_qpid_protocol): the model's own FIX ANALYSIS correctly diagnosed
+    "the dataLength field ... is being written as a 4-byte int but only the
+    first 3 bytes are meaningful" but the produced diff never actually changed
+    the reported line (line 23) - the identical BufferOverflowException
+    recurred. Real captured stack trace from that exact run."""
+    error = (
+        'Exception in thread "main" java.nio.BufferOverflowException\n'
+        "\tat java.base/java.nio.HeapByteBuffer.put(HeapByteBuffer.java:231)\n"
+        "\tat java.base/java.nio.ByteBuffer.put(ByteBuffer.java:1210)\n"
+        "\tat com.example.ProtocolParser.encode(ProtocolParser.java:23)\n"
+        "\tat com.example.ProtocolApp.main(ProtocolApp.java:40)\n"
+    )
+    scaffold = DeveloperAgent._build_buffer_capacity_scaffold(error)
+    assert "BufferOverflowException" in scaffold
+    assert "writing (put)" in scaffold
+    assert "non-standard width" in scaffold
+    assert "allocated total size" in scaffold
+
+def test_build_buffer_capacity_scaffold_names_underflow_direction():
+    """The sibling exception (BufferUnderflowException, the read-path version of
+    the same root cause) was also found live, independently, 2026-08-07
+    (kriya-protocol-parser-app's hand-rolled protocol decode())."""
+    error = (
+        'Exception in thread "main" java.nio.BufferUnderflowException\n'
+        "\tat java.base/java.nio.Buffer.nextGetIndex(Buffer.java:640)\n"
+        "\tat com.example.ProtocolParser.decode(ProtocolParser.java:45)\n"
+    )
+    scaffold = DeveloperAgent._build_buffer_capacity_scaffold(error)
+    assert "BufferUnderflowException" in scaffold
+    assert "reading (get)" in scaffold
+
+def test_build_buffer_capacity_scaffold_empty_when_no_match():
+    assert DeveloperAgent._build_buffer_capacity_scaffold(None) == ""
+    assert DeveloperAgent._build_buffer_capacity_scaffold("cannot find symbol: class Foo") == ""
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_prompt_includes_buffer_capacity_scaffold():
+    """Integration check: when prior_error_context carries a
+    java.nio.BufferOverflowException, the actual prompt sent to the model
+    includes the scaffold - confirms it's wired into _fill_missing_content,
+    not just unit-tested in isolation."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();"
+    ))
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["ProtocolParser.java"],
+        prior_error_context=(
+            'Exception in thread "main" java.nio.BufferOverflowException\n'
+            "\tat com.example.ProtocolParser.encode(ProtocolParser.java:23)\n"
+        ),
+        error_source_context={"ProtocolParser.java": "\n>> 23: buffer.putInt(dataLength);\n"},
+    )
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "BufferOverflowException" in file_prompt
+    assert "bit-shifting" in file_prompt
+
+@pytest.mark.asyncio
+async def test_extra_fix_instruction_is_a_backward_compatible_noop_by_default():
+    """extra_fix_instruction exists for spikes/fix_alignment/ (a real-LLM-call
+    test measuring how often a correct FIX ANALYSIS fails to produce a
+    correct edit) - must have zero effect on every existing caller unless
+    explicitly passed."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();")
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["X.java"],
+        prior_error_context="some generic error",
+        error_source_context={"X.java": "\n>> 1: foo();\n"},
+    )
+    prompt_without_override = llm.complete.call_args_list[0][0][1]
+    assert "RE-READ" not in prompt_without_override.upper()
+
+@pytest.mark.asyncio
+async def test_extra_fix_instruction_reaches_the_real_prompt_when_set():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();")
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["X.java"],
+        prior_error_context="some generic error",
+        error_source_context={"X.java": "\n>> 1: foo();\n"},
+        extra_fix_instruction="\nRE-READ your own FIX ANALYSIS before writing the edit.\n",
+    )
+    prompt_with_override = llm.complete.call_args_list[0][0][1]
+    assert "RE-READ your own FIX ANALYSIS" in prompt_with_override
+
+def test_sanitize_generated_content_none_passthrough():
+    assert DeveloperAgent.sanitize_generated_content(None) is None
+
+def test_sanitize_generated_content_strips_gutter_and_fence():
+    # "   4: " (three leading spaces) is the REAL non-highlighted gutter
+    # format _build_error_source_context() emits - confirmed by generating
+    # this exact snippet via the real function, not a hand-typed guess (a
+    # 2-space version of this fixture was a latent inaccuracy, silently
+    # inconsistent with the real format, until fixed 2026-08-11 alongside
+    # the audit that narrowed _GUTTER_CONTEXT_RE to require exactly this).
+    text = (
+        "```java\n"
+        ">> 3: import org.apache.ignite.cache.IgniteCache;\n"
+        "   4: public class App {\n"
+        "```"
+    )
+    assert DeveloperAgent.sanitize_generated_content(text) == (
+        "import org.apache.ignite.cache.IgniteCache;\npublic class App {"
+    )
+
+def test_sanitize_generated_content_truncates_redundant_trailing_marker():
+    text = "public class App {}\n\nFILE CONTENT:\npublic class App { /* duplicated */ }"
+    assert DeveloperAgent.sanitize_generated_content(text) == "public class App {}"
+
+def test_sanitize_generated_content_truncates_prose_phrased_marker():
+    # Same real 2026-08-08 phrasing as
+    # test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content -
+    # the old regex only matched the literal "FILE CONTENT:" marker line,
+    # not a prose lead-in like "Corrected file content for '...':".
+    text = "public class App {}\n\nCorrected file content for 'App.java':\npublic class App { /* dup */ }"
+    assert DeveloperAgent.sanitize_generated_content(text) == "public class App {}"
+
+def test_sanitize_generated_content_plain_text_passthrough():
+    # No gutter, no fence, no marker - must not be altered at all.
+    text = "public class App {\n    public static void main(String[] args) {}\n}"
+    assert DeveloperAgent.sanitize_generated_content(text) == text
+
+def test_sanitize_generated_content_does_not_truncate_real_code_mentioning_the_phrase():
+    """Regression test for a real bug found live, 2026-08-11
+    (kriya-oneshot-protocol-ignite-qpid audit): the old _TRAILING_FILE_CONTENT_RE
+    matched ANY line containing "file content" followed by a colon within 60
+    chars, anywhere in the file - including a perfectly ordinary log statement,
+    not just Kriya's own marker line - and silently deleted everything after
+    it. A real marker (literal or prose-phrased) always has nothing but the
+    colon left on its own line; this log statement has real code after its
+    colon, so it must survive untouched."""
+    text = (
+        "public class FileReader {\n"
+        "    public String read(String path) throws IOException {\n"
+        "        String data = Files.readString(Path.of(path));\n"
+        "        logger.info(\"Loaded file content: {} bytes\", data.length());\n"
+        "        return data;\n"
+        "    }\n"
+        "\n"
+        "    public void validate(String data) {\n"
+        "        if (data.isEmpty()) throw new IllegalArgumentException(\"empty\");\n"
+        "    }\n"
+        "}\n"
+    )
+    assert DeveloperAgent.sanitize_generated_content(text) == text
+
+def test_sanitize_generated_content_does_not_strip_yaml_numeric_keys():
+    """Regression test for a real bug found live, 2026-08-11: the old gutter
+    regex's "  N:" branch matched ANY 2-OR-MORE-space-indented "digit:" line
+    unconditionally - identical in shape to a legitimate YAML/properties
+    entry, and with no way to tell the two apart, silently deleted the key
+    and colon, leaving only the value. Narrowed to require the REAL, exact
+    format _build_error_source_context() emits (three leading spaces, not
+    "two or more") - ordinary 2-space YAML indentation no longer collides."""
+    text = "retry:\n  1: first-attempt-config\n  2: second-attempt-config\n"
+    assert DeveloperAgent.sanitize_generated_content(text) == text
+
+def test_sanitize_generated_content_still_strips_context_gutter_at_the_real_space_count():
+    # Mirrors test_sanitize_generated_content_strips_gutter_and_fence above
+    # but without a fence, isolating that the narrowed three-space
+    # requirement still correctly strips a REAL gutter-shaped context line
+    # (not just rejecting the too-loose 2-space YAML shape).
+    text = ">> 3: import org.apache.ignite.cache.IgniteCache;\n   4: public class App {"
+    assert DeveloperAgent.sanitize_generated_content(text) == (
+        "import org.apache.ignite.cache.IgniteCache;\npublic class App {"
+    )
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_full_content_retry_strips_copied_gutter():
+    """Regression test: unlike the anchored-edit SEARCH/REPLACE path (already
+    covered in test_split_fix_analysis_edit_strips_copied_error_source_gutter),
+    a full FILE CONTENT: retry response is shown the exact same gutter-
+    formatted error_source_context but, before sanitize_generated_content was
+    wired into _fill_missing_content's non-anchored branch, only ever had
+    markdown fences stripped - a model that echoed the gutter back into a
+    full-file response (not just a SEARCH block) would have written it
+    straight to disk uncorrected."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: wrong import package.\n"
+        "FILE CONTENT:\n"
+        ">> 1: import org.apache.ignite.cache.IgniteCache;\n"
+        "   2: public class App {}\n"
+    ))
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="cannot find symbol",
+        # No error_source_context entry for this file - keeps prefer_anchored_edit
+        # False so this exercises the non-anchored FILE CONTENT: branch, not the
+        # SEARCH/REPLACE one already covered by _split_fix_analysis_edit's tests.
+        error_source_context=None,
+    )
+    assert files[0]["content"] == (
+        "import org.apache.ignite.cache.IgniteCache;\npublic class App {}"
+    )
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_prefers_anchored_edit_when_source_context_known():
+    """A precise source location (error_source_context has a real snippet for
+    this file) should make the prompt prefer a small SEARCH:/REPLACE: patch
+    over full-file regeneration, and a compliant response should come back as
+    edits, not content. Motivated by a real, distinct failure mode: a full
+    regeneration correctly self-diagnosed a one-line fix (Person needing
+    `implements Serializable`) in its own FIX ANALYSIS text, then still
+    emitted the class without it - the stated intention got lost somewhere
+    across rewriting the whole file. A small anchored edit has no unrelated
+    content for that to happen inside."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value=(
+            "FIX ANALYSIS: Person needs Serializable.\n"
+            "SEARCH:\npublic class Person {\nREPLACE:\npublic class Person implements java.io.Serializable {"
+        )
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["Person.java"],
+        prior_error_context="incompatible types at Person.java:[5,1]",
+        error_source_context={"Person.java": "\n>> 5: public class Person {\n"},
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "SEARCH:" in file_prompt
+    assert "REPLACE:" in file_prompt
+    assert files[0]["content"] is None
+    assert files[0]["edits"] == [{
+        "search": "public class Person {",
+        "replace": "public class Person implements java.io.Serializable {",
+    }]
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_anchored_edit_preference_without_source_context():
+    """Without a known source location (error_source_context has no entry for
+    this file), the prompt must stay on the plain FILE CONTENT: instruction -
+    an anchored edit isn't well-grounded without knowing where to anchor it."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nFILE CONTENT:\nclass App {}")
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="some error with no location",
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "SEARCH:" not in file_prompt
+    assert "FILE CONTENT:" in file_prompt
+    assert files[0]["content"] == "class App {}"
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_prefers_anchored_edit_when_current_content_known_without_locator():
+    """Regression test for the a-6 live incident, 2026-08-14
+    (spikes/eval_harness/runs/a-6): a runtime-verification failure ("[VERIFICATION]
+    FAIL: Protocols do not match") carries no compiler-style file:line locator, so
+    error_source_context has no entry for the target file - the OLD gate
+    (prefer_anchored_edit = apply_fix_analysis and bool(source_context_block)) would
+    force a full FILE CONTENT: regeneration here, which is exactly what silently
+    reverted an already-fixed import from two attempts earlier in the real incident.
+    files_with_current_content widens the gate: even with zero source_context_block,
+    naming this file as one whose current content is already embedded in
+    existing_code_context should still prefer a small anchored patch."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value=(
+            "FIX ANALYSIS: the time field round-trip is wrong.\n"
+            "SEARCH:\nlong time = buffer.getLong();\nREPLACE:\nlong time = buffer.getInt() & 0xFFFFFFFFL;"
+        )
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["ProtocolApp.java"],
+        prior_error_context="[VERIFICATION] FAIL: Protocols do not match",
+        error_source_context=None,
+        files_with_current_content=["ProtocolApp.java", "Protocol.java"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "SEARCH:" in file_prompt
+    assert files[0]["content"] is None
+    assert files[0]["edits"] == [{
+        "search": "long time = buffer.getLong();",
+        "replace": "long time = buffer.getInt() & 0xFFFFFFFFL;",
+    }]
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_anchored_edit_preference_when_file_not_in_current_content_set():
+    """Sibling/negative case: files_with_current_content is set (this IS a retry
+    with other files already written), but the specific target file isn't in it -
+    the real shape of a missing-file recovery, where the target file doesn't exist
+    yet, so there is no current content to copy verbatim from. Must stay on the
+    plain FILE CONTENT: instruction, same as having no files_with_current_content
+    at all."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nFILE CONTENT:\nclass App {}")
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="some error with no location",
+        files_with_current_content=["OtherFile.java"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "SEARCH:" not in file_prompt
+    assert "FILE CONTENT:" in file_prompt
+    assert files[0]["content"] == "class App {}"
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_change_needed_leaves_file_untouched_anchored_path():
+    """Regression test for a real live bug, 2026-08-10 (ignite_qpid_protocol,
+    run 20260810-111517): a java.nio.BufferOverflowException's stack trace
+    gave BOTH ProtocolParser.java (where the bug lives) and ProtocolApp.java
+    (its caller) a real file:line locator, so extract_implicated_files()
+    correctly scoped a targeted retry to both - each got its own separate
+    per-file completion. But the fix-analysis instruction gave the model no
+    way to say "this file is fine as-is" for ProtocolApp.java, whose real
+    problem was entirely inside ProtocolParser.encode() - confirmed directly
+    from the raw captured completion: ProtocolApp.java's own response wrote
+    a correct FIX ANALYSIS describing ProtocolParser.encode()'s bug, then a
+    SEARCH block that was actually ProtocolParser.java's encode() method body
+    verbatim, which could never match ProtocolApp.java's real content
+    ("Anchor matching failed... matched 0 times"), burning a whole wasted
+    retry attempt. The prompt now offers a NO CHANGE NEEDED: escape hatch,
+    and a compliant response must come back as content=None (the write
+    loop's existing "if content is None: continue" already means leave this
+    file exactly as it is - no new write-path plumbing needed), not an
+    invented edit."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value=(
+            "FIX ANALYSIS: The BufferOverflowException occurs because ProtocolParser.encode() "
+            "incorrectly uses putInt() for a 3-byte dataLength field.\n"
+            "NO CHANGE NEEDED: this file only calls ProtocolParser.encode() - the fix belongs "
+            "entirely in ProtocolParser.java, not here.\n"
+        )
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["ProtocolApp.java"],
+        prior_error_context=(
+            "java.nio.BufferOverflowException\n"
+            "\tat com.example.ProtocolParser.encode(ProtocolParser.java:21)\n"
+            "\tat com.example.ProtocolApp.main(ProtocolApp.java:37)\n"
+        ),
+        error_source_context={"ProtocolApp.java": "\n>> 37: byte[] encodedData = ProtocolParser.encode(sampleProtocol);\n"},
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "NO CHANGE NEEDED" in file_prompt
+    # "analysis" is threaded out (not just logged) as of 2026-08-13 - this
+    # exact scenario (a NO CHANGE NEEDED analysis naming a DIFFERENT real
+    # file, "the fix belongs entirely in ProtocolParser.java, not here") is
+    # precisely what kriya/workflow/attribution.py's self_diagnosis tier
+    # reads to redirect the next retry, see tests/test_attribution.py.
+    assert files == [{
+        "filepath": "ProtocolApp.java", "content": None,
+        "analysis": (
+            "The BufferOverflowException occurs because ProtocolParser.encode() "
+            "incorrectly uses putInt() for a 3-byte dataLength field."
+        ),
+    }]
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_change_needed_leaves_file_untouched_plain_path():
+    # Same escape hatch, exercised via the plain FIX ANALYSIS/FILE CONTENT:
+    # path (no known source location, so no anchored-edit preference).
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        return_value="FIX ANALYSIS: the bug is in a different file.\nNO CHANGE NEEDED: nothing to fix here.\n"
+    )
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="some error located entirely in a different file",
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "NO CHANGE NEEDED" in file_prompt
+    assert files == [{
+        "filepath": "App.java", "content": None,
+        "analysis": "the bug is in a different file.",
+    }]
+
+def test_split_fix_analysis_edit_no_change_needed_takes_priority_over_search_replace():
+    # If the model contradicts itself (declares no change needed but also
+    # emits a SEARCH/REPLACE pair), NO CHANGE NEEDED wins - trust the
+    # explicit declaration over a possibly-stray leftover edit.
+    text = (
+        "FIX ANALYSIS: reason.\n"
+        "NO CHANGE NEEDED: nothing to do here.\n"
+        "SEARCH:\nfoo\nREPLACE:\nbar\n"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits is None
+    assert content is None
+    assert analysis == "reason."
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_applies_retry_temperature_only_to_implicated_file():
+    """retry_temperature (LLMConfig.retry_temperature) must only override the
+    completion temperature for a file the fix-analysis instruction actually
+    applies to - never a clean first attempt, never an unrelated file in the
+    same full-set batch. Real, cited motivation: code-gen success rate was
+    found to drop as temperature rises even within Kriya's own low default
+    range, so a retry benefits from going lower, not higher - but only the
+    file actually being fixed should pay that (opt-in) behavior change."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    file_list_response = json.dumps([
+        {"filepath": "Broken.java"},
+        {"filepath": "Unrelated.java"},
+    ])
+    llm.complete = AsyncMock(side_effect=[
+        file_list_response,
+        "FIX ANALYSIS: fixed it\nFILE CONTENT:\nclass Broken {}",
+        "class Unrelated {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        prior_error_context="incompatible types at Broken.java:[10,5]",
+        implicated_files=["Broken.java"],
+        retry_temperature=0.05,
+    )
+
+    broken_kwargs = llm.complete.call_args_list[1].kwargs
+    unrelated_kwargs = llm.complete.call_args_list[2].kwargs
+    assert broken_kwargs["temperature_override"] == 0.05
+    assert unrelated_kwargs["temperature_override"] is None
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_retry_temperature_on_clean_first_attempt():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="class App {}")
+
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        retry_temperature=0.05,
+    )
+
+    assert llm.complete.call_args_list[0].kwargs["temperature_override"] is None
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_implicated_files_none_applies_to_all():
     """implicated_files=None (the default, and what a targeted retry passes,
@@ -457,6 +1385,57 @@ async def test_fill_missing_content_implicated_files_none_applies_to_all():
         assert "FIX ANALYSIS" in call[0][1]
 
 @pytest.mark.asyncio
+async def test_fill_missing_content_logs_pass_through_at_info_level(caplog):
+    """Found live, 2026-08-15, while forensically investigating a real run
+    where the same file kept failing STRUCTURAL CORRUPTION across 3 straight
+    full-set attempts with no way to tell, from logs alone, whether it was
+    ever actually regenerated: the pass-through path (an entry that already
+    has content/edits, e.g. from Planner-reuse or a resolved
+    known_target_files entry) had ZERO logging of any kind - not gated
+    behind the optional stream_callback, not logged at all. A real
+    kriya.log/captured-stdout investigation had nothing to distinguish
+    "this file was reused as-is" from "this file was silently dropped.\""""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(
+        side_effect=AssertionError("must not call the model for an entry that already has content")
+    )
+    dev = DeveloperAgent("developer", llm)
+
+    with caplog.at_level(logging.INFO, logger="kriya.agents.agent"):
+        result = await dev._fill_missing_content(
+            [{"filepath": "App.java", "content": "class App {}", "edits": None}],
+            "Task", "Design", "Existing code", None, None, None, None,
+        )
+
+    assert result == [{"filepath": "App.java", "content": "class App {}", "edits": []}]
+    assert any(
+        "App.java" in r.message and "reusing it as-is" in r.message for r in caplog.records
+    )
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_logs_fresh_generation_at_info_level(caplog):
+    """Sibling to the pass-through test above - the "actively generating"
+    branch only logged via the optional stream_callback before this fix, so
+    a caller with none wired (or whose stream text isn't captured by
+    whatever log is being read) had no logger-level record of which files
+    got a fresh generation call either."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="class App {}")
+    dev = DeveloperAgent("developer", llm)
+
+    with caplog.at_level(logging.INFO, logger="kriya.agents.agent"):
+        await dev._fill_missing_content(
+            [{"filepath": "App.java", "content": None, "edits": None}],
+            "Task", "Design", "Existing code", None, None, None, None,
+        )
+
+    assert any(
+        "App.java" in r.message and "generating content for" in r.message for r in caplog.records
+    )
+
+@pytest.mark.asyncio
 async def test_run_generation_without_known_target_files_still_asks_for_file_list():
     """known_target_files must be strictly opt-in - a normal (non-targeted)
     generation call, which doesn't know the file set in advance, must be
@@ -472,6 +1451,54 @@ async def test_run_generation_without_known_target_files_still_asks_for_file_lis
 
     assert llm.complete.call_count == 1
     assert files[0]["filepath"] == "math_lib.py"
+
+@pytest.mark.asyncio
+async def test_run_generation_fallback_includes_prior_error_context():
+    """SME review finding (2026-08-15): the single-stage-generation fallback
+    (triggered when Step 1's file-list resolution produces nothing usable -
+    a real, expected outcome per _resolve_step1_file_list()'s own docstring,
+    not a theoretical edge case) used to silently drop prior_error_context/
+    extra_fix_instruction/retry_temperature entirely - a retry that hit this
+    path got zero information about what it was supposed to fix, and would
+    plausibly just regenerate the same mistake."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "I cannot determine the file list from this design.",  # Step 1: unparseable, forces the fallback
+        json.dumps([{"filepath": "App.java", "content": "class App {}"}]),  # fallback's own response
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    files = await dev.run_generation(
+        "Goal: fix the bug", "Design specs", "Existing code",
+        prior_error_context="App.java:12: cannot find symbol: variable x",
+        extra_fix_instruction="Double-check the variable is declared.",
+        retry_temperature=0.1,
+    )
+
+    assert llm.complete.call_count == 2
+    fallback_prompt = llm.complete.call_args_list[1][0][1]
+    assert "App.java:12: cannot find symbol: variable x" in fallback_prompt
+    assert "Double-check the variable is declared." in fallback_prompt
+    assert llm.complete.call_args_list[1].kwargs["temperature_override"] == 0.1
+    assert files[0]["filepath"] == "App.java"
+
+@pytest.mark.asyncio
+async def test_run_generation_fallback_no_error_block_on_clean_first_attempt():
+    """No prior_error_context (a clean first attempt that just happens to hit
+    this fallback) must not fabricate an error block that was never real."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "I cannot determine the file list from this design.",
+        json.dumps([{"filepath": "App.java", "content": "class App {}"}]),
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation("Goal: build the app", "Design specs", "Existing code")
+
+    fallback_prompt = llm.complete.call_args_list[1][0][1]
+    assert "Prior Attempt Failed" not in fallback_prompt
 
 
 def test_strip_markdown_fences_plain_leading_fence():
@@ -717,6 +1744,39 @@ async def test_run_verifier_grade_passed():
     assert "SUCCESS" in grade["reasoning"]
 
 @pytest.mark.asyncio
+async def test_run_verifier_grade_prompt_prefers_program_self_check_over_recomputation():
+    """Regression test for a real live bug, 2026-08-10 (staged ignite_qpid_
+    protocol build, stage 1): the grader independently recomputed "Hello,
+    Protocol".getBytes()'s expected length as 13 (wrong - it's actually 15,
+    confirmed via len("Hello, Protocol".encode("utf-8"))) and rejected a
+    genuinely correct run whose OWN self-check (dataLength=15, bodyLength=15,
+    equals=true - a real comparison against real decoded data) had already
+    passed. Worse: the Developer model's own fix-analysis nearly caught this
+    ("I think there's a misunderstanding in my analysis... the issue is not
+    in my code") before deferring to the (wrong) grader's authority and
+    "fixing" already-correct code across several subsequent attempts. The
+    grader system prompt must instruct treating a program's own printed
+    self-verification result as primary evidence over the grader's own
+    recomputation of an expected value."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": True,
+        "reasoning": "equals=true confirms the round-trip comparison the program itself performed."
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.grade(
+        goal="round trip test", success_criteria="prints decoded values matching the original",
+        output="[RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=123, bodyLength=15, equals=true",
+        returncode=0,
+    )
+
+    system_prompt_sent = llm.complete.call_args_list[0][0][0]
+    assert "OWN explicit self-" in system_prompt_sent
+    assert "Do NOT independently recompute" in system_prompt_sent
+
+@pytest.mark.asyncio
 async def test_run_verifier_grade_unparseable_response_defaults_to_failure():
     # A grader response that can't be parsed must fail closed, not silently pass.
     cfg = AppConfig()
@@ -727,6 +1787,88 @@ async def test_run_verifier_grade_unparseable_response_defaults_to_failure():
     grade = await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
 
     assert grade["passed"] is False
+    assert grade["likely_files"] == []
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_returns_likely_files_on_failure():
+    """A runtime failure's captured output structurally never names a .java
+    file the way a compile error does - the grader naming the responsible
+    file directly is what lets the retry loop scope a fix instead of
+    retrying blind against every file."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": False,
+        "reasoning": "The Person was never found in the cache.",
+        "likely_files": ["src/main/java/com/example/CombinedApplication.java"],
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(
+        goal="Cache a Person", success_criteria="Person is cached and logged",
+        output="No Person found in cache", returncode=0,
+        files_written=["src/main/java/com/example/CombinedApplication.java", "src/main/java/com/example/Person.java"],
+    )
+
+    assert grade["passed"] is False
+    assert grade["likely_files"] == ["src/main/java/com/example/CombinedApplication.java"]
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_filters_out_hallucinated_likely_files():
+    # Trust boundary: never let the grader point the retry loop at a file
+    # that was never actually generated for this goal.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": False,
+        "reasoning": "Something failed.",
+        "likely_files": ["src/main/java/com/example/CombinedApplication.java", "NotARealFile.java"],
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(
+        goal="Goal", success_criteria="Criteria", output="output", returncode=0,
+        files_written=["src/main/java/com/example/CombinedApplication.java"],
+    )
+
+    assert grade["likely_files"] == ["src/main/java/com/example/CombinedApplication.java"]
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_timed_out_adds_prompt_note():
+    """timed_out=True must tell the grader not to treat the forced-kill exit
+    code/output as evidence of failure on its own - the caller (workflow.py)
+    still treats a timeout as disqualifying regardless of grade()'s verdict,
+    but grade() itself must judge purely on whether the goal's described
+    output is genuinely present in what was captured before the kill."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": True,
+        "reasoning": "The [SUCCESS] line is present despite the forced kill.",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(
+        goal="Print [SUCCESS]", success_criteria="Output contains [SUCCESS]",
+        output="[SUCCESS] done\n", returncode=-1, timed_out=True,
+    )
+
+    assert grade["passed"] is True
+    prompt = llm.complete.call_args_list[0][0][1]
+    assert "forcibly killed" in prompt
+    assert "Do NOT treat the exit code or the kill itself as evidence of failure" in prompt
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_no_timeout_note_by_default():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({"passed": True, "reasoning": "ok"}))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
+
+    prompt = llm.complete.call_args_list[0][0][1]
+    assert "forcibly killed" not in prompt
 
 @pytest.mark.asyncio
 async def test_skill_gap_agent_extracts_rules_and_examples():
@@ -831,6 +1973,133 @@ async def test_skill_gap_agent_unparseable_response_returns_empty_not_error():
 
     assert result == {"rules": [], "examples": {}, "conflicts": []}
 
+@pytest.mark.asyncio
+async def test_skill_gap_agent_discards_malformed_conflict_entries_without_crashing():
+    # Same trust boundary as check_skill_conflicts' index-bounds check: a "conflicts"
+    # entry that isn't shaped like {"candidate_rule": ..., ...} must never reach
+    # _stage_skill_conflicts() (which calls .get() on every item unconditionally with
+    # no enclosing try/except at its call site) - a plain string entry would otherwise
+    # raise an uncaught AttributeError and abort the entire generation run.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": [
+            "just a string, not an object",
+            {"conflicts_with": "Use port 5672.", "reason": "no candidate_rule field"},
+            {"candidate_rule": "", "conflicts_with": "x", "reason": "blank candidate_rule"},
+            {"candidate_rule": "Use port 5673.", "conflicts_with": "Use port 5672.", "reason": "Different pinned port."},
+        ]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="What port?", existing_rules=["Use port 5672."]
+    )
+
+    assert len(result["conflicts"]) == 1
+    assert result["conflicts"][0]["candidate_rule"] == "Use port 5673."
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_conflict_non_string_subfields_default_to_empty():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": [{"candidate_rule": "Use port 5673.", "conflicts_with": 5672, "reason": None}]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="What port?", existing_rules=["Use port 5672."]
+    )
+
+    assert result["conflicts"] == [{"candidate_rule": "Use port 5673.", "conflicts_with": "", "reason": ""}]
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_whitespace_only_candidate_rule_is_discarded():
+    # A regression narrowing "not candidate_rule.strip()" back down to "not
+    # candidate_rule" would silently admit a whitespace-only rule as if it were
+    # real content - distinct from (and not covered by) the plain-empty-string case.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": [{"candidate_rule": "   ", "conflicts_with": "x", "reason": "whitespace only"}]
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="What port?", existing_rules=["Use port 5672."]
+    )
+
+    assert result["conflicts"] == []
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_conflicts_not_a_list_returns_empty():
+    # The outer `isinstance(conflicts, list)` guard matters on its own, separately
+    # from per-item validation - a regression dropping it (e.g. iterating "conflicts"
+    # unconditionally) would raise iterating a dict's keys as strings, or crash
+    # outright on a plain string/int value.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {},
+        "conflicts": {"candidate_rule": "not actually a list"}
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="What port?", existing_rules=[]
+    )
+
+    assert result["conflicts"] == []
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_examples_filtered_per_item_not_all_or_nothing():
+    # One malformed example value used to discard the ENTIRE examples dict, even
+    # genuinely valid entries in the same response - inconsistent with "rules"'
+    # own per-item filtering in the same function.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [],
+        "examples": {
+            "good-config.json": '{"modelVersion": "8.0"}',
+            "bad-config.json": {"nested": "not a string"},
+        },
+        "conflicts": []
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="Missing info.", existing_rules=[]
+    )
+
+    assert result["examples"] == {"good-config.json": '{"modelVersion": "8.0"}'}
+
+@pytest.mark.asyncio
+async def test_skill_gap_agent_examples_not_a_dict_returns_empty():
+    # The outer `isinstance(examples, dict)` guard matters on its own, separately
+    # from per-item filtering - a regression dropping it (e.g. calling .items()
+    # unconditionally) would crash on a list/string "examples" value.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "rules": [], "examples": ["good-config.json", "bad-config.json"], "conflicts": []
+    }))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="Missing info.", existing_rules=[]
+    )
+
+    assert result["examples"] == {}
+
 
 @pytest.mark.asyncio
 async def test_check_skill_conflicts_returns_valid_conflict():
@@ -838,8 +2107,8 @@ async def test_check_skill_conflicts_returns_valid_conflict():
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({
         "conflicts": [{
-            "rule_a": "Broker must bind AMQP to port 5672.",
-            "rule_b": "Configure the broker to listen on port 5673 for AMQP clients.",
+            "rule_a_index": 1,
+            "rule_b_index": 1,
             "explanation": "Both skills configure the same embedded broker's AMQP port to different values."
         }]
     }))
@@ -855,16 +2124,22 @@ async def test_check_skill_conflicts_returns_valid_conflict():
     assert result[0]["rule_b"] == "Configure the broker to listen on port 5673 for AMQP clients."
 
 @pytest.mark.asyncio
-async def test_check_skill_conflicts_discards_hallucinated_rule_text():
+async def test_check_skill_conflicts_discards_out_of_range_index():
     # Defensive check mirroring extract_skill_update's mutual-exclusivity fix: a
-    # "conflict" whose rule text doesn't exactly match either skill's actual rules
-    # must never be trusted, since it would silently exclude real rule content.
+    # "conflict" whose index doesn't resolve to a real position in either skill's
+    # actual rule list must never be trusted, since it would silently exclude
+    # real rule content. Index-based referencing (not verbatim text) is itself
+    # the fix for a real efficiency bug found live: asking the model to
+    # reproduce rule text character-for-character caused a near-100% discard
+    # rate (up to 28 discarded "conflicts" from a single call) even when the
+    # model's underlying judgment may have been reasonable - an index is either
+    # a valid position or it isn't, no "almost right" case to fail on.
     cfg = AppConfig()
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({
         "conflicts": [{
-            "rule_a": "Paraphrased version of the real rule.",
-            "rule_b": "Use port 5673.",
+            "rule_a_index": 5,  # out of range - skill_a only has 1 rule
+            "rule_b_index": 1,
             "explanation": "Ports differ."
         }]
     }))
@@ -915,7 +2190,45 @@ def test_architect_prompt_requires_listing_files_that_need_modification_too():
     referencing Qpid/JMS classes compiled against a pom.xml that still only
     had Ignite dependencies, since pom.xml was never in the Architect's
     "Files to Create" list. The prompt must explicitly cover modifying
-    existing files, not just creating new ones."""
+    existing files, not just creating new ones.
+
+    The original fix used a markdown heading ("## Files to Create or
+    Modify") later replaced by a validated JSON contract (see
+    kriya/agents/contracts.py, ArchitectAgent.run_with_file_list) - this
+    test now checks for the JSON shape instead of the old heading text,
+    same regression intent."""
     prompt = ArchitectAgent("architect", None).system_prompt
-    assert "Files to Create or Modify" in prompt
+    assert '"files"' in prompt
     assert "already-existing" in prompt.lower() or "existing files" in prompt.lower()
+
+def test_architect_agent_requires_explicit_build_manifest():
+    """Regression test for a real bug found live (2026-08-07,
+    kriya-protocol-parser-app): a goal saying 'In a Maven project...' never
+    explicitly asked for pom.xml, the Architect's design never listed it
+    either, and no attempt across an entire generation run ever created
+    one - every retry failed on the same missing-dependency compile errors
+    since nothing in the retry loop could recover a file that was never
+    requested in the first place (see _detect_missing_build_manifest's
+    structural fix for the other half of this)."""
+    prompt = ArchitectAgent("architect", None).system_prompt
+    assert "pom.xml" in prompt
+    assert "build.gradle" in prompt
+    assert "not implicit" in prompt.lower()
+
+def test_planner_agent_prompt_forbids_unrequested_multi_module_structure():
+    """Regression test for a real bug found live, 2026-08-15
+    (spikes/eval_harness, ignite_qpid_protocol): a goal describing
+    functionality in three layers, and explicitly stating all orchestration
+    must live in ONE entry-point class, was planned as three separate Maven
+    modules (protocol-layer/ignite-layer/qpid-layer, each with its own
+    pom.xml AND its own separate ProtocolApp.java) - directly contradicting
+    the goal's own explicit constraint. Confirmed via the actual checkpointed
+    plan text that this originated in Planner's own output, not a later
+    stage - Architect and Developer just faithfully implemented what a wrong
+    plan already specified. Unlike ArchitectAgent (which already has a
+    MINIMALISM principle, added earlier), PlannerAgent - which runs FIRST
+    and originates this exact class of decision - had no equivalent."""
+    prompt = PlannerAgent("planner", None).system_prompt
+    assert "MINIMALISM" in prompt
+    assert "single Maven/Gradle module" in prompt
+    assert "multi-module" in prompt.lower()

@@ -1,15 +1,38 @@
 import ipaddress
+import json
 import logging
 import re
 import socket
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    AuthenticationError,
+    InternalServerError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 
 from kriya.config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+# Exception types that are clearly NOT about response_format/reasoning
+# compatibility - a connection refused, an expired API key, or a rate limit
+# has nothing to do with whether this backend supports JSON mode together
+# with reasoning, so retrying identically for these just adds latency while
+# reporting a misleading root cause (2026-08-12 SME review). Deliberately an
+# exclusion list, not an allowlist restricted to e.g. just BadRequestError -
+# the retry exists for real, previously-observed backend quirks whose exact
+# error shape isn't guaranteed across every OpenAI-compatible server, so an
+# unrecognized exception still gets the benefit of the doubt and retries.
+_LLM_RETRY_EXCLUDED_EXCEPTIONS = (
+    APIConnectionError, APITimeoutError, AuthenticationError,
+    PermissionDeniedError, RateLimitError, InternalServerError,
+)
 
 class EgressViolationError(ValueError):
     """Raised when an LLM completion request violates local_only egress policy."""
@@ -20,8 +43,19 @@ def is_local_url(url: str) -> bool:
         parsed = urlparse(url)
         hostname = parsed.hostname
         if not hostname:
-            return True
-            
+            # Fail CLOSED, not open - found live, 2026-08-12 (SME architecture
+            # review): a malformed/typo'd base_url (e.g. missing "http://" in
+            # a config file) parses with hostname=None via urlparse, and this
+            # branch was previously treating that as local/allowed - the
+            # opposite of the fail-closed behavior the except block below
+            # already implements for every OTHER failure mode. This function
+            # is a hard safety boundary (see kriya/core/llm.py's egress
+            # enforcement, and CLAUDE.md's "Egress control" section) - an
+            # unparseable hostname is exactly the kind of ambiguous input
+            # that should never be treated as "safe."
+            logger.debug(f"is_local_url check found no hostname for '{url}', treating as non-local (fail closed)")
+            return False
+
         if hostname.lower() in {"localhost", "127.0.0.1", "[::1]"}:
             return True
         if hostname.lower().endswith(".local"):
@@ -130,8 +164,11 @@ class LLMClient:
             except Exception as e:
                 # Only reasoning models risk this combination being unsupported by some
                 # backend - a plain json_mode call already worked fine unconditionally
-                # before this change, so there's no need to retry that case.
-                if response_format is not None and is_reasoning:
+                # before this change, so there's no need to retry that case. Also
+                # excludes exception types that are clearly unrelated to response_format
+                # (connection/timeout/auth/rate-limit/server errors) - see
+                # _LLM_RETRY_EXCLUDED_EXCEPTIONS.
+                if response_format is not None and is_reasoning and not isinstance(e, _LLM_RETRY_EXCLUDED_EXCEPTIONS):
                     logger.warning(
                         f"Completion request with response_format={response_format} failed for "
                         f"reasoning model '{model}' ({e}) - retrying once without it (this backend/"
@@ -226,3 +263,72 @@ class LLMClient:
             content = response.choices[0].message.content or ""
             content = content.strip()
         return content, prompt_tokens, completion_tokens
+
+    async def complete_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        temperature_override: Optional[float] = None,
+        max_tokens_override: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Single-turn native tool-calling completion. Unlike complete()'s fixed
+        system/user string pair, a tool-calling loop needs to append tool_calls and
+        tool results as its own messages between turns - so this takes a full
+        OpenAI-style message list and returns raw enough structure (content +
+        decoded tool_calls) for the caller to drive that loop itself. One call is
+        one model turn; this method does NOT loop turns - see
+        kriya/workflow/self_correction.py for the only current caller's turn-budget
+        loop.
+
+        Reuses complete()'s own egress check and base_url_override/api_key_override
+        client-construction logic unchanged - this is a second call site into the
+        same safety boundary, not a parallel one. Deliberately does not support
+        streaming, json_mode, or reasoning-tag stripping, all out of scope for a
+        tool-calling turn (see this session's tool-use scoping decision - a tool
+        loop's own turn content is a short plan/summary, not the kind of long-form
+        output those features exist for)."""
+        if self.config.autonomy.egress_policy == "local_only":
+            url_to_check = base_url_override or self.config.llm.base_url
+            if not is_local_url(url_to_check):
+                raise EgressViolationError(
+                    f"Egress violation: Request to external API '{url_to_check}' blocked under 'local_only' policy."
+                )
+
+        model = model_override or self.model
+        client = self.client
+        if base_url_override or api_key_override:
+            client = AsyncOpenAI(
+                api_key=api_key_override or self.config.llm.api_key,
+                base_url=base_url_override or self.config.llm.base_url
+            )
+
+        temperature = temperature_override if temperature_override is not None else self.temperature
+        max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
+        extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            extra_body=extra_body,
+        )
+        message = response.choices[0].message
+        raw_tool_calls = message.tool_calls or []
+        tool_calls = []
+        for tc in raw_tool_calls:
+            try:
+                arguments = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, TypeError):
+                # A malformed/truncated arguments string is a real, observed local-model
+                # failure mode even at small tool-call-argument scale - falling back to {}
+                # (surfaced to the caller as a missing-field tool error) rather than raising
+                # keeps one bad tool call from crashing the whole self-correction loop.
+                arguments = {}
+            tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": arguments})
+        return {"content": (message.content or "").strip(), "tool_calls": tool_calls}

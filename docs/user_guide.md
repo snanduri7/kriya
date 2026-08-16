@@ -38,6 +38,10 @@ llm:
   temperature: 0.3
   max_tokens: 4096
   context_window: 32768                    # Native model input context window limit
+  retry_temperature: 0.1                   # Optional, unset by default. Overrides temperature ONLY for a
+                                            # Developer completion that's fixing a real prior error (see §4.7) -
+                                            # a cited study found code-gen success rate drops as temperature
+                                            # rises even at the low end, so lower (not higher) helps a retry.
 
 # Ordered fallback/escalation chain - tried in order after a quality-gate failure
 llm_chain:
@@ -380,11 +384,45 @@ In a full-set retry (regenerating every file in the batch, not just one), this "
 
 If a failure doesn't clearly point at one of your files (a bare exit code, a build-tool configuration error with no source file involved), Kriya falls back to a normal full-file-set retry - targeting is a bonus when it can confidently narrow the fix, never a guess.
 
+When a retry knows the exact broken source line, it now prefers asking for a small, anchored patch (a targeted before/after code block) over regenerating the whole file - found live that a full regeneration can correctly state the right fix in its own analysis and then still lose it while rewriting everything else around it. Falls back to full-file content automatically if the fix genuinely needs broader changes.
+
+When `jdtls` is installed (`brew install jdtls`, no config needed) and a retry is fixing a Java file, Kriya also checks it against the project's real, resolved classpath and folds any confirmed error into the same retry prompt - deterministic ground truth for import/symbol mistakes, distinct from (and complementary to) the compile error itself. Optional and automatic: not found, or fails to start, and nothing changes. `kriya doctor` reports whether it was detected.
+
+Java compile checks always pass `-Xlint:rawtypes,unchecked` to javac now, so a raw-type mistake (e.g. using a cache/collection without generics, a real and recurring cause of "incompatible types" failures) shows up as a precisely-located warning right next to the resulting error, rather than javac's default one-line notice with no file/line at all - one more concrete thing the fix-analysis step above has to work with.
+
 ### 4.8 Completeness Prevention & Missing-File Recovery
 No configuration needed - this is always on. Before the Developer generates anything, Kriya scans the Architect's design for the files it calls for and hands the Developer an explicit "Required files" checklist as part of the task description - not just a check applied after the fact. If a required file is still missing once generation finishes, the next retry asks specifically for that missing file (with the rest of your codebase shown as reference), instead of either silently accepting an incomplete result or regenerating everything from scratch. This shares Targeted Single-File Retry's budget (3 attempts) and never escalates models, for the same reasons.
 
 ### 4.9 Working on an Uncommitted/In-Progress Project
 No configuration needed. The Developer & Quality Gates sandbox (`.kriya/worktree`) is synced with whatever is actually on disk in your workspace before every run - including uncommitted changes and new, not-yet-`git add`ed files - not just your last commit. You don't need to commit in-progress work before running `kriya generate`; a goal that builds on or preserves existing (even uncommitted) code sees it correctly either way.
+
+### 4.10 Knowledge Gaps and Readiness
+The lesson-extraction mechanism described in 4.3 (an auto-debugging escalation staging a rule for `kriya skills approve`) captures *whether* a fix worked, but not *how usable* the resulting knowledge is - a vague, unlinked sentence and an exact dependency coordinate looked identical to Kriya before this. `kriya/knowledge/` now tags every automatically-captured fact by category (Metadata, Compatibility, Dependencies, APIs, Configuration, Rules, Examples, Verification, Constraints, Best Practices) and by how it was extracted (a direct manifest read is trusted more than an LLM guess with no supporting quote), so a skill's actual knowledge quality can be scored, not just assumed.
+
+Two automatic sources feed this today: a repo-manifest channel that reads exact dependency coordinates already sitting in your project's own `pom.xml`/`package.json`/`requirements.txt`/`build.gradle` (mechanical, no LLM, no network - and scoped only to dependencies your skill's tags already match, so it never floods a skill with facts about libraries you're not using), and a generalized version of the lesson-extraction mechanism above (same trigger as 4.3, now producing multiple structured, category-tagged facts instead of one free sentence). Both stage into a skill folder's `staged_knowledge.json` - a new file that sits alongside, and never touches, the existing `rules.txt`/`staged_rules.txt` files - and `kriya skills approve` now promotes both in one pass.
+
+Check how ready a skill's knowledge actually is:
+```bash
+kriya -c kriya.yaml skills readiness <skill_name>
+```
+Each category scores 0-4 (0 = nothing captured, 4 = a fact proven correct by a real run) - a skill is only as ready as its weakest category. If you don't know what's missing or how detailed an answer needs to be, ask instead of guessing:
+```bash
+kriya -c kriya.yaml skills gaps <skill_name>
+kriya -c kriya.yaml skills gaps <skill_name> --interactive   # answer questions right here
+```
+This only asks about categories still below the readiness threshold - a category already scoring well stays silent, so you're never asked busywork. An interactive answer is recorded immediately (not staged for later approval) since directly answering a specific question is already a strong signal it's correct, the same trust level Kriya already gives content you supply in response to a skill-gap prompt (Section 3.4).
+
+Doc ingestion (PDFs/README's/vendor docs) and package-registry lookups are natural next sources for this same pipeline but aren't wired up yet - see `docs/design.md` for the current state.
+
+### 4.11 Static Pre-Checks and Best-of-N First Attempts
+No configuration needed, always on: before the (expensive) compile gate runs, Kriya scans everything the Developer just wrote for a small set of known-bad patterns already documented in your active skills' rules - e.g. Apache Ignite's two startup mechanisms mixed in the same app (throws `IgniteException: ... already been started` at runtime), or an `Ignition.start()` left unclosed (hangs the JVM indefinitely after everything else already finished). If one matches, that retry attempt is redirected immediately, before ever invoking Maven/the JVM - the same rule the model already had in context, just enforced deterministically instead of hoped for.
+
+Separately, for goals where the same skill context sometimes produces a compliant first attempt and sometimes doesn't, you can ask Kriya to try more than one independent attempt before reacting to a real failure:
+```yaml
+autonomy:
+  best_of_n_first_attempt: 2   # default 1 - today's exact single-attempt behavior
+```
+This only ever applies to the very first attempt of a run (not later retries, which already have real error context to react to), and is strictly sequential - never parallel - so it never uses more resources at any given moment than a normal single-attempt run; the only cost is bounded extra wall-clock in the worst case (every candidate fails). It also only activates when Kriya actually has an isolated worktree sandbox to run each candidate in (the normal case for any real git repo) - without one, a discarded candidate would have nowhere safe to reset to, so it's silently skipped rather than risk writing a failed attempt's files into your real project.
 
 ---
 
