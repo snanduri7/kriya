@@ -66,7 +66,13 @@ class Failure:
     e.g. a targeted retry scoped by a locator that could only ever name the
     file where a runtime check threw, not the different file whose method
     silently computed the wrong value; see find_misdirected_edit_target() in
-    kriya/workflow/edit_safety.py), or "general_error" (fallback for a bare,
+    kriya/workflow/edit_safety.py), "pom_semantic_validation" (pom.xml is
+    well-formed XML - structural_corruption's own check already passed - but
+    `mvn validate` still rejects it as an invalid POM, e.g. the wrong root
+    element; caught immediately after pom.xml is written, before any other
+    file in the batch is generated, since nothing else can compile without a
+    usable POM anyway; see PolymorphicValidator.run_pom_validate() in
+    kriya/tools/validate.py), or "general_error" (fallback for a bare,
     non-QualityGateFailure Exception).
     """
     type: str

@@ -206,6 +206,7 @@ async def test_workflow_uses_structured_architect_file_list_for_known_target_fil
         {"filepath": "pom.xml", "content": "<project></project>"},
     ])
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
         res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
 
@@ -241,6 +242,7 @@ async def test_workflow_falls_back_to_heuristic_file_list_when_architect_respons
         {"filepath": "Main.java", "content": "public class Main {}"},
     ])
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
         res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
 
@@ -1493,6 +1495,7 @@ async def test_workflow_full_set_prompt_includes_existing_dependencies_checklist
 </project>""")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1500,13 +1503,24 @@ async def test_workflow_full_set_prompt_includes_existing_dependencies_checklist
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
         "Design: Write pom.xml",
-        '[{"filepath": "pom.xml", "content": "<project></project>"}]',
+        # A bare string, not JSON: attempt 1's heuristic-extracted
+        # expected_files_upfront (["pom.xml"], from the design prose) makes
+        # this the SOLE targeted file, so known_target_files bypasses
+        # DeveloperAgent's Step-1 file-list query (parse_file_list()) entirely
+        # and this response is used directly AS the file's raw content - found
+        # live, 2026-08-16, investigating why this test had been silently
+        # failing all session as a presumed "environment-dependent" baseline
+        # item: it wasn't one. The old JSON-array-shaped fixture value here
+        # predates that bypass behavior and was never updated to match -
+        # confirmed directly via a standalone repro before touching this test.
+        "<project></project>",
         "Review: Approved",
     ])
 
     we = WorkflowEngine(kernel, llm)
 
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
         mock_compile.return_value = {"success": True, "output": "Maven compilation succeeded."}
 
@@ -2294,6 +2308,7 @@ async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
     surfaced regardless of the run's own pass/fail outcome, not folded only
     into the environment_failure circuit breaker's failure-only reporting."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -2301,13 +2316,19 @@ async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
         "Design: Write pom.xml",
-        '[{"filepath": "pom.xml", "content": "<project></project>"}]',
+        # A bare string, not JSON - see test_workflow_full_set_prompt_
+        # includes_existing_dependencies_checklist's own comment above for why
+        # (known_target_files bypasses Step 1's parse_file_list() entirely for
+        # this single-file case, so this response is used directly as raw
+        # file content, not JSON to be parsed).
+        "<project></project>",
         "Review: Approved",
     ])
 
     we = WorkflowEngine(kernel, llm)
 
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.check_java_toolchain", return_value={
              "java_found": True, "java_version": "17",
@@ -2351,6 +2372,7 @@ async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
     only once per generation run, regardless of which of the two
     PolymorphicValidator construction sites reaches it first."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -2358,7 +2380,26 @@ async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
         "Design: Write pom.xml",
-        '[{"filepath": "pom.xml", "content": "<project><bad></project>"}]',
+        # Attempt 1's response (bare string, not JSON): known_target_files
+        # (from attempt 1's heuristic-extracted expected_files_upfront)
+        # bypasses Step 1's parse_file_list() entirely for this single-file
+        # case - see test_workflow_full_set_prompt_includes_existing_
+        # dependencies_checklist's own comment above for why. Deliberately
+        # well-formed XML (unlike an actually-malformed
+        # "<project><bad></project>", which find_structural_corruption's own
+        # XML check would catch BEFORE ever reaching the mocked compile gate
+        # below, consuming an extra, unbudgeted retry cycle) - this test wants
+        # attempt 1 to reach and fail AT the (fully mocked, content-agnostic)
+        # compile gate specifically, matching mock_compile.side_effect's own
+        # two entries below.
+        "<project><bad/></project>",
+        # Attempt 2's response (back to the JSON-array shape): the mocked
+        # compile failure text ("some generic xml error") names no real file,
+        # so extract_implicated_files() can't scope this retry to pom.xml -
+        # it falls through to an UNSCOPED full-set retry, which genuinely
+        # does go through Step 1's batch-JSON-with-content path (unlike
+        # attempt 1's known_target_files-scoped call above) - confirmed via a
+        # standalone repro before landing on this content.
         '[{"filepath": "pom.xml", "content": "<project></project>"}]',
         "Review: Approved",
     ])
@@ -2366,6 +2407,7 @@ async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
     we = WorkflowEngine(kernel, llm)
 
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.check_java_toolchain", return_value={
              "java_found": True, "java_version": "17",
@@ -3173,7 +3215,8 @@ async def test_run_attempt_static_check_scopes_likely_files_not_every_written_fi
         },
     )
 
-    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check"):
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check"), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}):
         with pytest.raises(QualityGateFailure) as exc_info:
             await run_attempt(state, ctx)
 
@@ -3522,6 +3565,9 @@ async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path
         "kriya.tools.validate.PolymorphicValidator.run_compile_check",
         return_value={"success": True, "output": "Maven compilation succeeded."},
     ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_pom_validate",
+        return_value={"success": True, "output": ""},
+    ), patch(
         "kriya.tools.validate.PolymorphicValidator.run_tests",
         return_value={"success": True, "output": ""},
     ), patch(
@@ -3585,6 +3631,9 @@ async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(
     }), patch(
         "kriya.tools.validate.PolymorphicValidator.run_compile_check",
         return_value={"success": True, "output": "Maven compilation succeeded."},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_pom_validate",
+        return_value={"success": True, "output": ""},
     ), patch(
         "kriya.tools.validate.PolymorphicValidator.run_tests",
         return_value={"success": True, "output": ""},
@@ -3651,6 +3700,9 @@ async def test_workflow_pins_exec_plugin_executable_to_resolved_jdk_in_applied_w
         "kriya.tools.validate.PolymorphicValidator.run_compile_check",
         return_value={"success": True, "output": "Maven compilation succeeded."},
     ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_pom_validate",
+        return_value={"success": True, "output": ""},
+    ), patch(
         "kriya.tools.validate.PolymorphicValidator.run_tests",
         return_value={"success": True, "output": ""},
     ), patch(
@@ -3699,6 +3751,7 @@ async def test_workflow_recovers_missing_build_manifest_never_requested_by_archi
         [{"filepath": "pom.xml", "content": "<project></project>"}],
     ])
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile, \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}):
         mock_compile.side_effect = [
             {
@@ -4798,7 +4851,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
 
     assert res["quality_gates_passed"] is True
     mock_search.assert_called_once_with("widgetlib example", "http://fake-search:8080", top_k=3)
-    mock_fetch.assert_called_once_with("https://example.com/widgetlib")
+    mock_fetch.assert_called_once_with("https://example.com/widgetlib", quiet_on_failure=True)
     assert skill_gap_calls == []  # human-ask path never fired - live lookup resolved it first
 
     se = SkillEngine(str(skills_dir), load_global=False)
@@ -5213,7 +5266,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
 
     assert res["quality_gates_passed"] is True
     mock_search.assert_called_once_with("gizmolib example", "http://fake-search:8080", top_k=3)
-    mock_fetch.assert_called_once_with("https://example.com/gizmolib")
+    mock_fetch.assert_called_once_with("https://example.com/gizmolib", quiet_on_failure=True)
 
     se = SkillEngine(str(skills_dir), load_global=False)
     se.discover_and_load()
@@ -5884,7 +5937,7 @@ async def test_get_or_start_jdtls_client_logs_not_found_at_info(caplog):
     engaged and had nothing to add' were still indistinguishable from the
     log even after the failure path was fixed. This one-time INFO note on
     the not-found path (previously completely silent) closes that gap."""
-    with caplog.at_level(logging.INFO, logger="kriya.workflow.workflow"), \
+    with caplog.at_level(logging.INFO, logger="kriya.workflow.lsp_integration"), \
          patch("kriya.tools.lsp.find_jdtls", return_value=None):
         result = await _get_or_start_jdtls_client(None, "/fake/project")
     assert result is None
@@ -5898,7 +5951,7 @@ async def test_get_or_start_jdtls_client_logs_success_at_info(caplog):
     whether a lack of ground-truth text means 'didn't run' or 'ran and
     found nothing wrong'."""
     mock_client = AsyncMock()
-    with caplog.at_level(logging.INFO, logger="kriya.workflow.workflow"), \
+    with caplog.at_level(logging.INFO, logger="kriya.workflow.lsp_integration"), \
          patch("kriya.tools.lsp.find_jdtls", return_value="/usr/local/bin/jdtls"), \
          patch("kriya.tools.lsp.JdtlsClient", return_value=mock_client):
         result = await _get_or_start_jdtls_client(None, "/fake/project")
@@ -6506,12 +6559,24 @@ def test_resolve_java_home_override_resolves_when_goal_matches_java_side():
     that when 'mvn' defaults to a different JDK on the machine (confirmed
     live: JDK 26 broke a Qpid Broker-J API call unrelated to anything the
     generated code controls)."""
+    # Patched on kriya.workflow.toolchain, not kriya.workflow.workflow - found
+    # live, 2026-08-16, investigating why this test had been silently failing
+    # all session as a presumed "environment-dependent" baseline item: it
+    # isn't one. _resolve_java_home_override() and _resolve_jdk_home_for_version()
+    # both live in kriya/workflow/toolchain.py and call each other as a
+    # same-module reference - workflow.py's own re-exported copy (kept for
+    # backward-compat import call sites after the 2026-08-11 modularization)
+    # is a DIFFERENT name binding that _resolve_java_home_override() never
+    # actually reaches, so patching it left the real, unmocked function
+    # scanning THIS machine's real filesystem for a JDK 17 install and
+    # finding whatever's really there instead of the intended mock value -
+    # confirmed directly via a standalone repro before touching this test.
     with patch("kriya.tools.validate.check_java_toolchain", return_value={
         "java_found": True, "java_version": "17",
         "mvn_found": True, "mvn_java_version": "26",
         "mismatch": True,
     }), patch(
-        "kriya.workflow.workflow._resolve_jdk_home_for_version",
+        "kriya.workflow.toolchain._resolve_jdk_home_for_version",
         return_value="/opt/jdk-17",
     ) as mock_resolve:
         assert _resolve_java_home_override("In a Maven project targeting Java 17") == "/opt/jdk-17"
@@ -6662,12 +6727,17 @@ async def test_workflow_applies_java_home_override_to_maven_subprocess(tmp_path)
     # `subprocess.run(["mvn", "-version"], ...)` preflight check (which never
     # explicitly passes env=, unlike _run_cmd_with_timeout's real compile-check
     # call, so it has no "env" key in its kwargs at all - filtering on cmd[0]
-    # == "mvn" alone isn't enough to land on the right call). Filter to a real
-    # mvn invocation that also explicitly passed env=, i.e. one that actually
-    # went through _run_cmd_with_timeout.
+    # == "mvn" alone isn't enough to land on the right call), and (2026-08-16,
+    # PolymorphicValidator.run_pom_validate()) an earlier "mvn validate"
+    # pre-check that ALSO goes through _run_cmd_with_timeout (so it ALSO has
+    # "env" in its kwargs) but deliberately does NOT apply java_home_override -
+    # that check never invokes javac, so it doesn't need the goal-specific JDK
+    # targeting real compilation does (see that method's own docstring). Filter
+    # to specifically the REAL compile invocation, not just "any mvn call that
+    # passed env=".
     mvn_calls = [
         c for c in mock_popen.call_args_list
-        if c.args and c.args[0] and c.args[0][0] == "mvn" and "env" in c.kwargs
+        if c.args and c.args[0] and c.args[0][0] == "mvn" and "env" in c.kwargs and "compile" in c.args[0]
     ]
     assert mvn_calls, mock_popen.call_args_list
     _, kwargs = mvn_calls[0]

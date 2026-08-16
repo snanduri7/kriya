@@ -321,6 +321,53 @@ class PolymorphicValidator:
                 "timeout": True,
             }
 
+    def run_pom_validate(self) -> Dict[str, Any]:
+        """Cheap, semantic-level pre-check for a Maven pom.xml - catches a
+        well-formed-but-wrong POM (e.g. the wrong root element, a missing
+        <modelVersion>, malformed coordinates) before paying for the full
+        compile gate's own dependency resolution + javac invocation.
+
+        Motivation: find_structural_corruption() (kriya/workflow/edit_safety.py)
+        already checks pom.xml is well-formed XML, but "well-formed" and
+        "a valid Maven POM" are different questions - confirmed live,
+        2026-08-16 (ignite_qpid_person, run b-6): a pom.xml whose root element
+        was <plugin> instead of <project> is perfectly valid XML, passed that
+        check cleanly, and was only caught by a full `mvn compile` - by which
+        point every other file in the batch had already been written for
+        nothing, since nothing else in the project could possibly compile
+        without a usable POM.
+
+        `mvn validate` is the Maven lifecycle's own first phase - it checks the
+        POM's own shape (coordinates, model version, structure) without
+        resolving the transitive dependency graph needed for compilation or
+        invoking javac, so a genuinely broken POM fails fast without incurring
+        that cost. Deliberately NOT run with --offline: run_compile_check()'s
+        own `mvn clean compile` doesn't use it either, and introducing an
+        inconsistency here would risk a spurious offline-only failure that has
+        nothing to do with the POM itself.
+
+        Returns the same {"success": bool, "output": str} shape as
+        run_compile_check(), and is a no-op success (nothing to validate) if
+        the project has no pom.xml at all - callers gate on whether pom.xml
+        exists/was just written, but this stays safe to call unconditionally."""
+        pom_path = os.path.join(self.workspace_path, "pom.xml")
+        if not os.path.exists(pom_path):
+            return {"success": True, "output": "No pom.xml to validate."}
+        try:
+            res = self._run_cmd_with_timeout(["mvn", "validate"], cwd=self.workspace_path, timeout=120)
+            if res["returncode"] == 0:
+                return {"success": True, "output": "Maven POM validation succeeded."}
+            return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
+        except FileNotFoundError as e:
+            # 'mvn' itself isn't on PATH - a toolchain problem, not a POM
+            # defect. Same reasoning as run_compile_check()'s identical guard:
+            # must be returned, not silently swallowed, or a real toolchain
+            # gap gets misread as a code-content bug.
+            return {"success": False, "output": f"Failed to invoke mvn validate: {e}"}
+        except Exception as e:
+            logger.warning(f"Failed to invoke mvn validate: {e}")
+            return {"success": True, "output": f"mvn validate could not be run ({e}) - skipped, not confirmed valid."}
+
     def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
         """Runs language-specific compilation check on changed files."""
         if not files:
