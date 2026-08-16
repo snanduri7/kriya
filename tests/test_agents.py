@@ -327,7 +327,143 @@ async def test_fill_missing_content_shows_freshly_generated_sibling_content_not_
     # filename, since there's genuinely nothing to show yet.
     first_call_prompt = llm.complete.call_args_list[0][0][1]
     assert "Other Files In This Batch, Not Yet Written" in first_call_prompt
-    assert "ProtocolParser.java" in first_call_prompt
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_sibling_section_respects_explicit_budget():
+    """Regression test for the 2026-08-15 external review's Finding 8: before
+    this fix, the "Already-Written File This Batch" sibling section
+    concatenated every already-written sibling's FULL content with zero token
+    budgeting - the same unbounded-auxiliary-text bug class
+    _reserve_graph_context_budget() was built to fix for skills_prompt/
+    learned_rag_context, just unaddressed here. A third file's per-file call
+    must omit an earlier sibling's content (falling back to a filename-only
+    notice, distinct from "not yet written") once the explicit budget is
+    exhausted, rather than including it unconditionally."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    large_content = "package com.example;\n" + ("// padding line\n" * 200)
+    llm.complete = AsyncMock(side_effect=[
+        large_content,
+        "package com.example;\npublic class Second {}",
+        "package com.example;\npublic class Third {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    file_entries = [
+        {"filepath": "First.java", "content": None, "edits": None},
+        {"filepath": "Second.java", "content": None, "edits": None},
+        {"filepath": "Third.java", "content": None, "edits": None},
+    ]
+    # Budget large enough for the second (small) file's block, but not also
+    # the first (large) file's block once both are already written.
+    await dev._fill_missing_content(
+        file_entries, "Task", "Design", "Existing code", None, None, None, None,
+        sibling_content_budget=200,
+    )
+
+    third_call_prompt = llm.complete.call_args_list[2][0][1]
+    assert "Additional Already-Written Files This Batch" in third_call_prompt
+    assert "First.java" in third_call_prompt
+    # The omitted sibling's real content must not appear at all - only its name.
+    assert large_content not in third_call_prompt
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_sibling_section_uses_default_budget_when_unset():
+    """A caller that doesn't pass sibling_content_budget (e.g. an older/direct
+    call) must fall back to DeveloperAgent.DEFAULT_SIBLING_CONTENT_BUDGET, not
+    silently revert to the old unbounded-concatenation behavior."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    protocol_content = "package com.example;\npublic class Protocol {}"
+    llm.complete = AsyncMock(side_effect=[
+        protocol_content,
+        "package com.example;\npublic class Consumer {}",
+    ])
+
+    dev = DeveloperAgent("developer", llm)
+    file_entries = [
+        {"filepath": "Protocol.java", "content": None, "edits": None},
+        {"filepath": "Consumer.java", "content": None, "edits": None},
+    ]
+    await dev._fill_missing_content(
+        file_entries, "Task", "Design", "Existing code", None, None, None, None,
+    )
+
+    second_call_prompt = llm.complete.call_args_list[1][0][1]
+    # Small sibling content comfortably fits the default budget - included in full.
+    assert protocol_content in second_call_prompt
+    assert "Additional Already-Written Files This Batch" not in second_call_prompt
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_system_prompt_is_create_mode_on_a_clean_attempt():
+    """Regression test for the 2026-08-15 external review's Finding 2 (of that
+    review's own numbering): the per-file system prompt used to be ONE
+    unconditional block claiming "Return ONLY the raw file content" - sent
+    even on a retry, directly contradicting the user-message instruction to
+    instead write FIX ANALYSIS/SEARCH/REPLACE/FILE CONTENT/NO CHANGE NEEDED.
+    On a clean, non-retry attempt (no prior_error_context), the system prompt
+    must be CREATE_FULL_FILE mode - no FIX ANALYSIS contract mentioned."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+    dev = DeveloperAgent("developer", llm)
+    file_entries = [{"filepath": "App.java", "content": None, "edits": None}]
+    await dev._fill_missing_content(
+        file_entries, "Task", "Design", "Existing code", None, None, None, None,
+    )
+    system_prompt_sent = llm.complete.call_args_list[0][0][0]
+    assert "MODE: CREATE_FULL_FILE" in system_prompt_sent
+    assert "Return ONLY the raw file content" in system_prompt_sent
+    assert "FIX ANALYSIS" not in system_prompt_sent
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_system_prompt_is_repair_mode_on_a_retry():
+    """The same call, but WITH prior_error_context (a retry) - the system
+    prompt must switch to REPAIR mode and must NOT tell the model to return
+    only raw file content, since the user-message fix_analysis_instruction
+    requires a FIX ANALYSIS line first. Without a precise source-line locator
+    or files_with_current_content, prefer_anchored_edit is False, so REPAIR
+    mode should offer FILE CONTENT:/NO CHANGE NEEDED: but not SEARCH:/REPLACE:."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nFILE CONTENT:\npublic class App {}")
+    dev = DeveloperAgent("developer", llm)
+    file_entries = [{"filepath": "App.java", "content": None, "edits": None}]
+    await dev._fill_missing_content(
+        file_entries, "Task", "Design", "Existing code", None, None, None, None,
+        prior_error_context="cannot find symbol: class Foo",
+    )
+    system_prompt_sent = llm.complete.call_args_list[0][0][0]
+    assert "MODE: REPAIR" in system_prompt_sent
+    assert "FIX ANALYSIS" in system_prompt_sent
+    assert "Return ONLY the raw file content" not in system_prompt_sent
+    assert "SEARCH:" not in system_prompt_sent
+
+    file_prompt_sent = llm.complete.call_args_list[0][0][1]
+    assert "Follow the REPAIR contract above" in file_prompt_sent
+    assert "Please generate the complete, correct file content for" not in file_prompt_sent
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_system_prompt_offers_anchored_edit_when_grounded():
+    """Same retry, but WITH a precise source-line locator (error_source_context)
+    - prefer_anchored_edit becomes True, and REPAIR mode's system prompt must
+    now offer the SEARCH:/REPLACE: anchored-patch option too."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();")
+    dev = DeveloperAgent("developer", llm)
+    file_entries = [{"filepath": "App.java", "content": None, "edits": None}]
+    await dev._fill_missing_content(
+        file_entries, "Task", "Design", "Existing code", None, None, None, None,
+        prior_error_context="App.java:[10,5] cannot find symbol: class Foo",
+        error_source_context={"App.java": "\n>> 10: Foo f = new Foo();\n"},
+    )
+    system_prompt_sent = llm.complete.call_args_list[0][0][0]
+    assert "MODE: REPAIR" in system_prompt_sent
+    assert "SEARCH:" in system_prompt_sent
+    assert "Return ONLY the raw file content" not in system_prompt_sent
 
 @pytest.mark.asyncio
 async def test_run_generation_with_known_target_files_skips_file_list_call():
@@ -791,6 +927,28 @@ def test_build_incompatible_types_scaffold_names_the_reported_types():
 def test_build_incompatible_types_scaffold_empty_when_no_match():
     assert DeveloperAgent._build_incompatible_types_scaffold(None) == ""
     assert DeveloperAgent._build_incompatible_types_scaffold("cannot find symbol: class Foo") == ""
+
+def test_build_incompatible_types_scaffold_warns_against_var_plus_cast_hybrid():
+    """Regression test for a real live incident, 2026-08-16 (ignite_qpid_person,
+    run b-7) - confirmed directly from the real post-attempt file content
+    (recoverable this time thanks to the atomic-write fix). The model correctly
+    named both of the scaffold's two options in its own FIX ANALYSIS, then
+    produced `var cache = (IgniteCache<Integer, Person>) ignite.cache(CACHE_NAME);`
+    - option 2's `var` combined with option 1's cast, wrapping a generic method
+    call. This specific hybrid is illegal Java (the cast operand gets no target
+    type to infer from, so its type parameters default to Object, and casting
+    that erased result to a differently-parameterized generic type violates
+    generics invariance) even though it superficially looks like option 1. The
+    scaffold must explicitly warn against this exact hybrid shape."""
+    error = (
+        "IgniteQpidPersonApp.java:[104,82] incompatible types: "
+        "org.apache.ignite.IgniteCache<java.lang.Object,java.lang.Object> cannot be "
+        "converted to org.apache.ignite.IgniteCache<java.lang.Integer,com.example.Person>"
+    )
+    scaffold = DeveloperAgent._build_incompatible_types_scaffold(error)
+    assert "Do NOT combine both into one line" in scaffold
+    assert "no target type to infer from" in scaffold
+    assert "generics are invariant" in scaffold
 
 @pytest.mark.asyncio
 async def test_fill_missing_content_prompt_includes_incompatible_types_scaffold():
@@ -1714,6 +1872,61 @@ async def test_run_verifier_judge_missing_run_commands_forces_should_run_false()
     assert judgment["should_run"] is False
 
 @pytest.mark.asyncio
+async def test_run_verifier_judge_string_false_is_not_python_truthy_coerced():
+    """Independent adversarial review, 2026-08-16: bool("false") is True in Python
+    (any non-empty string is truthy) - a model returning the JSON STRING "false"
+    instead of the JSON literal false was silently read as should_run=True, meaning
+    a command could execute that was never actually supposed to run. json_mode
+    guarantees syntactically valid JSON, not that every field matches its intended
+    type, so this is a real, reachable local-model response shape, not a
+    theoretical one."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": "false",
+        "run_commands": [["python", "app.py"]],
+        "command_source": "inferred",
+        "success_criteria": "Something"
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["should_run"] is False
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_string_true_is_honored():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": "true",
+        "run_commands": [["python", "app.py"]],
+        "command_source": "inferred",
+        "success_criteria": "Something"
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["should_run"] is True
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_unrecognized_should_run_value_defaults_false():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": "maybe",
+        "run_commands": [["python", "app.py"]],
+        "command_source": "inferred",
+        "success_criteria": "Something"
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["should_run"] is False
+
+@pytest.mark.asyncio
 async def test_run_verifier_judge_unparseable_response_defaults_to_no_run():
     cfg = AppConfig()
     llm = LLMClient(cfg)
@@ -1742,6 +1955,26 @@ async def test_run_verifier_grade_passed():
 
     assert grade["passed"] is True
     assert "SUCCESS" in grade["reasoning"]
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_string_false_is_not_python_truthy_coerced():
+    """Independent adversarial review, 2026-08-16: same bool("false")-is-True gap
+    as judge()'s should_run, here on the grader's "passed" field - a real runtime-
+    verification FAILURE would have been silently recorded as a pass."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "passed": "false",
+        "reasoning": "Output does not contain the expected line."
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(
+        goal="Print [SUCCESS]", success_criteria="Output contains [SUCCESS]",
+        output="wrong output", returncode=0
+    )
+
+    assert grade["passed"] is False
 
 @pytest.mark.asyncio
 async def test_run_verifier_grade_prompt_prefers_program_self_check_over_recomputation():

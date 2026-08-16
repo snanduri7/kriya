@@ -40,6 +40,7 @@ from kriya.workflow.worktree import (
 from kriya.workflow.context_budget import (
     _MIN_GRAPH_CONTEXT_BUDGET,
     _reserve_graph_context_budget,
+    _reserve_sibling_content_budget,
     build_code_context,
     estimate_tokens,
     skeletonize_braced_code,
@@ -1453,6 +1454,54 @@ class WorkflowEngine:
                     except Exception as ex:
                         logger.warning(f"Pre-approval Reviewer call failed, proceeding without it: {ex}")
 
+                def _abort_without_applying(status: str, review_text: str) -> Dict[str, Any]:
+                    """Shared cleanup for both 'a human said no' and 'approval was
+                    required but there was no way to even ask' - never applies
+                    worktree changes to the real workspace, restoring/removing
+                    exactly as the original human-rejection path already did."""
+                    if worktree_path != workspace_path:
+                        remove_git_worktree(workspace_path, worktree_path)
+                    else:
+                        for filepath, orig_content in state.all_original_contents.items():
+                            actual_file = os.path.join(workspace_path, filepath)
+                            if orig_content:
+                                # Atomic, not plain open(...,"w") - this restores the
+                                # user's REAL project file directly (no worktree
+                                # isolation on this path), so a kill mid-write here would
+                                # corrupt the user's actual pre-existing source, not just
+                                # a scratch sandbox file.
+                                atomic_write_file(actual_file, orig_content)
+                            elif os.path.exists(actual_file):
+                                os.remove(actual_file)
+                    delete_checkpoint(workspace_path, run_id)
+                    try:
+                        from kriya.core.trace import TraceLogger
+                        trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                        trace_logger = TraceLogger(trace_db)
+                        trace_logger.log_run(
+                            run_id=trace_id,
+                            goal=goal,
+                            duration_sec=time.time() - start_time,
+                            # + best_of_n_candidates_tried: retry_count alone understates true
+                            # effort whenever Best-of-N discarded independent candidates before
+                            # this run's winning/final attempt (retry_count gets reset to 0 for
+                            # each fresh candidate - see kriya/workflow/best_of_n.py).
+                            attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
+                            status=status,
+                            files_modified=[],
+                            failure_category=status,
+                        )
+                    except Exception as trace_ex:
+                        logger.warning(f"Failed to write run trace: {trace_ex}")
+                    return {
+                        "plan": plan,
+                        "design": design,
+                        "files": [],
+                        "quality_gates_passed": False,
+                        "review": review_text,
+                        "run_id": run_id,
+                    }
+
                 if need_human_approval and approval_callback:
                     logger.info(f"Escalating changes to human approval gate: {escalation_reason}")
                     approved = approval_callback(diffs_to_show, escalation_reason)
@@ -1460,49 +1509,32 @@ class WorkflowEngine:
                         approved = await approved
                     if not approved:
                         logger.info("Human rejected changes. Aborting workflow.")
-                        if worktree_path != workspace_path:
-                            remove_git_worktree(workspace_path, worktree_path)
-                        else:
-                            for filepath, orig_content in state.all_original_contents.items():
-                                actual_file = os.path.join(workspace_path, filepath)
-                                if orig_content:
-                                    # Atomic, not plain open(...,"w") - this restores the
-                                    # user's REAL project file directly (no worktree
-                                    # isolation on this path), so a kill mid-write here would
-                                    # corrupt the user's actual pre-existing source, not just
-                                    # a scratch sandbox file.
-                                    atomic_write_file(actual_file, orig_content)
-                                elif os.path.exists(actual_file):
-                                    os.remove(actual_file)
-                        delete_checkpoint(workspace_path, run_id)
-                        try:
-                            from kriya.core.trace import TraceLogger
-                            trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
-                            trace_logger = TraceLogger(trace_db)
-                            trace_logger.log_run(
-                                run_id=trace_id,
-                                goal=goal,
-                                duration_sec=time.time() - start_time,
-                                # + best_of_n_candidates_tried: retry_count alone understates true
-                                # effort whenever Best-of-N discarded independent candidates before
-                                # this run's winning/final attempt (retry_count gets reset to 0 for
-                                # each fresh candidate - see kriya/workflow/best_of_n.py).
-                                attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
-                                status="human_rejected",
-                                files_modified=[],
-                                failure_category="human_rejected"
-                            )
-                        except Exception as trace_ex:
-                            logger.warning(f"Failed to write run trace: {trace_ex}")
-                        return {
-                            "plan": plan,
-                            "design": design,
-                            "files": [],
-                            "quality_gates_passed": False,
-                            "review": "Rejected by user during approval gate review.",
-                            "run_id": run_id,
-                        }
-                        
+                        return _abort_without_applying(
+                            "human_rejected", "Rejected by user during approval gate review."
+                        )
+                elif need_human_approval and not approval_callback:
+                    # Independent adversarial review, 2026-08-16, Finding 2: this gate used
+                    # to fail OPEN - if policy required approval but no callback was wired
+                    # (any direct run_generation_workflow() caller that doesn't supply one,
+                    # e.g. a library/MCP integration), execution silently fell through to
+                    # the unconditional "apply to workspace" step below with no approval
+                    # ever having been requested. A sensitive-path match or a large diff
+                    # would be applied to the real workspace with zero human involvement,
+                    # in the one mode whose entire purpose is preventing exactly that.
+                    # Fixed the same way the existing knowledge_gap/human_rejected paths
+                    # already handle "can't proceed automatically" - a distinct early-return
+                    # status, never silently applying, so a caller missing a callback gets
+                    # an unambiguous signal instead of an unreviewed change landing on disk.
+                    logger.warning(
+                        f"Approval required ({escalation_reason}) but no approval_callback was "
+                        "provided - refusing to apply changes rather than proceeding unreviewed."
+                    )
+                    return _abort_without_applying(
+                        "approval_required",
+                        f"Not applied: human approval was required ({escalation_reason}) but no "
+                        "approval_callback was provided to run_generation_workflow().",
+                    )
+
                 # If approved, write files to the actual workspace
                 if worktree_path != workspace_path:
                     for filepath in state.all_files_written:

@@ -65,7 +65,7 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
         candidates = []
         for r in results:
             try:
-                text = await fetch_url_text(r["url"])
+                text = await fetch_url_text(r["url"], quiet_on_failure=True)
             except Exception as ex:
                 logger.debug(f"Live lookup fetch failed for '{term}' ({r['url']}): {ex}")
                 continue

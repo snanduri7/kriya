@@ -203,6 +203,47 @@ def _reserve_graph_context_budget(model_context_window: int, *unbounded_texts: s
     return max(_MIN_GRAPH_CONTEXT_BUDGET, base_budget - reserved)
 
 
+# Floor for _reserve_sibling_content_budget() below, same role as
+# _MIN_GRAPH_CONTEXT_BUDGET above - even a small/fallback model's window still
+# leaves enough room to show at least one typically-sized sibling file's real
+# content, rather than collapsing to near-zero and defeating the cross-file
+# consistency fix this budget protects (see _reserve_sibling_content_budget's
+# own docstring).
+_MIN_SIBLING_CONTENT_BUDGET = 500
+
+# Sibling content (kriya/agents/agent.py's DeveloperAgent._fill_missing_content(),
+# the "Already-Written File This Batch" section) is reference-only material for
+# cross-file consistency, not the primary content a per-file completion is
+# generating - a smaller fraction than build_code_context()'s own 0.75 is
+# appropriate, since the bulk of the window still needs to go to the file's
+# own graph-RAG context, task description, design context, and the model's
+# own output.
+_SIBLING_CONTENT_BUDGET_FRACTION = 0.15
+
+
+def _reserve_sibling_content_budget(model_context_window: int) -> int:
+    """Token budget for the concatenated "already-written sibling" section of a
+    per-file Developer completion prompt (2026-08-15 external review, Finding 8).
+
+    Before this fix, _fill_missing_content() concatenated every already-written
+    sibling's FULL content unconditionally, with zero token accounting - the
+    same class of bug _reserve_graph_context_budget() above was built to fix for
+    skills_prompt/learned_rag_context (see that function's own docstring for the
+    2026-08-07 incident), just in a different part of the same prompt. A large
+    multi-file batch (many files, each individually a reasonable size) could
+    silently accumulate an unbounded sibling section - worst-case exactly on the
+    LAST file generated in the batch, where the model has the least room left
+    to also produce its own new content.
+
+    Scales with the ACTIVE model's context window (same convention as
+    _reserve_graph_context_budget - a primary-model attempt and a fallback-model
+    attempt get proportionally different budgets, not one hardcoded number that's
+    generous for one and starves the other), floored at
+    _MIN_SIBLING_CONTENT_BUDGET so even a small fallback model's window still
+    leaves room for at least one sibling's real content."""
+    return max(_MIN_SIBLING_CONTENT_BUDGET, int(model_context_window * _SIBLING_CONTENT_BUDGET_FRACTION))
+
+
 _TIER_STEPS = ("full", "skeleton", "signatures")
 
 

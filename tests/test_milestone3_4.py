@@ -44,6 +44,7 @@ def test_persistent_trace_logger(tmp_path):
 async def test_staged_skill_accrual(tmp_path):
     from kriya.config import FallbackModelConfig
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(tmp_path / "skills")
     cfg.paths.logs = str(tmp_path / "logs")
     cfg.llm_chain = [FallbackModelConfig(model="model-fallback", base_url="http://localhost", api_key="test")]

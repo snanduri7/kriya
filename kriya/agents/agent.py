@@ -235,6 +235,40 @@ def _is_unparseable_json(response: str) -> bool:
     return not isinstance(parsed, dict)
 
 
+def _coerce_bool_field(value: Any, field_name: str, context: str) -> bool:
+    """Safely interprets a JSON field the prompt asked for as a boolean, WITHOUT
+    Python's own bool() coercion - bool("false") is True (any non-empty string is
+    truthy), so a model that returns the STRING "false" instead of the JSON literal
+    false (a real, plausible local-model slip - json_mode guarantees syntactically
+    valid JSON, not that every field matches its intended type) was silently read as
+    True. Independent adversarial review, 2026-08-16: flagged this exact gap for both
+    RunVerifierAgent.judge()'s "should_run" (a false positive here means EXECUTING a
+    command that was never actually supposed to run) and .grade()'s "passed" (a false
+    positive here means a genuine runtime-verification FAILURE gets recorded as a
+    pass) - both real, both fixed here with the same helper.
+
+    A real JSON bool passes through unchanged. A string is matched case-
+    insensitively against the obvious true/false spellings a model might plausibly
+    substitute. Anything else (an int, null, a list, an unrecognized string) is
+    NOT guessed at - defaults to False and logs a warning, the safe direction for
+    both callers (don't run an unrequested command; don't count an ungraded result
+    as a pass) - same "fail toward the safer outcome, never trust an ambiguous LLM
+    claim" bias already used throughout this codebase's other trust boundaries."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "yes", "1"):
+            return True
+        if normalized in ("false", "no", "0", ""):
+            return False
+    logger.warning(
+        f"{context}: '{field_name}' was {value!r} (type {type(value).__name__}), not a real boolean or a "
+        "recognizable true/false string - defaulting to False rather than guessing."
+    )
+    return False
+
+
 # =====================================================================
 # 1. Base Agent
 # =====================================================================
@@ -698,7 +732,28 @@ class DeveloperAgent(BaseAgent):
         shape. Deliberately generic across whatever X/Y the compiler actually
         reported - not hardcoded to any one library - since raw/erased generics
         and missing casts are a language-level Java footgun, not specific to
-        Ignite or any other skill this happened to be found through."""
+        Ignite or any other skill this happened to be found through.
+
+        The illegal-hybrid warning paragraph below was added 2026-08-16 after a
+        live incident (ignite_qpid_person, run b-7) confirmed directly from the
+        real post-attempt file content (not guessed - the atomic-write fix
+        shipped earlier the same day meant this evidence actually survived, unlike
+        an earlier, evidence-destroyed incident this same session hit the same
+        general shape of bug and had to leave unresolved): the model correctly
+        named BOTH options above in its own FIX ANALYSIS, then produced
+        `var cache = (org.apache.ignite.IgniteCache<Integer, Person>)
+        ignite.cache(CACHE_NAME);` - option 2's `var` combined with option 1's
+        cast, applied to a GENERIC method call. This specific hybrid is illegal
+        Java (not just unidiomatic): calling a generic method as a cast operand
+        gives the compiler no target type to infer from, so its type parameters
+        default to Object; casting that erased result to a differently-
+        parameterized generic type is a compile error under generics invariance
+        - the exact "IgniteCache<Object,Object> cannot be converted to
+        IgniteCache<Integer,Person>" shape. Deliberately kept in this shared,
+        library-agnostic scaffold rather than an Ignite-specific skill rule -
+        this is a generic-method/collection/cache footgun, not an Ignite API
+        detail; `ignite.cache(name)` just happened to be the concrete case that
+        surfaced it live."""
         if not prior_error_context:
             return ""
         pairs = []
@@ -719,9 +774,19 @@ class DeveloperAgent(BaseAgent):
             "2) Declare the source (a collection, cache, or generic method call) with explicit "
             "generic type parameters instead of `var` or a raw/unparameterized type, so the compiler "
             "infers the correct type without needing a cast.\n"
+            "Do NOT combine both into one line - do NOT write `var x = (TargetType<A,B>) "
+            "someGenericMethodOrCollectionCall();`. When a generic method/cache/collection accessor "
+            "(e.g. a cache getter, a map's get()) is called as the operand of a cast instead of a "
+            "plain typed assignment, Java has no target type to infer from, so its type parameters "
+            "silently default to Object - and casting THAT erased result to a differently-"
+            "parameterized generic type is a compile error (generics are invariant), even though it "
+            "looks exactly like option 1. If option 2 applies, use it with NO cast at all: "
+            "`TargetType<A, B> value = someGenericSourceCall();` - a plain declared-type assignment, "
+            "not `var`, not wrapped in a cast.\n"
             "A change that does anything else (e.g. renaming a method call, adjusting an unrelated "
-            "import) WITHOUT doing one of these two things at the reported line will NOT resolve this "
-            "error - the identical 'incompatible types' error will simply recur on the next attempt.\n"
+            "import) WITHOUT doing one of these two things correctly at the reported line will NOT "
+            "resolve this error - the identical 'incompatible types' error will simply recur on the "
+            "next attempt.\n"
         )
 
     @staticmethod
@@ -788,6 +853,14 @@ class DeveloperAgent(BaseAgent):
         "the edit is worse than no diagnosis at all.\n"
     )
 
+    # Fallback for _fill_missing_content's sibling_content_budget param when a
+    # caller doesn't pass one (e.g. a direct test call, or a caller not yet
+    # updated to compute a model-scaled budget via
+    # kriya.workflow.context_budget._reserve_sibling_content_budget) - see that
+    # function's own docstring for the real incident this guards against.
+    # Conservative fixed value, not tied to any specific model's context_window.
+    DEFAULT_SIBLING_CONTENT_BUDGET = 3000
+
     async def _fill_missing_content(
         self,
         file_entries: List[Dict[str, Any]],
@@ -804,6 +877,7 @@ class DeveloperAgent(BaseAgent):
         retry_temperature: Optional[float] = None,
         extra_fix_instruction: str = "",
         files_with_current_content: Optional[Iterable[str]] = None,
+        sibling_content_budget: Optional[int] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
@@ -856,7 +930,20 @@ class DeveloperAgent(BaseAgent):
         and diluting the one analysis call that actually mattered. None means
         "apply to every file" (the pre-existing behavior, and correct for a
         targeted retry, where every file in the batch already IS implicated by
-        construction via known_target_files)."""
+        construction via known_target_files).
+
+        sibling_content_budget: token budget for the "Already-Written File This
+        Batch" sibling section built below (2026-08-15 external review, Finding 8)
+        - before this fix, that section concatenated every already-written
+        sibling's FULL content unconditionally, the same unbounded-auxiliary-text
+        class of bug _reserve_graph_context_budget() (kriya/workflow/context_budget.py)
+        was built to fix for skills_prompt/learned_rag_context, just unaddressed in
+        this other part of the same prompt - a large multi-file batch could
+        silently accumulate an unbounded sibling section. Callers (attempt.py's
+        retry-loop call sites) pass the active model's own
+        _reserve_sibling_content_budget(context_window) so the budget scales with
+        whichever model is generating; None (a caller that hasn't been updated, or
+        a direct test call) falls back to DEFAULT_SIBLING_CONTENT_BUDGET below."""
         all_paths = [e["filepath"] for e in file_entries]
         files_out = []
         for entry in file_entries:
@@ -887,16 +974,6 @@ class DeveloperAgent(BaseAgent):
             if stream_callback:
                 stream_callback(f"\n[Implementing file: {filepath}]")
 
-            file_sys_prompt = (
-                "You are the Kriya Developer Agent.\n"
-                "Your task is to write the complete, production-grade source code for the requested file path, "
-                "and ONLY that one file. Return ONLY the raw file content for that single file. Do not include "
-                "markdown code block wrappers (like ```), conversational explanation, or the content of any other "
-                "file - even one you're told is also part of this batch. If you believe another file also needs "
-                "a change, that is out of scope for this response and will be handled separately; do not act on it "
-                "here, and do not prepend or append its content."
-            )
-
             # Live-diagnosed root cause (2026-08-15, ignite_qpid_protocol eval run): a
             # per-file generation call previously saw ONLY sibling filenames, never their
             # actual content - even for a sibling already generated earlier in this SAME
@@ -914,19 +991,59 @@ class DeveloperAgent(BaseAgent):
             # filename list for those - the same ordering the Architect's own file list
             # already tends to produce (a data class like Protocol.java listed, and
             # therefore generated, before its consumers) closes this for the common case.
+            # Budget-aware since 2026-08-15 (external review, Finding 8) - see
+            # sibling_content_budget's own docstring above and
+            # _reserve_sibling_content_budget's docstring
+            # (kriya/workflow/context_budget.py) for the real bug this closes.
+            # Deferred import: same import-cycle reason review_context.py's
+            # build_review_batches() gives for its own deferred estimate_tokens
+            # import (kriya.workflow's package __init__ pulls in workflow.py,
+            # which imports this module at the top level).
+            from kriya.workflow.context_budget import estimate_tokens
+
+            budget = (
+                sibling_content_budget if sibling_content_budget is not None
+                else self.DEFAULT_SIBLING_CONTENT_BUDGET
+            )
             sibling_paths = [p for p in all_paths if p != filepath]
             already_written = {e["filepath"]: e["content"] for e in files_out if e.get("content")}
-            sibling_content_section = "".join(
-                f"=== Already-Written File This Batch (for cross-file consistency - reference "
-                f"its real package/class/method signatures, do NOT repeat or modify it): {sp} ===\n"
-                f"{already_written[sp]}\n\n"
-                for sp in sibling_paths if sp in already_written
-            )
+            included_blocks = []
+            omitted_for_budget = []
+            running_tokens = 0
+            for sp in sibling_paths:
+                if sp not in already_written:
+                    continue
+                block = (
+                    f"=== Already-Written File This Batch (for cross-file consistency - reference "
+                    f"its real package/class/method signatures, do NOT repeat or modify it): {sp} ===\n"
+                    f"{already_written[sp]}\n\n"
+                )
+                block_tokens = estimate_tokens(block)
+                if running_tokens + block_tokens > budget:
+                    omitted_for_budget.append(sp)
+                    continue
+                included_blocks.append(block)
+                running_tokens += block_tokens
+            sibling_content_section = "".join(included_blocks)
             not_yet_written = [p for p in sibling_paths if p not in already_written]
-            sibling_section = sibling_content_section + (
-                f"=== Other Files In This Batch, Not Yet Written (context only - do NOT output "
-                f"their content here) ===\n{', '.join(not_yet_written)}\n\n"
-            ) if not_yet_written else sibling_content_section
+            sibling_section = sibling_content_section
+            if omitted_for_budget:
+                # Distinct from "not yet written" below - these files DO exist
+                # and have real content, it just didn't fit the budget. Telling
+                # the model that plainly (rather than silently dropping them, or
+                # folding them into the "not yet written" list where their
+                # content would misleadingly appear to not exist yet) avoids the
+                # model assuming a sibling it can't see hasn't been written at all.
+                sibling_section += (
+                    f"=== Additional Already-Written Files This Batch (contents omitted - "
+                    f"cross-file reference budget reached; filenames only): "
+                    f"{', '.join(omitted_for_budget)} ===\n\n"
+                )
+            if not_yet_written:
+                sibling_section += (
+                    f"=== Other Files In This Batch, Not Yet Written (context only - do NOT output "
+                    f"their content here) ===\n{', '.join(not_yet_written)}\n\n"
+                )
 
             # Only present on a retry that's directly responding to a real prior
             # Quality Gate failure (targeted retries, and full-set retries after
@@ -993,6 +1110,70 @@ class DeveloperAgent(BaseAgent):
             prefer_anchored_edit = apply_fix_analysis and (
                 bool(source_context_block) or filepath in (files_with_current_content or ())
             )
+
+            # 2026-08-15 external adversarial review, Finding 2 (of that review's own
+            # numbering - unrelated to this session's own Finding 5/2/8 fixes above):
+            # this system prompt used to be ONE unconditional block claiming "Return
+            # ONLY the raw file content" - sent even on a retry, where the user-message
+            # fix_analysis_instruction below (built a few lines down) requires a
+            # completely different response shape (a "FIX ANALYSIS:" line followed by
+            # SEARCH:/REPLACE:, FILE CONTENT:, or NO CHANGE NEEDED: - never raw content
+            # alone). Confirmed as a real, direct contradiction within the SAME
+            # completion call, not a hypothetical - both instructions reached the model
+            # in every retry, disagreeing about the required output shape. Now built
+            # per-mode, decided deterministically here (not left for the model to infer
+            # from context) - CREATE_FULL_FILE when this isn't a retry-with-error, REPAIR
+            # (in either its anchored-preferred or full-file-preferred phrasing) when it
+            # is. Kept short and stable (not a restatement of fix_analysis_instruction's
+            # full detail) - the full contract is still repeated once, verbatim, right
+            # before generation via fix_analysis_instruction below, matching this
+            # module's own already-validated "repeat critical instructions near the
+            # generation point" pattern (see the "only this file" comment further down)
+            # rather than duplicating the whole spec twice.
+            if not apply_fix_analysis:
+                file_sys_prompt = (
+                    "You are the Kriya Developer Agent. MODE: CREATE_FULL_FILE.\n"
+                    "Write the complete content of exactly one file - the requested file path. Return ONLY "
+                    "the raw file content for that single file. Do not include markdown code block wrappers "
+                    "(like ```), conversational explanation, or the content of any other file - even one "
+                    "you're told is also part of this batch. If you believe another file also needs a "
+                    "change, that is out of scope for this response and will be handled separately; do not "
+                    "act on it here, and do not prepend or append its content."
+                )
+            elif prefer_anchored_edit:
+                file_sys_prompt = (
+                    "You are the Kriya Developer Agent. MODE: REPAIR.\n"
+                    "Repair exactly one existing file - do not touch or return content for any other file, "
+                    "even one you're told is also part of this batch. Write, in this exact order:\n"
+                    "\"FIX ANALYSIS:\" - 1-3 sentences identifying the SPECIFIC cause of the reported error "
+                    "in this file.\n"
+                    "Then exactly ONE of:\n"
+                    "  \"SEARCH:\" <exact original text, copied verbatim from the source shown to you>\n"
+                    "  \"REPLACE:\" <the corrected replacement - only the lines that actually change, plus "
+                    "the minimum surrounding context needed to uniquely identify them>\n"
+                    "or, only if the fix genuinely requires broader restructuring than a small patch:\n"
+                    "  \"FILE CONTENT:\" <the complete corrected file>\n"
+                    "or, if this file genuinely needs no code change (the bug is entirely in a different "
+                    "file this error also implicates):\n"
+                    "  \"NO CHANGE NEEDED:\" <one sentence explaining why>\n"
+                    "Never combine these outcomes, and never return raw file content with no FIX ANALYSIS "
+                    "line first."
+                )
+            else:
+                file_sys_prompt = (
+                    "You are the Kriya Developer Agent. MODE: REPAIR.\n"
+                    "Repair exactly one existing file - do not touch or return content for any other file, "
+                    "even one you're told is also part of this batch. Write, in this exact order:\n"
+                    "\"FIX ANALYSIS:\" - 1-3 sentences identifying the SPECIFIC cause of the reported error "
+                    "in this file.\n"
+                    "Then either:\n"
+                    "  \"FILE CONTENT:\" <the complete corrected file, and nothing else after it>\n"
+                    "or, if this file genuinely needs no code change (the bug is entirely in a different "
+                    "file this error also implicates):\n"
+                    "  \"NO CHANGE NEEDED:\" <one sentence explaining why>\n"
+                    "Never return raw file content with no FIX ANALYSIS line first."
+                )
+
             if prefer_anchored_edit:
                 fix_analysis_instruction = (
                     "\nThis is a RETRY: the previous attempt at this file failed the error described "
@@ -1067,13 +1248,44 @@ class DeveloperAgent(BaseAgent):
                 "listed there."
                 if has_skill_conventions else ""
             )
+            # Same contradiction as file_sys_prompt above, one level down: this line
+            # used to unconditionally say "return ONLY the content" even on a retry,
+            # directly ahead of fix_analysis_instruction telling the model to instead
+            # write FIX ANALYSIS/SEARCH/REPLACE/FILE CONTENT/NO CHANGE NEEDED - a
+            # second copy of the same conflict, inside one message this time. Made
+            # mode-aware for the same reason - and, matching fix_analysis_instruction's
+            # own three-way branch just above, gated on prefer_anchored_edit too: a
+            # first pass of this fix mentioned SEARCH:/REPLACE: whenever apply_fix_analysis
+            # was true regardless of prefer_anchored_edit, silently reintroducing an
+            # anchor mention even when no source location grounds one - caught by
+            # test_fill_missing_content_no_anchored_edit_preference_without_source_context/
+            # ..._when_file_not_in_current_content_set (existing tests, not new ones)
+            # failing after this change; both were passing before it.
+            if prefer_anchored_edit:
+                generation_directive = (
+                    f"Follow the REPAIR contract above for '{filepath}' ONLY - do not touch or return "
+                    "content for any other file, even one mentioned above: write FIX ANALYSIS first, then "
+                    "exactly one of SEARCH:/REPLACE:, FILE CONTENT:, or NO CHANGE NEEDED:. Never return "
+                    "raw file content with no FIX ANALYSIS line.\n"
+                )
+            elif apply_fix_analysis:
+                generation_directive = (
+                    f"Follow the REPAIR contract above for '{filepath}' ONLY - do not touch or return "
+                    "content for any other file, even one mentioned above: write FIX ANALYSIS first, then "
+                    "exactly one of FILE CONTENT: or NO CHANGE NEEDED:. Never return raw file content "
+                    "with no FIX ANALYSIS line.\n"
+                )
+            else:
+                generation_directive = (
+                    f"Please generate the complete, correct file content for: '{filepath}'\n"
+                    f"Return ONLY the content of '{filepath}' - nothing before it, nothing after it, no other file.\n"
+                )
             file_prompt = (
                 f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
                 f"=== Architecture Design ===\n{design_context}\n\n"
                 f"=== Task ===\n{task_description}\n\n"
                 f"{sibling_section}"
-                f"Please generate the complete, correct, and production-grade file content for: '{filepath}'\n"
-                f"Return ONLY the content of '{filepath}' - nothing before it, nothing after it, no other file.\n"
+                f"{generation_directive}"
                 "Reminder: per the Verification Contract above, if this file is (or contains) the "
                 "entrypoint and the goal describes a checkable runtime outcome, it must end by printing "
                 "\"[VERIFICATION] PASS\" or \"[VERIFICATION] FAIL: <reason>\"."
@@ -1203,6 +1415,7 @@ class DeveloperAgent(BaseAgent):
         retry_temperature: Optional[float] = None,
         extra_fix_instruction: str = "",
         files_with_current_content: Optional[Iterable[str]] = None,
+        sibling_content_budget: Optional[int] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -1237,14 +1450,16 @@ class DeveloperAgent(BaseAgent):
         written files whose current worktree content is embedded in
         existing_code_context, widening when a small anchored edit is preferred
         over a full-file rewrite beyond just "does this failure have a precise
-        line locator"."""
+        line locator".
+
+        sibling_content_budget: see _fill_missing_content."""
         if known_target_files:
             file_entries = [{"filepath": p, "content": None, "edits": None} for p in known_target_files]
             return await self._fill_missing_content(
                 file_entries, task_description, design_context, existing_code_context,
                 stream_callback, model_override, base_url_override, api_key_override,
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
-                extra_fix_instruction, files_with_current_content,
+                extra_fix_instruction, files_with_current_content, sibling_content_budget,
             )
 
         try:
@@ -1256,7 +1471,7 @@ class DeveloperAgent(BaseAgent):
                     file_entries, task_description, design_context, existing_code_context,
                     stream_callback, model_override, base_url_override, api_key_override,
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
-                    extra_fix_instruction, files_with_current_content,
+                    extra_fix_instruction, files_with_current_content, sibling_content_budget,
                 )
 
         except Exception as e:
@@ -1448,7 +1663,7 @@ class RunVerifierAgent(BaseAgent):
                 run_commands = candidate
 
         return {
-            "should_run": bool(parsed.get("should_run")) and run_commands is not None,
+            "should_run": _coerce_bool_field(parsed.get("should_run"), "should_run", "Run Verifier judge()") and run_commands is not None,
             "run_commands": run_commands,
             "command_source": parsed.get("command_source") if parsed.get("command_source") in ("goal_explicit", "inferred") else "inferred",
             "success_criteria": parsed.get("success_criteria") or "",
@@ -1535,7 +1750,7 @@ class RunVerifierAgent(BaseAgent):
             if isinstance(raw_likely, list) else []
         )
         return {
-            "passed": bool(parsed.get("passed")),
+            "passed": _coerce_bool_field(parsed.get("passed"), "passed", "Run Verifier grade()"),
             "reasoning": parsed.get("reasoning") or "",
             "likely_files": likely_files,
         }

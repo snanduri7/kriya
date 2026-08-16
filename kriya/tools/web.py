@@ -54,7 +54,7 @@ def _is_safe_external_url(url: str) -> bool:
         return False
 
 
-async def fetch_url_text(url: str) -> str:
+async def fetch_url_text(url: str, quiet_on_failure: bool = False) -> str:
     """Fetch raw HTML from a URL and extract clean, readable text.
 
     Manually follows redirects (rather than httpx's own follow_redirects)
@@ -63,7 +63,22 @@ async def fetch_url_text(url: str) -> str:
     URL and ends at an internal one would otherwise bypass the guard
     entirely. Streams the response body and enforces _MAX_RESPONSE_BYTES
     against actual bytes read, not just a (spoofable, or absent under
-    chunked encoding) Content-Length header."""
+    chunked encoding) Content-Length header.
+
+    quiet_on_failure: found live, 2026-08-16 - a failed fetch always logged
+    at ERROR with a full traceback (exc_info=True), correct for the 3
+    call sites where the caller fetches ONE deliberate, user-specified URL
+    (kriya learn, workflow.py's two "user-supplied reference URL" sites) and
+    a failure there IS worth surfacing loudly. But kriya/workflow/
+    live_lookup.py tries a whole LIST of search-result candidates and moves
+    on the moment one fails - there, a single candidate 403ing (e.g.
+    mvnrepository.com blocking scraper-looking User-Agents, unrelated to
+    Kriya) is routine and already re-logged at DEBUG by that caller right
+    after catching this function's re-raised exception - the loud
+    ERROR+traceback from in here had already been written by that point
+    regardless, alarming to read for something that isn't a problem. Default
+    False (unchanged behavior for every existing caller) - only
+    live_lookup.py's candidate loop opts in."""
     if not _is_safe_external_url(url):
         raise ValueError(f"Refusing to fetch '{url}': not a safe external http(s) URL.")
     try:
@@ -117,5 +132,8 @@ async def fetch_url_text(url: str) -> str:
 
             return text.strip()
     except Exception as e:
-        logger.error(f"Failed to fetch content from URL '{url}': {e}", exc_info=True)
+        if quiet_on_failure:
+            logger.debug(f"Failed to fetch content from URL '{url}': {e}")
+        else:
+            logger.error(f"Failed to fetch content from URL '{url}': {e}", exc_info=True)
         raise ValueError(f"HTTP fetch failed for {url}: {e}") from e

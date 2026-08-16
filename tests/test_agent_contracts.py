@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kriya.agents.agent import ArchitectAgent, DeveloperAgent
-from kriya.agents.contracts import FileList, parse_file_list
+from kriya.agents.contracts import FileList, _normalize_file_list_paths, parse_file_list
 from kriya.config import AppConfig
 from kriya.core.llm import LLMClient
 
@@ -186,6 +186,84 @@ def test_valid_relative_paths_with_dots_in_filename_are_not_confused_with_traver
     files, err = parse_file_list(design)
     assert files == ["config/app.v2.1.yaml", "README.md"]
     assert err is None
+
+
+# ---------------------------------------------------------------------------
+# _normalize_file_list_paths - bare-entrypoint path correction
+# ---------------------------------------------------------------------------
+
+def test_normalize_file_list_paths_corrects_bare_entrypoint_against_java_siblings():
+    """Regression test for a real, fully-diagnosed live incident, 2026-08-16
+    (ignite_qpid_person, run b-8): the Architect's own JSON file list -
+    reproduced here byte-for-byte - correctly pathed every file except the
+    entrypoint, which came back as a bare "PersonApp.java". Nothing
+    downstream ever caught this, so it was written straight to the
+    WORKSPACE ROOT - Maven only compiles src/main/java/**, so the file was
+    silently outside the build from attempt 1 onward, and no content-level
+    fix across 7 attempts and 2 models (including 2 DIAGNOSIS MISMATCH
+    catches) could ever have resolved "Could not find or load main class
+    PersonApp", because the retry loop kept fixing content at a path Maven
+    structurally never looks at."""
+    files, err = parse_file_list(
+        '{"files": ["pom.xml", "src/main/java/Person.java", '
+        '"src/main/resources/qpid-initial-config.json", '
+        '"src/main/resources/system.properties", '
+        '"src/main/resources/ignite-config.xml", "PersonApp.java"]}'
+    )
+    assert err is None
+    assert files == [
+        "pom.xml",
+        "src/main/java/Person.java",
+        "src/main/resources/qpid-initial-config.json",
+        "src/main/resources/system.properties",
+        "src/main/resources/ignite-config.xml",
+        "src/main/java/PersonApp.java",
+    ]
+
+def test_normalize_file_list_paths_does_not_relocate_a_root_level_build_descriptor():
+    """Regression test for a false positive caught before shipping: an
+    earlier version of this fix grouped by raw file EXTENSION alone (not
+    source-vs-config), so "pom.xml" (correctly bare - always project-root by
+    convention) got wrongly rewritten to "src/main/resources/pom.xml" purely
+    because it shares the ".xml" extension with an unrelated
+    "ignite-config.xml" resource file in the same list. pom.xml must stay
+    exactly where the model put it."""
+    assert _normalize_file_list_paths(
+        ["pom.xml", "src/main/resources/ignite-config.xml"]
+    ) == ["pom.xml", "src/main/resources/ignite-config.xml"]
+
+def test_normalize_file_list_paths_leaves_python_layouts_untouched():
+    """Regression test for a second false positive caught before shipping:
+    an earlier version of this fix also covered .py/.rb, which wrongly
+    rewrote a legitimate, idiomatic Python layout (a root-level entrypoint
+    script alongside a package subdirectory) into a nonexistent nested path.
+    Unlike Maven's rigid src/main/java/ convention, Python/Ruby have no
+    equivalent single-source-root rule, so this correction must be scoped to
+    .java only - this exact fixture is the same shape as the EXISTING
+    test_ignores_trailing_chatty_prose_after_the_json_block fixture above,
+    which must keep passing unmodified."""
+    assert _normalize_file_list_paths(["cli.py", "tasks/store.py"]) == ["cli.py", "tasks/store.py"]
+
+def test_normalize_file_list_paths_leaves_disagreeing_siblings_untouched():
+    # Ambiguous - two non-bare .java siblings disagree on directory (main
+    # vs. test source roots) - no single safe inference exists, don't guess.
+    files = ["src/main/java/A.java", "src/test/java/B.java", "C.java"]
+    assert _normalize_file_list_paths(files) == files
+
+def test_normalize_file_list_paths_leaves_multiple_bare_files_untouched():
+    # Two bare .java files - which one, if either, belongs in the shared
+    # directory is genuinely ambiguous, don't guess.
+    files = ["src/main/java/A.java", "B.java", "C.java"]
+    assert _normalize_file_list_paths(files) == files
+
+def test_normalize_file_list_paths_leaves_a_lone_source_file_untouched():
+    # Only one .java file total - nothing to infer a shared directory from.
+    files = ["pom.xml", "App.java"]
+    assert _normalize_file_list_paths(files) == files
+
+def test_normalize_file_list_paths_is_a_noop_when_already_consistent():
+    files = ["src/main/java/A.java", "src/main/java/B.java"]
+    assert _normalize_file_list_paths(files) == files
 
 
 # ---------------------------------------------------------------------------
