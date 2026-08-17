@@ -8980,6 +8980,49 @@ def test_apply_anchored_edits_still_rejects_zero_matches():
     assert "extra closing" in problem2
 
 
+def test_apply_anchored_edits_grounds_a_chained_edit_against_evolving_content():
+    """Regression test for a real bug found live, 2026-08-17, digging into a
+    corpus-wide survey of eval-harness runs: shown_context is a fixed
+    snapshot passed in once, never updated across the per-edit loop, but
+    current_content DOES evolve as earlier edits in the SAME response get
+    applied. A two-step chained edit (edit #1 adds a `helper();` call, edit
+    #2 wants to comment on that exact new line) is completely valid and
+    internally consistent, but edit #2's search text was never part of the
+    ORIGINAL file the model was shown - only of what edit #1 itself just
+    introduced - so the old check (comparing only against the static
+    shown_context) wrongly rejected it as "elided in the skeletonized
+    context," even though the model introduced that exact text itself, one
+    edit earlier in the same response. Confirmed live in the run history:
+    14 occurrences of this exact rejection message across the eval-harness
+    corpus, at least one with a multi-edit response ("edit #4") consistent
+    with this shape."""
+    from kriya.workflow.workflow import apply_anchored_edits
+
+    original = "public class App {\n    int x = 1;\n}\n"
+    shown_context = original
+    edits = [
+        {"search": "int x = 1;", "replace": "int x = 1;\n    helper();"},
+        {"search": "helper();", "replace": "helper(); // step 2, chained off edit 1"},
+    ]
+    result = apply_anchored_edits(original, edits, shown_context)
+    assert "helper(); // step 2, chained off edit 1" in result
+
+
+def test_apply_anchored_edits_chained_grounding_still_rejects_fabricated_search_text():
+    # Companion negative case - a search block that matches NEITHER the
+    # original shown context NOR the evolving current content (a genuinely
+    # fabricated/hallucinated block, not one introduced by an earlier edit
+    # in this same response) must still be rejected.
+    from kriya.workflow.workflow import apply_anchored_edits
+
+    original = "public class App {\n    int x = 1;\n}\n"
+    shown_context = original
+    edits = [{"search": "<parameter name=\"totally_fake\"/>", "replace": "<property name=\"totally_fake\"/>"}]
+
+    with pytest.raises(ValueError, match="elided in the skeletonized context"):
+        apply_anchored_edits(original, edits, shown_context)
+
+
 def test_find_structural_corruption_xml_well_formed_vs_malformed():
     valid_xml = "<beans><bean id=\"x\" class=\"Y\"/></beans>"
     assert find_structural_corruption("applicationContext.xml", valid_xml) is None

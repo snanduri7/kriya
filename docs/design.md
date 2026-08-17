@@ -1207,3 +1207,27 @@ Held, not committed - same discipline as everything else this session.
 **Not yet done, flagged for later**: the live-lookup call made from *within* `handle_attempt_failure()` itself (already confirmed internally safe, per above) sits in a structurally different position worth a second look eventually - it's inside the `except` handler, not the `try` block, so an exception there would escape the handler entirely rather than being misattributed; a different failure mode (crashes the run ungracefully) than the one this audit targeted, not investigated further tonight since it wasn't found to be actually vulnerable.
 
 Held, not committed - same discipline as everything else this session.
+
+### 7.28 A Corpus-Wide Failure Survey Found a Real Bug: `apply_anchored_edits()`'s Grounding Check Used a Static Snapshot, Never the Evolving Edit State
+
+**Motivation.** Asked to grep every `eval_harness` run's failures and build an injected-cause smoke-test set from them. Built `spikes/incident_replay/survey_runs.py` on `spike/incident-replay-harness` and ran it across all historical runs. Two buckets got dug into on request: "unclassified" (78/79 turned out to be a classifier gap in the survey script itself, not a real mystery; the remaining 1/79 was the already-understood JSON-escaping issue) and, this entry, the 14 `anchored_edit` failures whose message read "elided in the skeletonized context and not shown to the model."
+
+**False lead ruled out first.** Suspected the retry-prompt builders (`_build_targeted_retry_prompt`, `_build_full_set_retry_prompt`, `_build_missing_files_retry_prompt` in `kriya/workflow/retry_prompts.py`) might be showing the model a skeletonized version of a file it then tried to edit against full content. Read all three end-to-end: every already-written file's **full, unskeletonized** content is read fresh from disk unconditionally on every retry prompt; skeletonization only ever applies to the *starting* graph-context portion, with full file content appended on top. Ruled out.
+
+**Real root cause.** `apply_anchored_edits(original_content, edits, shown_context)` (`kriya/workflow/edit_safety.py`) applies a list of SEARCH/REPLACE pairs in one response sequentially, each via `current_content = current_content.replace(...)`. Its grounding check - meant to reject a search block the model was never actually shown, as a prompt-injection/hallucination guard - compared `norm_search` only against `norm_shown` (`normalize_whitespace(shown_context)`), a **parameter fixed for the entire call**. It never checked `current_content`, which legitimately evolves as earlier edits in the *same* response are applied. So a multi-edit response where edit #2's search block targets text that edit #1 just introduced (not present in the original `shown_context` at all, by construction) was rejected as if the model had hallucinated it - even though the content was 100% real, freshly written by the model's own prior edit in the same turn. Confirmed this matches the historical `b-1` "edit #4" failure exactly.
+
+**Shipped.** Grounding check now accepts a search block matched against *either* the original shown context *or* the current, evolving content:
+```python
+if shown_context:
+    norm_shown = normalize_whitespace(shown_context)
+    norm_current = normalize_whitespace(current_content)
+    if norm_search not in norm_shown and norm_search not in norm_current:
+        raise ValueError(...)
+```
+This closes the false-positive without weakening the guard: a genuinely fabricated search block (never in the original context *and* not produced by any prior edit in the same response) is still rejected exactly as before.
+
+**Testing.** Two new tests: `test_apply_anchored_edits_grounds_a_chained_edit_against_evolving_content` (the fix case - edit #2 targets text edit #1 just introduced) and `test_apply_anchored_edits_chained_grounding_still_rejects_fabricated_search_text` (negative case - confirms the guard still rejects genuinely hallucinated search text even after other edits have evolved `current_content`). Full existing `edit_safety`/`workflow` test coverage re-run directly: zero regressions.
+
+**Branch note.** Investigation and initial fix were done on `spike/incident-replay-harness` (the survey tooling's branch) before noticing this is a production fix, not tooling - moved to `main` via `git stash push -u` / `checkout main` / `stash pop`, then re-verified working on `main` directly.
+
+Held, not committed - same discipline as everything else this session.
