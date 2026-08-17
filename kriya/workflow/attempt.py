@@ -31,7 +31,7 @@ from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_mi
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
 from kriya.workflow.static_checks import run_static_checks
-from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, resolve_fallback_model
+from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
@@ -191,11 +191,41 @@ def _diagnosis_mismatch_bypass_reason(
     diagnosis text stays useful there, just never a blocking gate for these
     two cases) if the check should be skipped for this edit; None if the
     existing diagnosis-mismatch check should run and decide as before."""
+    # Bounded-veto policy, checked before anything else and independent of
+    # fail_type: this check can reject a given FILE'S edit at most once per
+    # run. Found live, 2026-08-17 (ignite_qpid_person, run b-10o): the
+    # pom_semantic_validation false positive above rejected the SAME correct
+    # fix 4 CONSECUTIVE times before the model finally gave up and regenerated
+    # from scratch on a fallback model - by which point the run had already
+    # burned most of its wall-clock budget on one heuristic's repeated wrong
+    # call. Every fail_type this check has EVER been extended to cover
+    # (compile, static_rule_violation, pom_semantic_validation) was found
+    # this same way: a real incident, after the fact. This is the safety net
+    # for every fail_type NOT yet on that list, and for the next false-
+    # positive shape this check will inevitably have that nobody has found
+    # yet - a single wrongful rejection costs one retry; catching this
+    # heuristic in a 4x-in-a-row loop costs the whole run.
+    if state.budgets.diagnosis_mismatch_veto_counts.get(filepath, 0) >= 1:
+        return (
+            "this check already rejected an edit to this file once this run - "
+            "per the bounded-veto policy, it never rejects the same file twice "
+            "regardless of failure type; the real downstream gate decides instead"
+        )
     sig = state.budgets.last_failure_signature
     if not sig:
         return None
     fail_type = sig[0]
-    if fail_type in ("compile", "pom_semantic_validation"):
+    if fail_type in ("compile", "pom_semantic_validation", "targeted_test"):
+        # targeted_test added 2026-08-17: run_tests(target_test=...) (kriya/
+        # tools/validate.py) already scopes a targeted-test rerun to the ONE
+        # test file extract_target_test() identified - not the whole
+        # regression suite - and that real rerun happens immediately after
+        # this per-file write loop regardless, in the SAME attempt (see the
+        # targeted_test gate a few hundred lines below this check's own call
+        # site). Same tradeoff as compile/pom_semantic_validation: bypassing
+        # here costs nothing beyond what would happen anyway, and avoids
+        # prose-matching a correct fix out from under a test that would have
+        # passed.
         # pom_semantic_validation added 2026-08-17 after a live false positive
         # (ignite_qpid_person, run b-10o): a correct edit wrapped a bare
         # <dependency> fragment in a full, valid <project> POM structure -
@@ -213,7 +243,7 @@ def _diagnosis_mismatch_bypass_reason(
         # XML-attribute-vs-bare-tag-name, not really about pom.xml
         # specifically - a 6th signal here would just be the next incident-
         # specific patch this function's whole redesign was meant to stop).
-        return "this retry responds to a compile/POM-validation failure - deferring to the real compiler instead of prose-matching"
+        return "this retry responds to a compile/POM-validation/targeted-test failure - deferring to the real gate instead of prose-matching"
     if fail_type == "static_rule_violation":
         from kriya.workflow.static_checks import run_static_checks
         still_violates = run_static_checks(
@@ -789,6 +819,35 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure) from anchor_ex
 
+            # Layer 0 pre-flight check (see find_whole_response_no_op's own
+            # docstring): purely structural, no analysis text or fail_type
+            # dispatch needed - unlike Layers 1/2 below, a response whose
+            # every edit is a byte-identical no-op is objectively useless
+            # regardless of what it claims, so this is never bypassed and
+            # never counts against the Layer 2 bounded veto (a different
+            # check, a different question). apply_anchored_edits() above
+            # already confirmed every search block matched real content -
+            # this only fires when the edit(s) that matched changed nothing.
+            if find_whole_response_no_op(edits):
+                failure = Failure(
+                    type="no_op_edit",
+                    message=(
+                        f"NO-OP EDIT in {filepath}: every SEARCH/REPLACE pair in your response "
+                        f"is byte-identical - this response changes nothing. If this file "
+                        f"genuinely needs no change, write \"NO CHANGE NEEDED:\" instead of a "
+                        f"SEARCH/REPLACE block; otherwise your REPLACE text must actually differ "
+                        f"from your SEARCH text."
+                    ),
+                    raw_output="every edit in the response was a no-op (search == replace)",
+                    file_locations=[FileLocation(filepath=filepath)],
+                    likely_files=[filepath],
+                    failed_content={filepath: orig_text},
+                    attempted_edits=edits,
+                    attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+
             # Layer 1 pre-flight check (see find_edits_ignoring_reported_line's
             # own docstring): only meaningful when this attempt is itself
             # responding to a real prior error with a locatable line for this
@@ -882,6 +941,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         f"DIAGNOSIS MISMATCH pre-flight check bypassed for {filepath}: {bypass_reason}."
                     )
                 else:
+                    # Counted here, at the actual rejection - see the bounded-
+                    # veto policy's own comment in _diagnosis_mismatch_bypass_
+                    # reason for why this exists.
+                    state.budgets.diagnosis_mismatch_veto_counts[filepath] = (
+                        state.budgets.diagnosis_mismatch_veto_counts.get(filepath, 0) + 1
+                    )
                     failure = Failure(
                         type="diagnosis_mismatch",
                         message=(
@@ -898,6 +963,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     )
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
+            else:
+                # This file's edit looked consistent with its own analysis -
+                # a clean slate, so an unrelated mismatch found later in the
+                # run for this same file still gets its own bounded veto.
+                state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
             atomic_write_file(full_path, new_content)
         else:
@@ -938,6 +1008,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             f"DIAGNOSIS MISMATCH pre-flight check bypassed for {filepath}: {bypass_reason}."
                         )
                     else:
+                        state.budgets.diagnosis_mismatch_veto_counts[filepath] = (
+                            state.budgets.diagnosis_mismatch_veto_counts.get(filepath, 0) + 1
+                        )
                         failure = Failure(
                             type="diagnosis_mismatch",
                             message=(
@@ -953,6 +1026,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         )
                         state.gate_outcomes.append(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
+                else:
+                    state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
             atomic_write_file(full_path, content)
 

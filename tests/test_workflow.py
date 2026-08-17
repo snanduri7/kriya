@@ -72,6 +72,7 @@ from kriya.workflow.workflow import (
     find_misdirected_edit_target,
     find_missing_expected_files,
     find_structural_corruption,
+    find_whole_response_no_op,
     atomic_write_file,
     normalize_written_filepath,
     _resolve_file_locations,
@@ -3479,6 +3480,196 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_for_pom_semantic_validati
         written = fh.read()
     assert "<project" in written
     assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
+
+@pytest.mark.asyncio
+async def test_run_attempt_diagnosis_mismatch_bounded_veto_bypasses_second_rejection(tmp_path):
+    """Regression test for the bounded-veto policy added 2026-08-17
+    (kriya/workflow/state.py's diagnosis_mismatch_veto_counts,
+    kriya/workflow/attempt.py's _diagnosis_mismatch_bypass_reason): this
+    check may reject a given FILE's edit at most once per run, regardless of
+    fail_type - the safety net underneath the fail-type-scoped bypasses
+    (compile/static_rule_violation/pom_semantic_validation), for every OTHER
+    fail_type where no cheap re-check exists. Motivated directly by
+    ignite_qpid_person run b-10o, where this exact check rejected the same
+    correct fix 4 CONSECUTIVE times before the run's wall-clock budget ran
+    out.
+
+    Deliberately uses "run_verification" as the failure signature - NOT one
+    of the 3 fail_types with their own cheap-recheck bypass - to prove this
+    is a real, fail-type-independent safety net, not just a restatement of
+    the existing dispatch."""
+    state = GenerationState()
+    original_content = "class App {\n    int getValue() { return 1; }\n}\n"
+    with open(os.path.join(str(tmp_path), "App.java"), "w", encoding="utf-8") as fh:
+        fh.write(original_content)
+    state.all_files_written = {"App.java"}
+    state.budgets.last_failure_signature = ("run_verification", ("dummy",))
+
+    mismatched_response = [{
+        "filepath": "App.java", "content": None,
+        "edits": [{
+            # A real, non-identical change (a comment appended) - NOT a
+            # whole-response no-op, so this exercises Layer 2's bypass
+            # specifically, not the separate Layer 0 no-op check.
+            "search": "int getValue() { return 1; }",
+            "replace": "int getValue() { return 1; } // unchanged",
+        }],
+        "analysis": "I renamed `getValue` to `fetchValue` to match the goal's naming convention.",
+    }]
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=mismatched_response)
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["App.java"],
+        expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+    )
+
+    # First attempt: no veto recorded yet for this file - rejects exactly as
+    # find_edits_ignoring_own_diagnosis's own logic always has.
+    with pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+    assert exc_info.value.failure.type == "diagnosis_mismatch"
+    assert state.budgets.diagnosis_mismatch_veto_counts.get("App.java") == 1
+
+    # Second attempt: the model repeats the IDENTICAL non-fix (as it did 4x
+    # in the real b-10o incident) - the bounded veto must bypass this time
+    # regardless of fail_type, deferring to the real compile gate (mocked to
+    # pass here, matching a case where the "mismatch" was harmless all along).
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    diagnosis_mismatch_outcomes = [g for g in state.gate_outcomes if g["type"] == "diagnosis_mismatch"]
+    assert len(diagnosis_mismatch_outcomes) == 1, "must never reject the same file's diagnosis a second time"
+
+@pytest.mark.asyncio
+async def test_run_attempt_diagnosis_mismatch_bypassed_for_targeted_test(tmp_path):
+    """End-to-end regression test for the targeted_test half of the
+    deterministic-validation-first bypass, added 2026-08-17 alongside the
+    bounded-veto policy: run_tests(target_test=...) (kriya/tools/validate.py)
+    already scopes a rerun to the ONE test file extract_target_test()
+    identified, not the whole suite, and that real rerun happens immediately
+    after this per-file write loop regardless, in the same attempt - so a
+    targeted_test-triggered retry gets the same bypass treatment as
+    compile/pom_semantic_validation, for the same reason."""
+    state = GenerationState()
+    store_content = "def add(x):\n    return x + 1\n"
+    with open(os.path.join(str(tmp_path), "store.py"), "w", encoding="utf-8") as fh:
+        fh.write(store_content)
+    with open(os.path.join(str(tmp_path), "test_store.py"), "w", encoding="utf-8") as fh:
+        fh.write("def test_add():\n    assert True\n")
+    state.all_files_written = {"store.py", "test_store.py"}
+    state.budgets.last_failure_signature = ("targeted_test", ("dummy",))
+    state.error_context = "test_store.py::test_add failed"
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "store.py", "content": None,
+        # A real, non-identical change - NOT a whole-response no-op, so this
+        # exercises the targeted_test bypass specifically, not the separate
+        # Layer 0 no-op check.
+        "edits": [{"search": "def add(x):", "replace": "def add(x):  # unchanged"}],
+        "analysis": "I renamed `add` to `increment` to make the intent clearer.",
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["store.py", "test_store.py"],
+        expected_files_upfront=["store.py", "test_store.py"],
+        architect_basename_to_path={"store.py": "store.py", "test_store.py": "test_store.py"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_a_whole_response_no_op_edit(tmp_path):
+    """End-to-end regression test for the Layer 0 no-op check added
+    2026-08-17 (find_whole_response_no_op, kriya/workflow/attribution.py),
+    reproducing the real b-10l incident this closes (design doc §7.32): a
+    targeted retry whose SEARCH and REPLACE were byte-identical, which the
+    model itself mislabeled as "replacing the entire file content." This
+    must be rejected BEFORE Layer 2 (diagnosis_mismatch) ever runs - and,
+    unlike Layer 2, unconditionally, with no fail-type bypass and no
+    bounded-veto interaction, since it's purely structural (search != replace
+    is an objective fact, not a fuzzy prose judgment)."""
+    state = GenerationState()
+    xml_content = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<beans><bean id="x" class="y"/></beans>\n'
+    )
+    with open(os.path.join(str(tmp_path), "applicationContext.xml"), "w", encoding="utf-8") as fh:
+        fh.write(xml_content)
+    state.all_files_written = {"applicationContext.xml"}
+    # Deliberately a fail_type that DOES have its own cheap-recheck bypass
+    # (compile) - proves Layer 0 fires unconditionally, before that dispatch
+    # even runs, not just for the fail types Layer 2 doesn't cover.
+    state.budgets.last_failure_signature = ("compile", ("dummy",))
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "applicationContext.xml", "content": None,
+        "edits": [{"search": xml_content, "replace": xml_content}],
+        "analysis": "I will replace the entire file content with a clean, exact copy to strip hidden characters.",
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["applicationContext.xml"],
+        expected_files_upfront=["applicationContext.xml"],
+        architect_basename_to_path={"applicationContext.xml": "applicationContext.xml"},
+    )
+
+    with pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "no_op_edit"
+    assert exc_info.value.failure.likely_files == ["applicationContext.xml"]
+    assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
+
+@pytest.mark.asyncio
+async def test_run_attempt_no_op_check_does_not_flag_a_companion_edit(tmp_path):
+    """Negative case for the same Layer 0 check: a response with ONE no-op
+    edit sitting alongside a genuinely real edit (the b-10f companion-edit
+    shape, §7.29) must pass through Layer 0 untouched - only a response
+    where every edit does nothing is a whole-response no-op."""
+    state = GenerationState()
+    java_content = (
+        'import bad.pkg.Cache;\n'
+        'class App {\n'
+        '  Cache c = get();\n'
+        '}\n'
+    )
+    with open(os.path.join(str(tmp_path), "App.java"), "w", encoding="utf-8") as fh:
+        fh.write(java_content)
+    state.all_files_written = {"App.java"}
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "App.java", "content": None,
+        "edits": [
+            {"search": "import bad.pkg.Cache;", "replace": "import good.pkg.Cache;"},
+            {"search": "  Cache c = get();", "replace": "  Cache c = get();"},
+        ],
+        "analysis": "Fixed the bad Cache import.",
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["App.java"],
+        expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+    )
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    assert not any(g["type"] == "no_op_edit" for g in state.gate_outcomes)
 
 @pytest.mark.asyncio
 async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
@@ -8066,6 +8257,53 @@ def test_find_edits_ignoring_reported_line_empty_without_a_locatable_error():
         "App.java", "some error with no file:[line,col] locator at all",
     )
     assert ignored == []
+
+
+# --- find_whole_response_no_op(): Layer 0 - did this response change ANYTHING at all? ---
+
+def test_find_whole_response_no_op_flags_a_single_identical_edit():
+    """Reproduces the real b-10l incident (design doc §7.32): the model
+    claimed "I will replace the entire file content" but SEARCH and REPLACE
+    were byte-identical - a pure no-op needing no prose comparison to
+    catch."""
+    edits = [{
+        "search": '<?xml version="1.0" encoding="UTF-8"?>\n<beans>...</beans>\n',
+        "replace": '<?xml version="1.0" encoding="UTF-8"?>\n<beans>...</beans>\n',
+    }]
+    assert find_whole_response_no_op(edits) is True
+
+
+def test_find_whole_response_no_op_ignores_whitespace_only_differences():
+    # normalize_whitespace-equivalent (differing indentation/blank lines
+    # only) is still a no-op - the same tolerance apply_anchored_edits
+    # itself already uses for matching.
+    edits = [{
+        "search": "line one\n  line two",
+        "replace": "line one\n    line two\n",
+    }]
+    assert find_whole_response_no_op(edits) is True
+
+
+def test_find_whole_response_no_op_does_not_flag_a_real_change():
+    edits = [{"search": "int x = 1;", "replace": "int x = 2;"}]
+    assert find_whole_response_no_op(edits) is False
+
+
+def test_find_whole_response_no_op_does_not_flag_a_mixed_response():
+    """Reproduces the b-10f companion-edit shape (§7.29): a harmless no-op
+    edit sitting alongside a genuinely real one in the SAME response must
+    NOT be flagged - only a response where EVERY edit does nothing is a
+    whole-response no-op."""
+    edits = [
+        {"search": "import bad.pkg.Cache;", "replace": "import good.pkg.Cache;"},
+        {"search": "  Cache c = get();", "replace": "  Cache c = get();"},
+    ]
+    assert find_whole_response_no_op(edits) is False
+
+
+def test_find_whole_response_no_op_empty_or_missing_edits():
+    assert find_whole_response_no_op([]) is False
+    assert find_whole_response_no_op(None) is False
 
 
 # --- find_misdirected_edit_target(): did a failed anchor match aim at the wrong file? ---

@@ -665,6 +665,45 @@ def _still_contains(needle: str, haystack: str) -> bool:
     return re.search(pattern, haystack) is not None
 
 
+def find_whole_response_no_op(edits: Optional[List[Dict[str, str]]]) -> bool:
+    """Layer 0 pre-flight check, deliberately simpler and cheaper than both
+    Layer 1 (find_edits_ignoring_reported_line) and Layer 2
+    (find_edits_ignoring_own_diagnosis) below - and, unlike either, purely
+    structural: it needs no analysis text, no reported-error locator, no
+    fail_type dispatch, and has no false-positive risk to bound, because it
+    asks the one thing that's true regardless of what the model claims: did
+    this response, taken as a whole, change anything at all?
+
+    Added 2026-08-17 after reclassifying the corpus survey's own "13
+    legitimate diagnosis_mismatch catches" claim (see docs/design.md §7.32
+    for the full incident): of the 4 completions actually still rejected by
+    find_edits_ignoring_own_diagnosis today, one (b-10l, applicationContext.xml)
+    needed no prose comparison at all - every edit's search and replace were
+    byte-identical, a pure no-op the model itself mislabeled as "replacing
+    the entire file content." Layer 2 caught it anyway, but only via fuzzy
+    substring matching against the analysis text - fragile machinery for a
+    question this cheap to answer directly.
+
+    Deliberately scoped to the WHOLE response (every edit is a no-op), not
+    per-edit - a per-edit no-op check would incorrectly reject the b-10f
+    companion-edit shape (§7.29 in docs/design.md): a harmless no-op edit
+    that merely echoes an already-fixed usage site, sitting alongside a
+    genuinely correct edit elsewhere in the SAME response. Only when EVERY
+    edit in the response does nothing is the response itself provably
+    useless, regardless of how many edits it contains or what any of them
+    claims to do.
+
+    Returns True (whole response is a no-op) or False - never None, since
+    unlike the other two Layer checks this has no "not applicable" case:
+    an edits list either changes something or it doesn't."""
+    if not edits:
+        return False
+    return all(
+        normalize_whitespace(e.get("search", "")) == normalize_whitespace(e.get("replace", ""))
+        for e in edits
+    )
+
+
 def find_edits_ignoring_own_diagnosis(
     analysis: Optional[str],
     edits: Optional[List[Dict[str, str]]],
