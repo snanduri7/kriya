@@ -64,12 +64,23 @@ HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _init_git_repo(path: Path) -> None:
+    # See run_harness.py's own _init_git_repo docstring for the incident this
+    # closes: re-running against an existing workspace whose .kriya/worktree
+    # already exists made `git add -A` pick up that real git worktree as an
+    # "embedded git repository", printing git's own submodule-confusion
+    # warning on every resumed run. .gitignore-ing .kriya/ before the first
+    # add, and --allow-empty on the commit (a resumed run may have nothing
+    # new to stage once README.md/.gitignore are already committed), closes
+    # it the same way in all three eval scripts that share this pattern.
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "eval-harness@kriya.local"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name", "Kriya Developer Eval"], cwd=path, check=True)
     (path / "README.md").write_text("developer eval scratch project\n")
+    gitignore_path = path / ".gitignore"
+    if not gitignore_path.exists():
+        gitignore_path.write_text(".kriya/\n")
     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "initial"], cwd=path, check=True)
 
 
 async def _eval_one_goal(
