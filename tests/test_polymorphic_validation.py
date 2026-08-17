@@ -772,6 +772,74 @@ def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path)
     assert mock_popen.call_count == 1
 
 
+def _mock_popen_result(returncode, stdout="", stderr=""):
+    mock_process = MagicMock()
+    mock_process.communicate.return_value = (stdout, stderr)
+    mock_process.returncode = returncode
+    return mock_process
+
+
+def test_run_pom_validate_catches_wrong_root_element(tmp_path):
+    """Regression test for a real live incident, 2026-08-16 (ignite_qpid_person,
+    run b-6): a generated pom.xml with root element <plugin> instead of
+    <project> is perfectly well-formed XML - find_structural_corruption()'s
+    own check passes it cleanly - and was only ever caught by paying for the
+    full compile gate's dependency resolution + javac invocation, after every
+    other file in the batch had already been written for nothing. Confirmed
+    directly against a real `mvn validate` invocation (not just this mocked
+    unit test) before writing this: real Maven's own error text is exactly
+    "Expected root element 'project' but found 'plugin'"."""
+    (tmp_path / "pom.xml").write_text(
+        '<?xml version="1.0"?>\n<plugin xmlns="http://maven.apache.org/POM/4.0.0">'
+        "<modelVersion>4.0.0</modelVersion></plugin>\n"
+    )
+    validator = PolymorphicValidator(str(tmp_path))
+
+    mock_process = _mock_popen_result(
+        1, stdout="[ERROR] Malformed POM ...: Expected root element 'project' but found 'plugin'"
+    )
+    with patch("subprocess.Popen", return_value=mock_process) as mock_popen:
+        res = validator.run_pom_validate()
+
+    assert res["success"] is False
+    assert "Expected root element 'project' but found 'plugin'" in res["output"]
+    assert mock_popen.call_args[0][0] == ["mvn", "validate"]
+
+def test_run_pom_validate_passes_a_valid_pom(tmp_path):
+    (tmp_path / "pom.xml").write_text(
+        '<?xml version="1.0"?>\n<project xmlns="http://maven.apache.org/POM/4.0.0">'
+        "<modelVersion>4.0.0</modelVersion></project>\n"
+    )
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen", return_value=_mock_popen_result(0)):
+        res = validator.run_pom_validate()
+
+    assert res["success"] is True
+
+def test_run_pom_validate_noop_when_no_pom_exists(tmp_path):
+    # Safe to call unconditionally - never invokes a subprocess if there's
+    # genuinely nothing to validate.
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen") as mock_popen:
+        res = validator.run_pom_validate()
+    assert res["success"] is True
+    assert mock_popen.call_count == 0
+
+def test_run_pom_validate_reports_missing_mvn_honestly(tmp_path):
+    # Same reasoning as test_java_compile_check_reports_missing_mvn_without_
+    # javac_fallback above - a missing 'mvn' binary is a toolchain problem,
+    # must be returned as a real failure, not silently treated as "valid."
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen", side_effect=FileNotFoundError(2, "No such file or directory", "mvn")):
+        res = validator.run_pom_validate()
+
+    assert res["success"] is False
+    assert "Failed to invoke mvn validate" in res["output"]
+
+
 def test_check_java_toolchain_detects_mismatch(monkeypatch):
     from kriya.tools.validate import check_java_toolchain
 

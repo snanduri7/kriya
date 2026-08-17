@@ -309,6 +309,7 @@ def test_workflow_auto_accrual(tmp_path):
     # reaches it first" comment).
     with patch("kriya.workflow.workflow.RepositoryAnalyzer") as MockAnalyzer, \
          patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=mock_run_compile), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": "Tests passed"}):
 
         mock_analyzer = MockAnalyzer.return_value
@@ -319,16 +320,16 @@ def test_workflow_auto_accrual(tmp_path):
         # Disable human approval to auto-apply
         cfg.autonomy.mode = "autonomous"
         cfg.autonomy.risk_threshold_lines = 1000
-        
+
         import asyncio
         res = asyncio.run(we.run_generation_workflow(
             goal="Build a standard application",
             workspace_path=str(tmp_path),
             knowledge_risk_confirmed=True
         ))
-        
+
         assert res["quality_gates_passed"] is True
-        
+
         # Verify that the custom skill directory was automatically accrued in the skills folder!
         expected_skill_path = tmp_path / "skills" / "org.apache.activemq-artemis-server-2.31.2"
         assert os.path.exists(expected_skill_path)
@@ -389,6 +390,7 @@ def test_workflow_auto_accrual_skipped_when_suggestion_never_actually_used(tmp_p
     # to real Maven validation unmocked.
     with patch("kriya.workflow.workflow.RepositoryAnalyzer") as MockAnalyzer, \
          patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=mock_run_compile), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": "Tests passed"}):
 
         mock_analyzer = MockAnalyzer.return_value

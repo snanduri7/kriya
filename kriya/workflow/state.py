@@ -76,6 +76,19 @@ class GenerationState:
     # wrong, since fallback_targeted_attempted is deliberately flipped True
     # as the first action inside the fallback_targeted branch itself.
     last_attempt_mode: Optional[str] = None
+    # Whether attempt 1 reused the Planner's own over-delivered code blocks
+    # verbatim (extract_planner_code_blocks(), attempt.py) instead of a fresh
+    # Developer generation call - None until attempt 1's full-set branch
+    # actually runs (never reassigned after, since that branch only executes
+    # once per run: gated on state.budgets.retry_count == 0). Recorded purely
+    # for observability - added 2026-08-16 specifically to make "does
+    # Planner-reuse correlate with more first-attempt failures than fresh
+    # Developer generation" an answerable-from-data question (an external
+    # review raised this as a real hypothesis, evidenced by two of that same
+    # day's live incidents both tracing back to reused Planner content) rather
+    # than something argued from a handful of anecdotes - never read or
+    # branched on anywhere in the retry loop itself.
+    planner_reuse_used_attempt1: Optional[bool] = None
     # The model/endpoint override the most recent run_attempt() call actually
     # used (None means the primary model) - the caller needs these afterward
     # to gate lesson extraction on "this successful attempt used a non-primary

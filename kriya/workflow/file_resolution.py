@@ -4,6 +4,7 @@ import ast
 import asyncio
 import difflib
 import hashlib
+import json
 import logging
 import os
 import re
@@ -288,24 +289,56 @@ def _looks_like_python(content: str) -> bool:
         return False
 
 
+def _looks_like_xml(content: str) -> bool:
+    try:
+        ET.fromstring(content)
+        return True
+    except ET.ParseError:
+        return False
+
+
+def _looks_like_json(content: str) -> bool:
+    try:
+        json.loads(content)
+        return True
+    except (json.JSONDecodeError, ValueError):
+        return False
+
+
 # Extension -> plausibility check. Each entry answers "does this content
 # genuinely look like/parse as this language" for a Planner-drafted fenced
 # code block before it's trusted as a file's real content (see
 # extract_planner_code_blocks() below). Deliberately per-language rather than
 # one shared heuristic - Java's cheapest reliable signal is a keyword regex
-# (no stdlib Java parser available here); Python's is exact syntax validation
-# via the stdlib `ast` module, which is strictly stronger where available.
+# (no stdlib Java parser available here); Python/XML/JSON's are exact syntax
+# validation via a real parser, which is strictly stronger where available.
 # Extensions with no entry here get no plausibility check at all - this is a
-# known, incomplete allowlist, not a claim of full coverage. Root cause of
-# this table's very first version (2026-08-12): a fenced block near a
-# ".java" file's heading that was actually the qpid/ignite-java17 skill's own
-# documented run-command example ("mvn -q compile exec:exec
+# known, incomplete allowlist, not a claim of full coverage (no reliable
+# syntax check exists for something like `.properties`, arbitrary key=value
+# text - adding a weak heuristic there risks its own false positives/
+# negatives, so it's deliberately left unchecked rather than guessed at).
+# Root cause of this table's very first version (2026-08-12): a fenced block
+# near a ".java" file's heading that was actually the qpid/ignite-java17
+# skill's own documented run-command example ("mvn -q compile exec:exec
 # -Dexec.mainClass=..."), not Java source - the Planner had written it as a
 # "here's how to run this" note, and extraction had no way to tell it apart
-# from real code before this check existed.
+# from real code before this check existed. The identical failure shape
+# recurred live, 2026-08-17 (ignite_qpid_person, run b-10k), through the
+# exact gap this table's own docstring already warned about: `.xml` had no
+# entry, so a fenced block near `ignite-config.xml`'s heading - whatever its
+# actual content, not recoverable after the fact since the worktree is
+# reused/reset across retries with no per-attempt git history - was accepted
+# unconditionally and immediately failed structural corruption with
+# "malformed XML: syntax error: line 1, column 0", consistent with non-XML
+# content (anything not starting with `<` fails `ET.fromstring()` at the
+# very first character). `.json` added alongside it for the same reason
+# (equally common in this pipeline's generated projects, equally guessable
+# via a real parser).
 _MIN_PLAUSIBLE_CODE_CHECK: Dict[str, Callable[[str], bool]] = {
     ".java": _looks_like_java,
     ".py": _looks_like_python,
+    ".xml": _looks_like_xml,
+    ".json": _looks_like_json,
 }
 
 

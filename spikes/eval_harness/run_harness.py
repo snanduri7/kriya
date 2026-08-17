@@ -86,7 +86,7 @@ def _init_git_repo(path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
-def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction, best_of_n):
+def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction, best_of_n, log_level):
     # paths.skills/memory stay relative (resolved against this config file's own
     # directory, i.e. per-goal-isolated - see CLAUDE.md's config-resolution note)
     # so one goal's skill/RAG state can never leak into another's. paths.logs is
@@ -129,6 +129,12 @@ def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url,
         # entirely until now.
         "search": {"base_url": search_base_url, "top_k": 3},
         "paths": {"skills": "./skills", "memory": "./memory", "logs": shared_logs_dir},
+        # kriya/config/default_config.yaml's own packaged default is "INFO" - only
+        # written here at all so --log-level DEBUG (see that flag's own help text)
+        # can override it per batch; every prior batch got this by omission anyway,
+        # so passing the same "INFO" back through when unset is a no-op, not a
+        # behavior change.
+        "logging": {"level": log_level},
     }
     (workspace_path / "kriya.yaml").write_text(yaml.dump(config))
 
@@ -199,6 +205,12 @@ def main():
                               "goal set with and without this flag for a before/after comparison "
                               "(kriya/workflow/best_of_n.py). Deliberately sequential, never parallel - see "
                               "that module's own docstring for why.")
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                         help="logging.level for every goal's kriya.yaml (default INFO, matching Kriya's own "
+                              "packaged default - unchanged batch behavior unless passed). DEBUG is verbose "
+                              "(logs the full raw pre-parse Developer completion for every per-file generation "
+                              "call, kriya/agents/agent.py) - meant for a targeted, single-goal investigative "
+                              "run (pair with --goal-id), not left on for a full batch.")
     args = parser.parse_args()
 
     goals = GOALS if not args.goal_id else [g for g in GOALS if g.id in args.goal_id]
@@ -216,6 +228,7 @@ def main():
     print(f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}")
     print(f"Self-correction loop: {'ON' if args.self_correction else 'off'}")
     print(f"Best-of-N (first attempt): {args.best_of_n}")
+    print(f"Log level: {args.log_level}")
     print(f"Goals: {[g.id for g in goals]}\n")
 
     summary_lines = [
@@ -224,6 +237,7 @@ def main():
         f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}",
         f"Self-correction loop: {'ON' if args.self_correction else 'off'}",
         f"Best-of-N (first attempt): {args.best_of_n}",
+        f"Log level: {args.log_level}",
         f"traces.db: {os.path.join(logs_dir, 'traces.db')}",
         "",
     ]
@@ -232,7 +246,7 @@ def main():
         goal_dir = Path(os.path.join(batch_dir, "workspaces", goal.id))
         goal_dir.mkdir(parents=True, exist_ok=True)
         _init_git_repo(goal_dir)
-        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model, args.search_base_url, args.self_correction, args.best_of_n)
+        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model, args.search_base_url, args.self_correction, args.best_of_n, args.log_level)
 
         print(f"--- Running goal '{goal.id}' (timeout {args.timeout_per_goal}s) ---")
         start = time.time()

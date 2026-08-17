@@ -587,6 +587,16 @@ def find_edits_ignoring_reported_line(
 
 _ANALYSIS_QUOTED_SPAN_RE = re.compile(r"`([^`]+)`")
 
+# A bare relative file path (multiple `/`-separated segments, ending in a file
+# extension) - used to exclude a self-referential filepath quote from
+# find_edits_ignoring_own_diagnosis()'s "must be new" evidence requirement. See
+# that function's own inline comment for the full incident. Deliberately
+# structural, not a lookup against the real expected-files list - keeps this
+# check self-contained without threading a filepath through the function
+# signature, at the cost of also excluding a genuine code quote that happens to
+# look like a bare path (accepted tradeoff, see the same comment).
+_BARE_FILE_PATH_RE = re.compile(r"^[\w.\-]+(?:/[\w.\-]+)+\.[a-zA-Z0-9]+$")
+
 # Phrases that explicitly mark the quoted span right after them as the
 # PROBLEM being moved away from, not the fix - "instead of `var`", "never a
 # raw or var-inferred cache handle" style language already seen verbatim in
@@ -598,6 +608,30 @@ _ANALYSIS_QUOTED_SPAN_RE = re.compile(r"`([^`]+)`")
 # second, independent signal from the addition-check above it.
 _REMOVAL_PHRASE_RE = re.compile(
     r"(?:instead of|rather than|not|never|remove|removing|stop using|no longer)\s+(?:using\s+)?`([^`]+)`",
+    re.IGNORECASE,
+)
+
+# Found live, 2026-08-16/17 (ignite_qpid_person, run b-10i): "instead of" is
+# ambiguous between an INSTRUCTION ("do Y instead of `X`" - X is what to
+# discard, the shape _REMOVAL_PHRASE_RE was built for) and a RESULT
+# DESCRIPTION ("returns `Object` instead of `Person`" - Person is the
+# correct/desired value, not something to remove; it's expected to still
+# appear, unchanged, in a correct fix). A missing-cast diagnosis phrased as
+# "`cache.get(1)` returns an `Object` type instead of `Person`" got its
+# correct, quoted "Person" wrongly captured as a removal target - `Person`
+# legitimately still appears in a correct cast-insertion fix
+# (`(Person) cache.get(1)`), so the stale-removal check rejected an
+# already-correct edit. Narrowly scoped to the confirmed live shape: a
+# result-describing verb (returns/produces/gives/yields/is/was) appearing
+# before "instead of" in the SAME clause (no sentence boundary crossed)
+# means the term after it is the DESIRED value, not a removal target -
+# exclude it from removal_quoted rather than trying to make
+# _REMOVAL_PHRASE_RE itself direction-aware (that would risk the same
+# fragility the addition signals already learned to avoid - see the
+# per-pair scoping comment above).
+_RESULT_DESCRIBING_INSTEAD_OF_RE = re.compile(
+    r"(?:returns?|returned|produces?|produced|gives?|gave|yields?|yielded|\bis\b|\bwas\b)"
+    r"[^.\n]{0,60}instead of\s+(?:using\s+)?`([^`]+)`",
     re.IGNORECASE,
 )
 
@@ -710,10 +744,34 @@ def find_edits_ignoring_own_diagnosis(
     of, and takes priority over, the
     addition signal above: the two are separate claims, and either one failing means the
     edit doesn't actually implement what its own analysis said. Same dual edit-shape
-    handling (edits list vs. full content) as the rest of this function."""
+    handling (edits list vs. full content) as the rest of this function.
+
+    FOURTH signal (2026-08-16) - see its own inline comment below (the "cast insertion"
+    check) for the full incident: a missing-cast diagnosis quotes the operand and type
+    name as separate spans, never the fused `(Type) operand` cast expression, so a
+    genuinely correct cast-insertion edit satisfies none of signals (a)/(b)/(c) and was
+    confirmed live to be wrongly rejected 3 consecutive retries in a row."""
     if not analysis:
         return None
     quoted = [q for q in _ANALYSIS_QUOTED_SPAN_RE.findall(analysis) if len(q.strip()) >= 2]
+    # Found live, 2026-08-17 (ignite_qpid_person, run b-10k): a diagnosis for a
+    # malformed/missing file routinely backtick-quotes the FILE'S OWN PATH purely
+    # for self-identification ("malformed XML in `src/main/resources/ignite-
+    # config.xml`"), not as a claimed code fragment - but this check has no way to
+    # tell that apart from a real quoted code snippet, and a self-referential path
+    # obviously never appears literally inside that file's own content. Confirmed
+    # live via raw-completion DEBUG capture: the model proposed genuinely valid,
+    # complete XML content identically on 3 consecutive retries, and every one was
+    # rejected, because the ONLY backtick-quoted span in each vague analysis was
+    # the file's own path. Excluded via a narrow structural pattern (multiple
+    # `/`-separated path segments ending in a file extension) rather than
+    # threading the real filepath through this function's signature -
+    # deliberately narrow: a genuine code fragment that happens to look like a
+    # bare path (e.g. a resource-path string literal being added as new code)
+    # could be excluded too, but that's a safe degrade (one fewer piece of
+    # evidence, not a wrong rejection), matching every other false-positive/
+    # negative tradeoff already accepted in this function.
+    quoted = [q for q in quoted if not _BARE_FILE_PATH_RE.match(q.strip())]
     if not quoted:
         return None
 
@@ -737,6 +795,8 @@ def find_edits_ignoring_own_diagnosis(
     new_text = "\n".join(replace for _, replace in pairs)
 
     removal_quoted = [q for q in _REMOVAL_PHRASE_RE.findall(analysis) if len(q.strip()) >= 2]
+    result_describing = set(_RESULT_DESCRIBING_INSTEAD_OF_RE.findall(analysis))
+    removal_quoted = [q for q in removal_quoted if q not in result_describing]
     stale_removals = [q for q in removal_quoted if _still_contains(q, new_text)]
     if stale_removals:
         stale_desc = ", ".join(f"`{q}`" for q in stale_removals)
@@ -781,9 +841,34 @@ def find_edits_ignoring_own_diagnosis(
         # (not the flat-joined pools, same reasoning as the two signals
         # above) so an unrelated edit elsewhere can't manufacture a false
         # "disappearance" either.
+        # FOURTH signal (2026-08-16, ignite_qpid_person run b-10h) - a "cast
+        # insertion" check, sibling to the other three but for a shape none of
+        # them cover: a diagnosis correcting a missing-cast compile error
+        # ("Object cannot be converted to Person") naturally quotes the
+        # OPERAND (`cache.get(1)`) and the TYPE (`Person`) as separate spans,
+        # not the fused `(Person) cache.get(1)` expression as one span - a
+        # model doesn't write prose that way. Both separate quotes are
+        # trivially present in BOTH old and new text (the operand and the
+        # type name are unchanged; only a parenthesized cast prefix was
+        # inserted immediately before the operand), so signals (a)/(b)/(c)
+        # all miss it - none of them see anything "new". Confirmed live via
+        # the new raw-completion DEBUG logging (kriya/agents/agent.py): a
+        # textbook-correct `Person cachedPerson = cache.get(1);` ->
+        # `Person cachedPerson = (Person) cache.get(1);` edit was rejected as
+        # a mismatch 3 consecutive retries in a row, real compile fix,
+        # wrongly blocked every time. Likely the same root cause behind the
+        # still-unresolved historical incident in the backlog (`Protocol
+        # cachedProtocol = cache.get(1)` -> `(Protocol) cache.get(1)`,
+        # "root cause NOT confirmed" - this predates DEBUG-level raw-
+        # completion capture, so it was never traced to this function
+        # before). Scoped narrowly to a literal `(q)` parenthesization of the
+        # quoted span appearing new in this pair's replace - deliberately
+        # not a general "any change counts" relaxation, which would reopen
+        # the no-op-edit gap this whole check exists to close.
         if any(
             (q in replace and (q not in search or q == search.strip()))
             or (q in search and q not in replace)
+            or (f"({q})" in replace and f"({q})" not in search)
             for search, replace in pairs
         ):
             return None

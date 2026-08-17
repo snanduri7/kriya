@@ -469,6 +469,26 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "as any other attempt."
                 )
 
+        # Logged symmetrically on BOTH branches (previously only the reused
+        # branch logged anything) so a run's log alone - via the same grep-
+        # based analysis this session has used all day - can already answer
+        # "did attempt 1 use Planner-reused content or fresh Developer
+        # generation" without needing new tooling. See
+        # state.planner_reuse_used_attempt1's own docstring for why this is
+        # worth tracking at all: an external review raised, and two of the
+        # same day's live incidents supported, the hypothesis that reused
+        # Planner content correlates with more first-attempt failures than
+        # fresh Developer generation - this makes that measurable from
+        # ordinary run logs instead of argued from a handful of anecdotes.
+        if state.budgets.retry_count == 0:
+            state.planner_reuse_used_attempt1 = reused_files is not None
+            if reused_files is None:
+                logger.info(
+                    "Attempt 1: Planner's plan did not contain usable code for every expected "
+                    "file (or none was expected upfront) - using a fresh Developer generation "
+                    "call for all files."
+                )
+
         if reused_files is not None:
             files = reused_files
         else:
@@ -824,6 +844,49 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.files_written.append(filepath)
         state.all_files_written.add(filepath)
         logger.info(f"Wrote generated/edited file to sandbox: {filepath}")
+
+        if os.path.basename(filepath) == "pom.xml":
+            # Cheap, semantic pre-check for pom.xml specifically - see
+            # PolymorphicValidator.run_pom_validate()'s own docstring for the
+            # real incident this closes (a well-formed-but-wrong-root-element
+            # POM sailing straight past find_structural_corruption's XML
+            # well-formedness check above, only caught by paying for the full
+            # compile gate's own dependency resolution + javac invocation,
+            # after every OTHER file in the batch had already been written
+            # for nothing - nothing else in the project can possibly compile
+            # without a usable POM). Checked here, immediately after the
+            # write, not deferred to after the whole batch - pom.xml has no
+            # cross-file dependency on sibling files (unlike a proactive
+            # unresolved-symbol check on a .java file would), so there's no
+            # "sibling not written yet" false-positive risk in checking it
+            # this early, and this is exactly where the payoff is: the loop
+            # stops right here, before any of the other files this attempt
+            # would otherwise write are generated.
+            #
+            # Deliberately a fresh, minimal validator instance, not the one
+            # built later for the real compile gate - "mvn validate" never
+            # invokes javac or runs the application, so it doesn't need the
+            # goal-specific JAVA_HOME override that compilation/execution
+            # does (that override is resolved further below, after this
+            # point in the loop, specifically to close a real JDK-version
+            # mismatch gap for actual compilation - not applicable here).
+            from kriya.tools.validate import PolymorphicValidator
+            pom_validator = PolymorphicValidator(ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy)
+            pom_validate_res = pom_validator.run_pom_validate()
+            if not pom_validate_res["success"]:
+                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    failed_pom_content = fh.read()
+                failure = Failure(
+                    type="pom_semantic_validation",
+                    message=f"POM VALIDATION FAILED for {filepath}: {pom_validate_res['output']}",
+                    raw_output=pom_validate_res["output"],
+                    file_locations=[FileLocation(filepath=filepath)],
+                    likely_files=[filepath],
+                    failed_content={filepath: failed_pom_content},
+                    attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
 
     if not resuming_developer_stage:
         # Completeness Check: catch the Developer Agent silently under-delivering
