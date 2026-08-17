@@ -174,8 +174,11 @@ def _diagnosis_mismatch_bypass_reason(
        correct fix (3-6 wasted retries EACH, tonight), the evidence favors
        letting the compiler decide.
 
-    Every OTHER failure type (misdirected_edit, run_verification,
-    pom_semantic_validation, general_error, etc.) is left exactly as-is - no
+    pom_semantic_validation joined the compile bypass 2026-08-17 (see the
+    inline comment on that branch below) - a real compile gate always runs
+    right after this check regardless, so it's the same tradeoff, not a
+    separate case. Every OTHER failure type (misdirected_edit,
+    run_verification, general_error, etc.) is left exactly as-is - no
     evidence yet that this check misfires for them, and this is deliberately
     not a blanket "disable the check" change. (unaddressed_error_location -
     find_edits_ignoring_reported_line, the "Layer 1" check just above this
@@ -192,8 +195,25 @@ def _diagnosis_mismatch_bypass_reason(
     if not sig:
         return None
     fail_type = sig[0]
-    if fail_type == "compile":
-        return "this retry responds to a compile failure - deferring to the real compiler instead of prose-matching"
+    if fail_type in ("compile", "pom_semantic_validation"):
+        # pom_semantic_validation added 2026-08-17 after a live false positive
+        # (ignite_qpid_person, run b-10o): a correct edit wrapped a bare
+        # <dependency> fragment in a full, valid <project> POM structure -
+        # exactly what its own analysis said - but the analysis quoted the
+        # tag as `<project>` (no attributes) while the actual fix wrote
+        # `<project xmlns="...">` (real Maven POMs always declare a
+        # namespace), so a literal substring check for the bare quoted tag
+        # never matched. Same tradeoff as compile, for the same reason: `mvn
+        # validate` (the check that raised pom_semantic_validation) is a
+        # cheap PRE-check specifically so a broken POM fails before the
+        # expensive full `mvn compile` - but that real compile gate still
+        # runs immediately after this per-file loop regardless, and would
+        # catch a genuinely still-broken POM just as reliably, one step
+        # later. No new prose-matching signal needed (the underlying gap is
+        # XML-attribute-vs-bare-tag-name, not really about pom.xml
+        # specifically - a 6th signal here would just be the next incident-
+        # specific patch this function's whole redesign was meant to stop).
+        return "this retry responds to a compile/POM-validation failure - deferring to the real compiler instead of prose-matching"
     if fail_type == "static_rule_violation":
         from kriya.workflow.static_checks import run_static_checks
         still_violates = run_static_checks(

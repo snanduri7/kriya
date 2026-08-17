@@ -3410,6 +3410,77 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_when_static_check_genuine
     assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
 
 @pytest.mark.asyncio
+async def test_run_attempt_diagnosis_mismatch_bypassed_for_pom_semantic_validation(tmp_path):
+    """End-to-end regression test for the pom_semantic_validation half of the
+    deterministic-validation-first bypass, added 2026-08-17 after a real live
+    false positive (ignite_qpid_person, run b-10o): a correct edit wrapped a
+    bare, dangling <dependency> fragment in a full, valid Maven <project> POM
+    - exactly what its own FIX ANALYSIS described - but was rejected 4
+    consecutive times because the analysis quoted the tag as `<project>`
+    (no attributes) while the real fix wrote `<project xmlns="...">` (a real
+    Maven POM always declares a namespace), so a literal substring check for
+    the bare quoted tag never matched. The underlying gap
+    (find_edits_ignoring_own_diagnosis's own prose-matching) is real and
+    reproduced directly against the actual incident text below; this test
+    confirms the bypass, not a 6th signal, is what makes the edit through -
+    same tradeoff as the compile case, since a real compile gate runs right
+    after regardless."""
+    state = GenerationState()
+    dangling_content = (
+        '<dependency>\n'
+        '    <groupId>com.fasterxml.jackson.core</groupId>\n'
+        '    <artifactId>jackson-databind</artifactId>\n'
+        '    <version>2.15.2</version>\n'
+        '</dependency>\n'
+    )
+    with open(os.path.join(str(tmp_path), "pom.xml"), "w", encoding="utf-8") as fh:
+        fh.write(dangling_content)
+    state.all_files_written = {"pom.xml"}
+    state.budgets.last_failure_signature = ("pom_semantic_validation", ("mvn_validate_failed",))
+
+    fixed_pom = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
+        '    <modelVersion>4.0.0</modelVersion>\n'
+        '    <groupId>com.example</groupId>\n'
+        '    <artifactId>app</artifactId>\n'
+        '    <version>1.0-SNAPSHOT</version>\n'
+        '    <dependencies>\n'
+        '        <dependency>\n'
+        '            <groupId>com.fasterxml.jackson.core</groupId>\n'
+        '            <artifactId>jackson-databind</artifactId>\n'
+        '            <version>2.15.2</version>\n'
+        '        </dependency>\n'
+        '    </dependencies>\n'
+        '</project>\n'
+    )
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "pom.xml", "content": None,
+        "edits": [{"search": dangling_content.strip(), "replace": fixed_pom.strip()}],
+        "analysis": (
+            "The error indicates that the pom.xml file is malformed - it starts directly "
+            "with a `<dependency>` element instead of the required Maven POM structure "
+            "with `<project>` as the root element. I need to wrap the existing dependency "
+            "in the proper Maven project XML structure."
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["pom.xml"],
+        expected_files_upfront=["pom.xml"],
+        architect_basename_to_path={"pom.xml": "pom.xml"},
+    )
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}):
+        await run_attempt(state, ctx)  # must NOT raise QualityGateFailure
+
+    with open(os.path.join(str(tmp_path), "pom.xml"), encoding="utf-8") as fh:
+        written = fh.read()
+    assert "<project" in written
+    assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
+
+@pytest.mark.asyncio
 async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
     """Mirror of the failure-path test above: a clean compile with no tests
     and Runtime Verification disabled returns normally (no exception), having
