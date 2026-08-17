@@ -78,10 +78,41 @@ HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _init_git_repo(path):
+    # Called unconditionally on every invocation, including a --batch-dir
+    # resume of an already-populated goal directory - not just a fresh one.
+    # MUST no-op entirely once a repo already exists here - a real, more
+    # serious bug than the embedded-repo warning this comment used to
+    # describe (that half is still true and still worth knowing, kept
+    # below): re-running `git add -A` + commit against a goal directory a
+    # PRIOR successful run already wrote a generated app into swept that
+    # leftover application code (source files, and for a Java goal even
+    # compiled target/*.class bytecode) into a brand new "initial" commit,
+    # which then becomes what create_git_worktree's worktree-reset logic
+    # (kriya/workflow/worktree.py) checks the reused worktree out to -
+    # so a "fresh" resumed run silently starts from the PREVIOUS run's
+    # generated code, not a clean slate. Confirmed live (2026-08-17,
+    # b-10p): ignite_qpid_person's second run's baseline commit contained
+    # its own compiled .class files and Maven metadata from the first run;
+    # django_healthcheck_gap's second run generated a different directory
+    # layout (myapp/-prefixed) than its first run's root-level files, and
+    # the two conflicting layouts coexisting on disk produced a cascade of
+    # confusing failures (MISDIRECTED EDIT, a stray bare verification
+    # marker in old leftover files, a Django ModuleNotFoundError) that had
+    # nothing to do with the current model's actual output. The ORIGINAL
+    # embedded-repo bug (a --batch-dir resume's `git add -A` picking up
+    # .kriya/worktree - a real git worktree with its own .git file - as an
+    # embedded repository, which git warns or, on some versions, hard-fails
+    # exit 128 on) had been silently PREVENTING this deeper bug from
+    # manifesting in most runs by crashing/warning before the harness ever
+    # got this far - fixing only that symptom (an earlier, incomplete pass
+    # at this function) let the harness proceed further and hit this one.
+    if (path / ".git").exists():
+        return
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "eval-harness@kriya.local"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name", "Kriya Eval Harness"], cwd=path, check=True)
     (path / "README.md").write_text("eval harness scratch project\n")
+    (path / ".gitignore").write_text(".kriya/\n")
     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 

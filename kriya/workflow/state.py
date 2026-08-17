@@ -46,6 +46,21 @@ class RetryBudgets:
     # workflow.py that read retry_count for that purpose, after best_of_n.py resets
     # retry_count back to 0 for each fresh independent candidate.
     best_of_n_candidates_tried: int = 0
+    # {filepath: consecutive diagnosis_mismatch rejections for that file},
+    # added 2026-08-17 for the bounded-veto policy (attempt.py's
+    # _diagnosis_mismatch_bypass_reason): find_edits_ignoring_own_diagnosis
+    # is a fuzzy prose-vs-diff heuristic, proven repeatedly this session to
+    # have real false-positive shapes (5 found and closed via signals, a 6th
+    # via a bypass, see docs/design.md §7.29/§7.31) - no matter how many more
+    # are found and fixed, the heuristic can never be proven complete. This
+    # counter is the safety net UNDERNEATH all of that: once a file's edit
+    # has been rejected by this specific check once, it is NEVER rejected by
+    # it again in the same run, regardless of fail_type or whether a cheap
+    # re-check exists - the real downstream compile/test/verification gates
+    # decide instead. Reset to 0 whenever an attempt writes that file WITHOUT
+    # this check flagging it, so an unrelated, later mismatch on the same
+    # file still gets its own first (bounded) veto.
+    diagnosis_mismatch_veto_counts: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
