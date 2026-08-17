@@ -81,6 +81,50 @@ async def test_self_correction_exhausts_budget(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_self_correction_llm_exception_preserves_original_compile_error(tmp_path):
+    """Regression test for a real bug found live, 2026-08-17
+    (ignite_qpid_person, run b-10l): llm.complete_with_tools() had NO
+    exception handling, despite this function's own docstring explicitly
+    promising the caller can treat any non-resolved outcome "exactly the
+    same as if the loop had never run." That promise was false for an
+    exception - it propagated all the way up past attempt.py's own
+    unguarded call site to workflow.py's outer exception handler, which
+    replaced the REAL, already-captured Maven compile error with the raw
+    HTTP/SDK exception text (three consecutive HTTP 500s from Ollama while
+    parsing the model's own native tool call, in the live incident),
+    causing every subsequent retry to implicate the wrong file entirely.
+    Must degrade to resolved=False, preserving the original compile error,
+    not raise."""
+    worktree_path = str(tmp_path)
+    _write(worktree_path, "App.java", "class App {}\n")
+
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=RuntimeError(
+        "Error code: 500 - {'error': {'message': 'XML syntax error on line 15: "
+        "element <parameter> closed by </function>'}}"
+    ))
+
+    validator = MagicMock()
+
+    result = await run_self_correction_loop(
+        llm=llm,
+        worktree_path=worktree_path,
+        validator=validator,
+        files_in_scope=["App.java"],
+        compile_error_output=(
+            "App.java:[63,56] incompatible types: java.lang.Object cannot be "
+            "converted to com.example.Person"
+        ),
+        active_code_context="",
+    )
+
+    assert result.resolved is False
+    assert "Object cannot be converted to com.example.Person" in result.final_compile_output
+    assert "500" not in result.final_compile_output
+    validator.run_compile_check.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_self_correction_apply_patch_error_fed_back_to_model(tmp_path):
     worktree_path = str(tmp_path)
     _write(worktree_path, "a.py", "def foo():\n    return 1\n")

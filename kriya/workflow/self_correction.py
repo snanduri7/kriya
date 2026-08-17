@@ -293,13 +293,50 @@ async def run_self_correction_loop(
     turns_used = 0
     for turn in range(max_turns):
         turns_used = turn + 1
-        result = await llm.complete_with_tools(
-            messages,
-            _TOOLS,
-            model_override=model_override,
-            base_url_override=base_url_override,
-            api_key_override=api_key_override,
-        )
+        try:
+            result = await llm.complete_with_tools(
+                messages,
+                _TOOLS,
+                model_override=model_override,
+                base_url_override=base_url_override,
+                api_key_override=api_key_override,
+            )
+        except Exception as exc:
+            # Found live, 2026-08-17 (ignite_qpid_person, run b-10l): this call
+            # had NO exception handling, despite this function's own docstring
+            # explicitly promising "either way, the caller treats this exactly
+            # the same as if the loop had never run" - false for an exception,
+            # which propagated all the way up past attempt.py's own unguarded
+            # call site to workflow.py's outer `except Exception as e:`, where
+            # retry_strategy.py's handle_attempt_failure() does
+            # `raw_error_context = str(e)` and - since a bare HTTP/SDK
+            # exception has no `.failure` attribute - falls through to a
+            # generic Failure(type="general_error", message=raw_error_context).
+            # Confirmed live: three consecutive HTTP 500s from Ollama while
+            # parsing the model's own native tool call ("XML syntax error on
+            # line 15: element <parameter> closed by </function>") completely
+            # REPLACED the real, already-captured Maven compile error
+            # (compile_error_output, sitting unused in attempt.py's own local
+            # scope) as the attempt's failure text - every subsequent retry
+            # then implicated applicationContext.xml (the only file-like token
+            # in the HTTP error text) instead of the actually-broken
+            # App.java, burning the whole retry budget on a file that was
+            # never broken. Degrading to resolved=False here restores the
+            # documented contract: the caller (attempt.py) falls through to
+            # its own _build_quality_gate_failure() call using compile_res
+            # ['output'] - the real Maven error - exactly as if this optional
+            # loop had never run at all.
+            logger.warning(
+                "Self-correction tool loop failed (optional micro-loop, not the "
+                f"original compile failure) - preserving original compile error: {exc}"
+            )
+            return SelfCorrectionResult(
+                resolved=False,
+                turns_used=turns_used,
+                final_compile_output=last_compile_output,
+                modified_files=modified_files,
+                transcript=transcript,
+            )
         tool_calls = result["tool_calls"]
         if not tool_calls:
             # Model gave up (or thinks it's done) without a passing recompile -

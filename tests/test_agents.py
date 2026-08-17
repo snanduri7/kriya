@@ -839,6 +839,37 @@ def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
         "  public static void main(String[] args) {"
     )
 
+def test_split_fix_analysis_edit_strips_same_line_marker_separator():
+    """Regression test for a real bug found live, 2026-08-17
+    (ignite_qpid_person, run b-10l): a model wrote "REPLACE: <?xml
+    version=\"1.0\"?>..." on ONE line instead of putting the content on the
+    line after the marker. The existing `.strip("\n")` never touches a
+    leading SPACE (it only strips "\n" characters from the ends), so that
+    one separator space survived into the actual replacement text -
+    " <?xml version=\"1.0\"?>...", invalid per the XML spec (no whitespace
+    may precede an XML declaration). Confirmed as the exact cause of a live
+    "XML or text declaration not at start of entity: line 1, column 1"
+    failure that recurred identically across 2 consecutive retries."""
+    text = (
+        "SEARCH: <?xml version=\"1.0\"?>\n<beans></beans>\n\n"
+        "REPLACE: <?xml version=\"1.0\"?>\n<beans><bean/></beans>"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits[0]["search"] == "<?xml version=\"1.0\"?>\n<beans></beans>"
+    assert edits[0]["replace"] == "<?xml version=\"1.0\"?>\n<beans><bean/></beans>"
+
+def test_split_fix_analysis_edit_same_line_marker_separator_does_not_corrupt_indented_code():
+    # Companion negative case - meaningful leading indentation on a
+    # multi-line block (content starts on the line AFTER the marker) must
+    # be preserved exactly, not eaten by the new same-line-separator fix.
+    text = (
+        "SEARCH:\n    old();\n\n"
+        "REPLACE:\n    new();"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits[0]["search"] == "    old();"
+    assert edits[0]["replace"] == "    new();"
+
 def test_split_fix_analysis_edit_parses_multiple_search_replace_pairs():
     """Regression test for a real bug found live, 2026-08-07
     (ignite_qpid_person): despite the prompt saying "include only the lines

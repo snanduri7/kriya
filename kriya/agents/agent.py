@@ -610,6 +610,36 @@ class DeveloperAgent(BaseAgent):
         return (analysis or None), content
 
     @staticmethod
+    def _strip_marker_separator(text: str) -> str:
+        """Strips exactly the single separator between a "SEARCH:"/"REPLACE:"
+        marker and its content when both sit on the SAME line ("REPLACE:
+        <content>") instead of the content starting on the line after the
+        marker - deliberately not a blanket lstrip(), which would also eat
+        meaningful leading indentation on a block whose entire content is a
+        single indented line (e.g. "    new()"). Found live, 2026-08-17
+        (ignite_qpid_person, run b-10l): a model wrote
+        "REPLACE: <?xml version=\"1.0\"?>..." on one line instead of putting
+        the content on the line after the marker - slicing right after the
+        marker's own regex match leaves that one separator space attached,
+        and _split_fix_analysis_edit's existing `.strip("\\n")` never touches
+        it (it only strips "\\n" characters from the ends, not a space).
+        Confirmed as the exact cause of a live "XML or text declaration not
+        at start of entity: line 1, column 1" failure, recurring identically
+        across 2 consecutive retries since nothing anywhere caught or fixed
+        it. Checks for exactly one occurrence of the marker's own separator
+        (a single space, or a newline) at the very start, not a general
+        strip - a genuine multi-space indent immediately after the marker
+        (rare, but the same shape a real code block's own leading whitespace
+        would have) is deliberately left alone beyond that first character."""
+        if text.startswith(" "):
+            return text[1:]
+        if text.startswith("\r\n"):
+            return text[2:]
+        if text.startswith("\n"):
+            return text[1:]
+        return text
+
+    @staticmethod
     def _split_fix_analysis_edit(text: str) -> Tuple[Optional[str], Optional[List[Dict[str, str]]], Optional[str]]:
         """Splits a per-file retry completion into (fix_analysis, edits, full_content)
         when the model was asked to prefer a small, anchored SEARCH:/REPLACE: patch
@@ -699,10 +729,14 @@ class DeveloperAgent(BaseAgent):
             # specifically here, at the point the artifact is introduced, rather
             # than inside sanitize_generated_content below, which must also handle
             # plain full-file content where a genuine trailing newline is real,
-            # not an artifact.
-            search_block = text[end:r_start].strip("\n")
+            # not an artifact. _strip_marker_separator() handles the sibling
+            # artifact - the marker's own SPACE separator when content sits on
+            # the SAME line as "SEARCH:"/"REPLACE:" instead of the line after it
+            # - which .strip("\n") alone never touches (see that function's own
+            # docstring for the live incident this closes).
+            search_block = DeveloperAgent._strip_marker_separator(text[end:r_start]).strip("\n")
             replace_end_bound = markers[j + 1][1] if j + 1 < len(markers) else bound
-            replace_block = text[r_end:replace_end_bound].strip("\n")
+            replace_block = DeveloperAgent._strip_marker_separator(text[r_end:replace_end_bound]).strip("\n")
             # Both real, observed model habits this used to hand-patch here alone
             # (a redundant trailing FILE CONTENT: over-delivery, and this module's
             # own display gutter getting echoed back verbatim) are now handled by
