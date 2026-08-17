@@ -173,10 +173,15 @@ def _diagnosis_mismatch_bypass_reason(
        correct fix (3-6 wasted retries EACH, tonight), the evidence favors
        letting the compiler decide.
 
-    Every OTHER failure type (misdirected_edit, unaddressed_error_location,
-    run_verification, pom_semantic_validation, general_error, etc.) is left
-    exactly as-is - no evidence yet that this check misfires for them, and
-    this is deliberately not a blanket "disable the check" change.
+    Every OTHER failure type (misdirected_edit, run_verification,
+    pom_semantic_validation, general_error, etc.) is left exactly as-is - no
+    evidence yet that this check misfires for them, and this is deliberately
+    not a blanket "disable the check" change. (unaddressed_error_location -
+    find_edits_ignoring_reported_line, the "Layer 1" check just above this
+    one's call site - got its OWN, separately-scoped deterministic-
+    validation-first bypass the same night this docstring line was found to
+    be stale; see that check's own inline comment in run_attempt() for why it
+    didn't need this function's signature-based dispatch at all.)
 
     Returns a human-readable bypass reason (for logging/observability - the
     diagnosis text stays useful there, just never a blocking gate for these
@@ -769,45 +774,47 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # file - error_context is "" on a clean first attempt, where
             # extract_error_source_locations() would find nothing anyway, but
             # the explicit guard avoids the line-matching work entirely there.
+            #
+            # Deterministic-validation-first (same principle as
+            # _diagnosis_mismatch_bypass_reason, 2026-08-17): this check ONLY
+            # ever fires when extract_error_source_locations() found a real
+            # javac-style file:[line,col] locator for THIS file - i.e. it is
+            # compile-scoped by construction, every single time, not just
+            # sometimes (unlike diagnosis_mismatch, which fires for every
+            # failure type). A real compile gate runs immediately after this
+            # per-file write loop regardless, so it is always the cheaper,
+            # authoritative answer to "does this edit actually still leave
+            # the reported error in place" - no heuristic needed at all.
+            # Confirmed both ways live via the corpus survey's replay of the
+            # 2 DEBUG-capturable unaddressed_error_location occurrences
+            # (b-10f, b-10n): b-10f was a FALSE positive - a companion edit
+            # earlier in the same response fixed the bad import, which
+            # transitively resolves the reported line's "cannot find symbol"
+            # error too, but this check has no visibility into OTHER edits in
+            # the same response and flagged the untouched (but now-harmless)
+            # usage-site line anyway. b-10n was a genuine TRUE positive - the
+            # model's own analysis said it would add a missing import and
+            # never did - and bypassing here costs nothing there: the real
+            # compile gate catches the exact same missing-import error one
+            # step later, through the normal compile-failure retry path this
+            # loop already handles well. Given every occurrence of this
+            # check's own reported-line recurred identically across many
+            # historical runs (10x/9x/6x for single line numbers - the same
+            # small number of Ignite/Qpid goals hitting it over and over),
+            # the false-positive cost of hard-blocking here was likely the
+            # dominant driver of this failure category, not genuine misses.
             if state.error_context:
                 ignored_lines = find_edits_ignoring_reported_line(
                     orig_text, edits, filepath, state.error_context
                 )
                 if ignored_lines:
                     lines_desc = ", ".join(str(n) for n in sorted(ignored_lines))
-                    # Preserve the ORIGINAL error text (with its javac
-                    # file:[line,col] locator) inside the message, not just a
-                    # paraphrase - error_context becomes the NEXT attempt's
-                    # error_context via `error_context = raw_error_context`
-                    # below, and both extract_error_source_locations() (this
-                    # same check, on a possible next attempt) and
-                    # _build_error_source_context() (the source-snippet shown
-                    # in the prompt) depend on that locator still being present
-                    # verbatim - a paraphrase-only message would silently lose
-                    # source-line grounding from here on.
-                    failure = Failure(
-                        type="unaddressed_error_location",
-                        message=(
-                            f"UNADDRESSED ERROR LOCATION in {filepath}: your previous edit's "
-                            f"search block included line(s) {lines_desc} of the error below, but "
-                            f"left that exact line unchanged in its replace text - applying it "
-                            f"would leave the identical error in place. If your fix genuinely "
-                            f"doesn't require changing line(s) {lines_desc} itself (e.g. you fixed "
-                            f"a type declaration elsewhere instead), don't include it in your "
-                            f"search block at all; otherwise, you MUST change that exact line.\n\n"
-                            f"Original error:\n{state.error_context}"
-                        ),
-                        raw_output=f"search block ignored reported line(s) {lines_desc}",
-                        file_locations=[
-                            FileLocation(filepath=filepath, line=n) for n in sorted(ignored_lines)
-                        ],
-                        likely_files=[filepath],
-                        failed_content={filepath: orig_text},
-                        attempted_edits=edits,
-                        attempt=state.attempt_number,
+                    logger.info(
+                        f"UNADDRESSED ERROR LOCATION pre-flight check bypassed for {filepath} "
+                        f"(line(s) {lines_desc} of the reported error left unchanged): deferring "
+                        f"to the real compiler instead of this heuristic, which cannot see whether "
+                        f"a companion edit elsewhere in the same response already resolved it."
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
-                    raise QualityGateFailure(failure)
 
             # Structural corruption pre-flight check (see
             # find_structural_corruption's own docstring) - a cheap,

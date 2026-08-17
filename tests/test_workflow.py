@@ -8524,14 +8524,24 @@ def test_find_edits_ignoring_own_diagnosis_removal_signal_handles_full_content_s
 
 
 @pytest.mark.asyncio
-async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_path):
-    """End-to-end regression test for the same real live failure
-    (ignite_qpid_person, 2026-08-07): Layer 1 must reject an edit whose search
-    block spans a previously-reported compile-error line but leaves that line
-    unchanged in its replace text - BEFORE the (expensive) compile check ever
-    runs again, not after. Confirmed here by asserting PolymorphicValidator's
-    compile check is called exactly twice (attempt 1's real failure, and the
-    eventual real fix's success) - never for the rejected middle attempt."""
+async def test_workflow_unaddressed_error_location_defers_to_the_real_compiler(tmp_path):
+    """End-to-end regression test, UPDATED 2026-08-17 for the deterministic-
+    validation-first bypass (see _diagnosis_mismatch_bypass_reason's docstring
+    addendum and the inline comment at this check's call site in attempt.py):
+    Layer 1 (find_edits_ignoring_reported_line) no longer hard-rejects an edit
+    whose search block spans a previously-reported compile-error line but
+    leaves that exact line unchanged - it's a bypassed, logged-only signal
+    now, since a real compile gate always runs right after anyway and is the
+    authoritative answer (confirmed live: this exact check false-positived on
+    a companion edit elsewhere in the same response that already transitively
+    fixed the reported line, ignite_qpid_person run b-10f). So attempt 2's
+    no-op edit here now genuinely reaches the compiler, which correctly fails
+    it again (the real, unfixed type error) - one extra compile cycle instead
+    of a pre-flight rejection, same tradeoff already accepted for
+    diagnosis_mismatch's compile-triggered bypass. Confirmed via 3 compile
+    calls (attempt 1's real failure, attempt 2's real failure since the edit
+    genuinely never changed line 2, and attempt 3's real fix) and zero
+    unaddressed_error_location gate outcomes."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -8552,6 +8562,10 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
                 "success": False,
                 "output": "[ERROR] .../App.java:[2,20] incompatible types: java.lang.Object cannot be converted to java.lang.String",
             },
+            {
+                "success": False,
+                "output": "[ERROR] .../App.java:[2,20] incompatible types: java.lang.Object cannot be converted to java.lang.String",
+            },
             {"success": True, "output": ""},
         ]
         we.developer.run_generation = AsyncMock(
@@ -8560,6 +8574,7 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
                 [{"filepath": "App.java", "content": "class App {\n  String x = get();\n}"}],
                 # Attempt 2: search spans line 2 but replace leaves it byte-identical -
                 # the exact non-fix pattern found live (something else renamed instead).
+                # Now reaches the real compiler and fails there instead of pre-flight.
                 [{"filepath": "App.java", "edits": [{
                     "search": "class App {\n  String x = get();\n}",
                     "replace": "class App { // renamed for clarity\n  String x = get();\n}",
@@ -8571,7 +8586,7 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
         res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
 
     assert res["quality_gates_passed"] is True
-    assert mock_compile.call_count == 2  # attempt 2's rejection never reached compile
+    assert mock_compile.call_count == 3  # attempt 2's edit now genuinely reaches the compiler
 
     db_path = os.path.join(cfg.paths.logs, "traces.db")
     conn = sqlite3.connect(db_path)
@@ -8580,11 +8595,77 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
     conn.close()
     gate_outcomes = json.loads(row["gate_outcomes"])
 
-    unaddressed = [o for o in gate_outcomes if o.get("type") == "unaddressed_error_location"]
-    assert len(unaddressed) == 1, gate_outcomes
-    assert unaddressed[0]["likely_files"] == ["App.java"]
-    assert unaddressed[0]["file_locations"] == [{"filepath": "App.java", "line": 2, "col": None}]
-    assert unaddressed[0]["success"] is False
+    assert not any(o.get("type") == "unaddressed_error_location" for o in gate_outcomes), gate_outcomes
+    failed_compile_outcomes = [
+        o for o in gate_outcomes if o.get("type") == "compile" and o.get("success") is False
+    ]
+    assert len(failed_compile_outcomes) == 2
+
+
+@pytest.mark.asyncio
+async def test_workflow_unaddressed_error_location_bypass_lets_a_companion_edit_through(tmp_path):
+    """Regression test for the real live false positive that motivated the
+    bypass above (ignite_qpid_person, run b-10f, replayed via the corpus
+    survey's DEBUG-capture, 2026-08-17): a targeted retry's FIRST edit fixes
+    the actual root cause (a bad import), which transitively resolves every
+    usage site the compiler flagged - but the SAME response's second edit is
+    a harmless no-op that just echoes one of those now-fixed usage sites back
+    unchanged. Layer 1 used to see only the second edit in isolation and hard-
+    reject it as "line left unchanged", even though the file it actually
+    produces compiles fine. Confirms the fix: this now reaches the real
+    compiler, which is the only thing that ever needed to make this call, and
+    passes on the first try - no wasted extra compile cycle, unlike the
+    genuine-non-fix case above."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {
+                "success": False,
+                "output": "[ERROR] .../App.java:[3,5] cannot find symbol: class Cache",
+            },
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                # Attempt 1: full content, fails compile - bad import for Cache.
+                [{
+                    "filepath": "App.java",
+                    "content": "import bad.pkg.Cache;\nclass App {\n  Cache c = get();\n}",
+                }],
+                # Attempt 2: edit #1 fixes the ACTUAL root cause (the import) -
+                # edit #2 is a harmless no-op echo of the now-transitively-fixed
+                # usage site the compiler also named at line 2.
+                [{"filepath": "App.java", "edits": [
+                    {"search": "import bad.pkg.Cache;", "replace": "import good.pkg.Cache;"},
+                    {"search": "  Cache c = get();", "replace": "  Cache c = get();"},
+                ]}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert mock_compile.call_count == 2  # no wasted third compile - the fix genuinely worked first try
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    assert not any(o.get("type") == "unaddressed_error_location" for o in gate_outcomes), gate_outcomes
 
 
 def test_estimate_tokens_no_longer_undercounts_punctuation_heavy_identifiers():
