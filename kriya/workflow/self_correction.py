@@ -19,7 +19,7 @@ attempt.py), so it costs nothing when disabled."""
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from kriya.core.llm import LLMClient
 from kriya.tools.validate import PolymorphicValidator
@@ -185,13 +185,18 @@ def _dispatch_tool_call(
     files_in_scope: List[str],
     active_code_context: str,
     modified_files: Dict[str, str],
+    read_files: Set[str],
 ) -> str:
     """Executes one tool call and returns the string fed back to the model as
     the tool result. Every branch is small-argument-in, small-string-out -
     read_file/apply_patch never return/accept more than one file's worth of
     content, and every filepath is checked against files_in_scope/
     modified_files (a strict allowlist, not a sanitized arbitrary path) before
-    touching disk."""
+    touching disk.
+
+    read_files (mutated in place, owned by the caller's per-loop scope) tracks
+    which files this conversation has genuinely seen the real content of via
+    read_file - see apply_patch's own use of it below for why this exists."""
     name = call["name"]
     args = call["arguments"] if isinstance(call["arguments"], dict) else {}
     known_files = set(files_in_scope) | set(modified_files.keys())
@@ -200,6 +205,7 @@ def _dispatch_tool_call(
         filepath = args.get("filepath")
         if not filepath or filepath not in known_files:
             return f"ERROR: '{filepath}' is not a file in this attempt's sandbox. Known files: {sorted(known_files)}"
+        read_files.add(filepath)
         if filepath in modified_files:
             return modified_files[filepath]
         full_path = os.path.join(worktree_path, filepath)
@@ -230,8 +236,35 @@ def _dispatch_tool_call(
             with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
                 orig_text = fh.read()
 
+        # Found live, 2026-08-17 (ignite_qpid_person, run b-10m): apply_patch's
+        # OWN edit-application already re-reads the real, current, full file
+        # content as orig_text (from disk or modified_files, identical to
+        # what read_file just returned) - fully grounded. But it then passed
+        # `active_code_context` (a snapshot fixed at the START of this
+        # conversation, possibly skeletonized for token budget, never updated
+        # as read_file gets called mid-loop) as apply_anchored_edits'
+        # shown_context check, which independently re-validates the search
+        # block against THAT stale snapshot. A model that called read_file,
+        # was shown the real current content, and copied its search block
+        # exactly from what it just read could still get rejected with
+        # "elided in the skeletonized context and not shown to the model" -
+        # false, it WAS shown, just through a different, more current channel
+        # than the one this check was comparing against. Confirmed live: the
+        # self-correction model read PersonDemoApp.java, correctly diagnosed
+        # the cast issue, and proposed an exact, grounded fix that got
+        # rejected by this stale-context check before ever reaching
+        # recompile. Once a file has been read (or already modified) THIS
+        # conversation, its own real content is strictly more current and
+        # trustworthy evidence than the original prompt-time snapshot, so the
+        # skeletonized-context check is skipped entirely for it - the strict
+        # exact/unique anchor-matching against the REAL current content
+        # (below) still fully protects against a stale or ambiguous edit.
+        # For a file NEVER read or modified this conversation, the original
+        # check stays exactly as-is - a model guessing at unseen content is
+        # still exactly the failure mode this check exists to catch.
+        effective_shown_context = "" if (filepath in read_files or filepath in modified_files) else active_code_context
         try:
-            new_content = apply_anchored_edits(orig_text, edits, active_code_context)
+            new_content = apply_anchored_edits(orig_text, edits, effective_shown_context)
         except ValueError as anchor_ex:
             # Fed back to the model as this tool call's result, NOT raised - the
             # whole point of this loop is letting the model retry within its
@@ -272,6 +305,7 @@ async def run_self_correction_loop(
     loop had never run, falling through to the existing QualityGateFailure
     path."""
     modified_files: Dict[str, str] = {}
+    read_files: Set[str] = set()
     transcript: List[Dict[str, Any]] = []
     last_compile_output = compile_error_output
 
@@ -354,7 +388,7 @@ async def run_self_correction_loop(
 
         for call in tool_calls:
             tool_result_text = _dispatch_tool_call(
-                call, worktree_path, validator, files_in_scope, active_code_context, modified_files,
+                call, worktree_path, validator, files_in_scope, active_code_context, modified_files, read_files,
             )
             transcript.append(
                 {"turn": turn, "tool": call["name"], "arguments": call["arguments"], "result": tool_result_text}

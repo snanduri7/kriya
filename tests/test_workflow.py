@@ -8351,6 +8351,76 @@ def test_find_edits_ignoring_own_diagnosis_file_path_exclusion_still_flags_a_tru
     ) is not None
 
 
+def test_find_edits_ignoring_own_diagnosis_recognizes_a_bare_line_print_wrap_within_a_larger_block():
+    """Regression test for a fifth, distinct false-positive bug found live,
+    2026-08-17 (ignite_qpid_person, run b-10m). Signal (b) (the existing wrap
+    detector) requires the quoted span to equal the ENTIRE search block
+    (q == search.strip()) - true for a small, isolated wrap edit, but not
+    when the search block also needs surrounding context (the enclosing
+    if/else) to match uniquely elsewhere in the file. Real analysis text and
+    edit from the incident, reproduced verbatim - Kriya's own
+    BareVerificationMarkerCheck correctly flagged a bare, unwrapped
+    `[VERIFICATION] PASS` line as invalid Java, the model's repair correctly
+    wrapped it in System.out.println(...), and this genuinely correct fix
+    was wrongly rejected 3 times across 2 consecutive runs, directly causing
+    a 2400s timeout."""
+    analysis = (
+        "The file contains a stray `[VERIFICATION] PASS` text literal injected directly "
+        "into the Java source code on line 69, which breaks the Java syntax parser and "
+        "causes the compiler to fail with \"Expression expected after this token\". I will "
+        "remove the invalid text and replace it with proper "
+        "`System.out.println(\"[VERIFICATION] ...\")` calls inside the conditional branches "
+        "to satisfy the verification contract."
+    )
+    edits = [{
+        "search": (
+            "                        // Read from cache and print fields\n"
+            "                        Person cachedPerson = (Person) cache.get(1);\n"
+            "\n"
+            "[VERIFICATION] PASS\n"
+            "                        if (cachedPerson != null) {\n"
+            "                            System.out.println(\"Retrieved Person from cache: \" + cachedPerson);\n"
+            "                        } else {\n"
+            "                            System.out.println(\"No Person found in cache\");\n"
+            "                        }"
+        ),
+        "replace": (
+            "                        // Read from cache and print fields\n"
+            "                        Person cachedPerson = (Person) cache.get(1);\n"
+            "\n"
+            "                        if (cachedPerson != null) {\n"
+            "                            System.out.println(\"Retrieved Person from cache: \" + cachedPerson);\n"
+            "                            System.out.println(\"[VERIFICATION] PASS\");\n"
+            "                        } else {\n"
+            "                            System.out.println(\"No Person found in cache\");\n"
+            "                            System.out.println(\"[VERIFICATION] FAIL: No Person found in cache\");\n"
+            "                        }"
+        ),
+    }]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_bare_line_wrap_signal_still_flags_unrelated_nearby_change():
+    # Same shape as the existing wrap-shape negative test, but multi-line:
+    # the marker stays bare and UNCHANGED on its own line while an unrelated
+    # nearby line changes - must still be flagged, not waved through just
+    # because the marker happens to sit in a multi-line search block.
+    analysis = "wrap the bare marker `[VERIFICATION] PASS` in a print() call."
+    edits = [{"search": "[VERIFICATION] PASS\nx = 1", "replace": "[VERIFICATION] PASS\nx = 2"}]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is not None
+
+
+def test_find_edits_ignoring_own_diagnosis_bare_line_wrap_signal_still_flags_trailing_comment_without_print():
+    # Companion negative case for the new signal specifically: a bare marker
+    # line gaining an unrelated trailing comment (no print/println/puts call
+    # anywhere) must still be flagged - this is the exact regression shape
+    # signal (b)'s own narrow `q == search.strip()` scoping was built to
+    # avoid, now re-verified against the new, broader-context signal too.
+    analysis = "The problem is that `[VERIFICATION] PASS` is never logged."
+    edits = [{"search": "x = 1\n[VERIFICATION] PASS", "replace": "x = 1\n[VERIFICATION] PASS // TODO"}]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is not None
+
+
 def test_find_edits_ignoring_own_diagnosis_removal_signal_takes_priority_over_addition():
     # The addition-check alone would pass this (the fix content genuinely is
     # new), but the removal-check must still catch it - the two signals are
