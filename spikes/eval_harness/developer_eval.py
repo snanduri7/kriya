@@ -65,14 +65,16 @@ HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def _init_git_repo(path: Path) -> None:
     # See run_harness.py's own _init_git_repo docstring for the full incident
-    # this closes - MUST no-op entirely once a repo already exists here:
-    # re-running git add -A + commit against a workspace a prior successful
-    # run already generated an app into swept that leftover code into a new
-    # "initial" commit, which then becomes what create_git_worktree resets
-    # the reused worktree to - a resumed run silently starting from the
-    # PREVIOUS run's generated code instead of a clean slate, not just the
-    # embedded-.kriya/worktree warning this used to only address.
+    # this closes - a resumed run must never re-run git add -A + commit, AND
+    # must actively discard any leftover untracked content from a prior run
+    # (git clean -fd, respecting .gitignore so .kriya/ is untouched) - Kriya's
+    # own _sync_uncommitted_changes_into_worktree copies any untracked file
+    # into a fresh worktree regardless of git history, so simply no-op'ing
+    # here was NOT enough to stop a prior run's leftover generated code from
+    # leaking into the next one.
     if (path / ".git").exists():
+        subprocess.run(["git", "checkout", "-f", "HEAD"], cwd=path, check=True)
+        subprocess.run(["git", "clean", "-fd"], cwd=path, check=True)
         return
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "eval-harness@kriya.local"], cwd=path, check=True)

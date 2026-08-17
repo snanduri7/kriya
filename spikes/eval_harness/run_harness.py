@@ -80,33 +80,36 @@ HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
 def _init_git_repo(path):
     # Called unconditionally on every invocation, including a --batch-dir
     # resume of an already-populated goal directory - not just a fresh one.
-    # MUST no-op entirely once a repo already exists here - a real, more
-    # serious bug than the embedded-repo warning this comment used to
-    # describe (that half is still true and still worth knowing, kept
-    # below): re-running `git add -A` + commit against a goal directory a
-    # PRIOR successful run already wrote a generated app into swept that
-    # leftover application code (source files, and for a Java goal even
-    # compiled target/*.class bytecode) into a brand new "initial" commit,
-    # which then becomes what create_git_worktree's worktree-reset logic
-    # (kriya/workflow/worktree.py) checks the reused worktree out to -
-    # so a "fresh" resumed run silently starts from the PREVIOUS run's
-    # generated code, not a clean slate. Confirmed live (2026-08-17,
-    # b-10p): ignite_qpid_person's second run's baseline commit contained
-    # its own compiled .class files and Maven metadata from the first run;
-    # django_healthcheck_gap's second run generated a different directory
-    # layout (myapp/-prefixed) than its first run's root-level files, and
-    # the two conflicting layouts coexisting on disk produced a cascade of
-    # confusing failures (MISDIRECTED EDIT, a stray bare verification
-    # marker in old leftover files, a Django ModuleNotFoundError) that had
-    # nothing to do with the current model's actual output. The ORIGINAL
-    # embedded-repo bug (a --batch-dir resume's `git add -A` picking up
-    # .kriya/worktree - a real git worktree with its own .git file - as an
-    # embedded repository, which git warns or, on some versions, hard-fails
-    # exit 128 on) had been silently PREVENTING this deeper bug from
-    # manifesting in most runs by crashing/warning before the harness ever
-    # got this far - fixing only that symptom (an earlier, incomplete pass
-    # at this function) let the harness proceed further and hit this one.
+    # A repo that already exists must never run `git add -A` + commit again
+    # (see git history for the incident that closed: re-committing a prior
+    # successful run's leftover generated app - for a Java goal even
+    # compiled target/*.class bytecode - into a new "initial" baseline,
+    # which then became what create_git_worktree resets the reused worktree
+    # to). Returning immediately once that was fixed stopped THAT leak, but
+    # not a second, independent one through a different mechanism: Kriya's
+    # own _sync_uncommitted_changes_into_worktree (kriya/workflow/
+    # worktree.py) deliberately copies any UNTRACKED file from the real
+    # workspace into a freshly-reset worktree, regardless of git history -
+    # correct and necessary for its real production use case (a real
+    # developer's actual in-progress uncommitted work must not vanish), but
+    # here it meant the previous run's leftover, never-committed app files
+    # (urls.py, views.py, ...) still leaked into the "fresh" worktree on
+    # every resumed run - confirmed live via a direct create_git_worktree()
+    # call reproducing the exact django_healthcheck_gap incident (a stale
+    # urls.py from run 1 present, unmodified, inside run 2's worktree).
+    #
+    # The harness's own semantics make the fix simple and safe here in a
+    # way it would NOT be inside Kriya itself: each --batch-dir invocation
+    # of a goal is meant to be an independent trial for benchmarking, never
+    # an incremental continuation of a prior attempt - so, unlike Kriya's
+    # real-world sync (which must preserve arbitrary uncommitted work),
+    # this can safely discard everything untracked and start over. `git
+    # clean -fd` (no `-x`) respects .gitignore by default, so .kriya/ -
+    # gitignored above - is left completely untouched; only leftover
+    # generated-app content actually gets removed.
     if (path / ".git").exists():
+        subprocess.run(["git", "checkout", "-f", "HEAD"], cwd=path, check=True)
+        subprocess.run(["git", "clean", "-fd"], cwd=path, check=True)
         return
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "eval-harness@kriya.local"], cwd=path, check=True)
