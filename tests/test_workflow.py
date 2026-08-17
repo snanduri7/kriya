@@ -3278,6 +3278,74 @@ async def test_run_attempt_static_check_scopes_likely_files_not_every_written_fi
     assert state.gate_outcomes[-1]["likely_files"] == ["ProtocolApp.java"]
 
 @pytest.mark.asyncio
+async def test_run_attempt_diagnosis_mismatch_bypassed_when_static_check_genuinely_resolved(tmp_path):
+    """End-to-end regression test for the deterministic-validation-first
+    bypass added 2026-08-17 (kriya/workflow/attempt.py's
+    _diagnosis_mismatch_bypass_reason), for its static_rule_violation half -
+    the sibling test for the compile-triggered half is
+    test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file above.
+
+    Uses IgniteUnclosedResourceCheck (not BareVerificationMarkerCheck) to
+    prove this is a genuinely GENERAL bypass, not just a re-implementation
+    of find_edits_ignoring_own_diagnosis's own signal (e) - which is scoped
+    specifically to the print-wrap shape and would not itself accept this
+    edit. The analysis deliberately quotes only the bare filename
+    (`ProtocolApp.java`, no `/` - not excluded by the self-referential-path
+    signal either, since that's scoped to actual paths) - a genuine
+    mismatch under every existing signal, satisfying none of them - so the
+    only thing that can accept this edit is the new bypass re-running
+    IgniteUnclosedResourceCheck directly against the proposed content and
+    finding the violation genuinely gone."""
+    state = GenerationState()
+    # Simulates attempt 1 having already happened: the file is on disk with
+    # the real violation, already tracked as written, and the retry loop's
+    # own budget bookkeeping already knows this retry responds to a
+    # static_rule_violation - exactly the state a real attempt 2 would be in.
+    unclosed_content = (
+        'public class ProtocolApp {\n'
+        '    public static void main(String[] args) throws Exception {\n'
+        '        Ignite ignite = Ignition.start();\n'
+        '        ignite.getOrCreateCache("x");\n'
+        '    }\n'
+        '}\n'
+    )
+    with open(os.path.join(str(tmp_path), "ProtocolApp.java"), "w", encoding="utf-8") as fh:
+        fh.write(unclosed_content)
+    state.all_files_written = {"ProtocolApp.java"}
+    state.budgets.last_failure_signature = ("static_rule_violation", ("ignite_unclosed_resource",))
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "ProtocolApp.java", "content": None,
+        "edits": [{
+            "search": '        Ignite ignite = Ignition.start();\n        ignite.getOrCreateCache("x");',
+            "replace": (
+                '        Ignite ignite = Ignition.start();\n'
+                '        try {\n'
+                '            ignite.getOrCreateCache("x");\n'
+                '        } finally {\n'
+                '            ignite.close();\n'
+                '        }'
+            ),
+        }],
+        "analysis": "The `ProtocolApp.java` resource leak needs explicit cleanup.",
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["ProtocolApp.java"],
+        expected_files_upfront=["ProtocolApp.java"],
+        architect_basename_to_path={"ProtocolApp.java": "ProtocolApp.java"},
+    )
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}):
+        await run_attempt(state, ctx)  # must NOT raise QualityGateFailure
+
+    with open(os.path.join(str(tmp_path), "ProtocolApp.java"), encoding="utf-8") as fh:
+        written = fh.read()
+    assert ".close()" in written
+    assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
+
+@pytest.mark.asyncio
 async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
     """Mirror of the failure-path test above: a clean compile with no tests
     and Runtime Verification disabled returns normally (no exception), having
@@ -9707,9 +9775,21 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
     motivated by a real divergence found live in spikes/eval_harness/runs/
     attribution-fix-validation-3): a targeted retry's own FIX ANALYSIS
     correctly named a specific fix, but the returned edit never actually made
-    that change - caught as a pre-flight failure BEFORE the expensive compile
-    gate ever runs a second time for the wrong reason, and correctly scoped
-    back to the same file for the next retry."""
+    that change.
+
+    UPDATED 2026-08-17: a compile-triggered diagnosis-mismatch is now
+    deliberately BYPASSED (see attempt.py's _diagnosis_mismatch_bypass_reason)
+    rather than rejected pre-flight - found live that this specific check
+    produced 3 confirmed false positives in one night, each wrongly rejecting
+    an edit that would have compiled correctly, while this check's own
+    original motivating incident (reproduced here) costs at most one extra,
+    otherwise-identical compile failure if the check is bypassed instead of
+    firing - the SAME repeated-failure signal the retry loop already tracks
+    independently. The no-op edit below now proceeds all the way to the real
+    compiler, fails there (for the same underlying reason, not a heuristic
+    guess), and the next targeted retry is still correctly scoped back to
+    A.java - via the real compiler's own locator this time, not the
+    diagnosis-mismatch pre-flight check."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
@@ -9728,29 +9808,33 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
         [{"filepath": "A.java", "content": "class A {\n  var cache = get();\n}"}],
         # Attempt 2 (targeted retry) - analysis names a specific fix, but the
         # edit doesn't actually make it (reproduces the real captured
-        # validation-3 divergence).
+        # validation-3 divergence). No longer caught pre-flight - proceeds to
+        # the real compiler, which fails again for the same reason.
         [{
             "filepath": "A.java", "content": None,
             "edits": [{"search": "var cache = get();", "replace": "var cache = get(); // still untyped"}],
             "analysis": "the fix requires declaring `IgniteCache<Integer, Protocol>` explicitly instead of `var`.",
         }],
         # Attempt 3 (targeted retry again, redirected back to A.java by the
-        # diagnosis_mismatch failure) - this time the fix is actually made.
+        # REAL compiler's own locator on attempt 2's failure) - this time the
+        # fix is actually made.
         [{"filepath": "A.java", "content": "class A {\n  IgniteCache<Integer, Protocol> cache = get();\n}"}],
     ])
 
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
         mock_compile.side_effect = [
             {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},
-            # No second entry for attempt 2 - it never reaches the compile
-            # gate at all, caught by the pre-flight check first.
+            # Attempt 2 now genuinely reaches the compile gate (the pre-flight
+            # check is bypassed for a compile-triggered retry) and fails for
+            # the same underlying reason, since the edit never actually fixed it.
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},
             {"success": True, "output": ""},
         ]
         res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
 
     assert res["quality_gates_passed"] is True
     assert we.developer.run_generation.call_count == 3
-    assert mock_compile.call_count == 2  # confirms attempt 2 never reached the compile gate
+    assert mock_compile.call_count == 3  # confirms attempt 2 DID reach the real compile gate
     third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
     assert third_call_kwargs["known_target_files"] == ["A.java"]
 
@@ -9760,9 +9844,12 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
     conn.close()
     gate_outcomes = json.loads(row["gate_outcomes"])
-    mismatch_outcome = next(g for g in gate_outcomes if g["type"] == "diagnosis_mismatch")
-    assert mismatch_outcome["likely_files"] == ["A.java"]
-    assert "IgniteCache<Integer, Protocol>" in mismatch_outcome["output"]
+    # No diagnosis_mismatch outcome anymore - both attempt-1 and attempt-2
+    # failures are genuine "compile" gate outcomes now (a third, successful
+    # "compile" outcome also exists for attempt 3 - not a failure).
+    assert not any(g["type"] == "diagnosis_mismatch" for g in gate_outcomes)
+    failed_compile_outcomes = [g for g in gate_outcomes if g["type"] == "compile" and g.get("success") is False]
+    assert len(failed_compile_outcomes) == 2
 
 
 # =====================================================================

@@ -123,6 +123,81 @@ def _extract_grounded_contract_verdict(
     return verdict
 
 
+def _diagnosis_mismatch_bypass_reason(
+    state: GenerationState, ctx: "AttemptContext", filepath: str, candidate_content: str,
+) -> Optional[str]:
+    """Deterministic-validation-first override for the diagnosis-mismatch
+    pre-flight check (find_edits_ignoring_own_diagnosis, kriya/workflow/
+    attribution.py) - added 2026-08-17 after 5 independent false-positive
+    prose shapes were found in that one check across a single night (cast-
+    insertion, "instead of" ambiguity, self-referential filepath,
+    verification-marker wrap, plus the original 2026-08-13 incident that
+    motivated the check at all). Five bespoke signals in one function is a
+    symptom of an unbounded problem, not a finite list of missing cases -
+    verifying analysis PROSE against diff CONTENT via backtick-quote
+    matching fights an inherently fuzzy correspondence that a new model
+    response shape can always break differently. Rather than adding a 6th/
+    7th/Nth signal for the next prose shape, this asks the real underlying
+    question directly, two different ways depending on what's cheaply
+    available:
+
+    1. If this retry is responding to a static_rule_violation (a CHEAP,
+       already-registered deterministic checker - kriya/workflow/
+       static_checks.py), just re-run that SAME check against the proposed
+       content. If the specific violation it originally flagged is gone,
+       that's authoritative - no prose-matching needed at all. Confirmed
+       live, 2026-08-17 (ignite_qpid_person, run b-10m): a correct fix
+       wrapping a bare `[VERIFICATION] PASS` line in println(...) was
+       rejected 3 times because the marker text was a substring of a
+       larger search block, not signal (b)'s required whole-block match -
+       re-running BareVerificationMarkerCheck against the candidate would
+       have accepted it on the first try, with zero new signal needed.
+    2. If this retry is responding to a `compile` failure, there is no
+       equally-cheap re-check available - the only authoritative answer is
+       the real compiler, which runs immediately after this check anyway.
+       Rather than keep guessing from prose, this check is bypassed
+       entirely for compile-triggered retries and the real compile gate
+       decides. This is an evidence-backed tradeoff, not a guess: 3 of the
+       5 confirmed false positives above (cast-insertion, "instead of",
+       self-referential filepath) were ALL compile-triggered, each
+       rejecting an edit that would have compiled successfully; by
+       contrast, this check's own ORIGINAL motivating incident (a compile
+       error recurring verbatim across 3 retries because an edit never
+       implemented its own analysis, at ANY line -
+       attribution-fix-validation-3, 2026-08-13) would cost at most one
+       extra wasted compile cycle if this check were entirely absent - the
+       SAME repeated-failure signal this retry loop already detects and
+       escalates from independently (state.budgets.last_failure_signature),
+       with no dependency on prose-matching at all. Given real compile
+       subprocess cost against the confirmed cost of wrongly rejecting a
+       correct fix (3-6 wasted retries EACH, tonight), the evidence favors
+       letting the compiler decide.
+
+    Every OTHER failure type (misdirected_edit, unaddressed_error_location,
+    run_verification, pom_semantic_validation, general_error, etc.) is left
+    exactly as-is - no evidence yet that this check misfires for them, and
+    this is deliberately not a blanket "disable the check" change.
+
+    Returns a human-readable bypass reason (for logging/observability - the
+    diagnosis text stays useful there, just never a blocking gate for these
+    two cases) if the check should be skipped for this edit; None if the
+    existing diagnosis-mismatch check should run and decide as before."""
+    sig = state.budgets.last_failure_signature
+    if not sig:
+        return None
+    fail_type = sig[0]
+    if fail_type == "compile":
+        return "this retry responds to a compile failure - deferring to the real compiler instead of prose-matching"
+    if fail_type == "static_rule_violation":
+        from kriya.workflow.static_checks import run_static_checks
+        still_violates = run_static_checks(
+            ctx.worktree_path, state.all_files_written, overrides={filepath: candidate_content},
+        )
+        if not still_violates:
+            return "the static check that originally flagged this file no longer flags the proposed content"
+    return None
+
+
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """Runs one Developer + Quality Gates attempt. Mutates state in place
     (files_written, gate_outcomes, model_hops, run_verification_*, etc.).
@@ -773,22 +848,28 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # across 3 targeted retries despite a textbook-correct analysis every time.
             diagnosis_mismatch = find_edits_ignoring_own_diagnosis(analysis, edits, None, orig_text)
             if diagnosis_mismatch:
-                failure = Failure(
-                    type="diagnosis_mismatch",
-                    message=(
-                        f"DIAGNOSIS MISMATCH in {filepath}: {diagnosis_mismatch}. "
-                        f"Make the exact change your own analysis described - not a "
-                        f"different or partial change."
-                    ),
-                    raw_output=diagnosis_mismatch,
-                    file_locations=[FileLocation(filepath=filepath)],
-                    likely_files=[filepath],
-                    failed_content={filepath: orig_text},
-                    attempted_edits=edits,
-                    attempt=state.attempt_number,
-                )
-                state.gate_outcomes.append(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
+                bypass_reason = _diagnosis_mismatch_bypass_reason(state, ctx, filepath, new_content)
+                if bypass_reason:
+                    logger.info(
+                        f"DIAGNOSIS MISMATCH pre-flight check bypassed for {filepath}: {bypass_reason}."
+                    )
+                else:
+                    failure = Failure(
+                        type="diagnosis_mismatch",
+                        message=(
+                            f"DIAGNOSIS MISMATCH in {filepath}: {diagnosis_mismatch}. "
+                            f"Make the exact change your own analysis described - not a "
+                            f"different or partial change."
+                        ),
+                        raw_output=diagnosis_mismatch,
+                        file_locations=[FileLocation(filepath=filepath)],
+                        likely_files=[filepath],
+                        failed_content={filepath: orig_text},
+                        attempted_edits=edits,
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
 
             atomic_write_file(full_path, new_content)
         else:
@@ -823,21 +904,27 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         prior_content = fh.read()
                 diagnosis_mismatch = find_edits_ignoring_own_diagnosis(analysis, None, content, prior_content)
                 if diagnosis_mismatch:
-                    failure = Failure(
-                        type="diagnosis_mismatch",
-                        message=(
-                            f"DIAGNOSIS MISMATCH in {filepath}: {diagnosis_mismatch}. "
-                            f"Make the exact change your own analysis described - not a "
-                            f"different or partial change."
-                        ),
-                        raw_output=diagnosis_mismatch,
-                        file_locations=[FileLocation(filepath=filepath)],
-                        likely_files=[filepath],
-                        failed_content={filepath: prior_content},
-                        attempt=state.attempt_number,
-                    )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
-                    raise QualityGateFailure(failure)
+                    bypass_reason = _diagnosis_mismatch_bypass_reason(state, ctx, filepath, content)
+                    if bypass_reason:
+                        logger.info(
+                            f"DIAGNOSIS MISMATCH pre-flight check bypassed for {filepath}: {bypass_reason}."
+                        )
+                    else:
+                        failure = Failure(
+                            type="diagnosis_mismatch",
+                            message=(
+                                f"DIAGNOSIS MISMATCH in {filepath}: {diagnosis_mismatch}. "
+                                f"Make the exact change your own analysis described - not a "
+                                f"different or partial change."
+                            ),
+                            raw_output=diagnosis_mismatch,
+                            file_locations=[FileLocation(filepath=filepath)],
+                            likely_files=[filepath],
+                            failed_content={filepath: prior_content},
+                            attempt=state.attempt_number,
+                        )
+                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        raise QualityGateFailure(failure)
 
             atomic_write_file(full_path, content)
 
