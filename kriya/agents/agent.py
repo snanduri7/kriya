@@ -1728,10 +1728,32 @@ class RunVerifierAgent(BaseAgent):
             f"=== Goal ===\n{goal}\n\n"
             "Decide whether this goal warrants runtime verification, per the rules above."
         )
-        response_str = await call_with_escalation(
-            self.llm, self.system_prompt, prompt, self._candidates(),
-            json_mode=True, is_failure=_is_unparseable_json,
-        )
+        # Found live, 2026-08-17, auditing for the same class of bug as the
+        # self-correction fix (docs/design.md §7.25): call_with_escalation()
+        # explicitly re-raises on total exhaustion (its own docstring:
+        # "so a role with an empty/unset chain behaves exactly as if
+        # escalation didn't exist at all"), and this function's own
+        # try/except only ever wrapped the SUBSEQUENT json.loads() call, not
+        # this one - an HTTP 500 or connection error here would propagate
+        # all the way up through attempt.py's unguarded call site, through
+        # workflow.py's outer `except Exception as e:`, and get treated as
+        # an authoritative Quality Gate failure - identical mechanism to the
+        # self-correction bug, just one call later in the pipeline, and
+        # worse here: this specific gate only ever runs AFTER compile and
+        # tests have already genuinely passed, so a transient failure of
+        # this OPTIONAL judgment call could fail an otherwise-correct run
+        # outright. Degrades to the exact same safe fallback the
+        # unparseable-JSON path already uses below - a glitchy call and a
+        # garbled response are the same "couldn't get a usable judgment"
+        # case from this function's own perspective.
+        try:
+            response_str = await call_with_escalation(
+                self.llm, self.system_prompt, prompt, self._candidates(),
+                json_mode=True, is_failure=_is_unparseable_json,
+            )
+        except Exception as e:
+            logger.warning(f"Run Verifier judge() call failed entirely, skipping run verification: {e}")
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": ""}
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
@@ -1829,10 +1851,17 @@ class RunVerifierAgent(BaseAgent):
             f"{timeout_note}\n\n"
             "Did this run actually succeed per the criteria above?"
         )
-        response_str = await call_with_escalation(
-            self.llm, grader_system_prompt, prompt, self._candidates(),
-            json_mode=True, is_failure=_is_unparseable_json,
-        )
+        # See judge()'s own comment above for the full incident this guards
+        # against (identical shape, same audit pass, same fallback-on-
+        # exception discipline).
+        try:
+            response_str = await call_with_escalation(
+                self.llm, grader_system_prompt, prompt, self._candidates(),
+                json_mode=True, is_failure=_is_unparseable_json,
+            )
+        except Exception as e:
+            logger.warning(f"Run Verifier grade() call failed entirely, treating as failure: {e}")
+            return {"passed": False, "reasoning": f"Grader call failed: {e}", "likely_files": []}
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
@@ -1909,10 +1938,16 @@ class SkillGapAgent(BaseAgent):
             f"=== What's Missing ===\n{gap_description}\n\n"
             "Extract rules/examples per the instructions above."
         )
-        response_str = await call_with_escalation(
-            self.llm, self.system_prompt, prompt, self._candidates(),
-            json_mode=True, is_failure=_is_unparseable_json,
-        )
+        # Same audit pass as judge()/grade() above - see judge()'s own
+        # comment for the full incident this guards against.
+        try:
+            response_str = await call_with_escalation(
+                self.llm, self.system_prompt, prompt, self._candidates(),
+                json_mode=True, is_failure=_is_unparseable_json,
+            )
+        except Exception as e:
+            logger.warning(f"Skill Gap Agent call failed entirely: {e}")
+            return {"rules": [], "examples": {}, "conflicts": []}
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
@@ -2043,10 +2078,16 @@ class SkillGapAgent(BaseAgent):
             f"=== Skill B: {skill_b_name} ===\n{numbered_b}\n\n"
             "Identify any genuine contradictions per the instructions above."
         )
-        response_str = await call_with_escalation(
-            self.llm, system_prompt, prompt, self._candidates(),
-            json_mode=True, is_failure=_is_unparseable_json,
-        )
+        # Same audit pass as judge()/grade() above - see judge()'s own
+        # comment for the full incident this guards against.
+        try:
+            response_str = await call_with_escalation(
+                self.llm, system_prompt, prompt, self._candidates(),
+                json_mode=True, is_failure=_is_unparseable_json,
+            )
+        except Exception as e:
+            logger.warning(f"Skill Conflict Checker call failed entirely: {e}")
+            return []
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:

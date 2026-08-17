@@ -2017,6 +2017,26 @@ async def test_run_verifier_judge_unparseable_response_defaults_to_no_run():
     assert judgment["run_commands"] is None
 
 @pytest.mark.asyncio
+async def test_run_verifier_judge_call_failure_defaults_to_no_run():
+    """Regression test for a bug found live 2026-08-17, auditing for the
+    same class as the self-correction fix (docs/design.md §7.25):
+    call_with_escalation() explicitly re-raises on total exhaustion, and
+    judge()'s own try/except only ever wrapped the SUBSEQUENT json.loads()
+    call, not this one - an HTTP 500 or connection error would propagate
+    all the way up through attempt.py's unguarded call site and get treated
+    as an authoritative Quality Gate failure, even though this gate only
+    ever runs after compile/tests have already genuinely passed."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=RuntimeError("Error code: 500 - simulated Ollama HTTP 500"))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["should_run"] is False
+    assert judgment["run_commands"] is None
+
+@pytest.mark.asyncio
 async def test_run_verifier_grade_passed():
     cfg = AppConfig()
     llm = LLMClient(cfg)
@@ -2093,6 +2113,22 @@ async def test_run_verifier_grade_unparseable_response_defaults_to_failure():
     cfg = AppConfig()
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="not json at all")
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    grade = await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
+
+    assert grade["passed"] is False
+    assert grade["likely_files"] == []
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_call_failure_fails_closed():
+    # Same incident as test_run_verifier_judge_call_failure_defaults_to_no_run
+    # above (see that test's own docstring) - grade()'s sibling call site had
+    # the identical gap. Must fail closed (passed=False), not silently pass
+    # a run that was never actually graded.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=RuntimeError("Error code: 500 - simulated Ollama HTTP 500"))
 
     verifier = RunVerifierAgent("run_verifier", llm)
     grade = await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
@@ -2318,6 +2354,22 @@ async def test_skill_gap_agent_unparseable_response_returns_empty_not_error():
     assert result == {"rules": [], "examples": {}, "conflicts": []}
 
 @pytest.mark.asyncio
+async def test_skill_gap_agent_call_failure_returns_empty_not_error():
+    # Same incident as test_run_verifier_judge_call_failure_defaults_to_no_run
+    # above (see that test's own docstring) - extract_skill_update()'s call
+    # site had the identical gap.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=RuntimeError("Error code: 500 - simulated Ollama HTTP 500"))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.extract_skill_update(
+        reference_text="Some reference text.", gap_description="Missing info.", existing_rules=[]
+    )
+
+    assert result == {"rules": [], "examples": {}, "conflicts": []}
+
+@pytest.mark.asyncio
 async def test_skill_gap_agent_discards_malformed_conflict_entries_without_crashing():
     # Same trust boundary as check_skill_conflicts' index-bounds check: a "conflicts"
     # entry that isn't shaped like {"candidate_rule": ..., ...} must never reach
@@ -2501,6 +2553,23 @@ async def test_check_skill_conflicts_no_conflict_returns_empty():
     cfg = AppConfig()
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({"conflicts": []}))
+
+    agent = SkillGapAgent("skill_gap", llm)
+    result = await agent.check_skill_conflicts(
+        "qpid", ["Use SLF4J for logging."],
+        "activemq-artemis", ["Use artemis-server, not artemis-core-server."]
+    )
+
+    assert result == []
+
+@pytest.mark.asyncio
+async def test_check_skill_conflicts_call_failure_returns_empty():
+    # Same incident as test_run_verifier_judge_call_failure_defaults_to_no_run
+    # above (see that test's own docstring) - check_skill_conflicts()'s call
+    # site had the identical gap.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=RuntimeError("Error code: 500 - simulated Ollama HTTP 500"))
 
     agent = SkillGapAgent("skill_gap", llm)
     result = await agent.check_skill_conflicts(
