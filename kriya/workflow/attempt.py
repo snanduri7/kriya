@@ -34,6 +34,7 @@ from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, resolve_fallback_model
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
+from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
 
@@ -1240,10 +1241,22 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         "Quality Gates: Running runtime verification: "
                         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
                     )
+                    # Snapshot/clean around the actual execution, not just once
+                    # per attempt - see clean_untracked_files_since()'s own
+                    # docstring for the real incident (python_task_tracker,
+                    # b-6/b-7) this closes: the worktree is deliberately reused
+                    # across retry attempts (compile caches), but nothing ever
+                    # cleaned up runtime state a PRIOR attempt's own verification
+                    # run wrote to disk (a JSON store, a database) - so attempt
+                    # N's run started from attempt N-1's leftover state instead
+                    # of a fresh one, producing task-ID drift and "not found"
+                    # failures that had nothing to do with the generated code.
+                    pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
                     run_res = validator.run_app_sequence(
                         resolved_run_commands,
                         timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
                     )
+                    clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
                     gate_type = "run_verification"
                     if run_res["timed_out"]:
                         # _run_cmd_with_timeout still reaps and captures whatever

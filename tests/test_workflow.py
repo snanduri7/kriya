@@ -3226,6 +3226,70 @@ async def test_run_attempt_static_check_fires_before_compile_gate(tmp_path):
     assert set(exc_info.value.failure.likely_files) == {"ProtocolApp.java", "ignite-config.xml"}
 
 @pytest.mark.asyncio
+async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts(tmp_path):
+    """Regression test for a real bug found live via the corpus survey's dig
+    into run_verification (python_task_tracker, runs b-6/b-7, 2026-08-16, see
+    clean_untracked_files_since's own docstring in kriya/workflow/worktree.py
+    for the full incident): the SAME worktree is reused across retry attempts
+    (compile caches), but nothing cleaned up a runtime state file (a JSON
+    store) a PRIOR attempt's own verification run wrote to disk - so a later
+    attempt's run started from stale leftover state instead of a fresh one,
+    producing failures that had nothing to do with the generated code.
+
+    Calls run_attempt() twice against the SAME state/worktree, with a
+    run_app_sequence() side effect that mimics a stateful app: it writes
+    'tasks.json' with this call's own attempt number, and records whether
+    the file already existed (with a DIFFERENT attempt's content) before it
+    ran. Pre-fix, the second call would see the first attempt's leftover
+    file; post-fix, each attempt starts clean."""
+    _init_git_repo(tmp_path)
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints a [VERIFICATION] verdict line",
+    })
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    tasks_json_path = os.path.join(str(tmp_path), "tasks.json")
+    pre_call_leftover_content = []
+
+    def fake_run_app_sequence(commands, timeout=90):
+        if os.path.exists(tasks_json_path):
+            with open(tasks_json_path) as f:
+                pre_call_leftover_content.append(f.read())
+        else:
+            pre_call_leftover_content.append(None)
+        with open(tasks_json_path, "w") as f:
+            f.write(f"attempt-{state.attempt_number}")
+        return {"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"}
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        side_effect=fake_run_app_sequence,
+    ):
+        await run_attempt(state, ctx)
+        await run_attempt(state, ctx)
+
+    assert pre_call_leftover_content == [None, None], (
+        f"attempt 2 should never see attempt 1's leftover tasks.json, got {pre_call_leftover_content}"
+    )
+    # Cleanup runs after EVERY run_app_sequence call, including the last one -
+    # nothing downstream needs a runtime artifact to survive past its own
+    # attempt (the apply-to-workspace step only copies source files the
+    # Developer wrote, never runtime state), so there's no reason to special-
+    # case the final attempt.
+    assert not os.path.exists(tasks_json_path)
+
+
+@pytest.mark.asyncio
 async def test_run_attempt_static_check_scopes_likely_files_not_every_written_file(tmp_path):
     """Regression test for a real bug found live (2026-08-13,
     ignite_qpid_protocol): a static_rule_violation's likely_files was
