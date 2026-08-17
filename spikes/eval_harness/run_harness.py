@@ -78,36 +78,43 @@ HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _init_git_repo(path):
-    # Runs unconditionally on every invocation, including a --batch-dir
+    # Called unconditionally on every invocation, including a --batch-dir
     # resume of an already-populated goal directory - not just a fresh one.
-    # Confirmed live: re-running against an existing batch dir whose
-    # .kriya/worktree already exists (a real `git worktree add` sandbox,
-    # with its own .git FILE pointing back at this repo - see kriya/workflow/
-    # worktree.py's create_git_worktree) made `git add -A` pick up
-    # .kriya/worktree as an "embedded git repository", printing git's own
-    # submodule-confusion warning on every resumed run. .gitignore-ing
-    # .kriya/ here (written and committed alongside README.md, so it's in
-    # place before the FIRST git add -A ever runs) closes it the same way
-    # Kriya's own worktree-sync logic already excludes .kriya/ from its git
-    # operations (kriya/workflow/worktree.py's
-    # _sync_uncommitted_changes_into_worktree pathspec) - the goal
-    # workspace's own throwaway git history was never meant to track Kriya's
-    # internal sandbox state at all.
+    # MUST no-op entirely once a repo already exists here - a real, more
+    # serious bug than the embedded-repo warning this comment used to
+    # describe (that half is still true and still worth knowing, kept
+    # below): re-running `git add -A` + commit against a goal directory a
+    # PRIOR successful run already wrote a generated app into swept that
+    # leftover application code (source files, and for a Java goal even
+    # compiled target/*.class bytecode) into a brand new "initial" commit,
+    # which then becomes what create_git_worktree's worktree-reset logic
+    # (kriya/workflow/worktree.py) checks the reused worktree out to -
+    # so a "fresh" resumed run silently starts from the PREVIOUS run's
+    # generated code, not a clean slate. Confirmed live (2026-08-17,
+    # b-10p): ignite_qpid_person's second run's baseline commit contained
+    # its own compiled .class files and Maven metadata from the first run;
+    # django_healthcheck_gap's second run generated a different directory
+    # layout (myapp/-prefixed) than its first run's root-level files, and
+    # the two conflicting layouts coexisting on disk produced a cascade of
+    # confusing failures (MISDIRECTED EDIT, a stray bare verification
+    # marker in old leftover files, a Django ModuleNotFoundError) that had
+    # nothing to do with the current model's actual output. The ORIGINAL
+    # embedded-repo bug (a --batch-dir resume's `git add -A` picking up
+    # .kriya/worktree - a real git worktree with its own .git file - as an
+    # embedded repository, which git warns or, on some versions, hard-fails
+    # exit 128 on) had been silently PREVENTING this deeper bug from
+    # manifesting in most runs by crashing/warning before the harness ever
+    # got this far - fixing only that symptom (an earlier, incomplete pass
+    # at this function) let the harness proceed further and hit this one.
+    if (path / ".git").exists():
+        return
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "eval-harness@kriya.local"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name", "Kriya Eval Harness"], cwd=path, check=True)
     (path / "README.md").write_text("eval harness scratch project\n")
-    gitignore_path = path / ".gitignore"
-    if not gitignore_path.exists():
-        gitignore_path.write_text(".kriya/\n")
+    (path / ".gitignore").write_text(".kriya/\n")
     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
-    # --allow-empty: a --batch-dir resume where README.md/.gitignore are
-    # already committed from a prior run has nothing new to stage - without
-    # this, `git commit` (exit 1, "nothing to commit") would crash the
-    # harness on every resumed run past the first, which the pre-existing
-    # `check=True` never actually hit before only because the (buggy)
-    # embedded-repo gitlink entry above always gave it something to commit.
-    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "initial"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
 def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction, best_of_n, log_level):
