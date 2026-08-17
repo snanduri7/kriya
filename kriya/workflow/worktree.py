@@ -153,6 +153,90 @@ def create_git_worktree(repo_path: str) -> str:
     return worktree_path
 
 
+def snapshot_untracked_files(worktree_path: str) -> Optional[set]:
+    """Returns the set of currently-untracked file paths (relative to
+    worktree_path) - the same `git status --porcelain --untracked-files=all`
+    source _sync_uncommitted_changes_into_worktree already uses, so a
+    directory that's entirely untracked is enumerated file-by-file rather
+    than collapsed into one `?? dir/` line. Returns None (not an empty set)
+    on any git failure, so a caller can distinguish "definitely no untracked
+    files" from "couldn't tell" and skip cleanup rather than risk deleting
+    something real off an unreliable read.
+
+    Paired with clean_untracked_files_since() below - see that function's own
+    docstring for the real incident this closes (Runtime Verification's
+    generated-app runtime state, e.g. a JSON store, leaking across retry
+    attempts inside the same reused worktree)."""
+    try:
+        res = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=worktree_path, capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            return None
+    except Exception as e:
+        logger.debug(f"Failed to snapshot untracked files in '{worktree_path}' (non-fatal): {e}")
+        return None
+    files = set()
+    for line in res.stdout.splitlines():
+        if line.startswith("??"):
+            files.add(line[3:].strip().strip('"'))
+    return files
+
+
+def clean_untracked_files_since(worktree_path: str, baseline: Optional[set]) -> None:
+    """Removes any file that became untracked in the worktree SINCE `baseline`
+    was snapshotted (via snapshot_untracked_files, taken immediately before
+    the just-finished operation) - i.e. exactly what that operation created,
+    nothing that already existed beforehand.
+
+    Added 2026-08-17 after the corpus survey's dig into `run_verification`
+    found a real, previously-undiscovered mechanism bug: run_app_sequence()
+    deliberately runs each verification command in the SAME worktree
+    directory so state one step creates (a JSON file, a database) is visible
+    to the next step WITHIN one attempt - correct and necessary for a
+    goal like "add a task, then list it". But the worktree itself is reused
+    across an ENTIRE run's retry attempts (create_git_worktree's own
+    docstring: "so compile caches... survive between retries"), and nothing
+    ever cleaned up what a PRIOR attempt's own verification run wrote to
+    disk. Confirmed live (python_task_tracker, runs b-6/b-7, 2026-08-16):
+    attempt 1's generated code was actually CORRECT (task added as id 1,
+    marked done, correctly excluded from the final pending list) - grade()
+    hallucinated a failure ("Task 1 should still be listed as completed",
+    not anything the goal actually asked for), triggering a retry. From
+    there, EVERY subsequent attempt's verification ran against the SAME
+    tasks.json the previous attempt's run had already written to - task
+    IDs kept climbing (1,2 -> ... -> 5,6 by attempt 7) and `done 1` failed
+    every time because task 1 had already been consumed/renumbered by an
+    earlier attempt's leftover state, producing a cascade of "the done
+    command doesn't work" failures that had nothing to do with the
+    generated code, which never changed in the way that mattered.
+
+    Snapshotting immediately before run_app_sequence() and cleaning up
+    immediately after (regardless of pass/fail) means every attempt's
+    verification always starts from the same "freshly compiled, never run"
+    baseline - compile-time build caches (target/, node_modules/, __pycache__/)
+    are untouched since they already existed in `baseline` by the time this
+    runs (compile always happens earlier in the same attempt), only files
+    the run itself just created get removed. A None baseline (snapshot
+    failed) or None/empty diff is a silent no-op, not an error - this is a
+    hygiene improvement, never a gate that can itself fail the run."""
+    if baseline is None:
+        return
+    current = snapshot_untracked_files(worktree_path)
+    if current is None:
+        return
+    for rel in current - baseline:
+        full = os.path.join(worktree_path, rel)
+        try:
+            if os.path.isdir(full):
+                shutil.rmtree(full, ignore_errors=True)
+            elif os.path.exists(full):
+                os.remove(full)
+        except OSError as e:
+            logger.debug(f"Failed to clean up runtime artifact '{rel}' after verification run (non-fatal): {e}")
+
+
 def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
     """Despite the name, this resets the worktree back to repo_path's current
     commit rather than truly deleting it - the worktree is deliberately reused
