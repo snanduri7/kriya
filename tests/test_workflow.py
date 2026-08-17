@@ -752,6 +752,58 @@ def test_extract_planner_code_blocks_still_accepts_real_python_content():
         "greet.py": "def greet(name: str) -> str:\n    return f\"Hello, {name}!\"\n\nprint(greet('World'))\n"
     }
 
+def test_extract_planner_code_blocks_rejects_run_command_for_xml_file():
+    """Regression test for the identical failure shape as the .java test
+    above, recurring live 2026-08-17 (ignite_qpid_person, run b-10k) through
+    the one gap that test's own fix never covered: .xml had no entry in
+    _MIN_PLAUSIBLE_CODE_CHECK, so the same "mvn -q compile exec:exec ..."
+    run-command snippet got silently accepted as ignite-config.xml's entire
+    content, causing "malformed XML: syntax error: line 1, column 0" - the
+    much more expensive structural-corruption/compile gate had to catch it
+    instead of extraction rejecting it up front."""
+    plan = (
+        "### src/main/resources/ignite-config.xml\n"
+        "Run it via:\n"
+        "```\nmvn -q compile exec:exec -Dexec.mainClass=com.example.PersonApp\n```\n"
+    )
+    result = extract_planner_code_blocks(plan, ["src/main/resources/ignite-config.xml"])
+    assert result == {}
+
+def test_extract_planner_code_blocks_still_accepts_real_xml_content():
+    """Sibling to the rejection test above, AND confirms the real incident's
+    exact shape: a valid XML fence followed by an unrelated run-command fence
+    closer to the heading must not let the later, invalid fence win via
+    last-block-wins - the earlier, genuinely valid XML must still be the one
+    returned."""
+    plan = (
+        "### ignite-config.xml\n"
+        "```xml\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<beans xmlns=\"http://www.springframework.org/schema/beans\">\n"
+        "    <bean id=\"ignite.cfg\" class=\"org.apache.ignite.configuration.IgniteConfiguration\"/>\n"
+        "</beans>\n```\n"
+        "Run instructions for ignite-config.xml:\n"
+        "```bash\nmvn -q compile exec:exec -Dexec.mainClass=com.example.PersonApp\n```\n"
+    )
+    result = extract_planner_code_blocks(plan, ["ignite-config.xml"])
+    assert result.get("ignite-config.xml", "").strip().startswith("<?xml")
+
+def test_extract_planner_code_blocks_rejects_run_command_for_json_file():
+    # Same shape, .json - added alongside .xml for the same reason (equally
+    # common in this pipeline's generated projects, equally guessable via a
+    # real parser).
+    plan = (
+        "### src/main/resources/qpid-initial-config.json\n"
+        "Run it via:\n"
+        "```\nmvn -q compile exec:exec -Dexec.mainClass=com.example.PersonApp\n```\n"
+    )
+    result = extract_planner_code_blocks(plan, ["src/main/resources/qpid-initial-config.json"])
+    assert result == {}
+
+def test_extract_planner_code_blocks_still_accepts_real_json_content():
+    plan = '### config.json\n```json\n{"name": "test"}\n```\n'
+    result = extract_planner_code_blocks(plan, ["config.json"])
+    assert result == {"config.json": '{"name": "test"}\n'}
+
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):
     """Configured agent_llms overrides must actually reach each role's real
@@ -8086,6 +8138,52 @@ def test_find_edits_ignoring_own_diagnosis_deletion_signal_still_flags_a_true_no
     ) is not None
 
 
+def test_find_edits_ignoring_own_diagnosis_recognizes_a_cast_insertion_fix():
+    """Regression test for a fourth, distinct false-positive bug found live,
+    2026-08-16 (ignite_qpid_person, run b-10h), via the new raw-completion
+    DEBUG logging (kriya/agents/agent.py). A missing-cast diagnosis quotes
+    the operand (`cache.get(1)`) and the type (`Person`) as separate spans,
+    never the fused `(Person) cache.get(1)` cast expression as one span - a
+    model doesn't phrase it that way. Both separate quotes are trivially
+    present in BOTH old and new text (only a parenthesized cast prefix was
+    inserted), so none of signals (a)/(b)/(c) see anything "new". Real
+    analysis text from the incident, reproduced verbatim - a genuinely
+    correct cast-insertion fix was wrongly rejected 3 consecutive retries in
+    a row and must NOT be flagged as a mismatch."""
+    analysis = (
+        "The error occurs because `cache.get(1)` returns an `Object` type, but it's being "
+        "assigned directly to a `Person` variable without explicit casting. The compiler "
+        "cannot automatically convert from `Object` to `Person`. This is a classic generics "
+        "issue where the cache's generic type parameter isn't properly declared, causing the "
+        "getter to return raw `Object` instead of the expected `Person` type."
+    )
+    edits = [{
+        "search": "Person cachedPerson = cache.get(1);",
+        "replace": "Person cachedPerson = (Person) cache.get(1);",
+    }]
+    assert find_edits_ignoring_own_diagnosis(
+        analysis, edits, None, "Person cachedPerson = cache.get(1);"
+    ) is None
+
+
+def test_find_edits_ignoring_own_diagnosis_cast_signal_still_flags_a_true_no_op():
+    # Companion negative case - the SAME cast-missing line left completely
+    # unchanged must still be flagged, not waved through just because
+    # `Person` happens to appear (unchanged, uncast) in both search and
+    # replace.
+    analysis = (
+        "The error occurs because `cache.get(1)` returns an `Object` type, but it's being "
+        "assigned directly to a `Person` variable without explicit casting."
+    )
+    edits = [{
+        "search": "Person cachedPerson = cache.get(1);",
+        "replace": "Person cachedPerson = cache.get(1);",
+    }]
+    assert find_edits_ignoring_own_diagnosis(
+        analysis, edits, None, "Person cachedPerson = cache.get(1);"
+    ) is not None
+
+
 # --- find_edits_ignoring_own_diagnosis(): the "removed the old code too" signal ---
 
 def test_find_edits_ignoring_own_diagnosis_flags_a_stale_removal():
@@ -8158,6 +8256,99 @@ def test_find_edits_ignoring_own_diagnosis_removal_signal_ignores_unrelated_subs
         "replace": "IgniteCache<Integer, Protocol> cache = ignite.getOrCreateCache(\"x\"); // variance ok",
     }]
     assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_removal_signal_ignores_result_describing_instead_of():
+    """Regression test for a fifth false-positive shape, found live 2026-08-16/17
+    (ignite_qpid_person, run b-10i): "instead of" is ambiguous between an
+    INSTRUCTION ("do Y instead of `X`" - X is what to discard, the shape
+    _REMOVAL_PHRASE_RE was built for) and a RESULT DESCRIPTION ("returns `Object`
+    instead of `Person`" - Person is the correct/desired value, expected to still
+    appear unchanged in a correct fix). Real analysis text from the incident,
+    reproduced verbatim - a genuinely correct cast-insertion fix was wrongly
+    rejected by the removal signal (not the addition signals, which already
+    correctly recognize this shape - see the cast-insertion test above) twice in
+    the same run and must NOT be flagged as a mismatch."""
+    analysis = (
+        "The compilation error occurs because `cache.get(1)` returns an `Object` type "
+        "instead of `Person`, causing a type mismatch when assigned to `Person cachedPerson`. "
+        "This happens because the Ignite cache is declared without explicit generic type "
+        "parameters, so the compiler infers it as a raw type. The fix requires either adding "
+        "an explicit cast or declaring the cache with proper generic type parameters to "
+        "ensure type safety and prevent the compilation error."
+    )
+    edits = [{
+        "search": "Person cachedPerson = cache.get(1);",
+        "replace": "Person cachedPerson = (Person) cache.get(1);",
+    }]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_removal_signal_still_flags_result_describing_shape_when_genuinely_stale():
+    # Companion negative case - same "returns X instead of Y" result-describing
+    # phrasing must NOT blanket-exempt Y from ever being flagged: if Y (here
+    # `Person`) is ALSO explicitly named elsewhere in the analysis as something to
+    # remove via a genuine instruction (not just the result-describing clause),
+    # and it's genuinely gone from the fix, the removal signal must still have a
+    # real, unremoved genuine instruction quote to catch it. This uses two
+    # DIFFERENT quoted terms - `Person` (result-describing, exempted) and
+    # `legacyCache` (genuine removal instruction) - to confirm the exemption is
+    # scoped to the specific term matched by the result-describing pattern, not a
+    # blanket pass for the whole analysis.
+    analysis = (
+        "`cache.get(1)` returns an `Object` type instead of `Person`. Also, stop using "
+        "`legacyCache` entirely - it's deprecated."
+    )
+    edits = [{
+        "search": "Person cachedPerson = cache.get(1); legacyCache.close();",
+        "replace": "Person cachedPerson = (Person) cache.get(1); legacyCache.close();",
+    }]
+    result = find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant")
+    assert result is not None
+    assert "legacyCache" in result
+
+
+def test_find_edits_ignoring_own_diagnosis_excludes_self_referential_file_path():
+    """Regression test for a fifth false-positive shape, found live 2026-08-17
+    (ignite_qpid_person, run b-10k), via the raw-completion DEBUG logging. A
+    diagnosis for a malformed/missing file routinely backtick-quotes the FILE'S
+    OWN PATH purely for self-identification, not as a claimed code fragment - a
+    self-referential path obviously never appears literally inside that file's
+    own content. Real analysis text and content from the incident, reproduced
+    verbatim - genuinely valid, complete XML content was rejected 3 consecutive
+    times because the ONLY backtick-quoted span each time was the file's own
+    path, and must NOT be flagged as a mismatch."""
+    analysis = (
+        "The error indicates a malformed XML in `src/main/resources/ignite-config.xml` "
+        "with a syntax error at line 1, column 0. This suggests there's either a hidden "
+        "character, BOM (Byte Order Mark), or the file is completely empty/invalid. "
+        "Looking at the provided example and the task requirements, the ignite-config.xml "
+        "file should be a proper Spring XML configuration file defining an "
+        "IgniteConfiguration bean."
+    )
+    content = (
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<beans xmlns=\"http://www.springframework.org/schema/beans\">\n"
+        "    <bean id=\"ignite.cfg\" class=\"org.apache.ignite.configuration.IgniteConfiguration\">\n"
+        "        <property name=\"igniteInstanceName\" value=\"ignite-server-node\"/>\n"
+        "    </bean>\n"
+        "</beans>"
+    )
+    assert find_edits_ignoring_own_diagnosis(analysis, None, content, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_file_path_exclusion_still_flags_a_true_no_op():
+    # Companion negative case - a self-referential path quote must not blanket-
+    # exempt an analysis that ALSO quotes real code: the code quote must still
+    # be checked normally, and a true no-op edit must still be flagged.
+    analysis = (
+        "The error is in `src/main/resources/ignite-config.xml` - the bean `ignite.cfg` "
+        "is missing the required `igniteInstanceName` property."
+    )
+    content = "<beans><bean id=\"ignite.cfg\"/></beans>"
+    assert find_edits_ignoring_own_diagnosis(
+        analysis, None, content, "<beans><bean id=\"ignite.cfg\"/></beans>"
+    ) is not None
 
 
 def test_find_edits_ignoring_own_diagnosis_removal_signal_takes_priority_over_addition():

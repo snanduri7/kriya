@@ -1338,6 +1338,32 @@ class DeveloperAgent(BaseAgent):
                 temperature_override=retry_temperature if apply_fix_analysis else None,
             )
 
+            # DEBUG, not INFO - fires on every per-file completion in this loop, so
+            # would flood a long run's log at the default level. Added specifically
+            # to settle a real ambiguity found live, 2026-08-16 (ignite_qpid_person,
+            # run b-10c): a targeted retry's "Developer fix analysis for ..." INFO
+            # line (below) printed correctly, but the very next "Developer returned
+            # an anchored edit..." line that should immediately follow it (when
+            # edits parses truthy) was silently missing for that one retry - the
+            # file write got skipped entirely (content ended up None), and the
+            # SAME stale, already-broken file was re-verified, reproducing an
+            # identical runtime failure that looked exactly like "correct
+            # diagnosis, edit didn't take effect." Reconstructing the raw
+            # completion text from kriya.log alone was unreliable: a streaming
+            # call's stream_callback echoes raw tokens to stdout separately from
+            # (and not reliably ordered relative to) this logger's own immediately-
+            # flushed lines when both land in the same redirected log file, so the
+            # apparent SEARCH:/REPLACE: block sitting next to the analysis line in
+            # the log was never provably the exact text _split_fix_analysis_edit()
+            # actually parsed. This is that missing ground truth: the literal,
+            # unparsed completion, logged before _split_fix_analysis[_edit]() ever
+            # touches it - repr() specifically so an unexpected marker, stray
+            # phrase, or hidden whitespace (e.g. a "no change needed"-shaped aside
+            # ahead of a SEARCH:/REPLACE: block, which short-circuits parsing to
+            # edits=None/content=None before the block is ever inspected) is
+            # visible verbatim, not swallowed by print-formatting.
+            logger.debug(f"Developer raw completion for '{filepath}' (pre-parse): {content!r}")
+
             edits = None
             analysis = None
             if prefer_anchored_edit:
