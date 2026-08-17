@@ -69,6 +69,8 @@ _FAIL_TYPE_PREFIXES = [
     ("UNADDRESSED ERROR LOCATION", "unaddressed_error_location"),
     ("INCOMPLETE GENERATION", "incomplete_generation"),
     ("RUNTIME VERIFICATION FAILURE", "run_verification"),
+    ("TARGETED TEST FAILURE", "targeted_test_failure"),
+    ("Failed to parse Developer Agent response", "developer_json_parse_failure"),
     ("Error code:", "general_error"),
 ]
 
