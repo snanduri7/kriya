@@ -46,6 +46,7 @@ from kriya.workflow.workflow import (
     _likely_misattributed_sibling,
     _normalize_error_for_repeat_detection,
     _reserve_graph_context_budget,
+    _reserve_sibling_content_budget,
     build_code_context,
     _resolve_file_paths_from_design,
     _pin_exec_plugin_executable_to_resolved_jdk,
@@ -184,6 +185,7 @@ async def test_workflow_uses_structured_architect_file_list_for_known_target_fil
     path from prose at all."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -224,6 +226,7 @@ async def test_workflow_falls_back_to_heuristic_file_list_when_architect_respons
     call spent trying to recover it."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -247,6 +250,11 @@ async def test_workflow_falls_back_to_heuristic_file_list_when_architect_respons
     # Exactly 3 completions (Planner, Architect, Reviewer) - no extra
     # corrective follow-up call was made for the malformed file list.
     assert llm.complete.await_count == 3
+    # 2026-08-15 external review, Finding 8: the sibling-content budget must
+    # actually reach DeveloperAgent, scaled to the active (here: primary,
+    # since attempt 1 never escalates) model's real context window - not
+    # silently left unset.
+    assert first_call_kwargs["sibling_content_budget"] == _reserve_sibling_content_budget(cfg.llm.context_window)
 
 def test_is_near_duplicate_rule_catches_real_observed_rephrasings():
     """Regression test using the actual duplicate pairs observed live: qpid/rules.txt
@@ -748,6 +756,7 @@ async def test_workflow_uses_per_role_model_config(tmp_path):
     llm.complete() call - proving the config flows from AppConfig through
     WorkflowEngine's constructed agents, not just that the config schema parses."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.agent_llms.planner.llm = LLMConfig(model="devstral-small-2:24b")
     cfg.agent_llms.reviewer.llm = LLMConfig(model="devstral-small-2:24b")
@@ -776,6 +785,7 @@ async def test_workflow_uses_per_role_model_config(tmp_path):
 @pytest.mark.asyncio
 async def test_workflow_successful_run(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -806,6 +816,7 @@ async def test_workflow_successful_run(tmp_path):
 @pytest.mark.asyncio
 async def test_workflow_syntax_error_auto_debugging_loop(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -844,6 +855,7 @@ async def test_workflow_incomplete_generation_triggers_retry(tmp_path):
     (e.g. only pom.xml instead of pom.xml + 6 source files) must not be accepted as
     a passing run just because what little it wrote happens to compile."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -884,6 +896,7 @@ async def test_workflow_missing_file_recovery_lets_model_resolve_nested_path(tmp
     them. So this attempt's file-list call never happens at all (known_target_files
     bypasses it) - only a single per-file content completion for the resolved path."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -912,6 +925,7 @@ async def test_workflow_missing_file_recovery_lets_model_resolve_nested_path(tmp
 async def test_workflow_fallback_chain(tmp_path):
     from kriya.config import FallbackModelConfig
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.llm_chain = [
         FallbackModelConfig(model="fallback-1"),
         FallbackModelConfig(model="fallback-2")
@@ -1009,6 +1023,7 @@ async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_
     full_set mode (not targeted) both times - the two failures increment
     retry_count to 2 before the third attempt succeeds."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1059,6 +1074,7 @@ async def test_workflow_does_not_extract_lesson_from_a_single_targeted_retry(tmp
     attempt - matching the original mechanism's intent (a genuinely hard-won
     lesson, not routine single-retry noise)."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1093,6 +1109,7 @@ async def test_workflow_best_of_n_never_activates_without_a_real_sandbox(tmp_pat
     workflow.py dispatch condition, not just run_attempt_with_best_of_n's own
     internal behavior (already covered in tests/test_best_of_n.py)."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.best_of_n_first_attempt = 3
     kernel = Kernel(config=cfg)
@@ -1124,6 +1141,7 @@ async def test_workflow_best_of_n_succeeds_on_second_independent_candidate(tmp_p
     exactly one discarded candidate."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.best_of_n_first_attempt = 2
     kernel = Kernel(config=cfg)
@@ -1167,6 +1185,7 @@ async def test_workflow_fallback_targeted_fix_succeeds_before_full_set_regenerat
     from kriya.config import FallbackModelConfig
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
     cfg.paths.skills = str(tmp_path / "skills")
@@ -1217,6 +1236,7 @@ async def test_workflow_self_correction_loop_resolves_compile_failure(tmp_path):
     from kriya.workflow.self_correction import SelfCorrectionResult
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.self_correction_loop_enabled = True
     cfg.paths.logs = str(tmp_path / "logs")
@@ -1268,6 +1288,7 @@ async def test_workflow_self_correction_loop_exhausts_falls_through_unchanged(tm
     from kriya.workflow.self_correction import SelfCorrectionResult
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.self_correction_loop_enabled = True
     cfg.paths.logs = str(tmp_path / "logs")
@@ -1323,6 +1344,7 @@ async def test_workflow_self_correction_loop_disabled_by_default_zero_new_code_p
     must never even import/invoke the self-correction module - proving the
     flag-off path is a true no-op, not just a discarded result."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     assert cfg.autonomy.self_correction_loop_enabled is False  # sanity: default, not explicitly set
@@ -1360,6 +1382,7 @@ async def test_workflow_fallback_targeted_fix_skipped_without_fallback_chain(tmp
     this is a pure regression check, not new behavior."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     # No llm_chain configured - the common/default case.
     kernel = Kernel(config=cfg)
@@ -1399,6 +1422,7 @@ async def test_workflow_fallback_targeted_fix_skipped_without_fallback_chain(tmp
 @pytest.mark.asyncio
 async def test_workflow_cumulative_sandbox_sync(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1539,6 +1563,7 @@ async def test_workflow_prompt_includes_ecosystem_invariant_on_first_attempt(tmp
     just retries, since attempt 1 is where the drift was actually observed."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1563,6 +1588,7 @@ async def test_workflow_prompt_includes_ecosystem_invariant_on_first_attempt(tmp
 async def test_workflow_prompt_includes_ecosystem_invariant_on_targeted_retry(tmp_path):
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1595,6 +1621,7 @@ async def test_workflow_prompt_includes_ecosystem_invariant_on_targeted_retry(tm
 async def test_workflow_prompt_includes_ecosystem_invariant_on_missing_files_retry(tmp_path):
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1635,6 +1662,7 @@ async def test_workflow_prompt_includes_resource_lifecycle_on_first_attempt(tmp_
     a retry after a runtime failure."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1657,6 +1685,7 @@ async def test_workflow_prompt_includes_resource_lifecycle_on_first_attempt(tmp_
 async def test_workflow_prompt_includes_resource_lifecycle_on_targeted_retry(tmp_path):
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1684,6 +1713,7 @@ async def test_workflow_prompt_includes_resource_lifecycle_on_targeted_retry(tmp
 async def test_workflow_prompt_includes_resource_lifecycle_on_missing_files_retry(tmp_path):
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1717,6 +1747,7 @@ async def test_workflow_sanitizes_batch_json_content_before_writing_to_disk(tmp_
     which internal path produced it."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1751,6 +1782,7 @@ async def test_workflow_sanitizes_batch_json_edits_before_applying(tmp_path):
     the same edits path but for the mismatch-failure case, not success)."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1812,6 +1844,7 @@ async def test_workflow_persists_intermediate_trace_checkpoint_before_reviewer(t
     that the final call afterward still correctly replaces it with the
     complete, final status."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.logs = str(tmp_path / "logs")
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -1904,6 +1937,7 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
 @pytest.mark.asyncio
 async def test_workflow_failure_category_none_on_success(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -1993,6 +2027,7 @@ async def test_workflow_retry_after_knowledge_gap_supersedes_the_transient_trace
     from kriya.tools.knowledge import GapReport
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -2035,6 +2070,49 @@ async def test_workflow_retry_after_knowledge_gap_supersedes_the_transient_trace
     assert rows[0]["run_id"] == first_run_id
     assert rows[0]["status"] == "success"  # the retry's real outcome, not "knowledge_gap"
 
+
+@pytest.mark.asyncio
+async def test_workflow_approval_required_but_no_callback_never_applies_changes(tmp_path):
+    """Independent adversarial review, 2026-08-16, Finding 2: this gate used to fail
+    OPEN - if policy required approval (human-in-the-loop mode here, but a sensitive-
+    path match or an over-threshold diff size hit the exact same gap) but no
+    approval_callback was ever wired, execution silently fell through to the
+    unconditional apply-to-workspace step with no approval ever having been
+    requested. Any direct run_generation_workflow() caller that doesn't supply a
+    callback (a library/MCP integration, or a future CLI mode) got files copied into
+    the real workspace completely unreviewed, in the one mode whose entire purpose
+    is preventing exactly that. Must now refuse to apply and return a distinct,
+    unambiguous signal instead."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "human-in-the-loop"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        # No "Review:" response needed - the pre-approval Reviewer call is gated on
+        # `approval_callback` too, so it never fires when one isn't wired either.
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create app",
+        workspace_path=str(tmp_path),
+        # Deliberately no approval_callback - the exact gap this test locks in.
+    )
+
+    assert res["quality_gates_passed"] is False
+    assert res["files"] == []
+    assert "approval was required" in res["review"]
+    # The file must never have been written to the real workspace.
+    assert not os.path.exists(os.path.join(str(tmp_path), "app.py"))
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    assert trace_row["status"] == "approval_required"
+    assert trace_row["failure_category"] == "approval_required"
 
 @pytest.mark.asyncio
 async def test_workflow_traces_human_rejected(tmp_path):
@@ -2118,8 +2196,16 @@ async def test_workflow_reviewer_not_run_early_when_no_approval_needed(tmp_path)
     to see it - autonomous mode (no escalation, no approval_callback needed) must pay
     zero extra latency/cost for it. Call count must match the pre-fix baseline exactly
     (Planner/Architect/Developer/Reviewer, one each) - not one more for a wasted early
-    call nobody would ever see."""
+    call nobody would ever see.
+
+    Explicitly sets a non-"human-in-the-loop" mode - AutonomyConfig.mode defaults to
+    "human-in-the-loop" (kriya/config/config.py), so a bare AppConfig() is NOT
+    autonomous by default. This test originally omitted that override and was, until
+    the Finding 2 fix (2026-08-16) closed the fail-open gap it was silently relying
+    on, actually exercising "approval required but no callback provided, proceed
+    anyway" rather than the "no approval needed" case its own name claimed."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -2310,6 +2396,7 @@ async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
 @pytest.mark.asyncio
 async def test_workflow_skips_toolchain_check_for_non_java_stack(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -2361,6 +2448,7 @@ async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
     resolved before any file exists, so what actually gets generated
     afterward doesn't matter for what this test is checking."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -2393,6 +2481,7 @@ async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
 @pytest.mark.asyncio
 async def test_workflow_omits_target_jvm_fact_when_no_java_toolchain(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -2427,6 +2516,7 @@ async def test_workflow_run_verification_goal_explicit_passes_without_confirmati
     without needing the human-in-the-loop confirmation gate, even though that's the
     default autonomy mode."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -2548,6 +2638,7 @@ async def test_workflow_verification_contract_marker_skips_llm_grade_on_pass(tmp
     VERIFICATION_CONTRACT_HEADER's rationale comment in
     kriya/workflow/retry_prompts.py for the full incident."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -2602,6 +2693,7 @@ async def test_workflow_ungrounded_pass_marker_falls_back_to_llm_grade(tmp_path)
     wiring through _extract_grounded_contract_verdict() in attempt.py), not
     just the pure pass_verdict_is_grounded() function in isolation."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -2650,6 +2742,7 @@ async def test_workflow_run_verification_gate_outcome_records_graded_by_contract
     of grepping raw stdout logs by hand for "[VERIFICATION]", which is what
     diagnosing the underlying grader-reliability gap required this session."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -2711,6 +2804,7 @@ async def test_workflow_run_verification_gate_outcome_records_graded_by_llm(tmp_
     field reflects which path actually decided the outcome, not a hardcoded
     value."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -3397,6 +3491,7 @@ async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path
     run's own outcome - same reporting path _check_java_toolchain_mismatch's
     warning already uses."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -3457,6 +3552,7 @@ async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(
     on 17, forbidden only on 24+ - must survive, even though mvn's own
     untouched default is 26."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -3521,6 +3617,7 @@ async def test_workflow_pins_exec_plugin_executable_to_resolved_jdk_in_applied_w
     got a crash Kriya's own verification never saw. Confirms the fix reaches
     the FINAL APPLIED workspace file, not just the worktree copy."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -3584,6 +3681,7 @@ async def test_workflow_recovers_missing_build_manifest_never_requested_by_archi
     correctly declined to fix an out-of-scope dependency problem on every
     prior attempt."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -3635,6 +3733,7 @@ async def test_workflow_run_verification_judgment_cached_across_retry_attempts(t
     to False rather than raising) rather than crashing, silently skipping
     verification on attempt 2 instead of correctly re-running it."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -3684,6 +3783,7 @@ async def test_workflow_scopes_retry_to_grader_likely_files_on_run_verification_
     - grade()'s likely_files assigned directly to Failure.likely_files - not
     via the old stringify-into-the-message-then-regex-re-extract round-trip."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -3873,6 +3973,7 @@ async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_pat
     the generated code was actually correct. Kriya's own interpreter must be
     substituted so the run gets a real chance to prove the code works."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -3976,6 +4077,7 @@ async def test_workflow_full_regression_check_tests_the_applied_change_not_stale
     subprocess.run(["git", "commit", "-q", "-m", "initial (buggy) commit"], cwd=tmp_path, check=True)
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -4016,6 +4118,7 @@ async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp
     (skill_folder / "rules.txt").write_text("Widgets must be printed in uppercase.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -4070,6 +4173,7 @@ async def test_workflow_extracted_rule_unverified_then_promoted_by_passing_run(t
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -4146,6 +4250,7 @@ async def test_workflow_surfaces_skill_staleness_warning_on_version_drift(tmp_pa
     )
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.skills = str(skills_dir)
     kernel = Kernel(config=cfg)
@@ -4188,6 +4293,7 @@ async def test_workflow_skill_gap_refuses_url_fetch_under_local_only_egress(tmp_
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.egress_policy = "local_only"
@@ -4236,6 +4342,7 @@ async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_pa
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -4288,6 +4395,7 @@ async def test_workflow_no_skill_gap_callback_still_reports_unresolved_gap(tmp_p
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -4319,6 +4427,7 @@ async def test_workflow_no_skill_gap_callback_still_reports_unresolved_gap(tmp_p
 @pytest.mark.asyncio
 async def test_workflow_unresolved_skill_gaps_none_when_nothing_flagged(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -4352,6 +4461,7 @@ async def test_workflow_skill_gap_not_reasked_once_acknowledged(tmp_path):
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -4418,6 +4528,7 @@ async def test_workflow_skill_conflict_excludes_losing_rule_and_persists_resolut
     skills_dir = _make_conflicting_skills_dir(tmp_path)
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -4461,6 +4572,7 @@ async def test_workflow_skill_conflict_remembered_resolution_skips_callback(tmp_
     record_conflict_resolution(str(skills_dir), "brokeralpha", _ALPHA_RULE, "brokerbeta", _BETA_RULE, "prefer_b")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -4518,6 +4630,7 @@ async def test_workflow_skill_conflict_check_sees_rule_extracted_earlier_in_same
     (skills_dir / "brokerbeta" / "rules.txt").write_text(f"{_BETA_RULE}\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -4569,6 +4682,7 @@ async def test_workflow_skill_conflict_no_callback_response_does_not_persist(tmp
     skills_dir = _make_conflicting_skills_dir(tmp_path)
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -4607,6 +4721,7 @@ async def test_workflow_no_conflict_check_without_callback(tmp_path):
     skills_dir = _make_conflicting_skills_dir(tmp_path)
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -4643,6 +4758,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
@@ -4707,6 +4823,7 @@ async def test_workflow_web_lookup_never_fires_without_approval(tmp_path):
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
@@ -4753,6 +4870,7 @@ async def test_workflow_web_lookup_query_callback_can_approve(tmp_path):
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
@@ -4806,6 +4924,7 @@ async def test_workflow_retry_loop_live_lookup_never_fires_without_approval(tmp_
     unattended, but that also meant it fired without ever needing authorization."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.search.base_url = "http://fake-search:8080"
@@ -4860,6 +4979,7 @@ async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extr
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
@@ -4885,7 +5005,7 @@ async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extr
         {"title": "Widgetlib Reference", "url": "https://example.com/widgetlib-ref", "snippet": "reference docs"},
     ]
 
-    async def fetch_side_effect(url):
+    async def fetch_side_effect(url, quiet_on_failure=False):
         return "Marketing copy, no specifics." if url.endswith("-home") else "The magic widget constant is 42."
 
     we = WorkflowEngine(kernel, llm)
@@ -4917,6 +5037,7 @@ async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
@@ -4967,6 +5088,7 @@ async def test_workflow_web_lookup_accepted_but_empty_falls_back_to_human_ask(tm
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
@@ -5022,6 +5144,7 @@ async def test_workflow_web_lookup_disabled_by_default_never_calls_search(tmp_pa
     (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     assert cfg.autonomy.web_lookup_enabled is False
@@ -5055,6 +5178,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
     skills_dir.mkdir()
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
@@ -5108,6 +5232,7 @@ async def test_workflow_web_lookup_design_derived_falls_back_to_human_ask_on_emp
     skills_dir.mkdir()
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
@@ -5172,6 +5297,7 @@ async def test_workflow_normalizes_absolute_filepath_from_developer_agent(tmp_pa
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True)
 
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5210,6 +5336,7 @@ async def test_workflow_successful_run_deletes_its_own_checkpoint(tmp_path):
     leave nothing behind for a future --resume to (mis)pick up."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5234,6 +5361,7 @@ async def test_workflow_successful_run_deletes_its_own_checkpoint(tmp_path):
 async def test_workflow_resumes_from_plan_checkpoint_skips_planner_only(tmp_path):
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5259,6 +5387,7 @@ async def test_workflow_resumes_from_plan_checkpoint_skips_planner_only(tmp_path
 async def test_workflow_resumes_from_design_checkpoint_skips_planner_and_architect(tmp_path):
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5289,6 +5418,7 @@ async def test_workflow_resumes_from_developer_success_checkpoint_skips_quality_
     tail and the Reviewer need to run - no re-generation, no re-compiling."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5323,6 +5453,7 @@ async def test_workflow_refuses_resume_on_goal_drift(tmp_path):
     than a partial/best-effort resume."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5352,6 +5483,7 @@ async def test_workflow_refuses_resume_on_goal_drift(tmp_path):
 async def test_workflow_resume_with_no_checkpoint_falls_back_to_fresh_run(tmp_path):
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5818,6 +5950,7 @@ async def test_workflow_merges_lsp_diagnostics_into_retry_prompt_for_java_projec
     _init_git_repo(tmp_path)
     (tmp_path / "pom.xml").write_text("<project></project>")
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5867,6 +6000,7 @@ async def test_workflow_surfaces_lsp_warning_when_jdtls_found_but_fails_to_start
     _init_git_repo(tmp_path)
     (tmp_path / "pom.xml").write_text("<project></project>")
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5907,6 +6041,7 @@ async def test_workflow_skips_lsp_gracefully_when_jdtls_not_found(tmp_path):
     _init_git_repo(tmp_path)
     (tmp_path / "pom.xml").write_text("<project></project>")
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -6426,6 +6561,7 @@ async def test_workflow_non_java_goal_prompt_omits_java_toolchain_fact_even_when
     existing_code_context, not just at the unit level."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -6453,6 +6589,7 @@ async def test_workflow_java_goal_prompt_includes_java_toolchain_fact_when_tools
     fact to real evidence, it doesn't just disable it outright."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -6491,6 +6628,7 @@ async def test_workflow_applies_java_home_override_to_maven_subprocess(tmp_path)
     whole feature a no-op even with correct decision logic."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -6631,7 +6769,7 @@ async def test_augment_error_with_live_lookup_skips_a_thin_landing_page_candidat
         {"url": "https://example.com/real-example", "snippet": "..."},
     ]
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, quiet_on_failure=False):
         if url == "https://example.com/landing":
             return "Welcome to our project."  # thin, below the usable threshold
         return "Full working example: " + ("x" * 300)
@@ -6670,6 +6808,7 @@ async def test_workflow_error_triggered_live_lookup_on_repeated_compile_failure(
     first attempt (no repeat yet), and search must fire exactly once."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
@@ -6727,6 +6866,7 @@ async def test_workflow_repeated_failure_live_lookup_resolves_wrong_import_via_d
     coordinate plus the symbol name."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True
@@ -6779,6 +6919,7 @@ async def test_workflow_repeated_failure_live_lookup_excludes_own_project_coordi
     in the same error text."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True
@@ -6839,6 +6980,7 @@ async def test_workflow_error_triggered_live_lookup_disabled_by_default_never_se
     contains an extractable coordinate."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     # web_lookup_enabled left False (default) - no search.base_url either.
     cfg.paths.skills = str(tmp_path / "skills")
@@ -7012,6 +7154,7 @@ async def test_workflow_targeted_retry_fixes_implicated_file_without_escalating(
     from kriya.config import FallbackModelConfig
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
     cfg.paths.skills = str(tmp_path / "skills")
@@ -7060,6 +7203,7 @@ async def test_workflow_no_targeted_retry_when_error_names_no_known_file(tmp_pat
     from kriya.config import FallbackModelConfig
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
     cfg.paths.skills = str(tmp_path / "skills")
@@ -7104,6 +7248,7 @@ async def test_workflow_prompt_includes_self_consistency_nudge_on_full_set_retry
     once spikes/fix_alignment/'s first real batch supported it."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -7135,6 +7280,7 @@ async def test_workflow_success_via_targeted_attempt_after_full_set_budget_exhau
     exhausted - this must still report success correctly."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     # No llm_chain configured -> max_retries defaults to 4.
     kernel = Kernel(config=cfg)
@@ -7183,6 +7329,7 @@ async def test_workflow_passes_prior_error_context_to_developer_only_on_retries(
     when there's a real error to analyze."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -7227,6 +7374,7 @@ async def test_workflow_passes_configured_retry_temperature_to_developer(tmp_pat
     configure it."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.llm.retry_temperature = 0.05
     kernel = Kernel(config=cfg)
@@ -7264,6 +7412,7 @@ async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tm
     file."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -7313,6 +7462,7 @@ async def test_workflow_passes_error_source_context_for_junit_stack_trace_test_f
     identified at all)."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -7401,6 +7551,7 @@ async def test_workflow_anchored_edit_failure_captures_filepath(tmp_path):
     the real filepath in both likely_files and file_locations."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -7471,6 +7622,7 @@ async def test_workflow_anchored_edit_failure_redirects_to_the_real_target_file(
     no way to recover."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -7769,6 +7921,101 @@ def test_find_edits_ignoring_own_diagnosis_regression_validation_3():
     assert find_edits_ignoring_own_diagnosis(analysis, fixed_edits, None, "irrelevant") is None
 
 
+def test_find_edits_ignoring_own_diagnosis_a_second_unrelated_edit_does_not_poison_a_correct_one():
+    """Regression test for a real false-positive bug found live, 2026-08-16
+    (ignite_qpid_person, runs b-8/b-9): a genuinely correct, single-line cast
+    fix ("return cache.get(1);" -> "return (Person) cache.get(1);" -
+    textbook signal (a), "Person" is real new content) was flagged as a
+    mismatch anyway, because the SAME multi-edit response also included a
+    second, unrelated edit elsewhere in the file whose OWN search text
+    happened to already mention "Person" (a common identifier in a
+    Person-caching app). The old implementation flat-joined every edit's
+    search/replace into one shared old_text/new_text pool before checking
+    "was this quote already present" - so the unrelated edit's search text
+    poisoned the check for a completely different, already-correct edit. A
+    response with more than one SEARCH/REPLACE pair in the same retry is
+    normal, not a rare shape - confirmed directly via this pure function,
+    no live model call needed to reproduce it."""
+    analysis = (
+        "The compilation error `Type mismatch: cannot convert from Object to Person` occurs "
+        "because `ignite.getOrCreateCache(CACHE_NAME)` returns an untyped cache, causing "
+        "`cache.get(1)` to return `Object`. I will explicitly cast the result of "
+        "`cache.get(1)` to `Person` in the `readFromCache` method to resolve the type mismatch."
+    )
+    edits = [
+        {"search": "return cache.get(1);", "replace": "return (Person) cache.get(1);"},
+        # Unrelated no-op edit elsewhere in the same response - its search
+        # text just happens to already mention "Person", for reasons that
+        # have nothing to do with the fix above.
+        {
+            "search": "Person cachedPerson = readFromCache(ignite);",
+            "replace": "Person cachedPerson = readFromCache(ignite);",
+        },
+    ]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "return cache.get(1);") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_still_flags_a_genuine_multi_edit_no_op():
+    # Companion negative case for the fix above - a multi-edit response that
+    # genuinely never makes the diagnosed change (in ANY of its edits) must
+    # still be flagged, not accidentally waved through just because there
+    # are multiple edits now.
+    analysis = "the fix requires declaring `IgniteCache<Integer, Protocol>` explicitly instead of `var`."
+    edits = [
+        {"search": "var cache = get();", "replace": "var cache = get(); // still untyped"},
+        {"search": "int unrelated = 1;", "replace": "int unrelated = 2;"},
+    ]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is not None
+
+
+def test_find_edits_ignoring_own_diagnosis_recognizes_a_deletion_shaped_fix():
+    """Regression test for a second, distinct false-positive bug found live,
+    2026-08-16 (ignite_qpid_person, run b-10a) - different from the
+    multi-edit-poisoning bug fixed above. A diagnosis that corrects a WRONG
+    qualified identifier to a RIGHT one (a deletion/substitution, not an
+    addition) never satisfies the additive signal (a)/(b): every quoted
+    fragment of a dotted identifier being shortened - "IgniteCache",
+    "org.apache.ignite.cache", "org.apache.ignite" - is trivially a
+    substring of BOTH the old and new text, so nothing reads as genuinely
+    "new." Real analysis text from the incident, reproduced verbatim -
+    correcting `import org.apache.ignite.cache.IgniteCache;` to
+    `import org.apache.ignite.IgniteCache;` is a completely correct fix and
+    must NOT be flagged as a mismatch."""
+    analysis = (
+        "The error occurs because the code imports `org.apache.ignite.cache.IgniteCache` on "
+        "line 6, but according to the engineering skill conventions for Ignite, `IgniteCache` "
+        "is not located in the `org.apache.ignite.cache` package as incorrectly imported. The "
+        "correct import location for `IgniteCache` is the top-level `org.apache.ignite` "
+        "package. This is a specific, documented fact in the Ignite skill conventions that was "
+        "missed in the original code. The fix requires changing the import statement to use "
+        "the correct package path."
+    )
+    edits = [{
+        "search": "import org.apache.ignite.cache.IgniteCache;",
+        "replace": "import org.apache.ignite.IgniteCache;",
+    }]
+    assert find_edits_ignoring_own_diagnosis(
+        analysis, edits, None, "import org.apache.ignite.cache.IgniteCache;"
+    ) is None
+
+
+def test_find_edits_ignoring_own_diagnosis_deletion_signal_still_flags_a_true_no_op():
+    # Companion negative case - the SAME import left completely unchanged
+    # must still be flagged, not waved through just because the wrong,
+    # fully-qualified quote happens to appear in the (unchanged) search text.
+    analysis = (
+        "The error occurs because the code imports `org.apache.ignite.cache.IgniteCache` on "
+        "line 6. The correct import location is the top-level `org.apache.ignite` package."
+    )
+    edits = [{
+        "search": "import org.apache.ignite.cache.IgniteCache;",
+        "replace": "import org.apache.ignite.cache.IgniteCache;",
+    }]
+    assert find_edits_ignoring_own_diagnosis(
+        analysis, edits, None, "import org.apache.ignite.cache.IgniteCache;"
+    ) is not None
+
+
 # --- find_edits_ignoring_own_diagnosis(): the "removed the old code too" signal ---
 
 def test_find_edits_ignoring_own_diagnosis_flags_a_stale_removal():
@@ -7888,6 +8135,7 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
     eventual real fix's success) - never for the rejected middle attempt."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -8067,6 +8315,28 @@ def test_reserve_graph_context_budget_barely_affects_a_large_primary_window():
     assert budget > int(32768 * 0.75) * 0.5
 
 
+def test_reserve_sibling_content_budget_scales_with_context_window():
+    # 2026-08-15 external review, Finding 8: sibling-content budget (unlike
+    # _reserve_graph_context_budget's 0.75) uses a smaller 0.15 fraction, since
+    # sibling content is reference-only material, not the primary content a
+    # per-file completion is generating.
+    assert _reserve_sibling_content_budget(32768) == int(32768 * 0.15)
+    assert _reserve_sibling_content_budget(16384) == int(16384 * 0.15)
+
+
+def test_reserve_sibling_content_budget_scales_down_for_a_smaller_fallback_model():
+    # A fallback model with a smaller context window gets a proportionally
+    # smaller sibling budget than the primary model - not one flat number
+    # generous for one and starving for the other.
+    assert _reserve_sibling_content_budget(16384) < _reserve_sibling_content_budget(32768)
+
+
+def test_reserve_sibling_content_budget_floors_instead_of_collapsing_to_near_zero():
+    # A pathologically small context window must still leave room for at
+    # least one typically-sized sibling file's real content.
+    assert _reserve_sibling_content_budget(1000) == 500
+
+
 def _write_deterministic_text_file(path, lines=40, words_per_line=8):
     # Plain .txt content deliberately, not .java/.py: skeletonize_code()'s
     # fallback branch makes "skeleton" tier a no-op (identical to "full")
@@ -8138,6 +8408,7 @@ async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degrada
     weakly-matched file loses detail in the prompt before a strongly-
     matched one does."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.memory = str(tmp_path / "memory")
     # Isolate from the real repo's shared skills/ directory - SkillEngine
@@ -8415,6 +8686,7 @@ async def test_workflow_structural_corruption_rejects_before_compiling(tmp_path)
     rejected, structurally-corrupted attempt."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -8586,6 +8858,7 @@ async def test_workflow_missing_file_recovery_does_not_escalate_or_consume_fulls
     from kriya.workflow.workflow import normalize_written_filepath as real_normalize_written_filepath
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
     cfg.paths.skills = str(tmp_path / "skills")
@@ -8992,6 +9265,7 @@ async def test_workflow_gate_outcome_records_attribution_tier(tmp_path):
     tier="locator"/confidence="high" and correctly scope the very next
     attempt to a targeted retry of just that file."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -9043,6 +9317,7 @@ async def test_workflow_self_diagnosis_redirects_after_confirmed_repeat_failure(
     signature recurs, the NEXT attempt must redirect to the self-diagnosed
     file instead of re-deriving the same (wrong) locator forever."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
@@ -9105,6 +9380,7 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
     gate ever runs a second time for the wrong reason, and correctly scoped
     back to the same file for the next retry."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)

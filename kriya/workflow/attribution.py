@@ -717,12 +717,24 @@ def find_edits_ignoring_own_diagnosis(
     if not quoted:
         return None
 
+    # Signal (a)/(b) are evaluated per-edit-PAIR (each edit's own search vs. its own
+    # replace), not against every edit's search/replace flat-joined into one shared
+    # old_text/new_text pool. Found live, 2026-08-16 (ignite_qpid_person, runs b-8/b-9):
+    # a genuinely correct, single-line cast fix (search "return cache.get(1);", replace
+    # "return (Person) cache.get(1);" - textbook signal (a), "Person" is real new
+    # content) was flagged as a mismatch anyway, because the SAME response's response
+    # also included a second, unrelated edit elsewhere in the file whose OWN search
+    # text happened to already mention "Person" (a common identifier in a
+    # Person-caching app) - flat-joining pollutes the "was this quote already present"
+    # check with content from a completely different edit that has nothing to do with
+    # the one actually implementing the diagnosed fix. A multi-edit response touching
+    # more than one spot in the same retry is normal, not rare - reproduced directly
+    # via find_edits_ignoring_own_diagnosis() itself, no live model call needed.
     if edits:
-        old_text = "\n".join(e.get("search") or "" for e in edits)
-        new_text = "\n".join(e.get("replace") or "" for e in edits)
+        pairs = [(e.get("search") or "", e.get("replace") or "") for e in edits]
     else:
-        old_text = orig_text
-        new_text = content or ""
+        pairs = [(orig_text, content or "")]
+    new_text = "\n".join(replace for _, replace in pairs)
 
     removal_quoted = [q for q in _REMOVAL_PHRASE_RE.findall(analysis) if len(q.strip()) >= 2]
     stale_removals = [q for q in removal_quoted if _still_contains(q, new_text)]
@@ -736,17 +748,44 @@ def find_edits_ignoring_own_diagnosis(
 
     for q in quoted:
         # Signal (b) is deliberately scoped to "the quote IS the entire old
-        # text" (not just present somewhere within a larger old_text) - a
-        # broader "old_text survives anywhere inside new_text" version was
-        # tried and found to also let a genuine mismatch through: appending
-        # an unrelated trailing comment to an unfixed line trivially makes
-        # the whole old line a substring of the new one too, for every
-        # quote in the analysis, not just the one actually being wrapped.
-        # Requiring q == old_text.strip() ties the signal to the specific
-        # quote whose surrounding statement was JUST that quote, which is
-        # exactly the real wrap shape (search: "X", replace: "print(X)")
-        # and excludes a multi-token old_text merely containing q somewhere.
-        if q in new_text and (q not in old_text or q == old_text.strip()):
+        # text OF THIS SAME PAIR" (not just present somewhere within a larger
+        # old_text, and not borrowed from a DIFFERENT pair) - a broader
+        # "old_text survives anywhere inside new_text" version was tried and
+        # found to also let a genuine mismatch through: appending an
+        # unrelated trailing comment to an unfixed line trivially makes the
+        # whole old line a substring of the new one too, for every quote in
+        # the analysis, not just the one actually being wrapped. Requiring
+        # q == search.strip() ties the signal to the specific quote whose
+        # surrounding statement was JUST that quote, which is exactly the
+        # real wrap shape (search: "X", replace: "print(X)") and excludes a
+        # multi-token old_text merely containing q somewhere.
+        #
+        # THIRD signal (2026-08-16) - a "disappearance" check, sibling to the
+        # ADDITIVE signal above but for the opposite shape: a diagnosis that
+        # names the WRONG value being corrected to a right one (a deletion/
+        # substitution, not an addition) never satisfies signal (a)/(b) at
+        # all, because every quoted fragment of a dotted/qualified identifier
+        # being shortened is trivially a substring of BOTH the old and new
+        # text - there's no genuinely "new" token to find. Found live,
+        # 2026-08-16 (ignite_qpid_person, run b-10a): "the code imports
+        # `org.apache.ignite.cache.IgniteCache`... the correct import
+        # location... is the top-level `org.apache.ignite` package" -
+        # correcting `import org.apache.ignite.cache.IgniteCache;` to
+        # `import org.apache.ignite.IgniteCache;` is a completely correct,
+        # real fix, but flagged as a mismatch because "IgniteCache",
+        # "org.apache.ignite.cache", and "org.apache.ignite" are all
+        # substrings of the ORIGINAL (wrong) import too. The one quote that
+        # DOES prove something happened is the full wrong path itself,
+        # `org.apache.ignite.cache.IgniteCache` - present in this pair's
+        # search, gone from this pair's replace. Scoped to the SAME pair
+        # (not the flat-joined pools, same reasoning as the two signals
+        # above) so an unrelated edit elsewhere can't manufacture a false
+        # "disappearance" either.
+        if any(
+            (q in replace and (q not in search or q == search.strip()))
+            or (q in search and q not in replace)
+            for search, replace in pairs
+        ):
             return None
 
     quoted_desc = ", ".join(f"`{q}`" for q in quoted)

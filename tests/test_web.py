@@ -78,6 +78,67 @@ async def test_fetch_url_text_refuses_redirect_to_unsafe_target():
 
 
 @pytest.mark.asyncio
+async def test_fetch_url_text_logs_error_with_traceback_by_default(caplog):
+    """Default behavior (quiet_on_failure=False, unchanged) - a fetch failure
+    logs at ERROR with a full traceback. Correct for the 3 call sites that
+    fetch ONE deliberate, user-specified URL (kriya learn, workflow.py's two
+    "user-supplied reference URL" sites), where a failure is worth surfacing
+    loudly."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="Forbidden")
+
+    transport = httpx.MockTransport(handler)
+
+    import logging
+    import kriya.tools.web as web_mod
+    orig_async_client = web_mod.httpx.AsyncClient
+    try:
+        web_mod.httpx.AsyncClient = lambda **kw: orig_async_client(transport=transport, **kw)
+        with caplog.at_level(logging.DEBUG, logger="kriya.tools.web"):
+            with pytest.raises(ValueError, match="HTTP fetch failed"):
+                await fetch_url_text("https://8.8.8.8/")
+    finally:
+        web_mod.httpx.AsyncClient = orig_async_client
+
+    error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(error_records) == 1
+    assert error_records[0].exc_info is not None
+
+@pytest.mark.asyncio
+async def test_fetch_url_text_quiet_on_failure_logs_debug_without_traceback(caplog):
+    """Regression test for a real live incident, 2026-08-16 - a single
+    live-lookup candidate URL (e.g. mvnrepository.com, which blocks
+    scraper-looking User-Agents) 403ing is routine and expected, not a
+    problem: kriya/workflow/live_lookup.py's multi-candidate loop already
+    catches this and moves on to the next candidate, re-logging it at DEBUG
+    itself - but the loud ERROR+full-traceback log from inside
+    fetch_url_text() had already been written by that point regardless,
+    alarming to read for something that isn't a bug. quiet_on_failure=True
+    (as live_lookup.py now passes) must downgrade this to a single DEBUG
+    line with no traceback, not suppress it entirely - still useful for
+    real debugging, just not alarming at a normal log level."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="Forbidden")
+
+    transport = httpx.MockTransport(handler)
+
+    import logging
+    import kriya.tools.web as web_mod
+    orig_async_client = web_mod.httpx.AsyncClient
+    try:
+        web_mod.httpx.AsyncClient = lambda **kw: orig_async_client(transport=transport, **kw)
+        with caplog.at_level(logging.DEBUG, logger="kriya.tools.web"):
+            with pytest.raises(ValueError, match="HTTP fetch failed"):
+                await fetch_url_text("https://8.8.8.8/", quiet_on_failure=True)
+    finally:
+        web_mod.httpx.AsyncClient = orig_async_client
+
+    assert not any(r.levelno == logging.ERROR for r in caplog.records)
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert len(debug_records) == 1
+    assert debug_records[0].exc_info is None
+
+@pytest.mark.asyncio
 async def test_fetch_url_text_enforces_byte_cap_while_streaming():
     """A malicious/huge response body must be rejected even without a (or
     with a lying) Content-Length header - the cap applies to actual bytes

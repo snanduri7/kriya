@@ -22,7 +22,11 @@ from kriya.workflow.edit_safety import apply_anchored_edits, atomic_write_file, 
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
-from kriya.workflow.context_budget import _reserve_graph_context_budget, build_code_context
+from kriya.workflow.context_budget import (
+    _reserve_graph_context_budget,
+    _reserve_sibling_content_budget,
+    build_code_context,
+)
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
@@ -218,6 +222,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
             files_with_current_content=state.all_files_written,
+            sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
         )
     elif use_fallback_targeted:
         # One-shot targeted fix on the first fallback model (see
@@ -275,6 +280,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
             files_with_current_content=state.all_files_written,
+            sibling_content_budget=_reserve_sibling_content_budget(fallback.context_window),
         )
     elif use_missing_files:
         # Missing-file recovery: same primary-model-only, non-escalating
@@ -332,6 +338,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             base_url_override=base_url_override,
             api_key_override=api_key_override,
             known_target_files=resolved_missing_files,
+            sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
         )
     else:
         # Re-run context budget allocator dynamically for escalated model context window size
@@ -342,11 +349,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         base_url_override = None
         api_key_override = None
 
+        active_context_window = ctx.kernel.config.llm.context_window
         fallback = resolve_fallback_model(state.budgets.retry_count, ctx.chain)
         if fallback is not None:
             model_override = fallback.model
             base_url_override = fallback.base_url
             api_key_override = fallback.api_key
+            active_context_window = fallback.context_window
             current_limit = _reserve_graph_context_budget(
                 fallback.context_window, ctx.skills_prompt, ctx.learned_rag_context
             )
@@ -480,6 +489,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 retry_temperature=ctx.kernel.config.llm.retry_temperature,
                 extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                 files_with_current_content=state.all_files_written,
+                sibling_content_budget=_reserve_sibling_content_budget(active_context_window),
             )
 
     # Recorded now, not derived by the caller afterward - see the fields'

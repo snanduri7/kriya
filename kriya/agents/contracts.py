@@ -23,10 +23,14 @@ json_mode only guarantees SOME valid JSON, not any particular shape) and a
 malformed response must degrade, never crash the run.
 """
 import json
+import logging
+import os
 import re
 from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, ValidationError, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class FileList(BaseModel):
@@ -72,6 +76,96 @@ _FENCED_JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 _BARE_FILES_OBJECT = re.compile(r'\{[^{}]*"files"\s*:\s*\[[^\]]*\][^{}]*\}', re.DOTALL)
 
 
+# Deliberately scoped to .java ONLY, not every compiled/interpreted source
+# extension - Maven/Gradle's src/main/java/ is a rigid, essentially
+# universal single-source-root convention that real Java projects don't
+# deviate from for main-scope source, which is the whole premise
+# _normalize_file_list_paths below relies on. Python/Ruby do NOT have an
+# equivalent rigid convention - a root-level entrypoint script alongside a
+# lib/package subdirectory (e.g. "cli.py" + "tasks/store.py") is completely
+# idiomatic, not a bug, so inferring a shared directory for those languages
+# would be a real, harmful false positive. Confirmed as a real, caught-
+# before-shipping false positive while testing this fix: an early ".py"-
+# inclusive version wrongly rewrote exactly that shape in an EXISTING test
+# fixture (test_ignores_trailing_chatty_prose_after_the_json_block) from
+# "cli.py" to "tasks/cli.py" - a legitimate root-level script, not a
+# mistake. A second false positive, also caught before shipping: grouping by
+# raw extension alone (not source-vs-config) "corrected" a real incident's
+# own "pom.xml" (correctly bare - pom.xml is always project-root) into
+# "src/main/resources/pom.xml", purely because it shares the ".xml"
+# extension with an unrelated "ignite-config.xml" resource file in the same
+# list - config/resource extensions are excluded for the same reason.
+_SOURCE_EXTENSIONS = {".java"}
+
+
+def _normalize_file_list_paths(files: List[str]) -> List[str]:
+    """Corrects a single bare-basename SOURCE-code entry (no directory
+    component) sitting among otherwise-consistently-pathed source siblings
+    of the same extension in the same file list - found live, 2026-08-16
+    (ignite_qpid_person, run b-8): the Architect's own JSON file list was
+    '{"files": ["pom.xml", "src/main/java/Person.java", ...,
+    "PersonApp.java"]}' - every OTHER file correctly pathed, but the
+    entrypoint (the one file that actually matters most, since it's what
+    pom.xml's exec plugin targets) came back bare. Nothing downstream ever
+    re-checks a file list's own internal path consistency - FileList's
+    validators only check per-path syntactic sanity (not blank, not
+    absolute, no '..'), so this passed validation cleanly and was written
+    literally as given: straight to the WORKSPACE ROOT, not
+    src/main/java/PersonApp.java. Maven only ever compiles src/main/java/**,
+    so the file was silently outside the build from attempt 1 onward -
+    "Could not find or load main class PersonApp" recurred identically
+    across 7 attempts and 2 models, including two DIAGNOSIS MISMATCH catches,
+    because every attempt was retrying CONTENT at a path Maven structurally
+    never looks at; no content-level fix could ever have resolved it.
+
+    Deliberately narrow and conservative - only corrects when the inference
+    is unambiguous: scoped to _SOURCE_EXTENSIONS only (see that constant's
+    own comment for why - config/resource extensions are excluded entirely,
+    not just handled cautiously). For each source extension appearing more
+    than once in the list, if exactly one file of that extension has an
+    empty directory component AND every OTHER file of that same extension
+    shares the IDENTICAL non-empty directory, the bare file is rewritten
+    into that shared directory. Any other shape (multiple bare files,
+    siblings disagreeing on directory, only one source file total of that
+    extension) is left untouched - there's no safe, ungrounded prefix to
+    invent, and guessing wrong would be worse than leaving the original bare
+    path for the existing IncompleteGenerationError/missing-file-recovery
+    machinery to eventually surface as a distinct, correctly-attributed
+    problem."""
+    by_ext: dict = {}
+    for f in files:
+        ext = os.path.splitext(f)[1]
+        if ext in _SOURCE_EXTENSIONS:
+            by_ext.setdefault(ext, []).append(f)
+
+    corrections = {}
+    for ext, group in by_ext.items():
+        if len(group) < 2:
+            continue
+        bare = [f for f in group if not os.path.dirname(f)]
+        if len(bare) != 1:
+            continue
+        dirs = {os.path.dirname(f) for f in group if f != bare[0]}
+        if len(dirs) != 1:
+            continue
+        shared_dir = next(iter(dirs))
+        if not shared_dir:
+            continue
+        corrections[bare[0]] = f"{shared_dir}/{bare[0]}"
+
+    if not corrections:
+        return files
+
+    for original, corrected in corrections.items():
+        logger.info(
+            f"Architect/Developer file list: '{original}' had no directory component while its "
+            f"'{os.path.splitext(original)[1]}' source siblings all agree on one - normalizing to "
+            f"'{corrected}' (an unambiguous, evidence-backed correction, not a guess: see "
+            "_normalize_file_list_paths's own docstring for the live incident this closes)."
+        )
+    return [corrections.get(f, f) for f in files]
+
+
 def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
     """Extracts and validates a {"files": [...]} JSON block from a completion
     - a full Architect design (the file list is a trailing block inside a
@@ -96,6 +190,7 @@ def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
         return None, f"file-list JSON block did not parse: {e}"
 
     try:
-        return FileList.model_validate(parsed).files, None
+        files = FileList.model_validate(parsed).files
     except ValidationError as e:
         return None, f"file-list JSON block failed schema validation: {e}"
+    return _normalize_file_list_paths(files), None
