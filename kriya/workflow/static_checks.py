@@ -232,15 +232,29 @@ STATIC_CHECKS = [
 ]
 
 
-def run_static_checks(worktree_path: str, all_files_written: Iterable[str]) -> Optional[str]:
+def run_static_checks(
+    worktree_path: str, all_files_written: Iterable[str], overrides: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
     """Reads every known-written file back from the worktree (nothing keeps a
     Dict[str,str] of full content in memory this late in run_attempt() - it's
     read-and-discarded per-file during the earlier write loop) and runs every
     registered check against the combined set. Returns the first violation
     message found, or None. Best-effort: a file that can't be read is silently
-    skipped rather than failing the whole check."""
+    skipped rather than failing the whole check.
+
+    overrides (optional): filepath -> content pairs used INSTEAD OF reading
+    that file from disk - lets a caller check a proposed-but-not-yet-written
+    candidate against the exact same registered checks a real write would
+    run, without writing it first. Added 2026-08-17 for
+    kriya/workflow/attempt.py's deterministic-validation-first override of
+    the diagnosis-mismatch pre-flight check - see that call site's own
+    comment for the full incident."""
+    overrides = overrides or {}
     files: Dict[str, str] = {}
     for filepath in all_files_written:
+        if filepath in overrides:
+            files[filepath] = overrides[filepath]
+            continue
         full_path = os.path.join(worktree_path, filepath)
         try:
             with open(full_path, "r", encoding="utf-8", errors="replace") as fh:

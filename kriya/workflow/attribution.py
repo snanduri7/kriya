@@ -597,6 +597,13 @@ _ANALYSIS_QUOTED_SPAN_RE = re.compile(r"`([^`]+)`")
 # look like a bare path (accepted tradeoff, see the same comment).
 _BARE_FILE_PATH_RE = re.compile(r"^[\w.\-]+(?:/[\w.\-]+)+\.[a-zA-Z0-9]+$")
 
+# A print/output-call opening, used by find_edits_ignoring_own_diagnosis()'s
+# fifth signal (a bare line wrapped into a print call) - see that signal's own
+# inline comment for the full incident. Deliberately a small closed set
+# (println/print/puts), mirroring the same narrow-vocabulary approach already
+# used for _REMOVAL_PHRASE_RE, not a general statement-shape detector.
+_PRINT_CALL_RE = re.compile(r"\b(?:println|print|puts)\s*\(")
+
 # Phrases that explicitly mark the quoted span right after them as the
 # PROBLEM being moved away from, not the fix - "instead of `var`", "never a
 # raw or var-inferred cache handle" style language already seen verbatim in
@@ -865,10 +872,40 @@ def find_edits_ignoring_own_diagnosis(
         # quoted span appearing new in this pair's replace - deliberately
         # not a general "any change counts" relaxation, which would reopen
         # the no-op-edit gap this whole check exists to close.
+        #
+        # FIFTH signal (2026-08-17, ignite_qpid_person run b-10m) - a
+        # "bare-line print-wrap" check, sibling to signal (b)'s wrap detection
+        # but for a shape it structurally can't reach: signal (b) requires
+        # q == search.strip() - the quote must be the ENTIRE search block -
+        # which holds for a small, isolated wrap edit but not when the search
+        # block also needs surrounding context (e.g. the enclosing if/else) to
+        # match uniquely elsewhere in the file. Confirmed live: Kriya's own
+        # BareVerificationMarkerCheck static rule correctly flagged a bare,
+        # unwrapped `[VERIFICATION] PASS` line as invalid Java; the model's
+        # own repair correctly wrapped it in `System.out.println(...)` -
+        # exactly the required fix - but the search block spanning several
+        # surrounding lines meant q ("[VERIFICATION] PASS") was a SUBSTRING of
+        # a bigger search block, not the whole thing, so signal (b) never
+        # fired. This genuinely correct repair was rejected 3 times across 2
+        # consecutive runs (fallback-targeted retry AND a full-set
+        # regeneration), directly causing a 2400s timeout. Scoped precisely to
+        # the confirmed shape: q was its own EXACT standalone line in search,
+        # is no longer a standalone line in replace, and now appears as a
+        # substring of some replace line that also opens a print/println/puts
+        # call - not a general "any wrap counts" relaxation. A quote that
+        # merely gains an unrelated trailing comment on its own line (the
+        # exact regression signal (b)'s own narrow scoping was built to avoid)
+        # doesn't satisfy this either, since that shape has no print-call
+        # opening on the changed line.
         if any(
             (q in replace and (q not in search or q == search.strip()))
             or (q in search and q not in replace)
             or (f"({q})" in replace and f"({q})" not in search)
+            or (
+                any(q == line.strip() for line in search.splitlines())
+                and not any(q == line.strip() for line in replace.splitlines())
+                and any(q in line and _PRINT_CALL_RE.search(line) for line in replace.splitlines())
+            )
             for search, replace in pairs
         ):
             return None

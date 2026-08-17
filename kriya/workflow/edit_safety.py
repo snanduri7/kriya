@@ -62,9 +62,30 @@ def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], sho
 
         norm_search = normalize_whitespace(search_block)
 
+        # Found live, 2026-08-17, digging into a corpus-wide survey of
+        # eval-harness runs: 14 "elided in the skeletonized context"
+        # failures across the whole run history, several from a genuinely
+        # legitimate shape this check never accounted for. shown_context is
+        # a fixed snapshot, passed in once and never updated across loop
+        # iterations - but current_content DOES evolve as earlier edits in
+        # this SAME response get applied (the .replace() call below).
+        # Reproduced directly: a two-step chained edit (edit #1 adds a
+        # `helper();` call, edit #2 wants to comment on that exact new
+        # line) is completely valid and internally consistent, but edit
+        # #2's search text was never part of the ORIGINAL file the model
+        # was shown - only of what edit #1 itself just introduced - so the
+        # old check (comparing only against the static shown_context)
+        # wrongly rejected it as "not shown to the model," when the model
+        # in fact introduced that exact text itself, one edit earlier in
+        # the same response. Grounding a search block against EITHER the
+        # original shown context OR the file's current (possibly
+        # already-edited) state closes this gap while still rejecting a
+        # genuinely fabricated/hallucinated search block, which by
+        # definition matches neither.
         if shown_context:
             norm_shown = normalize_whitespace(shown_context)
-            if norm_search not in norm_shown:
+            norm_current = normalize_whitespace(current_content)
+            if norm_search not in norm_shown and norm_search not in norm_current:
                 raise ValueError(
                     f"Anchor matching failed for edit #{idx}: The search block contains code segments "
                     f"that were elided in the skeletonized context and not shown to the model."

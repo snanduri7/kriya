@@ -3278,6 +3278,74 @@ async def test_run_attempt_static_check_scopes_likely_files_not_every_written_fi
     assert state.gate_outcomes[-1]["likely_files"] == ["ProtocolApp.java"]
 
 @pytest.mark.asyncio
+async def test_run_attempt_diagnosis_mismatch_bypassed_when_static_check_genuinely_resolved(tmp_path):
+    """End-to-end regression test for the deterministic-validation-first
+    bypass added 2026-08-17 (kriya/workflow/attempt.py's
+    _diagnosis_mismatch_bypass_reason), for its static_rule_violation half -
+    the sibling test for the compile-triggered half is
+    test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file above.
+
+    Uses IgniteUnclosedResourceCheck (not BareVerificationMarkerCheck) to
+    prove this is a genuinely GENERAL bypass, not just a re-implementation
+    of find_edits_ignoring_own_diagnosis's own signal (e) - which is scoped
+    specifically to the print-wrap shape and would not itself accept this
+    edit. The analysis deliberately quotes only the bare filename
+    (`ProtocolApp.java`, no `/` - not excluded by the self-referential-path
+    signal either, since that's scoped to actual paths) - a genuine
+    mismatch under every existing signal, satisfying none of them - so the
+    only thing that can accept this edit is the new bypass re-running
+    IgniteUnclosedResourceCheck directly against the proposed content and
+    finding the violation genuinely gone."""
+    state = GenerationState()
+    # Simulates attempt 1 having already happened: the file is on disk with
+    # the real violation, already tracked as written, and the retry loop's
+    # own budget bookkeeping already knows this retry responds to a
+    # static_rule_violation - exactly the state a real attempt 2 would be in.
+    unclosed_content = (
+        'public class ProtocolApp {\n'
+        '    public static void main(String[] args) throws Exception {\n'
+        '        Ignite ignite = Ignition.start();\n'
+        '        ignite.getOrCreateCache("x");\n'
+        '    }\n'
+        '}\n'
+    )
+    with open(os.path.join(str(tmp_path), "ProtocolApp.java"), "w", encoding="utf-8") as fh:
+        fh.write(unclosed_content)
+    state.all_files_written = {"ProtocolApp.java"}
+    state.budgets.last_failure_signature = ("static_rule_violation", ("ignite_unclosed_resource",))
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "ProtocolApp.java", "content": None,
+        "edits": [{
+            "search": '        Ignite ignite = Ignition.start();\n        ignite.getOrCreateCache("x");',
+            "replace": (
+                '        Ignite ignite = Ignition.start();\n'
+                '        try {\n'
+                '            ignite.getOrCreateCache("x");\n'
+                '        } finally {\n'
+                '            ignite.close();\n'
+                '        }'
+            ),
+        }],
+        "analysis": "The `ProtocolApp.java` resource leak needs explicit cleanup.",
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["ProtocolApp.java"],
+        expected_files_upfront=["ProtocolApp.java"],
+        architect_basename_to_path={"ProtocolApp.java": "ProtocolApp.java"},
+    )
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}):
+        await run_attempt(state, ctx)  # must NOT raise QualityGateFailure
+
+    with open(os.path.join(str(tmp_path), "ProtocolApp.java"), encoding="utf-8") as fh:
+        written = fh.read()
+    assert ".close()" in written
+    assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
+
+@pytest.mark.asyncio
 async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
     """Mirror of the failure-path test above: a clean compile with no tests
     and Runtime Verification disabled returns normally (no exception), having
@@ -8351,6 +8419,76 @@ def test_find_edits_ignoring_own_diagnosis_file_path_exclusion_still_flags_a_tru
     ) is not None
 
 
+def test_find_edits_ignoring_own_diagnosis_recognizes_a_bare_line_print_wrap_within_a_larger_block():
+    """Regression test for a fifth, distinct false-positive bug found live,
+    2026-08-17 (ignite_qpid_person, run b-10m). Signal (b) (the existing wrap
+    detector) requires the quoted span to equal the ENTIRE search block
+    (q == search.strip()) - true for a small, isolated wrap edit, but not
+    when the search block also needs surrounding context (the enclosing
+    if/else) to match uniquely elsewhere in the file. Real analysis text and
+    edit from the incident, reproduced verbatim - Kriya's own
+    BareVerificationMarkerCheck correctly flagged a bare, unwrapped
+    `[VERIFICATION] PASS` line as invalid Java, the model's repair correctly
+    wrapped it in System.out.println(...), and this genuinely correct fix
+    was wrongly rejected 3 times across 2 consecutive runs, directly causing
+    a 2400s timeout."""
+    analysis = (
+        "The file contains a stray `[VERIFICATION] PASS` text literal injected directly "
+        "into the Java source code on line 69, which breaks the Java syntax parser and "
+        "causes the compiler to fail with \"Expression expected after this token\". I will "
+        "remove the invalid text and replace it with proper "
+        "`System.out.println(\"[VERIFICATION] ...\")` calls inside the conditional branches "
+        "to satisfy the verification contract."
+    )
+    edits = [{
+        "search": (
+            "                        // Read from cache and print fields\n"
+            "                        Person cachedPerson = (Person) cache.get(1);\n"
+            "\n"
+            "[VERIFICATION] PASS\n"
+            "                        if (cachedPerson != null) {\n"
+            "                            System.out.println(\"Retrieved Person from cache: \" + cachedPerson);\n"
+            "                        } else {\n"
+            "                            System.out.println(\"No Person found in cache\");\n"
+            "                        }"
+        ),
+        "replace": (
+            "                        // Read from cache and print fields\n"
+            "                        Person cachedPerson = (Person) cache.get(1);\n"
+            "\n"
+            "                        if (cachedPerson != null) {\n"
+            "                            System.out.println(\"Retrieved Person from cache: \" + cachedPerson);\n"
+            "                            System.out.println(\"[VERIFICATION] PASS\");\n"
+            "                        } else {\n"
+            "                            System.out.println(\"No Person found in cache\");\n"
+            "                            System.out.println(\"[VERIFICATION] FAIL: No Person found in cache\");\n"
+            "                        }"
+        ),
+    }]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is None
+
+
+def test_find_edits_ignoring_own_diagnosis_bare_line_wrap_signal_still_flags_unrelated_nearby_change():
+    # Same shape as the existing wrap-shape negative test, but multi-line:
+    # the marker stays bare and UNCHANGED on its own line while an unrelated
+    # nearby line changes - must still be flagged, not waved through just
+    # because the marker happens to sit in a multi-line search block.
+    analysis = "wrap the bare marker `[VERIFICATION] PASS` in a print() call."
+    edits = [{"search": "[VERIFICATION] PASS\nx = 1", "replace": "[VERIFICATION] PASS\nx = 2"}]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is not None
+
+
+def test_find_edits_ignoring_own_diagnosis_bare_line_wrap_signal_still_flags_trailing_comment_without_print():
+    # Companion negative case for the new signal specifically: a bare marker
+    # line gaining an unrelated trailing comment (no print/println/puts call
+    # anywhere) must still be flagged - this is the exact regression shape
+    # signal (b)'s own narrow `q == search.strip()` scoping was built to
+    # avoid, now re-verified against the new, broader-context signal too.
+    analysis = "The problem is that `[VERIFICATION] PASS` is never logged."
+    edits = [{"search": "x = 1\n[VERIFICATION] PASS", "replace": "x = 1\n[VERIFICATION] PASS // TODO"}]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, "irrelevant") is not None
+
+
 def test_find_edits_ignoring_own_diagnosis_removal_signal_takes_priority_over_addition():
     # The addition-check alone would pass this (the fix content genuinely is
     # new), but the removal-check must still catch it - the two signals are
@@ -8386,14 +8524,24 @@ def test_find_edits_ignoring_own_diagnosis_removal_signal_handles_full_content_s
 
 
 @pytest.mark.asyncio
-async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_path):
-    """End-to-end regression test for the same real live failure
-    (ignite_qpid_person, 2026-08-07): Layer 1 must reject an edit whose search
-    block spans a previously-reported compile-error line but leaves that line
-    unchanged in its replace text - BEFORE the (expensive) compile check ever
-    runs again, not after. Confirmed here by asserting PolymorphicValidator's
-    compile check is called exactly twice (attempt 1's real failure, and the
-    eventual real fix's success) - never for the rejected middle attempt."""
+async def test_workflow_unaddressed_error_location_defers_to_the_real_compiler(tmp_path):
+    """End-to-end regression test, UPDATED 2026-08-17 for the deterministic-
+    validation-first bypass (see _diagnosis_mismatch_bypass_reason's docstring
+    addendum and the inline comment at this check's call site in attempt.py):
+    Layer 1 (find_edits_ignoring_reported_line) no longer hard-rejects an edit
+    whose search block spans a previously-reported compile-error line but
+    leaves that exact line unchanged - it's a bypassed, logged-only signal
+    now, since a real compile gate always runs right after anyway and is the
+    authoritative answer (confirmed live: this exact check false-positived on
+    a companion edit elsewhere in the same response that already transitively
+    fixed the reported line, ignite_qpid_person run b-10f). So attempt 2's
+    no-op edit here now genuinely reaches the compiler, which correctly fails
+    it again (the real, unfixed type error) - one extra compile cycle instead
+    of a pre-flight rejection, same tradeoff already accepted for
+    diagnosis_mismatch's compile-triggered bypass. Confirmed via 3 compile
+    calls (attempt 1's real failure, attempt 2's real failure since the edit
+    genuinely never changed line 2, and attempt 3's real fix) and zero
+    unaddressed_error_location gate outcomes."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -8414,6 +8562,10 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
                 "success": False,
                 "output": "[ERROR] .../App.java:[2,20] incompatible types: java.lang.Object cannot be converted to java.lang.String",
             },
+            {
+                "success": False,
+                "output": "[ERROR] .../App.java:[2,20] incompatible types: java.lang.Object cannot be converted to java.lang.String",
+            },
             {"success": True, "output": ""},
         ]
         we.developer.run_generation = AsyncMock(
@@ -8422,6 +8574,7 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
                 [{"filepath": "App.java", "content": "class App {\n  String x = get();\n}"}],
                 # Attempt 2: search spans line 2 but replace leaves it byte-identical -
                 # the exact non-fix pattern found live (something else renamed instead).
+                # Now reaches the real compiler and fails there instead of pre-flight.
                 [{"filepath": "App.java", "edits": [{
                     "search": "class App {\n  String x = get();\n}",
                     "replace": "class App { // renamed for clarity\n  String x = get();\n}",
@@ -8433,7 +8586,7 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
         res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
 
     assert res["quality_gates_passed"] is True
-    assert mock_compile.call_count == 2  # attempt 2's rejection never reached compile
+    assert mock_compile.call_count == 3  # attempt 2's edit now genuinely reaches the compiler
 
     db_path = os.path.join(cfg.paths.logs, "traces.db")
     conn = sqlite3.connect(db_path)
@@ -8442,11 +8595,77 @@ async def test_workflow_unaddressed_error_location_rejects_before_compiling(tmp_
     conn.close()
     gate_outcomes = json.loads(row["gate_outcomes"])
 
-    unaddressed = [o for o in gate_outcomes if o.get("type") == "unaddressed_error_location"]
-    assert len(unaddressed) == 1, gate_outcomes
-    assert unaddressed[0]["likely_files"] == ["App.java"]
-    assert unaddressed[0]["file_locations"] == [{"filepath": "App.java", "line": 2, "col": None}]
-    assert unaddressed[0]["success"] is False
+    assert not any(o.get("type") == "unaddressed_error_location" for o in gate_outcomes), gate_outcomes
+    failed_compile_outcomes = [
+        o for o in gate_outcomes if o.get("type") == "compile" and o.get("success") is False
+    ]
+    assert len(failed_compile_outcomes) == 2
+
+
+@pytest.mark.asyncio
+async def test_workflow_unaddressed_error_location_bypass_lets_a_companion_edit_through(tmp_path):
+    """Regression test for the real live false positive that motivated the
+    bypass above (ignite_qpid_person, run b-10f, replayed via the corpus
+    survey's DEBUG-capture, 2026-08-17): a targeted retry's FIRST edit fixes
+    the actual root cause (a bad import), which transitively resolves every
+    usage site the compiler flagged - but the SAME response's second edit is
+    a harmless no-op that just echoes one of those now-fixed usage sites back
+    unchanged. Layer 1 used to see only the second edit in isolation and hard-
+    reject it as "line left unchanged", even though the file it actually
+    produces compiles fine. Confirms the fix: this now reaches the real
+    compiler, which is the only thing that ever needed to make this call, and
+    passes on the first try - no wasted extra compile cycle, unlike the
+    genuine-non-fix case above."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {
+                "success": False,
+                "output": "[ERROR] .../App.java:[3,5] cannot find symbol: class Cache",
+            },
+            {"success": True, "output": ""},
+        ]
+        we.developer.run_generation = AsyncMock(
+            side_effect=[
+                # Attempt 1: full content, fails compile - bad import for Cache.
+                [{
+                    "filepath": "App.java",
+                    "content": "import bad.pkg.Cache;\nclass App {\n  Cache c = get();\n}",
+                }],
+                # Attempt 2: edit #1 fixes the ACTUAL root cause (the import) -
+                # edit #2 is a harmless no-op echo of the now-transitively-fixed
+                # usage site the compiler also named at line 2.
+                [{"filepath": "App.java", "edits": [
+                    {"search": "import bad.pkg.Cache;", "replace": "import good.pkg.Cache;"},
+                    {"search": "  Cache c = get();", "replace": "  Cache c = get();"},
+                ]}],
+            ]
+        )
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is True
+    assert mock_compile.call_count == 2  # no wasted third compile - the fix genuinely worked first try
+
+    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    assert not any(o.get("type") == "unaddressed_error_location" for o in gate_outcomes), gate_outcomes
 
 
 def test_estimate_tokens_no_longer_undercounts_punctuation_heavy_identifiers():
@@ -8840,6 +9059,49 @@ def test_apply_anchored_edits_still_rejects_zero_matches():
     problem2 = find_structural_corruption("Foo.java", extra)
     assert problem2 is not None
     assert "extra closing" in problem2
+
+
+def test_apply_anchored_edits_grounds_a_chained_edit_against_evolving_content():
+    """Regression test for a real bug found live, 2026-08-17, digging into a
+    corpus-wide survey of eval-harness runs: shown_context is a fixed
+    snapshot passed in once, never updated across the per-edit loop, but
+    current_content DOES evolve as earlier edits in the SAME response get
+    applied. A two-step chained edit (edit #1 adds a `helper();` call, edit
+    #2 wants to comment on that exact new line) is completely valid and
+    internally consistent, but edit #2's search text was never part of the
+    ORIGINAL file the model was shown - only of what edit #1 itself just
+    introduced - so the old check (comparing only against the static
+    shown_context) wrongly rejected it as "elided in the skeletonized
+    context," even though the model introduced that exact text itself, one
+    edit earlier in the same response. Confirmed live in the run history:
+    14 occurrences of this exact rejection message across the eval-harness
+    corpus, at least one with a multi-edit response ("edit #4") consistent
+    with this shape."""
+    from kriya.workflow.workflow import apply_anchored_edits
+
+    original = "public class App {\n    int x = 1;\n}\n"
+    shown_context = original
+    edits = [
+        {"search": "int x = 1;", "replace": "int x = 1;\n    helper();"},
+        {"search": "helper();", "replace": "helper(); // step 2, chained off edit 1"},
+    ]
+    result = apply_anchored_edits(original, edits, shown_context)
+    assert "helper(); // step 2, chained off edit 1" in result
+
+
+def test_apply_anchored_edits_chained_grounding_still_rejects_fabricated_search_text():
+    # Companion negative case - a search block that matches NEITHER the
+    # original shown context NOR the evolving current content (a genuinely
+    # fabricated/hallucinated block, not one introduced by an earlier edit
+    # in this same response) must still be rejected.
+    from kriya.workflow.workflow import apply_anchored_edits
+
+    original = "public class App {\n    int x = 1;\n}\n"
+    shown_context = original
+    edits = [{"search": "<parameter name=\"totally_fake\"/>", "replace": "<property name=\"totally_fake\"/>"}]
+
+    with pytest.raises(ValueError, match="elided in the skeletonized context"):
+        apply_anchored_edits(original, edits, shown_context)
 
 
 def test_find_structural_corruption_xml_well_formed_vs_malformed():
@@ -9637,9 +9899,21 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
     motivated by a real divergence found live in spikes/eval_harness/runs/
     attribution-fix-validation-3): a targeted retry's own FIX ANALYSIS
     correctly named a specific fix, but the returned edit never actually made
-    that change - caught as a pre-flight failure BEFORE the expensive compile
-    gate ever runs a second time for the wrong reason, and correctly scoped
-    back to the same file for the next retry."""
+    that change.
+
+    UPDATED 2026-08-17: a compile-triggered diagnosis-mismatch is now
+    deliberately BYPASSED (see attempt.py's _diagnosis_mismatch_bypass_reason)
+    rather than rejected pre-flight - found live that this specific check
+    produced 3 confirmed false positives in one night, each wrongly rejecting
+    an edit that would have compiled correctly, while this check's own
+    original motivating incident (reproduced here) costs at most one extra,
+    otherwise-identical compile failure if the check is bypassed instead of
+    firing - the SAME repeated-failure signal the retry loop already tracks
+    independently. The no-op edit below now proceeds all the way to the real
+    compiler, fails there (for the same underlying reason, not a heuristic
+    guess), and the next targeted retry is still correctly scoped back to
+    A.java - via the real compiler's own locator this time, not the
+    diagnosis-mismatch pre-flight check."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
@@ -9658,29 +9932,33 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
         [{"filepath": "A.java", "content": "class A {\n  var cache = get();\n}"}],
         # Attempt 2 (targeted retry) - analysis names a specific fix, but the
         # edit doesn't actually make it (reproduces the real captured
-        # validation-3 divergence).
+        # validation-3 divergence). No longer caught pre-flight - proceeds to
+        # the real compiler, which fails again for the same reason.
         [{
             "filepath": "A.java", "content": None,
             "edits": [{"search": "var cache = get();", "replace": "var cache = get(); // still untyped"}],
             "analysis": "the fix requires declaring `IgniteCache<Integer, Protocol>` explicitly instead of `var`.",
         }],
         # Attempt 3 (targeted retry again, redirected back to A.java by the
-        # diagnosis_mismatch failure) - this time the fix is actually made.
+        # REAL compiler's own locator on attempt 2's failure) - this time the
+        # fix is actually made.
         [{"filepath": "A.java", "content": "class A {\n  IgniteCache<Integer, Protocol> cache = get();\n}"}],
     ])
 
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
         mock_compile.side_effect = [
             {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},
-            # No second entry for attempt 2 - it never reaches the compile
-            # gate at all, caught by the pre-flight check first.
+            # Attempt 2 now genuinely reaches the compile gate (the pre-flight
+            # check is bypassed for a compile-triggered retry) and fails for
+            # the same underlying reason, since the edit never actually fixed it.
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},
             {"success": True, "output": ""},
         ]
         res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
 
     assert res["quality_gates_passed"] is True
     assert we.developer.run_generation.call_count == 3
-    assert mock_compile.call_count == 2  # confirms attempt 2 never reached the compile gate
+    assert mock_compile.call_count == 3  # confirms attempt 2 DID reach the real compile gate
     third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
     assert third_call_kwargs["known_target_files"] == ["A.java"]
 
@@ -9690,9 +9968,12 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
     conn.close()
     gate_outcomes = json.loads(row["gate_outcomes"])
-    mismatch_outcome = next(g for g in gate_outcomes if g["type"] == "diagnosis_mismatch")
-    assert mismatch_outcome["likely_files"] == ["A.java"]
-    assert "IgniteCache<Integer, Protocol>" in mismatch_outcome["output"]
+    # No diagnosis_mismatch outcome anymore - both attempt-1 and attempt-2
+    # failures are genuine "compile" gate outcomes now (a third, successful
+    # "compile" outcome also exists for attempt 3 - not a failure).
+    assert not any(g["type"] == "diagnosis_mismatch" for g in gate_outcomes)
+    failed_compile_outcomes = [g for g in gate_outcomes if g["type"] == "compile" and g.get("success") is False]
+    assert len(failed_compile_outcomes) == 2
 
 
 # =====================================================================
