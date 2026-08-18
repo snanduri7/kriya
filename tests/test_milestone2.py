@@ -79,9 +79,12 @@ def test_context_skeletonization():
     assert "process()" in skel
     assert "..." in skel
     
-    # Signatures tier: Keep only class header / packages / imports
+    # Signatures tier: Keep declarations but elide fields and method bodies
     sigs = skeletonize_code(java_code, "SimpleClass.java", "signatures")
-    assert "process()" not in sigs
+    assert "process()" in sigs
+    assert "{ ... }" in sigs
+    assert "private String name" not in sigs
+    assert "System.out.println" not in sigs
     assert "class SimpleClass" in sigs
     
     py_code = """import os

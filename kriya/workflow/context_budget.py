@@ -3,13 +3,16 @@
 import asyncio
 import difflib
 import hashlib
+import io
 import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tokenize
 import xml.etree.ElementTree as ET
+from functools import lru_cache
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
@@ -35,9 +38,153 @@ def skeletonize_code(content: str, filepath: str, tier: str) -> str:
         return content
 
 
+def _python_decorator_ranges(
+    tokens: List[tokenize.TokenInfo],
+    lines: List[str],
+) -> List[Tuple[int, int, int]]:
+    """Return ``(start_line, end_line, indent)`` for decorator statements."""
+    ranges = []
+    bracket_depth = 0
+    for index, token in enumerate(tokens):
+        if token.type == tokenize.OP and token.string in "([{":
+            bracket_depth += 1
+            continue
+        if token.type == tokenize.OP and token.string in ")]}":
+            bracket_depth = max(0, bracket_depth - 1)
+            continue
+        if token.type != tokenize.OP or token.string != "@":
+            continue
+        if bracket_depth != 0:
+            # A bare '@' inside an open (), [] or {} is the matrix-
+            # multiplication operator on a continuation line (common
+            # Black/PEP8 style for numpy/torch, e.g. `x = (\n    a\n@ b\n)`),
+            # never a decorator - a decorator statement can only start at
+            # zero bracket depth (2026-08-18 review finding: this was
+            # previously misattached to the next declaration).
+            continue
+        line_index = token.start[0] - 1
+        if lines[line_index][:token.start[1]].strip():
+            continue
+        for following in tokens[index + 1:]:
+            if following.type == tokenize.NEWLINE:
+                ranges.append((line_index, following.end[0] - 1, token.start[1]))
+                break
+    return ranges
+
+
+def _python_decorator_start(
+    declaration_line: int,
+    indent: int,
+    decorator_ranges: List[Tuple[int, int, int]],
+    lines: List[str],
+) -> int:
+    """Find the first decorator directly attached to a declaration."""
+    output_start = declaration_line
+    cursor = declaration_line
+    for start_line, end_line, decorator_indent in reversed(decorator_ranges):
+        if end_line >= cursor or decorator_indent != indent:
+            continue
+        intervening = lines[end_line + 1:cursor]
+        if all(not line.strip() or line.lstrip().startswith("#") for line in intervening):
+            output_start = start_line
+            cursor = start_line
+    return output_start
+
+
+def _python_declaration_ranges(content: str) -> Dict[int, Tuple[int, int, str, int]]:
+    """Return source ranges for every Python function and class declaration.
+
+    Tokenizing rather than counting lines is important here: annotations and
+    base lists can make a declaration span several lines and contain their own
+    colons.  The first colon outside (), [] and {} after ``def``/``class`` is
+    the suite delimiter.  The result is keyed by the first decorator line (or
+    the declaration line) and stores ``end_line, colon_column, kind, indent``.
+    Ranges discovered before a tokenization error remain usable for incomplete
+    source files, including any decorators tokenized before that error.
+    """
+    tokens = []
+    token_stream = tokenize.generate_tokens(io.StringIO(content).readline)
+    try:
+        while True:
+            tokens.append(next(token_stream))
+    except StopIteration:
+        pass
+    except (IndentationError, tokenize.TokenError):
+        pass
+
+    lines = content.splitlines()
+    decorator_ranges = _python_decorator_ranges(tokens, lines)
+    ranges: Dict[int, Tuple[int, int, str, int]] = {}
+    for index, token in enumerate(tokens):
+        if token.type != tokenize.NAME or token.string not in {"def", "class"}:
+            continue
+
+        bracket_depth = 0
+        for following in tokens[index + 1:]:
+            if following.type == tokenize.NEWLINE and bracket_depth == 0:
+                break
+            if following.type != tokenize.OP:
+                continue
+            if following.string in "([{":
+                bracket_depth += 1
+            elif following.string in ")]}" and bracket_depth:
+                bracket_depth -= 1
+            elif following.string == ":" and bracket_depth == 0:
+                declaration_line = token.start[0] - 1
+                indent = len(lines[declaration_line]) - len(lines[declaration_line].lstrip())
+                output_start = _python_decorator_start(
+                    declaration_line,
+                    indent,
+                    decorator_ranges,
+                    lines,
+                )
+                ranges[output_start] = (
+                    following.end[0] - 1,
+                    following.end[1],
+                    token.string,
+                    indent,
+                )
+                break
+
+    return ranges
+
+
 def skeletonize_python(content: str, tier: str) -> str:
     lines = content.splitlines()
     output = []
+
+    if tier == "signatures":
+        declaration_ranges = _python_declaration_ranges(content)
+        line_index = 0
+        while line_index < len(lines):
+            line = lines[line_index]
+            line_strip = line.strip()
+
+            declaration_range = declaration_ranges.get(line_index)
+            if declaration_range is not None:
+                end_line, colon_column, kind, indent = declaration_range
+                declaration_lines = lines[line_index:end_line + 1]
+                # A one-line declaration can have its suite after the colon.
+                # Retain only the declaration, never that inline body.
+                declaration_lines[-1] = declaration_lines[-1][:colon_column]
+                output.extend(declaration_lines)
+                if kind == "def":
+                    output.append(" " * (indent + 4) + "...")
+                line_index = end_line + 1
+                continue
+
+            if not line_strip:
+                output.append(line)
+            elif line_strip.startswith("import ") or line_strip.startswith("from "):
+                output.append(line)
+
+            line_index += 1
+
+        while output and not output[0].strip():
+            output.pop(0)
+        while output and not output[-1].strip():
+            output.pop()
+        return "\n".join(output)
     
     in_class = False
     class_indent = 0
@@ -58,14 +205,6 @@ def skeletonize_python(content: str, tier: str) -> str:
             class_indent = len(line) - len(line.lstrip())
             continue
             
-        if tier == "signatures":
-            if line_strip.startswith("def "):
-                continue
-            indent = len(line) - len(line.lstrip())
-            if not line_strip.startswith("def ") and (not in_class or indent <= class_indent + 4):
-                output.append(line)
-            continue
-            
         if line_strip.startswith("def "):
             output.append(line)
             indent = len(line) - len(line.lstrip())
@@ -81,22 +220,133 @@ def skeletonize_python(content: str, tier: str) -> str:
     return "\n".join(output)
 
 
+_BRACED_INLINE_ANNOTATIONS = (
+    r"(?:@[A-Za-z_$][\w.$]*(?:[ \t]*\([^\r\n)]*\))?[ \t]+)*"
+)
+_BRACED_MEMBER_MODIFIERS = (
+    r"(?:(?:public|protected|private|static|abstract|final|synchronized|native|strictfp|default)\s+)*"
+)
+_BRACED_EXTENDED_METHOD_SIGNATURE = (
+    _BRACED_MEMBER_MODIFIERS
+    + r"(?:<[^;{}()]+>\s+)?"
+    + r"[A-Za-z_$][\w.$:]*"
+    + r"(?:\s*<[^;{}()]+>)?"
+    + r"(?:\s*\[\s*\])*"
+    + r"(?:\s*[*&]+)?\s+"
+    + r"[A-Za-z_$][\w$]*\s*\([^)]*\)"
+)
+_BRACED_THROWS_CLAUSE = r"(?:\s+throws\s+[\w.$<>, ?&\[\]\r\n\t]+)?"
+_BRACED_DECLARATION_END = r"[ \t\r\n]*$"
+
+_BRACED_TYPE_DECLARATION_PATTERN = re.compile(
+    r"(?m)^(?P<declaration>[ \t]*"
+    + _BRACED_INLINE_ANNOTATIONS
+    + r"(?:(?:public|protected|private|abstract|static|final|strictfp|sealed|non-sealed)\s+)*"
+    + r"(?:class|interface|enum|@interface)\s+(?P<name>[A-Za-z_$][\w$]*)\b[^;{}]*)"
+    + _BRACED_DECLARATION_END
+)
+
+_BRACED_METHOD_DECLARATION_PATTERN = re.compile(
+    r"(?m)^(?P<signature>[ \t]*"
+    + _BRACED_INLINE_ANNOTATIONS
+    + r"(?:"
+    + JAVA_METHOD_SIGNATURE_CORE
+    + r"|"
+    + _BRACED_EXTENDED_METHOD_SIGNATURE
+    + r")"
+    + _BRACED_THROWS_CLAUSE
+    + r")"
+    + _BRACED_DECLARATION_END
+)
+
+
+@lru_cache(maxsize=256)
+def _braced_constructor_declaration_pattern(type_name: str) -> re.Pattern:
+    """Build an exact-name constructor matcher for the enclosing type.
+
+    Requiring the tracked type name is what distinguishes constructors from
+    one-token control-flow constructs such as ``if (...)`` and ``for (...)``.
+    Bounded (not maxsize=None) so a long-running process (kriya repl, or many
+    generate/fix/analyze runs across large/multiple repos) doesn't accumulate
+    one permanently cached compiled regex per distinct type name for its
+    entire lifetime (2026-08-18 review finding) - LRU eviction keeps the
+    common case (a bounded working set of types actively being skeletonized)
+    fully cached while letting old entries go.
+    """
+    return re.compile(
+        r"(?m)^(?P<signature>[ \t]*"
+        + _BRACED_INLINE_ANNOTATIONS
+        + r"(?:(?:public|protected|private)\s+)?"
+        + re.escape(type_name)
+        + r"\s*\([^)]*\)"
+        + _BRACED_THROWS_CLAUSE
+        + r")"
+        + _BRACED_DECLARATION_END
+    )
+
+
+def _braced_member_declaration_match(
+    structural_buffer: str,
+    enclosing_type: Optional[str],
+    allow_regular_method: bool,
+) -> Optional[re.Match]:
+    """Match a constructor first, then a regular method when scope allows."""
+    constructor_pattern = (
+        _braced_constructor_declaration_pattern(enclosing_type)
+        if enclosing_type is not None
+        else None
+    )
+    candidates = (
+        (enclosing_type is not None, constructor_pattern),
+        (allow_regular_method, _BRACED_METHOD_DECLARATION_PATTERN),
+    )
+    for enabled, pattern in candidates:
+        if enabled and pattern is not None:
+            match = pattern.search(structural_buffer)
+            if match is not None:
+                return match
+    return None
+
+
+def _braced_declaration_source(
+    buffer: str,
+    match: re.Match,
+    group_name: str,
+) -> str:
+    """Extract a declaration and any directly-attached annotation lines."""
+    start, end = match.span(group_name)
+    start = buffer.rfind("\n", 0, start) + 1
+
+    # Signature-mode buffers are reset at the preceding member delimiter. If
+    # their first nonblank line begins an annotation, retaining from there
+    # also covers a multi-line annotation whose continuation lines do not
+    # themselves begin with '@'.
+    first_nonblank = 0
+    while first_nonblank < start and buffer[first_nonblank].isspace():
+        first_nonblank += 1
+    if first_nonblank < start and buffer[first_nonblank] == "@":
+        start = buffer.rfind("\n", 0, first_nonblank) + 1
+
+    while start > 0:
+        previous_end = start - 1
+        previous_start = buffer.rfind("\n", 0, previous_end) + 1
+        previous_line = buffer[previous_start:previous_end]
+        if not previous_line.strip().startswith("@"):
+            break
+        start = previous_start
+
+    declaration_lines = buffer[start:end].splitlines()
+    while declaration_lines and not declaration_lines[0].strip():
+        declaration_lines.pop(0)
+    return "\n".join(declaration_lines).rstrip()
+
+
 def skeletonize_braced_code(content: str, tier: str) -> str:
-    if tier == "signatures":
-        lines = content.splitlines()
-        output = []
-        for line in lines:
-            line_strip = line.strip()
-            if line_strip.startswith("import ") or line_strip.startswith("package "):
-                output.append(line)
-            elif "class " in line or "interface " in line or "enum " in line:
-                output.append(line)
-        return "\n".join(output)
-        
     result = []
+    signatures_only = tier == "signatures"
+
     i = 0
     length = len(content)
-    method_sig_pattern = re.compile(JAVA_METHOD_SIGNATURE_CORE + r'\s*$')
     # Comment/string-stripped mirror (same length - comment/string spans
     # blanked to whitespace, everything else untouched) used only to detect
     # REAL structural braces; `content` itself (unchanged) is what actually
@@ -107,14 +357,59 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
     # extended to this call site (2026-08-12 SME review).
     structural = _strip_java_comments_and_strings(content)
 
+    if signatures_only:
+        # Checked against the STRUCTURAL (comment/string-blanked) line, not
+        # the raw content line: an example `import`/`package` statement
+        # written inside a Javadoc/block comment would otherwise be emitted
+        # as if it were real source (2026-08-18 review finding).
+        for line, structural_line in zip(content.splitlines(), structural.splitlines()):
+            structural_strip = structural_line.strip()
+            if structural_strip.startswith("import ") or structural_strip.startswith("package "):
+                result.append(line)
+
     buffer = ""
+    structural_buffer = ""
+    brace_depth = 0
+    # (exact type name, depth inside its body, declaration indentation)
+    type_stack: List[Tuple[str, int, str]] = []
     while i < length:
         char = content[i]
         if structural[i] == '{':
-            if method_sig_pattern.search(buffer.strip()):
-                result.append(buffer)
-                result.append(" { ... }")
+            type_match = _BRACED_TYPE_DECLARATION_PATTERN.search(structural_buffer)
+            directly_inside_type = bool(type_stack and brace_depth == type_stack[-1][1])
+            member_match = None
+            if type_match is None:
+                enclosing_type = type_stack[-1][0] if directly_inside_type else None
+                # In signatures mode a member is emitted only when it belongs
+                # directly to a tracked type (or there is no tracked type, as
+                # for a C/C++ free function).  This prevents methods inside an
+                # anonymous class/static initializer from being attributed to
+                # their enclosing named class.  Skeleton mode keeps the old
+                # all-scope method collapsing behavior.
+                allow_regular_method = (
+                    not signatures_only
+                    or directly_inside_type
+                    or (not type_stack and brace_depth == 0)
+                )
+                member_match = _braced_member_declaration_match(
+                    structural_buffer,
+                    enclosing_type,
+                    allow_regular_method,
+                )
+
+            if member_match is not None:
+                if signatures_only:
+                    signature = _braced_declaration_source(
+                        buffer,
+                        member_match,
+                        "signature",
+                    )
+                    result.append(signature + " { ... }")
+                else:
+                    result.append(buffer)
+                    result.append(" { ... }")
                 buffer = ""
+                structural_buffer = ""
                 brace_count = 1
                 i += 1
                 while i < length and brace_count > 0:
@@ -125,24 +420,74 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
                         brace_count -= 1
                     i += 1
                 continue
+
+            if type_match is not None:
+                declaration = _braced_declaration_source(
+                    buffer,
+                    type_match,
+                    "declaration",
+                )
+                type_name = type_match.group("name")
+                declaration_indent = declaration[:len(declaration) - len(declaration.lstrip())]
+                if signatures_only:
+                    result.append(declaration + " {")
+                else:
+                    result.append(buffer)
+                    result.append(char)
+                brace_depth += 1
+                type_stack.append((type_name, brace_depth, declaration_indent))
             else:
+                if not signatures_only:
+                    result.append(buffer)
+                    result.append(char)
+                brace_depth += 1
+
+            buffer = ""
+            structural_buffer = ""
+            i += 1
+        elif structural[i] == ';' and signatures_only:
+            directly_inside_type = bool(type_stack and brace_depth == type_stack[-1][1])
+            enclosing_type = type_stack[-1][0] if directly_inside_type else None
+            member_match = _braced_member_declaration_match(
+                structural_buffer,
+                enclosing_type,
+                allow_regular_method=(
+                    directly_inside_type or (not type_stack and brace_depth == 0)
+                ),
+            )
+            if member_match is not None:
+                signature = _braced_declaration_source(
+                    buffer,
+                    member_match,
+                    "signature",
+                )
+                result.append(signature + ";")
+            # At signatures tier both a retained abstract method and a dropped
+            # field/import end the current declaration candidate here.
+            buffer = ""
+            structural_buffer = ""
+            i += 1
+        elif structural[i] == '}':
+            if type_stack and brace_depth == type_stack[-1][1]:
+                _, _, declaration_indent = type_stack.pop()
+                if signatures_only:
+                    result.append(declaration_indent + "}")
+            if not signatures_only:
                 result.append(buffer)
                 result.append(char)
-                buffer = ""
-                i += 1
-        elif structural[i] == '}':
-            result.append(buffer)
-            result.append(char)
             buffer = ""
+            structural_buffer = ""
+            brace_depth = max(0, brace_depth - 1)
             i += 1
         else:
             buffer += char
+            structural_buffer += structural[i]
             i += 1
 
-    if buffer:
+    if buffer and not signatures_only:
         result.append(buffer)
 
-    return "".join(result)
+    return "\n".join(result) if signatures_only else "".join(result)
 
 
 def estimate_tokens(text: str) -> int:

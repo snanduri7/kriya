@@ -9096,6 +9096,285 @@ def test_skeletonize_braced_code_ignores_braces_inside_string_literals():
     )
 
 
+def test_python_signatures_keep_all_definitions_and_drop_bodies():
+    from kriya.workflow.workflow import skeletonize_python
+
+    content = '''import os
+from typing import List
+
+def top_level_fn(x, y):
+    z = x + y
+    return z
+
+class Foo:
+    """A class docstring that is not part of its interface."""
+    attr = 1
+
+    def __init__(self, x):
+        self.x = x
+
+    async def method_a(
+        self,
+        values: List[int],
+    ) -> int:
+        result = sum(values)
+
+        def nested(value: int = 1) -> int:
+            return value
+
+        return result
+'''
+
+    signatures = skeletonize_python(content, "signatures")
+
+    assert signatures == '''import os
+from typing import List
+
+def top_level_fn(x, y):
+    ...
+
+class Foo:
+
+    def __init__(self, x):
+        ...
+
+    async def method_a(
+        self,
+        values: List[int],
+    ) -> int:
+        ...
+
+        def nested(value: int = 1) -> int:
+            ...
+'''.rstrip("\n")
+    assert "z = x + y" not in signatures
+    assert "self.x = x" not in signatures
+    assert "result = sum(values)" not in signatures
+    assert "class docstring" not in signatures
+    assert "attr = 1" not in signatures
+
+
+def test_python_signatures_preserve_decorators_and_multiline_class_headers():
+    from kriya.workflow.workflow import skeletonize_python
+
+    content = '''@register("handler")
+class Handler(
+    BaseHandler,
+    Protocol,
+):
+    @property
+    @cached(
+        ttl=30,
+    )
+    def value(self) -> str:
+        return self._value
+'''
+
+    signatures = skeletonize_python(content, "signatures")
+
+    assert signatures == '''@register("handler")
+class Handler(
+    BaseHandler,
+    Protocol,
+):
+    @property
+    @cached(
+        ttl=30,
+    )
+    def value(self) -> str:
+        ...'''
+    assert "return self._value" not in signatures
+
+
+def test_braced_signatures_keep_types_constructors_and_multiline_methods_only():
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = '''package com.example;
+import java.util.List;
+
+public class Bar {
+    private String name;
+
+    public Bar(String name) {
+        this.name = name;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void update(
+        String name,
+        List<Integer> values
+    ) {
+        this.name = name;
+        values.clear();
+    }
+}
+'''
+
+    signatures = skeletonize_braced_code(content, "signatures")
+
+    assert signatures == '''package com.example;
+import java.util.List;
+public class Bar {
+    public Bar(String name) { ... }
+    public String getName() { ... }
+    public void update(
+        String name,
+        List<Integer> values
+    ) { ... }
+}'''
+    assert "private String name" not in signatures
+    assert "this.name = name" not in signatures
+    assert "values.clear" not in signatures
+
+
+def test_braced_signatures_do_not_misattribute_anonymous_scope_methods():
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = '''public class Outer {
+    private Runnable action = new Runnable() {
+        @Override
+        public void run() { secret(); }
+    };
+
+    static {
+        Runnable startup = new Runnable() {
+            @Override public void initialize() { secretStartup(); }
+        };
+    }
+
+    public void execute() { action.run(); }
+}
+
+enum Mode {
+    ACTIVE {
+        @Override public void apply() { secretMode(); }
+    };
+
+    public abstract void apply();
+}
+'''
+
+    signatures = skeletonize_braced_code(content, "signatures")
+
+    assert signatures == '''public class Outer {
+    public void execute() { ... }
+}
+enum Mode {
+    public abstract void apply();
+}'''
+    assert "public void run()" not in signatures
+    assert "public void initialize()" not in signatures
+    assert "public void apply()" not in signatures
+    assert "secret" not in signatures
+
+
+def test_braced_signatures_keep_annotations_and_semicolon_members():
+    from kriya.workflow.context_budget import _braced_constructor_declaration_pattern
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = '''@Contract
+public interface Service {
+    @Deprecated
+    void start();
+
+    @Named(
+        value = "primary"
+    )
+    String name();
+}
+
+abstract class BaseService {
+    @Deprecated
+    public abstract void stop() throws java.io.IOException;
+}
+'''
+
+    signatures = skeletonize_braced_code(content, "signatures")
+
+    assert signatures == '''@Contract
+public interface Service {
+    @Deprecated
+    void start();
+    @Named(
+        value = "primary"
+    )
+    String name();
+}
+abstract class BaseService {
+    @Deprecated
+    public abstract void stop() throws java.io.IOException;
+}'''
+    # Constructor patterns are cached by exact enclosing type rather than
+    # recompiled at every opening brace inside the same type.
+    assert (
+        _braced_constructor_declaration_pattern("BaseService")
+        is _braced_constructor_declaration_pattern("BaseService")
+    )
+
+
+def test_braced_skeleton_elides_constructors_regardless_of_member_position():
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    constructor_first = '''public class First {
+    public First() { this.name = "default"; }
+    public First(String name) { this.name = name; }
+    public String getName() { return name; }
+}
+'''
+    constructor_middle = '''public class Middle {
+    public String getName() { return name; }
+    public Middle(String name) { this.name = name; }
+    public void reset() { this.name = null; }
+}
+'''
+    constructor_last = '''public class Last {
+    public String getName() { return name; }
+    public Last(String name) { this.name = name; }
+}
+'''
+
+    for content, expected_constructors in (
+        (constructor_first, ("public First()", "public First(String name)")),
+        (constructor_middle, ("public Middle(String name)",)),
+        (constructor_last, ("public Last(String name)",)),
+    ):
+        skeleton = skeletonize_braced_code(content, "skeleton")
+        for constructor in expected_constructors:
+            assert constructor + "  { ... }" in skeleton
+        assert "this.name =" not in skeleton
+
+
+def test_braced_skeleton_does_not_treat_control_flow_as_members():
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = '''public class Flow {
+    public void execute() {
+        if (ready) {
+            for (Item item : items) {
+                use(item);
+            }
+        }
+        try {
+            run();
+        } catch (RuntimeException error) {
+            recover(error);
+        }
+    }
+}
+'''
+
+    skeleton = skeletonize_braced_code(content, "skeleton")
+
+    assert skeleton == '''public class Flow {
+    public void execute()  { ... }
+}
+'''
+    assert skeleton.count("{ ... }") == 1
+
+
 def test_java_method_signature_core_pattern_is_shared_across_all_three_call_sites():
     """Regression test for a finding from the 2026-08-12 SME review: the
     same Java method-signature-matching regex was independently duplicated
@@ -9117,6 +9396,89 @@ def test_java_method_signature_core_pattern_is_shared_across_all_three_call_site
     assert re.search(JAVA_METHOD_SIGNATURE_CORE + r"\s*\{", signature + " {").group(1) == "process"
     assert re.match(JAVA_METHOD_SIGNATURE_CORE + r"\s*\{?", signature).group(1) == "process"
     assert re.search(JAVA_METHOD_SIGNATURE_CORE + r"\s*$", signature)
+
+
+def test_braced_signatures_ignore_import_lines_inside_comments():
+    """Regression test, 2026-08-18 review finding: the signatures-tier
+    import/package scan checked raw source lines rather than the
+    comment/string-stripped structural mirror, so an example statement
+    written inside a Javadoc/block comment was emitted as if it were a real
+    import - corrupting exactly the triage context this fix exists to keep
+    trustworthy."""
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = '''package com.example;
+
+import java.util.List;
+
+/*
+ * Example usage:
+ * import com.example.Bar;
+ */
+public class Foo {
+    public void bar() {
+    }
+}
+'''
+
+    signatures = skeletonize_braced_code(content, "signatures")
+
+    assert signatures == '''package com.example;
+import java.util.List;
+public class Foo {
+    public void bar() { ... }
+}'''
+    assert "import com.example.Bar" not in signatures
+
+
+def test_python_signatures_do_not_treat_matmul_operator_as_decorator():
+    """Regression test, 2026-08-18 review finding: any line-leading '@' was
+    treated as a decorator without checking it was inside an open bracket -
+    the '@' matrix-multiplication operator on a continuation line (common
+    Black/PEP8 style for numpy/torch, e.g. `x = (\\n    a\\n@ b\\n)`) was
+    misattached to the next declaration as if it were that function's
+    decorator."""
+    from kriya.workflow.workflow import skeletonize_python
+
+    content = '''x = (
+    a
+@ b
+)
+
+def foo():
+    return 1
+'''
+
+    signatures = skeletonize_python(content, "signatures")
+
+    assert signatures == '''def foo():
+    ...'''
+    assert "@ b" not in signatures
+
+
+def test_braced_constructor_declaration_pattern_cache_is_bounded():
+    """Regression test, 2026-08-18 review finding: the constructor-pattern
+    cache used maxsize=None, so a long-running process (kriya repl, or many
+    generate/fix/analyze runs across large/multiple repos) accumulated one
+    permanently cached compiled regex per distinct type name for its entire
+    lifetime. Confirms the cache is bounded and actually evicts, not just
+    that a maxsize value is set."""
+    from kriya.workflow.context_budget import _braced_constructor_declaration_pattern
+
+    _braced_constructor_declaration_pattern.cache_clear()
+    for index in range(300):
+        _braced_constructor_declaration_pattern(f"GeneratedType{index}")
+
+    info = _braced_constructor_declaration_pattern.cache_info()
+    assert info.maxsize == 256
+    assert info.currsize <= 256
+
+    # The earliest-inserted name was evicted under LRU pressure - a fresh
+    # call recompiles it (a cache miss), not a hit.
+    misses_before = _braced_constructor_declaration_pattern.cache_info().misses
+    _braced_constructor_declaration_pattern("GeneratedType0")
+    misses_after = _braced_constructor_declaration_pattern.cache_info().misses
+    assert misses_after == misses_before + 1
 
 
 def test_reserve_graph_context_budget_subtracts_unbounded_text_size():

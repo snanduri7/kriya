@@ -1,0 +1,579 @@
+Overall assessment
+Kriya is a strong research-grade coding-agent platform with unusually good failure forensics, deterministic quality gates, worktree isolation, targeted retries, runtime verification, and a substantial test suite. However, I would not yet classify it as production-safe for proprietary repositories.
+The largest gaps are in Kriya’s orchestration and trust boundaries—not the local models themselves. A model producing a malformed XML file or an incorrect cast is expected model variability. Kriya repeatedly targeting the wrong file, rejecting a correct repair, exceeding its deadline, leaking repository content through an ungoverned embedding endpoint, or applying a candidate before all gates pass are Kriya defects.
+This was a read-only review of the current working tree, including approximately 21,779 Python LOC, 137 test files, 1,064 test functions, configuration, prompts, plugins/MCP, validation, RAG, skills, and recent b-10o/b-10p/b-10q artifacts. I made no changes, did not use the internet, and did not run pytest because [CLAUDE.md (line 34)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/CLAUDE.md:34) explicitly prohibits it.
+Prioritized recommendations
+Priority	Recommendation	Classification
+1	Centralize and enforce privacy/egress policy across every subsystem	P0 — release blocker
+2	Make candidate validation and application genuinely transactional	P0 — release blocker
+3	Add real execution isolation and capability controls	P0 — release blocker
+4	Add an end-to-end deadline and cancellation manager	P0 — reliability blocker
+5	Replace file-guessing attribution with evidence-driven failure slicing	P0 — correctness blocker
+6	Introduce an explicit failure/retry state machine	P1
+7	Replace fuzzy response policing with typed edit operations and validator-first decisions	P1
+8	Make validation coverage explicit and truthful	P1
+9	Build a role-aware prompt compiler and reduce prompt volume	P1
+10	Correct and strengthen Graph RAG and symbol resolution	P1
+11	Redesign skill learning, promotion, and verification provenance	P1
+12	Make Reviewer findings structured and policy-enforceable	P2
+13	Turn recent incidents into a hard-gated evaluation and observability system	P1
+14	Harden configuration and incrementally modularize the orchestration code	P2
+
+
+Detailed explanation
+1. Centralize privacy and egress enforcement
+The stated “only local LLMs” guarantee is currently narrower than it appears.
+LLM completion requests are checked against autonomy.egress_policy in [llm.py (line 110)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/core/llm.py:110). Other paths are not governed by that boundary:
+Repository chunks, goals, and questions can be posted to whatever embedding URL is configured in [vector.py (line 73)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/memory/vector.py:73).
+Compiler errors automatically trigger Maven Central requests containing FQCNs and package names in [resolver.py (line 42)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/tools/resolver.py:42).
+Maven, PyPI, npm, RubyGems, Go and other registry adapters independently make external requests in [knowledge.py (line 87)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/tools/knowledge.py:87).
+local_only accepts private-network and .local hosts, not just the local machine, in [llm.py (line 59)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/core/llm.py:59).
+MCP processes inherit the full parent environment in [mcp.py (line 40)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/mcp/mcp.py:40).
+An empty plugin allowlist means every discovered plugin is imported in [plugin.py (line 57)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/plugins/plugin.py:57). Import itself can execute arbitrary Python.
+Create one EgressBroker through which all HTTP, embeddings, registries, web lookup, package downloads, MCP network access, and local-model calls must pass. Give every request a data classification, destination class, purpose, and approval state.
+Recommended policies:
+strict_local: loopback-only LLM and embeddings; generated code has no network; all lookup/registries disabled.
+public_metadata: only approved public registries and public package coordinates.
+approved_web: exact sanitized query and destination shown to the user.
+private_network: explicit opt-in, separate from loopback.
+For strict mode, dependency builds should use pre-populated local caches or explicitly approved repository domains. A test should monkeypatch network entry points and prove that a full analyze/generate/fix run attempts zero non-loopback connections.
+2. Make the workflow transactional
+Two current behaviors break the isolation guarantee.
+First, worktree creation failure silently falls back to the real workspace in [workflow.py (line 1268)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/workflow.py:1268). A failing generation can therefore modify the user’s repository before quality gates succeed.
+Second, Kriya copies the candidate into the real repository and removes the worktree at [workflow.py (line 1539)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/workflow.py:1539), but runs the full regression suite afterwards at [workflow.py (line 1670)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/workflow.py:1670). If regression fails, the failing candidate is already applied and the retry loop has lost its worktree.
+The correct lifecycle is:
+Snapshot repository state and base hashes.
+Create an isolated candidate workspace or fail closed.
+Generate the complete candidate transaction.
+Run static checks, compile, targeted tests, runtime verification, full regression, and review inside that candidate.
+Request approval if required.
+Confirm real files still match their base hashes.
+Apply via atomic per-file replacement plus a rollback journal.
+Persist skills/lessons only after successful application.
+Remove the candidate workspace.
+An optional --unsafe-in-place mode may exist for non-Git repositories, but it must be explicit and prominently warn the user.
+Also replace the non-NUL-delimited git status --porcelain parsing in [worktree.py (line 46)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/worktree.py:46) with --porcelain=v1 -z, and test spaces, quotes, renames, Unicode, symlinks and submodules.
+Completion criterion: fault injection at every phase—including process termination midway through apply—must either leave the real repository untouched or restore it exactly.
+3. Add a real execution sandbox
+The current sandbox is deliberately only a restricted environment plus resource limits. Its own documentation acknowledges that it cannot prevent filesystem reads or network access in [sandbox.py (line 9)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/tools/sandbox.py:9).
+Generated tests and applications can therefore:
+Read SSH keys, cloud credentials, browser state, or files outside the repository.
+Access internal or public network endpoints.
+Spawn descendants outside the intended lifetime.
+Modify accessible locations outside the worktree.
+Use an OS-level execution boundary:
+Linux: user/mount/network namespaces, seccomp, cgroups; bubblewrap or a rootless container are practical options.
+macOS: a dedicated container/VM is strongest; a carefully defined Seatbelt profile is a lighter option.
+Mount repository baseline read-only and candidate workspace read-write.
+Give each run a private temporary directory.
+Disable network by default.
+Restrict process count, wall time, CPU, memory and output bytes.
+Kill and reap the entire process tree.
+Do not expose host secrets or unrestricted package caches.
+Plugins, MCP servers and tools need declared capabilities such as filesystem.read:workspace, filesystem.write:candidate, network:registry.maven, and process:shell. The arbitrary shell implementation in [core_tools (line 112)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/plugins/core_tools/__init__.py:112) should never receive ambient machine authority merely because it was loaded.
+4. Add an end-to-end deadline manager
+The retry loop is bounded by attempt counters, not time, at [workflow.py (line 1315)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/workflow.py:1315). The OpenAI-compatible client also has no Kriya-controlled per-call timeout or remaining-budget parameter in [llm.py (line 77)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/core/llm.py:77).
+This directly matches the eval behavior:
+b-10o person timed out after 1,200 seconds: [summary (line 10)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/spikes/eval_harness/runs/b-10o/summary.txt:10)
+b-10p protocol timed out after 2,400 seconds: [summary (line 11)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/spikes/eval_harness/runs/b-10p/summary.txt:11)
+b-10q protocol completed in 1,197.5 seconds: [summary (line 11)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/spikes/eval_harness/runs/b-10q/summary.txt:11)
+Introduce one run deadline propagated to every LLM call, subprocess, LSP/MCP request, lookup and review. Before starting a stage, compare remaining time to that stage’s recent p90/p95 duration for the active model and context size. Do not start a multi-minute full regeneration with insufficient remaining budget.
+On budget exhaustion:
+Cancel the active call.
+Kill its process tree.
+Persist a checkpoint and append-only trace event.
+Return deadline_exhausted, not an external harness kill or generic failure.
+Preserve the authoritative last failure and candidate state.
+Sequence verification must use a shared deadline; it currently gives every command a fresh timeout in [validate.py (line 743)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/tools/validate.py:743).
+5. Replace file guessing with evidence-driven failure slicing
+The current triage path provides skeletonize_code(..., "signatures") to the model in [attribution.py (line 290)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attribution.py:290). But:
+Python signature mode drops def lines in [context_budget.py (line 61)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/context_budget.py:61).
+Java signature mode includes imports and class declarations but no constructors or method signatures in [context_budget.py (line 84)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/context_budget.py:84).
+This explains the Ignite/Qpid protocol misattribution. A defect involving constructor state, encode/decode and equals() cannot be identified from class names and imports. The model then guesses a configuration file and spends multiple slow retries repairing the wrong subsystem.
+Build a failure slice instead:
+Parse assertion messages, stack frames, verification markers and exception chains.
+Rank root-cause frames above outer wrapper frames.
+Include the implicated method body, callers, constructors, equality/serialization methods and associated configuration.
+Use LSP/tree-sitter symbol spans and a scoped call/data-flow graph where available.
+Preserve multiple ranked files for multi-file defects.
+Treat low confidence as a reason to expand the slice, not to select one guessed file.
+Use negative evidence: if the broker started, sent and received a message successfully, deprioritize broker startup configuration.
+Measure attribution top-1/top-3 recall against the incident corpus. The existing module itself acknowledges untested multi-file and exception-depth behavior in [attribution.py (line 141)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attribution.py:141).
+6. Introduce an explicit failure/retry state machine
+Kriya has made good progress with the unified Failure object, but the failure taxonomy remains free-form strings and retry budgets are mostly global counters in [state.py (line 13)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/state.py:13).
+Use:
+An enum-backed failure taxonomy.
+Immutable PrimaryFailure.
+Separate AuxiliaryDiagnostic records.
+A failure signature containing gate, relevant output fingerprint, locations and candidate hash.
+Retry state per failure signature rather than one global targeted-retry counter.
+Explicit transitions such as same candidate/same failure, new candidate/same failure, new failure after repair, parser failure, and attribution uncertain.
+Rules should include:
+An optional subsystem can append diagnostics but cannot replace the primary failure.
+Identical candidate plus identical failure must never be rerun.
+A new failure after a repair counts as progress and receives a fresh local budget.
+Repeated anchor/parser failures switch edit strategy.
+Repeated low-confidence attribution expands context instead of escalating random generation.
+The self-correction and RunVerifier paths now catch some auxiliary failures, which is good. However, the final Reviewer call remains unguarded at [workflow.py (line 1803)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/workflow.py:1803); it can still fail a run after changes were already applied.
+7. Use typed edit operations and validator-first decisions
+The current bounded DIAGNOSIS_MISMATCH veto is a sensible safety net: one fuzzy heuristic can reject a file at most once per run in [attempt.py (line 194)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attempt.py:194). Its deterministic bypass for compile, POM validation and targeted tests is also the correct direction.
+The permanent solution is to stop treating prose-to-diff similarity as a safety invariant.
+Normalize every response into a single internal CandidateEdit:
+create_full_file
+repair_with_patch
+repair_with_full_file
+no_change_assessment
+Each operation has explicit invariants. For example, a patch requires a nonempty, uniquely matching search block and a different replacement; no_change_assessment is allowed only during targeted/broadcast repair and must include a reason.
+For local models, keep one response per file and use a small marker/state-machine protocol rather than forcing multiline source through deeply escaped JSON. Parse the declared operation first, then only the fields valid for that operation. Do not use broad regexes over the whole completion.
+Separate hard checks from fuzzy analysis:
+Hard reject: byte-identical edit, missing/stale search anchor, path escape, structural corruption, malformed protocol.
+Validator replay: static rule, syntax, compile, POM, targeted test.
+Expensive downstream validator: runtime verification.
+Fuzzy diagnosis alignment: telemetry or, temporarily, one bounded veto.
+This preserves genuine catches without continuing the growing backtick-substring rule set in [attribution.py (line 707)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attribution.py:707).
+8. Make validation outcomes truthful
+PolymorphicValidator supports Java, Python and Ruby. Unsupported stacks currently return success: True while stating that nothing was checked in [validate.py (line 506)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/tools/validate.py:506) and [validate.py (line 666)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/tools/validate.py:666).
+Return passed, failed, skipped, or unavailable. A code-changing autonomous run must not call skipped a pass. It should require user approval or a configured validator.
+Additional changes:
+Add JS/TS, Go, Rust and .NET adapters, or explicitly limit advertised support.
+Prefer manifest-derived commands over LLM-inferred test commands.
+Use mvn compile during retries; mvn clean compile at [validate.py (line 422)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/tools/validate.py:422) destroys useful incremental state.
+Treat pytest exit code 5 as no_tests_collected, not an unconditional pass, especially when a target test was expected.
+Make package installation and registry access subject to the egress policy.
+Run full regression before application.
+Treat generated [VERIFICATION] PASS output as evidence, not an independent production oracle.
+9. Build a role-aware prompt compiler
+Kriya’s prompts have accumulated many valuable incident-specific rules, but the resulting payloads are extremely large and repeated across Planner, Architect and Developer. The recent logs contain full prompts with large skill rules and examples, increasing latency and reducing attention quality.
+Create a prompt compiler that:
+Has a strict token budget for system, task, failure, repository, skills, sibling files and output.
+Uses the actual model tokenizer or a calibrated model-specific estimator.
+Deduplicates repeated constraints.
+Retrieves only task-relevant skill rules and examples.
+Treats repository text, runtime output and web content uniformly as untrusted data, never instructions.
+Gives Planner a repository summary, Architect interfaces/files, Developer relevant implementation slices, and Reviewer the final diff plus validation evidence.
+Uses stable prompt prefixes to improve local server caching.
+Skips Planner/Architect for small localized repairs where the target and operation are already deterministic.
+Planner code reuse should be isolated behind an experiment flag and decided by A/B evidence. The current behavior reuses code emitted contrary to the Planner’s contract at [attempt.py (line 575)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attempt.py:575). It is correlated with some incidents but not yet proven causal.
+10. Correct Graph RAG and symbol resolution
+The dependency graph still represents many symbols and relations using bare names. The schema and comments acknowledge collisions in [graph.py (line 58)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/analyzer/graph.py:58), while calls such as handle, get, close or run can relate unrelated files.
+Use symbol identities containing language, filepath, qualified owner, symbol name, signature and span. Prefer tree-sitter/LSP parsing; retain regex parsing as a lower-confidence fallback.
+Additional fixes:
+Repair the Python/Java signature skeletons immediately.
+Never store embedding failures as valid zero vectors; this currently occurs in [vector.py (line 128)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/memory/vector.py:128).
+On embedding failure, use explicit lexical-only mode.
+Fingerprint model, dimensions, normalization and chunker version; require reindexing after changes.
+Enforce a final hard prompt cap even when every file is already at the lowest skeleton tier.
+Add ANN indexing later for scale; correctness of symbols and slices is more urgent than vector-search speed.
+11. Redesign skill learning and verification provenance
+Extracted rules/examples can be appended directly to durable skill files and committed in [skill_extraction.py (line 200)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/skill_extraction.py:200). Web content and repository content are untrusted, so all extracted knowledge should first be staged.
+A passing runtime verification currently marks every active skill and its rule snapshot verified in [attempt.py (line 1527)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attempt.py:1527). A successful run does not prove every injected rule was exercised.
+Use rule-level provenance:
+Source URL/file, content hash, extraction model and date.
+Library/version applicability.
+Candidate state: staged, reviewed, exercised, verified, superseded.
+Exact validation evidence that exercised the rule.
+Expiry or compatibility policy.
+No durable promotion until the candidate passes all gates and a human or policy approves it.
+Resolve obvious conflicts deterministically using canonical keys such as dependency coordinate, port, Java version or mutually exclusive startup mechanism. Use the LLM only for unresolved semantic conflicts, reducing the current pairwise-call cost.
+12. Make Reviewer output enforceable
+Reviewer output is prose. In autonomous mode, it runs after application and cannot block a critical semantic or security defect. In human mode it is usefully shown before approval, but its findings still lack a machine-readable contract.
+Return structured findings:
+severity, confidence, category, filepath, line, evidence, remediation
+Policy:
+Deterministic security/static findings block.
+High-confidence critical Reviewer findings require human approval.
+Lower-confidence findings are advisory.
+Reviewer failure never changes a successful primary result.
+Multiple review batches receive a final synthesis step so cross-file findings are not lost.
+The final review should operate on diffs and gate evidence, not only whole generated files.
+13. Build hard-gated incident replay and observability
+The existing 1,064 tests and five-version CI matrix are major strengths. But the live-model job is intentionally non-blocking and explicitly does not assess generation quality in [ci.yml (line 77)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.github/workflows/ci.yml:77).
+Create two eval layers:
+Deterministic incident replay in required CI: raw recorded completions, parser outputs, candidate files and validator outputs—no live LLM needed.
+Scheduled live local-model matrix: representative primary/fallback models, cold/warm server, fixed hardware/context and multiple seeds.
+Metrics should include:
+pass@1 and pass within deadline
+p50/p95 wall time
+LLM calls, tokens and retries
+attribution top-k recall
+false-veto and true-catch rates
+validation coverage
+candidate repetition rate
+timeout cleanup integrity
+unsupported-stack outcomes
+external egress attempts, which must be zero in strict mode
+Tracing should be append-only events rather than one replaceable row. The current trace stores goal, rendered prompt and failed source contents in plaintext in [trace.py (line 20)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/core/trace.py:20). Add configurable retention, redaction, encryption-at-rest guidance and content-hash-only mode. DEBUG logs should not contain complete proprietary prompts by default.
+14. Harden configuration and modularize incrementally
+Configuration models contain few semantic validators in [config.py (line 10)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/config/config.py:10). Programmatic Pydantic defaults also differ from packaged YAML defaults—for example temperature, token budget and risk threshold—which can produce different behavior between CLI and library/test usage.
+Validate:
+Enum values for modes and policies
+loopback requirements for strict-local endpoints
+positive timeout/retry/context values
+temperature and threshold ranges
+URL schemes
+fallback-model completeness
+sensitive-path regexes at load time
+Invalid sensitive regexes currently only warn and silently stop enforcing that rule in [workflow.py (line 1396)](/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/workflow.py:1396). Security-related invalid configuration should fail closed.
+Finally, reduce the 2,143-line agent module and 1,882-line workflow module through tested extraction—not a rewrite. The natural boundaries are:
+WorkflowCoordinator
+ContextAssembler
+CandidateParser
+CandidateTransaction
+ValidationEngine
+FailurePolicy
+EgressBroker
+TraceSink
+Suggested execution order
+Implement priorities 1–5 before calling Kriya safe for proprietary production repositories. Then implement 6–11 as the reliability/correctness milestone. Priorities 12–14 can follow once the behavior is protected by the incident-replay suite.
+The best first delivery slice would combine:
+strict-local egress tests,
+all-gates-before-apply transaction ordering,
+fail-closed worktree creation,
+global deadline propagation,
+corrected signature skeletons plus the b-10p attribution replay.
+That slice directly closes the highest-risk privacy, repository-safety, timeout and wrong-file-repair failures without requiring a broad rewrite.
+
+
+# Kriya Architecture Review — Claude Handoff
+
+## Objective
+
+Review the CURRENT Kriya repository at:
+
+`/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode`
+
+Kriya must analyze/generate/repair repositories using only local LLMs. External lookup is permitted only when explicitly allowed and when no proprietary code, goal text, errors, identifiers, package names, credentials, or repository information can leave the machine.
+
+This pass is read-only unless separately authorized. Validate every finding against current code because the repository changes frequently. If a finding is already fixed, cite the exact code/test proving it. Do not accept comments/docstrings as proof of correct behavior.
+
+## Overall assessment
+
+Kriya is a strong research-grade platform with good foundations:
+
+- Local completion support
+- Worktree-based candidate isolation
+- Deterministic compile/test/runtime gates
+- Unified `Failure` data
+- Targeted retries and model escalation
+- Checkpoints and detailed traces
+- Large mocked test suite and live eval corpus
+- Current bounded-veto mitigation for `DIAGNOSIS_MISMATCH`
+
+It is not yet production-safe for proprietary repositories.
+
+Model-generated malformed XML, bad casts, or incomplete source are expected model variability. Repeatedly rejecting correct repairs, choosing the wrong file, exceeding the deadline, leaking data through embeddings/lookups, or applying a candidate before all gates pass are Kriya/orchestration defects.
+
+## Required priority order
+
+### P0-1: Centralize privacy and egress enforcement
+
+Evidence:
+
+- LLM completions enforce `egress_policy`: `kriya/core/llm.py`.
+- Embeddings do not: `kriya/memory/vector.py`; repository chunks/goals may be sent to any configured embedding URL.
+- Maven resolver automatically sends FQCN/package strings to Maven Central: `kriya/tools/resolver.py`.
+- Registry adapters independently call Maven/PyPI/npm/RubyGems/Go/Cargo/NuGet: `kriya/tools/knowledge.py`.
+- `local_only` accepts private-network and `.local` endpoints, not only loopback.
+- MCP inherits the complete host environment: `kriya/mcp/mcp.py`.
+- Empty plugin allowlist loads every discovered plugin: `kriya/plugins/plugin.py`.
+
+Required design:
+
+- One `EgressBroker` used by every HTTP/network path.
+- Every request declares data classification, purpose, destination class and approval.
+- Policies:
+  - `strict_local`: loopback-only LLM/embeddings; no external lookup or generated-code network.
+  - `public_metadata`: approved registries and demonstrably public coordinates only.
+  - `approved_web`: exact sanitized query and target shown for approval.
+  - `private_network`: separate explicit opt-in.
+- Builds in strict mode use local dependency caches; external repositories require explicit allowlisting.
+- Private/internal-looking namespaces must never be queried automatically.
+- Add tests that intercept socket/HTTP use and prove zero non-loopback attempts during complete analyze/generate/fix flows.
+
+### P0-2: Make candidate handling transactional
+
+Evidence:
+
+- Worktree creation failure silently falls back to the real workspace: `kriya/workflow/workflow.py`.
+- Candidate files are copied into the real workspace and the worktree removed before the full regression suite runs.
+- A regression failure therefore occurs after a failing candidate is already applied.
+- Subsequent retry may no longer have the original worktree.
+- Worktree sync parses non-NUL-delimited `git status --porcelain`, fragile for spaces, quotes and renames.
+
+Required lifecycle:
+
+1. Snapshot repository state and base hashes.
+2. Create isolated candidate workspace or fail closed.
+3. Generate complete candidate.
+4. Run static checks, compile, targeted tests, runtime verification, full regression and required review inside the candidate.
+5. Obtain approval when policy requires it.
+6. Recheck real files against base hashes.
+7. Apply using atomic writes plus rollback journal.
+8. Persist skills/lessons only after successful application.
+9. Remove candidate workspace.
+
+No implicit in-place fallback. Optional `--unsafe-in-place` must be explicit.
+
+Use `git status --porcelain=v1 -z` or binary diff/application. Test spaces, Unicode, quotes, renames, deletions, symlinks and process termination during every phase. The real repository must remain unchanged or be exactly recoverable.
+
+### P0-3: Add a real execution security boundary
+
+Current restricted environment/resource limits are not a security sandbox. Generated code can read host files, access the network and spawn descendants.
+
+Required:
+
+- OS/container isolation.
+- Repository baseline mounted read-only; candidate workspace read-write.
+- Private temporary directory.
+- Network denied by default.
+- No inherited secrets, SSH/cloud agents or credentials.
+- CPU, memory, wall-time, process-count and output limits.
+- Kill/reap entire process tree.
+- Plugins, MCP and tools require declared capabilities such as:
+  - `filesystem.read:workspace`
+  - `filesystem.write:candidate`
+  - `network:registry.maven`
+  - `process:shell`
+- Empty plugin configuration must not authorize arbitrary discovered plugins.
+- Adversarial tests must prove generated code cannot read secrets, write outside the candidate or access unapproved networks.
+
+### P0-4: Add an end-to-end deadline manager
+
+Evidence:
+
+- Retry loop uses attempt counts, not a deadline.
+- LLM calls lack Kriya-controlled remaining-budget propagation.
+- Runtime command sequences grant each step a fresh timeout.
+- Recent variance:
+  - b-10o person: timed out at 1200s.
+  - b-10p protocol: timed out at 2400s.
+  - b-10q protocol: completed at 1197.5s.
+
+Required:
+
+- One monotonic run deadline propagated to LLM, subprocess, LSP, MCP, lookup, reviewer and validation calls.
+- Stage budgets and explicit per-call timeout.
+- Use recent p90/p95 latency by model/context size to decide whether enough time remains.
+- Never start a full regeneration when insufficient budget remains.
+- Shared deadline for command sequences.
+- On exhaustion: cancel request, kill process tree, persist checkpoint/trace and return `deadline_exhausted`.
+- An external harness kill must not be the normal timeout mechanism.
+
+### P0-5: Replace file guessing with evidence-driven failure slicing
+
+Evidence:
+
+- Runtime triage calls `skeletonize_code(..., "signatures")`.
+- Python signature mode drops `def` lines.
+- Java signature mode includes imports/type declarations but omits constructors/methods.
+- This explains wrong-file repair in the Ignite/Qpid protocol incident: constructor/encode/decode/equals logic was invisible, so triage guessed configuration files.
+
+Required:
+
+- Parse assertions, stack frames, verification markers and chained exceptions.
+- Rank root-cause frames above wrapper frames.
+- Include implicated method bodies, callers, constructors, equality/serialization logic and relevant configuration.
+- Use LSP/tree-sitter spans and scoped call/data-flow relationships.
+- Return ranked multi-file candidates.
+- Low confidence expands context; it must not force one guessed target.
+- Apply negative evidence: if broker startup/send/receive succeeded, deprioritize broker configuration.
+- Build incident tests and measure attribution top-1/top-3 recall.
+- Cover multi-file fixes and chained-exception depth.
+
+### P1-6: Introduce an explicit failure/retry state machine
+
+Required:
+
+- Enum-backed failure types.
+- Immutable `PrimaryFailure`.
+- Separate `AuxiliaryDiagnostic`; optional subsystem errors can never replace the primary failure.
+- Signature includes gate, normalized output fingerprint, locations and candidate hash.
+- Retry budgets per failure signature.
+- Transitions:
+  - same candidate + same failure: never repeat
+  - new candidate + same failure: bounded retries
+  - new failure after repair: progress; new local budget
+  - repeated parser/anchor failure: change edit strategy
+  - low-confidence attribution: widen evidence
+- Final Reviewer failure must not fail an already-correct/applied result.
+- Audit lookup, LSP, MCP, skill extraction and reviewer paths for auxiliary-error overwrite.
+
+### P1-7: Replace fuzzy response policing with typed edit operations
+
+Normalize all model output into one internal `CandidateEdit` with exactly one operation:
+
+- `create_full_file`
+- `repair_with_patch`
+- `repair_with_full_file`
+- `no_change_assessment`
+
+Use one response per file and a small marker/state-machine protocol; do not require large source files to be JSON-escaped.
+
+Operation invariants:
+
+- Patch: nonempty uniquely matching search block and changed replacement.
+- Full repair/create: complete content.
+- No-change: reason required; allowed only in repair/broadcast contexts.
+- Path and base content/hash come from Kriya, not model claims.
+
+Separate checks:
+
+- Hard deterministic rejection: no-op, stale/missing anchor, invalid path, structural corruption, malformed protocol.
+- Replay original validator when cheap: static rule, syntax, compile, POM, targeted test.
+- Runtime verification remains downstream authority when expensive.
+- Fuzzy diagnosis-to-diff matching becomes telemetry or at most one bounded veto.
+
+The current per-file bounded veto and compile/POM/targeted-test bypass are acceptable transitional protections. Stop adding new substring exceptions to `find_edits_ignoring_own_diagnosis()`.
+
+### P1-8: Make validation coverage explicit
+
+Return `passed`, `failed`, `skipped` or `unavailable`; never represent unsupported validation as `success: true`.
+
+Required:
+
+- Autonomous apply cannot treat skipped/unavailable as passed.
+- Add JS/TS, Go, Rust and .NET adapters, or explicitly limit advertised support.
+- Derive commands from manifests/scripts before asking an LLM.
+- Use incremental `mvn compile` during retries; reserve clean builds for final verification or suspected stale state.
+- Pytest exit code 5 becomes `no_tests_collected`, not unconditional pass when tests were expected.
+- Package installation/network follows egress policy.
+- Full regression runs before apply.
+- Generated `[VERIFICATION] PASS` is evidence, not an independent production oracle.
+
+### P1-9: Build a role-aware prompt compiler
+
+Required:
+
+- Hard budgets for system, task, failure, repository, skills, sibling files and output.
+- Actual tokenizer or calibrated per-model estimator.
+- Deduplicate repeated rules.
+- Retrieve only relevant skill rules/examples.
+- Treat repository text, errors, logs and web content as untrusted data, never instructions.
+- Planner receives summary/constraints.
+- Architect receives interfaces/file responsibilities.
+- Developer receives exact relevant slices.
+- Reviewer receives diff plus gate evidence.
+- Use stable prefixes for local prompt caching.
+- Skip Planner/Architect for small, deterministic repairs.
+- Keep operation contracts in one template system.
+
+Planner-code reuse is correlated with incidents but not proven causal. Keep it behind an experiment flag and decide through A/B metrics rather than assumptions.
+
+### P1-10: Correct Graph RAG and symbol resolution
+
+Required:
+
+- Fix Python/Java signature skeletons immediately.
+- Symbol identity must include language, filepath, qualified owner, name, signature and span.
+- Prefer tree-sitter/LSP; regex is lower-confidence fallback.
+- Bare method names must not connect unrelated files.
+- Embedding failure must not store zero vectors as valid.
+- Explicit lexical-only fallback on embedding failure.
+- Fingerprint embedding model, dimensions, normalization and chunker version; require reindex on change.
+- Enforce final hard context cap.
+- ANN indexing is lower priority than symbol/slice correctness.
+
+### P1-11: Redesign skill learning and verification
+
+Evidence:
+
+- Extracted rules/examples may be written directly to durable skills and committed.
+- Passing runtime verification marks every active skill/rule snapshot verified even if not exercised.
+
+Required:
+
+- External/model-extracted knowledge always starts staged.
+- Record source, hash, extraction model/date, version scope and validation evidence.
+- States: staged, reviewed, exercised, verified, superseded.
+- Verify only rules demonstrably exercised by the passing scenario.
+- No durable skill/lesson mutation before all gates and application succeed.
+- Add compatibility/expiry policy.
+- Resolve canonical conflicts deterministically; use LLM only for unresolved semantic conflicts.
+- Keep global/shared skills from accidental project-specific pollution.
+
+### P2-12: Make Reviewer findings structured and enforceable
+
+Reviewer output fields:
+
+`severity, confidence, category, filepath, line, evidence, remediation`
+
+Policy:
+
+- Deterministic security/static failures block.
+- High-confidence critical reviewer findings require approval.
+- Lower-confidence findings are advisory.
+- Reviewer failure cannot replace the primary result.
+- Reviewer runs before apply where it can affect policy.
+- Multiple batches receive a final cross-file synthesis.
+
+### P1-13: Build hard-gated incident replay and observability
+
+Keep existing unit tests and Python-version CI. Add:
+
+1. Required deterministic incident replay using recorded raw completions, parser output, candidate content and validator output.
+2. Scheduled live local-model matrix across representative primary/fallback models, seeds, cold/warm state and context sizes.
+
+Metrics:
+
+- pass@1
+- pass within deadline
+- p50/p95 duration
+- tokens/calls/retries
+- attribution top-k recall
+- fuzzy-veto true/false-positive cost
+- repeated-candidate rate
+- validation coverage
+- timeout cleanup integrity
+- strict-mode external egress attempts
+
+Tracing must be append-only events with heartbeat/status, not only row replacement. Current traces/logs can store full goals, prompts and failed proprietary source. Add retention, redaction and content-hash-only mode; avoid full prompt logging by default.
+
+### P2-14: Harden configuration and modularize incrementally
+
+Required config validation:
+
+- Enum values
+- strict-local loopback endpoints
+- positive timeouts/retries/context sizes
+- temperature/threshold ranges
+- URL schemes
+- complete fallback configs
+- valid sensitive-path regexes
+
+Invalid security regex must fail closed. Resolve differences between Pydantic defaults and packaged YAML defaults so CLI/library/tests behave consistently.
+
+After behavior is protected by incident tests, extract—not rewrite—these boundaries:
+
+- `WorkflowCoordinator`
+- `ContextAssembler`
+- `CandidateParser`
+- `CandidateTransaction`
+- `ValidationEngine`
+- `FailurePolicy`
+- `EgressBroker`
+- `TraceSink`
+
+## Delivery order
+
+Release-blocking slice:
+
+1. Strict-local `EgressBroker` and zero-egress tests.
+2. Fail-closed worktree creation.
+3. All validation/regression before apply.
+4. Atomic apply/rollback.
+5. Global deadline propagation.
+6. Correct signature skeletons and b-10p attribution replay.
+
+Then implement priorities 6–11. Complete Reviewer/config/modularization after deterministic behavior is protected.
+
+## Expected response
+
+Return:
+
+1. Findings confirmed against current code.
+2. Findings already fixed, with exact evidence.
+3. Any disputed finding with concrete code/test evidence.
+4. A dependency-ordered implementation plan.
+5. Exact acceptance tests for every planned change.
+6. Risks and migration compatibility.
+7. No code changes unless separately authorized.
