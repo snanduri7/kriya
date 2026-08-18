@@ -30,13 +30,19 @@ async def test_base_agent_complete():
     assert res == "Mock response text"
     llm.complete.assert_called_once_with(
         planner.system_prompt, "Plan a math library", stream_callback=None, json_mode=False,
+        temperature_override=None,
     )
 
 @pytest.mark.asyncio
 async def test_call_with_escalation_no_role_config_preserves_default_call_shape():
     """A None candidate (the common case: a role with no dedicated agent_llms config)
-    must call complete() with no override kwargs at all, preserving today's exact
-    call shape/behavior for any project that never touches per-role config."""
+    must call complete() with no MODEL/BASE_URL/API_KEY/MAX_TOKENS/REASONING override
+    kwargs at all, preserving today's exact call shape/behavior for any project that
+    never touches per-role config. temperature_override is the one exception - since
+    74e76a4 it's always threaded through explicitly (defaulting to None, same as
+    complete()'s own default) so a caller like ReviewerAgent can set it without a
+    dedicated agent_llms entry; passing the explicit default is behaviorally a no-op
+    but changes the literal call shape asserted here."""
     cfg = AppConfig()
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="ok")
@@ -44,7 +50,9 @@ async def test_call_with_escalation_no_role_config_preserves_default_call_shape(
     result = await call_with_escalation(llm, "sys", "prompt", [None])
 
     assert result == "ok"
-    llm.complete.assert_called_once_with("sys", "prompt", stream_callback=None, json_mode=False)
+    llm.complete.assert_called_once_with(
+        "sys", "prompt", stream_callback=None, json_mode=False, temperature_override=None,
+    )
 
 @pytest.mark.asyncio
 async def test_call_with_escalation_passes_full_candidate_config():
