@@ -120,17 +120,36 @@ def _init_git_repo(path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
-def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction, best_of_n, log_level):
+def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction, best_of_n, log_level, llm_temperature, reasoning_effort, presence_penalty):
     # paths.skills/memory stay relative (resolved against this config file's own
     # directory, i.e. per-goal-isolated - see CLAUDE.md's config-resolution note)
     # so one goal's skill/RAG state can never leak into another's. paths.logs is
     # deliberately an ABSOLUTE path shared across every goal in the batch, so the
     # whole batch lands in one traces.db that report.py can read as a unit.
+    llm_section = {
+        "provider": "openai", "model": model, "base_url": base_url,
+        "temperature": llm_temperature, "api_key": "local-key",
+    }
+    # extra_body is only added when actually requested - load_config()'s merge
+    # (kriya/config/config.py, one-level dict.update() per top-level section)
+    # means omitting this key entirely lets Kriya's packaged default_config.yaml
+    # extra_body (num_ctx/top_p/top_k, tuned for the DEFAULT primary model) flow
+    # through unchanged, same as every batch before these flags existed. Passing
+    # --reasoning-effort/--presence-penalty here REPLACES that packaged
+    # extra_body wholesale (still a top-level dict, not deep-merged with it) -
+    # correct for a model like qwen3.8:27b, whose reasoning_effort/presence_penalty
+    # need come from the model's own HF card (see docs/kriya_backlog_and_lessons.md,
+    # 2026-08-17 entries), not the current default's Ollama-specific num_ctx/top_k
+    # tuning, which isn't confirmed relevant to qwen3.8:27b at all.
+    if reasoning_effort is not None or presence_penalty is not None:
+        extra_body = {}
+        if reasoning_effort is not None:
+            extra_body["reasoning_effort"] = reasoning_effort
+        if presence_penalty is not None:
+            extra_body["presence_penalty"] = presence_penalty
+        llm_section["extra_body"] = extra_body
     config = {
-        "llm": {
-            "provider": "openai", "model": model, "base_url": base_url,
-            "temperature": 0.2, "api_key": "local-key",
-        },
+        "llm": llm_section,
         # Explicit, fast, non-reasoning fallback - see LIVE_FALLBACK_MODEL's own
         # comment for why this can't be left to inherit Kriya's packaged
         # default_config.yaml chain (deepseek-r1:32b, reasoning: true) here.
@@ -245,6 +264,26 @@ def main():
                               "(logs the full raw pre-parse Developer completion for every per-file generation "
                               "call, kriya/agents/agent.py) - meant for a targeted, single-goal investigative "
                               "run (pair with --goal-id), not left on for a full batch.")
+    parser.add_argument("--llm-temperature", type=float, default=0.2,
+                         help="temperature for the primary llm (default 0.2, matching every prior batch's "
+                              "hardcoded eval-determinism value - unchanged unless passed). Override when a "
+                              "specific model's own validated sampling profile calls for something else - e.g. "
+                              "0.7 for qwen3.8:27b's instruct/non-thinking mode, confirmed against its real HF "
+                              "card and a live A/B (see docs/kriya_backlog_and_lessons.md, 2026-08-17).")
+    parser.add_argument("--reasoning-effort", default=None,
+                         help="Sets extra_body.reasoning_effort on the primary llm's OpenAI-compat request "
+                              "(Ollama-validated values: minimal/low/medium/high/xhigh/ultra/max/none). Unset "
+                              "by default - omitting this flag leaves Kriya's packaged default_config.yaml "
+                              "extra_body untouched, same as every batch before this flag existed. Confirmed "
+                              "silently harmless on a non-thinking model (qwen3-coder:30b), and confirmed live "
+                              "as the ONLY setting that reliably finishes within budget on qwen3.8:27b - any "
+                              "nonzero effort starves content on non-trivial tasks even with a 4x budget pad.")
+    parser.add_argument("--presence-penalty", type=float, default=None,
+                         help="Sets extra_body.presence_penalty on the primary llm's OpenAI-compat request. "
+                              "Unset by default (same fall-through behavior as --reasoning-effort). qwen3.8-"
+                              "27b's own HF card recommends 1.5 for its instruct/non-thinking mode - no "
+                              "existing Kriya config field covers this, presence_penalty isn't a formal "
+                              "LLMClient.complete() kwarg (kriya/core/llm.py), only reachable via extra_body.")
     args = parser.parse_args()
 
     goals = GOALS if not args.goal_id else [g for g in GOALS if g.id in args.goal_id]
@@ -257,8 +296,15 @@ def main():
     logs_dir = os.path.join(batch_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
 
+    llm_tuning_desc = (
+        f"temperature={args.llm_temperature} | reasoning_effort="
+        f"{args.reasoning_effort or '(unset - packaged default_config.yaml extra_body used as-is)'} "
+        f"| presence_penalty={args.presence_penalty if args.presence_penalty is not None else '(unset)'}"
+    )
+
     print(f"Eval harness batch: {batch_dir}")
     print(f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}")
+    print(f"LLM tuning: {llm_tuning_desc}")
     print(f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}")
     print(f"Self-correction loop: {'ON' if args.self_correction else 'off'}")
     print(f"Best-of-N (first attempt): {args.best_of_n}")
@@ -268,6 +314,7 @@ def main():
     summary_lines = [
         f"Eval harness batch {batch_ts}",
         f"Model: {args.model} | Fallback: {args.fallback_model} | Embed: {args.embed_model} | Base URL: {args.base_url}",
+        f"LLM tuning: {llm_tuning_desc}",
         f"Search Base URL: {args.search_base_url or '(unset - live lookup configured-but-inert)'}",
         f"Self-correction loop: {'ON' if args.self_correction else 'off'}",
         f"Best-of-N (first attempt): {args.best_of_n}",
@@ -280,7 +327,11 @@ def main():
         goal_dir = Path(os.path.join(batch_dir, "workspaces", goal.id))
         goal_dir.mkdir(parents=True, exist_ok=True)
         _init_git_repo(goal_dir)
-        _write_config(goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model, args.search_base_url, args.self_correction, args.best_of_n, args.log_level)
+        _write_config(
+            goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model,
+            args.search_base_url, args.self_correction, args.best_of_n, args.log_level,
+            args.llm_temperature, args.reasoning_effort, args.presence_penalty,
+        )
 
         print(f"--- Running goal '{goal.id}' (timeout {args.timeout_per_goal}s) ---")
         start = time.time()

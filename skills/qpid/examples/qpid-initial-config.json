@@ -1,28 +1,40 @@
 {
   "name": "broker",
   "modelVersion": "8.0",
+  "authenticationproviders": [
+    {
+      "name": "anonymous",
+      "type": "Anonymous"
+    }
+  ],
   "ports": [
     {
       "name": "AMQP",
-      "port": 5672,
+      "port": "5672",
+      "authenticationProvider": "anonymous",
+      "protocols": ["AMQP_1_0"],
       "virtualhostaliases": [
         {
+          "name": "nameAlias",
+          "type": "nameAlias"
+        },
+        {
+          "name": "defaultAlias",
           "type": "defaultAlias"
+        },
+        {
+          "name": "hostnameAlias",
+          "type": "hostnameAlias"
         }
       ]
     }
   ],
-  "virtualhosts": [
+  "virtualhostnodes": [
     {
       "name": "default",
-      "nodeAutoCreationPolicies": [
-        {
-          "pattern": ".*",
-          "createdOnPublish": true,
-          "createdOnConsume": true,
-          "nodeType": "queue"
-        }
-      ]
+      "type": "Memory",
+      "defaultVirtualHostNode": true,
+      "virtualHostInitialConfiguration": "{\"type\": \"Memory\", \"nodeAutoCreationPolicies\": [{\"pattern\":\".*\",\"createdOnPublish\":\"true\",\"createdOnConsume\":\"true\",\"nodeType\":\"queue\"}]}"
     }
   ]
 }
