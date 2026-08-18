@@ -9154,6 +9154,38 @@ class Foo:
     assert "attr = 1" not in signatures
 
 
+def test_python_signatures_preserve_decorators_and_multiline_class_headers():
+    from kriya.workflow.workflow import skeletonize_python
+
+    content = '''@register("handler")
+class Handler(
+    BaseHandler,
+    Protocol,
+):
+    @property
+    @cached(
+        ttl=30,
+    )
+    def value(self) -> str:
+        return self._value
+'''
+
+    signatures = skeletonize_python(content, "signatures")
+
+    assert signatures == '''@register("handler")
+class Handler(
+    BaseHandler,
+    Protocol,
+):
+    @property
+    @cached(
+        ttl=30,
+    )
+    def value(self) -> str:
+        ...'''
+    assert "return self._value" not in signatures
+
+
 def test_braced_signatures_keep_types_constructors_and_multiline_methods_only():
     from kriya.workflow.workflow import skeletonize_braced_code
 
@@ -9196,6 +9228,91 @@ public class Bar {
     assert "private String name" not in signatures
     assert "this.name = name" not in signatures
     assert "values.clear" not in signatures
+
+
+def test_braced_signatures_do_not_misattribute_anonymous_scope_methods():
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = '''public class Outer {
+    private Runnable action = new Runnable() {
+        @Override
+        public void run() { secret(); }
+    };
+
+    static {
+        Runnable startup = new Runnable() {
+            @Override public void initialize() { secretStartup(); }
+        };
+    }
+
+    public void execute() { action.run(); }
+}
+
+enum Mode {
+    ACTIVE {
+        @Override public void apply() { secretMode(); }
+    };
+
+    public abstract void apply();
+}
+'''
+
+    signatures = skeletonize_braced_code(content, "signatures")
+
+    assert signatures == '''public class Outer {
+    public void execute() { ... }
+}
+enum Mode {
+    public abstract void apply();
+}'''
+    assert "public void run()" not in signatures
+    assert "public void initialize()" not in signatures
+    assert "public void apply()" not in signatures
+    assert "secret" not in signatures
+
+
+def test_braced_signatures_keep_annotations_and_semicolon_members():
+    from kriya.workflow.context_budget import _braced_constructor_declaration_pattern
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = '''@Contract
+public interface Service {
+    @Deprecated
+    void start();
+
+    @Named(
+        value = "primary"
+    )
+    String name();
+}
+
+abstract class BaseService {
+    @Deprecated
+    public abstract void stop() throws java.io.IOException;
+}
+'''
+
+    signatures = skeletonize_braced_code(content, "signatures")
+
+    assert signatures == '''@Contract
+public interface Service {
+    @Deprecated
+    void start();
+    @Named(
+        value = "primary"
+    )
+    String name();
+}
+abstract class BaseService {
+    @Deprecated
+    public abstract void stop() throws java.io.IOException;
+}'''
+    # Constructor patterns are cached by exact enclosing type rather than
+    # recompiled at every opening brace inside the same type.
+    assert (
+        _braced_constructor_declaration_pattern("BaseService")
+        is _braced_constructor_declaration_pattern("BaseService")
+    )
 
 
 def test_braced_skeleton_elides_constructors_regardless_of_member_position():
