@@ -72,7 +72,7 @@ graph TD
 - [Ollama](https://ollama.com/) running locally.
 - Pull the default models:
   ```bash
-  ollama pull qwen2.5-coder:32b
+  ollama pull qwen3-coder:30b
   ollama pull nomic-embed-text:latest
   ```
 - Optional, Java projects only: [`jdtls`](https://github.com/eclipse-jdtls/eclipse.jdt.ls) (`brew install jdtls` on macOS) for LSP grounding on Developer retries — not a Python package, so it isn't in `requirements.txt`/`pyproject.toml`; Kriya talks to it directly over the Language Server Protocol (see `kriya/tools/lsp.py`), no client library needed. Entirely optional: not found on PATH, and `generate`/`fix` proceed exactly as before. `jdtls` itself needs **JDK 21+ to run** (separate from whatever JDK your project targets) — `kriya doctor` reports whether it was found and reminds you of this.
@@ -218,35 +218,82 @@ CI runs this tier in a separate, non-blocking job (`.github/workflows/ci.yml`'s 
 
 ## 6. Configuration
 
-Kriya loads configuration parameters from `default_config.yaml`. Here is the default schema:
+Kriya loads configuration parameters from `kriya/config/default_config.yaml`, shallow-merged one level deep with your project's own `kriya.yaml` if one exists (see `kriya/config/config.py::load_config()` - later wins). Below is the packaged default, annotated - see `docs/user_guide.md` §2 for a longer walkthrough and `docs/design.md` for the full rationale behind each non-obvious value.
 
 ```yaml
 llm:
-  provider: "openai"
+  provider: "openai"                       # OpenAI-compatible client; works against Ollama, LM Studio, etc.
+  model: "qwen3-coder:30b"
+  api_key: "local-key"                     # Most local servers ignore this; set a real key for a remote endpoint
   base_url: "http://localhost:11434/v1"
-  model: "qwen2.5-coder:32b"
-  temperature: 0.2
+  temperature: 0.7                         # Higher temperature avoids MoE repetition loops on this model family
+  max_tokens: 16384
+  extra_body:                              # Passed straight through to the completion request - backend-specific
+    options:                               # sampling knobs (num_ctx/top_p/top_k for Ollama) or a reasoning-
+      num_ctx: 32768                       # capable model's own reasoning_effort/presence_penalty go here.
+      top_p: 0.8
+      top_k: 20
+  reasoning: false                         # Marks the primary model as reasoning-capable (raises the max_tokens
+                                            # floor, strips inline <think> tags) - leave false for a non-thinking
+                                            # model like the default.
+  reviewer_temperature: 0.7                # Optional, unset by default upstream - overrides temperature ONLY for
+                                            # the Reviewer agent's own call, independent of the value above.
+                                            # Protects against the same MoE-repetition-loop failure class for a
+                                            # call site a global `temperature` override elsewhere doesn't reach.
+  retry_temperature:                       # Optional, unset by default (shown here for reference, no value set) -
+                                            # overrides temperature ONLY for a Developer completion directly
+                                            # responding to a real prior Quality Gate failure.
+  context_window: 32768                    # Used for context-budget allocation, not sent to the server
+
+# Ordered fallback/escalation chain, tried after llm above on a Quality Gate failure.
+# reasoning: false here matters - escalating to a reasoning model was measured to cost
+# 13-85x the latency of the primary model for zero correctness benefit on this class
+# of retry (see docs/kriya_backlog_and_lessons.md).
+llm_chain:
+  - model: "qwen3.6:35b-a3b-q4_K_M"
+    base_url: "http://localhost:11434/v1"
+    reasoning: false
+    context_window: 32768
+    temperature: 0.2
 
 embedding:
-  provider: "ollama"
-  base_url: "http://localhost:11434/v1"
-  model: "nomic-embed-text:latest"
+  model: "nomic-embed-text:latest"         # No `provider` field - embedding always goes through the same
+  base_url: "http://localhost:11434/v1"    # OpenAI-compatible client as llm above.
 
 autonomy:
-  mode: "guardrails"                      # Options: autonomous | guardrails
-  risk_threshold_lines: 300               # Trigger review escalation if file write exceeds this limit
-  sensitive_paths:                        # Sensitive file matching patterns
-    - ".*\\.env$"
-    - ".*secrets.*"
-    - ".*workflows.*"
-  run_verification_enabled: true          # Actually run the generated app and grade output before applying
+  mode: "human-in-the-loop"                # Any value other than "human-in-the-loop" behaves as "guardrails" -
+                                            # approval is then only triggered by a sensitive-path match or
+                                            # risk_threshold_lines, not on every change.
+  egress_policy: "local_only"              # Rejects any base_url that doesn't resolve to loopback/private/.local
+  sensitive_paths:                         # Your own list is ADDED to, never replaces, a baseline force-appended
+    - ".*\\.env$"                          # regardless of config: .env, secrets, .github/workflows/, Jenkinsfile,
+    - ".*secrets.*"                        # credentials, password (see kriya/config/config.py::load_config()).
+    - "\\.github/workflows/.*"
+    - "Jenkinsfile"
+    - ".*credentials.*"
+    - ".*password.*"
+  risk_threshold_lines: 100
+  sandbox_execution: true                  # Restricted env allowlist + CPU/memory limits for quality-gate/shell subprocess execution
+  run_verification_enabled: true           # After compile/test gates pass, actually run the app and LLM-grade its output
   run_verification_timeout_seconds: 90
   web_lookup_enabled: false                # Opt-in per project; also requires search.base_url below
   web_lookup_auto_approve: false           # Opt-in to skip the pre-send confirmation and allow unattended search
+  self_correction_loop_enabled: false      # Opt-in: a bounded native-tool-calling micro-loop on a compile failure
+  self_correction_loop_max_turns: 4
+  best_of_n_first_attempt: 1               # >1 tries that many independent candidates for the very first attempt only
 
 search:
   base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance
   top_k: 3                                 # Candidate results tried per term before giving up on it
+
+# Natural-language routing inside `kriya repl` - on by default, needs `ollama pull
+# embeddinggemma` in addition to whatever embedding.model above uses (a separate model,
+# tuned for short-phrase intent classification rather than long-form RAG retrieval).
+routing:
+  enabled: true
+  embed_model: "embeddinggemma:latest"
+  reject_threshold: 0.3
+  ask_margin: 0.05
 
 # Optional - every role below defaults to the primary llm block above if unset.
 # Developer is not configurable here; it always uses llm/llm_chain above.
@@ -280,8 +327,26 @@ agent_llms:
       base_url: "http://localhost:11434/v1"
   # architect: left unset -> uses the primary llm model too
 
+plugins:
+  directory: "./plugins"
+  enabled: []
+
 paths:
-  plugins: "./plugins"
   skills: "./skills"
   memory: "./memory"
+  logs: "./logs"
+
+logging:
+  level: "INFO"
+  file: "./logs/kriya.log"
+
+# Stage 0 KnowledgeGuard - scans a goal for library/version mentions that postdate
+# training_cutoff before generation starts.
+knowledge:
+  training_cutoff: "2023-12-01"
+  check_enabled: true
+  offline_mode: false
+
+# Per-project MCP servers - empty by default, e.g. {"my_server": {"command": "...", "args": [...]}}
+mcp: {}
 ```

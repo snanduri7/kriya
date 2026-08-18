@@ -6,6 +6,13 @@ llm:
   api_key: "local-key"
   base_url: "http://localhost:11434/v1"
   temperature: 0.7          # Higher temperature prevents MoE repetition loops
+  # ReviewerAgent's own temperature, independent of whatever `temperature` above (or
+  # a caller's own config) is set to - protects against the same MoE repetition-loop
+  # failure class, for the Reviewer call specifically. See LLMConfig.reviewer_temperature
+  # (kriya/config/config.py) for the live incident that motivated this (2026-08-18,
+  # eval harness batch b-10t: a Reviewer call at temperature=0.2 looped on the
+  # identical review block 250 times before hitting the token ceiling).
+  reviewer_temperature: 0.7
   max_tokens: 16384
   extra_body:
     options:

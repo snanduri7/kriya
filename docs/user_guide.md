@@ -37,34 +37,63 @@ llm:
   api_key: "local-key"                     # Most local servers ignore this; set a real key for remote endpoints
   temperature: 0.3
   max_tokens: 4096
-  context_window: 32768                    # Native model input context window limit
+  context_window: 32768                    # Native model input context window limit, used for context-budget
+                                            # allocation - not sent to the server.
+  extra_body:                              # Passed straight through into the completion request body - backend-
+    options:                               # specific sampling knobs live here. For Ollama: num_ctx/top_p/top_k.
+      num_ctx: 32768                       # For a reasoning-capable model served through Ollama's OpenAI-compat
+      top_p: 0.8                           # surface, this is also where reasoning_effort/presence_penalty go
+      top_k: 20                            # (e.g. {"reasoning_effort": "none"} to force a thinking model into
+                                            # non-thinking mode - see docs/kriya_backlog_and_lessons.md).
+  reasoning: false                         # Marks this model as reasoning-capable (raises the max_tokens floor,
+                                            # strips inline <think> tags from the response). Leave false for a
+                                            # non-thinking model.
   retry_temperature: 0.1                   # Optional, unset by default. Overrides temperature ONLY for a
                                             # Developer completion that's fixing a real prior error (see §4.7) -
                                             # a cited study found code-gen success rate drops as temperature
                                             # rises even at the low end, so lower (not higher) helps a retry.
+  reviewer_temperature: 0.7                # Optional, unset by default. Overrides temperature ONLY for the
+                                            # ReviewerAgent's own completion call, independent of `temperature`
+                                            # above - added after a live incident where a Reviewer call at low
+                                            # temperature entered a verbatim repetition loop (the same MoE-
+                                            # repetition failure class `temperature` itself exists to avoid,
+                                            # just for a call site a single global value doesn't reach).
 
 # Ordered fallback/escalation chain - tried in order after a quality-gate failure
 llm_chain:
   - model: "deepseek-r1:14b"
     base_url: "http://localhost:11434/v1"
     context_window: 16384
+    reasoning: false                       # Explicit, not incidental - escalating to a reasoning model on a
+                                            # retry was measured at 13-85x the latency of the primary model for
+                                            # zero correctness benefit on this failure class (fact-recall-shaped
+                                            # compile/test fixes). Deterministic grounding (LSP) helps here, not
+                                            # more reasoning - see docs/kriya_backlog_and_lessons.md.
   - model: "deepseek-r1:32b"
     base_url: "http://localhost:11434/v1"
     context_window: 32768
+    reasoning: false
   # Remote entries are blocked by egress_policy: local_only below unless you change it.
 
 # Data safety & egress boundaries
 autonomy:
-  mode: "human-in-the-loop"
+  mode: "human-in-the-loop"                # Any other value behaves as "guardrails" - approval then only
+                                            # triggers on a sensitive-path match or risk_threshold_lines, not
+                                            # on every change.
   egress_policy: "local_only"              # Enforce local boundaries; blocks remote endpoints
-  sensitive_paths:
-    - ".*\\.env$"
-    - ".*secrets.*"
+  sensitive_paths:                         # ADDED to, never replaces, a baseline force-appended regardless of
+    - ".*\\.env$"                          # config: .env, secrets, .github/workflows/, Jenkinsfile, credentials,
+    - ".*secrets.*"                        # password (kriya/config/config.py::load_config()) - you cannot
+                                            # accidentally disable protection for those by overriding this list.
   risk_threshold_lines: 500                # Pause for review if change size exceeds this many lines
   sandbox_execution: true                  # Restrict env vars + resource-limit quality-gate/shell subprocess execution
   run_verification_enabled: true           # After compile/test gates pass, actually run the app and LLM-grade its output
   run_verification_timeout_seconds: 90     # Kill the run if it hangs past this many seconds
   web_lookup_enabled: false                # Opt-in per project - see "search:" below and Section 4.6
+  self_correction_loop_enabled: false      # Opt-in: a bounded native-tool-calling micro-loop on a compile
+                                            # failure, before falling back to full-file regeneration.
+  best_of_n_first_attempt: 1               # >1 tries that many independent candidates on the very first attempt
+                                            # only (never on retries, which already have real error grounding).
 
 paths:
   skills: "./skills"                       # Path to engineering skills
@@ -72,14 +101,33 @@ paths:
   logs: "./logs"                           # Logs folder
 
 embedding:
-  model: "nomic-embed-text:latest"         # Embedding model for vector indexing (768 dimensions)
-  base_url: "http://localhost:11434/v1"
+  model: "nomic-embed-text:latest"         # Embedding model for vector indexing (768 dimensions) - no `provider`
+  base_url: "http://localhost:11434/v1"    # field; embedding goes through the same OpenAI-compatible client as llm.
 
 # Only used if autonomy.web_lookup_enabled is also true - both switches must be set,
 # so a config merge/copy-paste can't silently enable outbound search on its own.
 search:
   base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance
   top_k: 3                                 # Candidate results tried per term before giving up on it
+
+# Natural-language routing inside `kriya repl` (§3.6.1 below) - on by default. Needs
+# `ollama pull embeddinggemma` in addition to whatever embedding.model above uses -
+# a deliberately separate model, tuned for short-phrase intent classification rather
+# than the long-form retrieval embedding.model is tuned for.
+routing:
+  enabled: true
+  embed_model: "embeddinggemma:latest"
+  reject_threshold: 0.3                    # Below this cosine similarity to every command's exemplars, treat
+                                            # the input as out of scope even if the LLM gate said otherwise.
+  ask_margin: 0.05                         # Top-2 candidate commands within this similarity margin -> ask which
+                                            # one instead of guessing.
+
+# Stage 0 KnowledgeGuard - scans a goal's text for library/version mentions that
+# postdate training_cutoff and can pause the run for explicit confirmation.
+knowledge:
+  training_cutoff: "2023-12-01"
+  check_enabled: true
+  offline_mode: false
 
 # Optional per-role model overrides - see Section 2.1 below, and read its warning
 # about model-swap cost before configuring anything other than matching models here.

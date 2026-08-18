@@ -1449,7 +1449,10 @@ class WorkflowEngine:
                         for i, batch in enumerate(review_batches, 1):
                             batch_prompt = f"Goal: {goal}\n\nFiles generated:\n{batch}"
                             label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
-                            review_parts.append(label + await self.reviewer.run(batch_prompt, stream_callback=reviewer_stream))
+                            review_parts.append(label + await self.reviewer.run(
+                                batch_prompt, stream_callback=reviewer_stream,
+                                temperature_override=self.kernel.config.llm.reviewer_temperature,
+                            ))
                         state.pre_approval_review = "\n".join(review_parts)
                         escalation_reason += f"\n\n=== Automated Code Review ===\n{state.pre_approval_review}"
                     except Exception as ex:
@@ -1804,7 +1807,10 @@ class WorkflowEngine:
             for i, batch in enumerate(review_batches, 1):
                 batch_prompt = goal_header + batch
                 label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
-                review_parts.append(label + await self.reviewer.run(batch_prompt, stream_callback=reviewer_stream))
+                review_parts.append(label + await self.reviewer.run(
+                    batch_prompt, stream_callback=reviewer_stream,
+                    temperature_override=self.kernel.config.llm.reviewer_temperature,
+                ))
             review = "\n".join(review_parts)
         if step_callback:
             step_callback("Review", review)
