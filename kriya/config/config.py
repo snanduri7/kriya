@@ -33,6 +33,24 @@ class LLMConfig(BaseModel):
     # contradict - a retry's typically-shorter, narrower regeneration is a
     # different case, not evidence the global default should change too.
     retry_temperature: Optional[float] = Field(default=None)
+    # Applied ONLY to ReviewerAgent.run() calls (kriya/workflow/workflow.py, both the
+    # pre-approval and final Review stages) - None (default) means no override, the
+    # Reviewer inherits whatever `temperature` the rest of the run uses, unchanged
+    # behavior. Added after a live, root-caused incident (2026-08-18, eval harness
+    # batch b-10t, django_healthcheck_gap): a Reviewer call at temperature=0.2 (the
+    # eval harness's own hardcoded eval-determinism override, not this field) entered
+    # a verbatim degenerate repetition loop - one genuine review, then the identical
+    # "### Code Review" / "### Merge Readiness" block repeated 250 times until it hit
+    # the full max_tokens ceiling (639s wall-clock for what should have been a few
+    # hundred tokens). Confirmed via Ollama's own server.log: a real, steady ~26 tok/s
+    # generation the whole time, not a hang. This is the exact MoE-repetition-loop
+    # failure class `temperature: 0.7`'s own default_config.yaml comment already
+    # documents and defends against for the Developer's generation calls - the
+    # Reviewer stage had no equivalent protection. A dedicated field (mirroring
+    # retry_temperature's shape) rather than routing through agent_llms.reviewer.llm,
+    # which would silently require re-specifying model/base_url/max_tokens/etc. too
+    # just to change one sampling parameter.
+    reviewer_temperature: Optional[float] = Field(default=None)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")

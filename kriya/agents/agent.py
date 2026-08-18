@@ -183,6 +183,7 @@ async def call_with_escalation(
     json_mode: bool = False,
     stream_callback: Optional[Callable[[str], None]] = None,
     is_failure: Optional[Callable[[str], bool]] = None,
+    temperature_override: Optional[float] = None,
 ) -> str:
     """Tries each candidate in order - a role's own configured model, then its own
     escalation chain (kriya/config/config.py::AgentModelConfig) - via llm.complete(),
@@ -195,7 +196,11 @@ async def call_with_escalation(
     If every candidate is exhausted, re-raises the last exception (or returns the
     last response if only is_failure judged every attempt inadequate, never a raw
     exception) - so a role with an empty/unset chain behaves exactly as if escalation
-    didn't exist at all."""
+    didn't exist at all.
+
+    temperature_override, if given, only applies to a None candidate (the common
+    "no dedicated agent_llms config for this role" case) - an explicit candidate's
+    own cand.temperature is a more specific setting and always wins."""
     last_exc: Optional[Exception] = None
     last_response: Optional[str] = None
     for i, cand in enumerate(candidates):
@@ -203,6 +208,7 @@ async def call_with_escalation(
             if cand is None:
                 response = await llm.complete(
                     system_prompt, prompt, stream_callback=stream_callback, json_mode=json_mode,
+                    temperature_override=temperature_override,
                 )
             else:
                 response = await llm.complete(
@@ -304,13 +310,19 @@ class BaseAgent(ABC):
     def _candidates(self) -> List[Optional[Any]]:
         return [self.role_llm] + list(self.role_chain)
 
-    async def run(self, prompt: str, stream_callback: Optional[Callable[[str], None]] = None) -> str:
+    async def run(
+        self,
+        prompt: str,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        temperature_override: Optional[float] = None,
+    ) -> str:
         """Execute a text completion request, escalating through this role's chain
         only on a hard call failure (connection/timeout/HTTP/egress error) - a
         legitimately short-but-correct response is never wrongly retried just for
         being brief."""
         return await call_with_escalation(
             self.llm, self.system_prompt, prompt, self._candidates(), stream_callback=stream_callback,
+            temperature_override=temperature_override,
         )
 
 
