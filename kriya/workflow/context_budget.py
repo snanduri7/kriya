@@ -44,8 +44,23 @@ def _python_decorator_ranges(
 ) -> List[Tuple[int, int, int]]:
     """Return ``(start_line, end_line, indent)`` for decorator statements."""
     ranges = []
+    bracket_depth = 0
     for index, token in enumerate(tokens):
+        if token.type == tokenize.OP and token.string in "([{":
+            bracket_depth += 1
+            continue
+        if token.type == tokenize.OP and token.string in ")]}":
+            bracket_depth = max(0, bracket_depth - 1)
+            continue
         if token.type != tokenize.OP or token.string != "@":
+            continue
+        if bracket_depth != 0:
+            # A bare '@' inside an open (), [] or {} is the matrix-
+            # multiplication operator on a continuation line (common
+            # Black/PEP8 style for numpy/torch, e.g. `x = (\n    a\n@ b\n)`),
+            # never a decorator - a decorator statement can only start at
+            # zero bracket depth (2026-08-18 review finding: this was
+            # previously misattached to the next declaration).
             continue
         line_index = token.start[0] - 1
         if lines[line_index][:token.start[1]].strip():
@@ -245,12 +260,18 @@ _BRACED_METHOD_DECLARATION_PATTERN = re.compile(
 )
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=256)
 def _braced_constructor_declaration_pattern(type_name: str) -> re.Pattern:
     """Build an exact-name constructor matcher for the enclosing type.
 
     Requiring the tracked type name is what distinguishes constructors from
     one-token control-flow constructs such as ``if (...)`` and ``for (...)``.
+    Bounded (not maxsize=None) so a long-running process (kriya repl, or many
+    generate/fix/analyze runs across large/multiple repos) doesn't accumulate
+    one permanently cached compiled regex per distinct type name for its
+    entire lifetime (2026-08-18 review finding) - LRU eviction keeps the
+    common case (a bounded working set of types actively being skeletonized)
+    fully cached while letting old entries go.
     """
     return re.compile(
         r"(?m)^(?P<signature>[ \t]*"
@@ -323,11 +344,6 @@ def _braced_declaration_source(
 def skeletonize_braced_code(content: str, tier: str) -> str:
     result = []
     signatures_only = tier == "signatures"
-    if signatures_only:
-        for line in content.splitlines():
-            line_strip = line.strip()
-            if line_strip.startswith("import ") or line_strip.startswith("package "):
-                result.append(line)
 
     i = 0
     length = len(content)
@@ -340,6 +356,16 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
     # _strip_java_comments_and_strings() was built to avoid, not previously
     # extended to this call site (2026-08-12 SME review).
     structural = _strip_java_comments_and_strings(content)
+
+    if signatures_only:
+        # Checked against the STRUCTURAL (comment/string-blanked) line, not
+        # the raw content line: an example `import`/`package` statement
+        # written inside a Javadoc/block comment would otherwise be emitted
+        # as if it were real source (2026-08-18 review finding).
+        for line, structural_line in zip(content.splitlines(), structural.splitlines()):
+            structural_strip = structural_line.strip()
+            if structural_strip.startswith("import ") or structural_strip.startswith("package "):
+                result.append(line)
 
     buffer = ""
     structural_buffer = ""

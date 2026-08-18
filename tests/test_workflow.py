@@ -9398,6 +9398,89 @@ def test_java_method_signature_core_pattern_is_shared_across_all_three_call_site
     assert re.search(JAVA_METHOD_SIGNATURE_CORE + r"\s*$", signature)
 
 
+def test_braced_signatures_ignore_import_lines_inside_comments():
+    """Regression test, 2026-08-18 review finding: the signatures-tier
+    import/package scan checked raw source lines rather than the
+    comment/string-stripped structural mirror, so an example statement
+    written inside a Javadoc/block comment was emitted as if it were a real
+    import - corrupting exactly the triage context this fix exists to keep
+    trustworthy."""
+    from kriya.workflow.workflow import skeletonize_braced_code
+
+    content = '''package com.example;
+
+import java.util.List;
+
+/*
+ * Example usage:
+ * import com.example.Bar;
+ */
+public class Foo {
+    public void bar() {
+    }
+}
+'''
+
+    signatures = skeletonize_braced_code(content, "signatures")
+
+    assert signatures == '''package com.example;
+import java.util.List;
+public class Foo {
+    public void bar() { ... }
+}'''
+    assert "import com.example.Bar" not in signatures
+
+
+def test_python_signatures_do_not_treat_matmul_operator_as_decorator():
+    """Regression test, 2026-08-18 review finding: any line-leading '@' was
+    treated as a decorator without checking it was inside an open bracket -
+    the '@' matrix-multiplication operator on a continuation line (common
+    Black/PEP8 style for numpy/torch, e.g. `x = (\\n    a\\n@ b\\n)`) was
+    misattached to the next declaration as if it were that function's
+    decorator."""
+    from kriya.workflow.workflow import skeletonize_python
+
+    content = '''x = (
+    a
+@ b
+)
+
+def foo():
+    return 1
+'''
+
+    signatures = skeletonize_python(content, "signatures")
+
+    assert signatures == '''def foo():
+    ...'''
+    assert "@ b" not in signatures
+
+
+def test_braced_constructor_declaration_pattern_cache_is_bounded():
+    """Regression test, 2026-08-18 review finding: the constructor-pattern
+    cache used maxsize=None, so a long-running process (kriya repl, or many
+    generate/fix/analyze runs across large/multiple repos) accumulated one
+    permanently cached compiled regex per distinct type name for its entire
+    lifetime. Confirms the cache is bounded and actually evicts, not just
+    that a maxsize value is set."""
+    from kriya.workflow.context_budget import _braced_constructor_declaration_pattern
+
+    _braced_constructor_declaration_pattern.cache_clear()
+    for index in range(300):
+        _braced_constructor_declaration_pattern(f"GeneratedType{index}")
+
+    info = _braced_constructor_declaration_pattern.cache_info()
+    assert info.maxsize == 256
+    assert info.currsize <= 256
+
+    # The earliest-inserted name was evicted under LRU pressure - a fresh
+    # call recompiles it (a cache miss), not a hit.
+    misses_before = _braced_constructor_declaration_pattern.cache_info().misses
+    _braced_constructor_declaration_pattern("GeneratedType0")
+    misses_after = _braced_constructor_declaration_pattern.cache_info().misses
+    assert misses_after == misses_before + 1
+
+
 def test_reserve_graph_context_budget_subtracts_unbounded_text_size():
     """Regression test for a real live failure, 2026-08-07 (ignite_qpid_person):
     every retry path computed build_code_context()'s budget as a flat fraction
