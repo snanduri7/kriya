@@ -100,6 +100,12 @@ paths:
   memory: "./memory"                       # Path to databases and indexes
   logs: "./logs"                           # Logs folder
 
+# Set both false for a reproducible plain-Kriya run. paths.skills above
+# remains the one explicit project skill directory.
+skills:
+  load_global: true
+  load_cwd: true
+
 embedding:
   model: "nomic-embed-text:latest"         # Embedding model for vector indexing (768 dimensions) - no `provider`
   base_url: "http://localhost:11434/v1"    # field; embedding goes through the same OpenAI-compatible client as llm.
@@ -109,6 +115,7 @@ embedding:
 search:
   base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance
   top_k: 3                                 # Candidate results tried per term before giving up on it
+  public_terms: []                         # Extra identifiers explicitly safe for unattended lookup
 
 # Natural-language routing inside `kriya repl` (§3.6.1 below) - on by default. Needs
 # `ollama pull embeddinggemma` in addition to whatever embedding.model above uses -
@@ -395,6 +402,8 @@ A self-hosted SearXNG instance keeps the *aggregator* local, but by default it s
 **What can never leave your machine, even when this is on**: search queries are built *exclusively* from bare technology-name strings a bounded, deterministic code path already extracted from the goal or the Architect's proposed design (the same extraction used for missing-skill detection) - never your actual goal text, design text, or code. This is a hard, code-enforced boundary, not something a model decides at runtime, specifically so a project's proprietary content can never end up in an outbound search request.
 
 **A separate, additional gate on *when* a query is allowed to fire at all**: the content restriction above doesn't by itself mean a query is authorized to leave the machine right now. With `web_lookup_auto_approve` left at its default `false`, every outbound search - across all three trigger points below, including the retry-loop one - shows you the exact terms and target URL and asks for confirmation *before* sending, not just before using whatever comes back:
+
+Even when `web_lookup_auto_approve: true`, unattended lookup is limited to Kriya's built-in public technology catalog plus identifiers explicitly listed in `search.public_terms`. An unknown identifier falls back to the per-query approval callback; without one it is not sent. This prevents a private dependency or internal product name from becoming an unattended query merely because it resembles a library coordinate.
 ```
 [Live Lookup] Kriya wants to search for reference material on:
   - org.apache.ignite:ignite-core
