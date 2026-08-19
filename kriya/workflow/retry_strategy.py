@@ -95,7 +95,11 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # is the fallback signature - normalized first to strip Maven's
     # own always-different build-timing lines, or two occurrences
     # of the exact same failure would never compare equal.
-    state.environment_failure = classify_environment_failure(raw_error_context)
+    state.environment_failure = (
+        failure.message
+        if failure.type == "time_budget_exhausted"
+        else classify_environment_failure(raw_error_context)
+    )
 
     # Read fresh from the worktree's CURRENT pom.xml each attempt,
     # not cached once before the loop - the project's own

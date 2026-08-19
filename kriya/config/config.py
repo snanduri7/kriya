@@ -144,6 +144,13 @@ class AutonomyConfig(BaseModel):
     # effect when a real isolated worktree sandbox exists (see best_of_n.py's own
     # guard) - never risks writing a discarded candidate's files into the real project.
     best_of_n_first_attempt: int = Field(default=1)
+    # Optional end-to-end generation deadline. None preserves unbounded normal
+    # CLI behavior; eval/demo harnesses with an outer timeout should set this to
+    # the same or a slightly smaller value so Kriya can stop cleanly instead of
+    # starting a model pass the harness will kill mid-generation.
+    generation_time_budget_seconds: Optional[int] = Field(default=None, ge=1)
+    generation_gate_reserve_seconds: int = Field(default=120, ge=0)
+    generation_seconds_per_file_estimate: int = Field(default=90, ge=1)
 
 class SearchConfig(BaseModel):
     # Empty by default - live lookup stays fully inert unless a project explicitly

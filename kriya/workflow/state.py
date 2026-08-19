@@ -7,6 +7,7 @@ makes the next slices (an isolable attempt executor and retry-decision
 function) possible to unit-test without invoking the whole method.
 """
 from dataclasses import dataclass, field
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
@@ -78,6 +79,10 @@ class GenerationState:
     # chronological attempt number reads far more sensibly in the trace than
     # two counters that don't both advance on every iteration.
     attempt_number: int = 0
+    generation_started_monotonic: float = field(default_factory=time.monotonic)
+    # Completed/failed Developer calls used to refine the conservative configured
+    # per-file estimate without persisting prompt or proprietary source content.
+    generation_timings: List[Dict[str, Any]] = field(default_factory=list)
     error_context: str = ""
     # The canonical typed failure behind error_context. Retry prompts project
     # this object into bounded, revision-labelled evidence instead of relying

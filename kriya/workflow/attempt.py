@@ -13,6 +13,8 @@ stays in workflow.py - out of scope for this slice.
 import asyncio
 import logging
 import os
+import statistics
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -98,6 +100,89 @@ def _retry_package_for_attempt(
         source_context=state.last_error_source_context,
         max_chars=max_chars,
     )
+
+
+def _estimated_generation_seconds(
+    state: GenerationState, *, file_count: int, configured_per_file: int,
+) -> float:
+    observed = [
+        timing["duration_seconds"] / max(1, timing["file_count"])
+        for timing in state.generation_timings
+        if timing.get("duration_seconds", 0) > 0 and timing.get("file_count", 0) > 0
+    ]
+    per_file = statistics.median(observed) if observed else configured_per_file
+    return per_file * max(1, file_count)
+
+
+def _ensure_generation_time_budget(
+    state: GenerationState, ctx: "AttemptContext", *, file_count: int,
+) -> None:
+    autonomy = ctx.kernel.config.autonomy
+    budget = autonomy.generation_time_budget_seconds
+    if budget is None:
+        return
+    elapsed = time.monotonic() - state.generation_started_monotonic
+    remaining = max(0.0, budget - elapsed)
+    estimate = _estimated_generation_seconds(
+        state,
+        file_count=file_count,
+        configured_per_file=autonomy.generation_seconds_per_file_estimate,
+    )
+    required = estimate + autonomy.generation_gate_reserve_seconds
+    if remaining < required:
+        failure = Failure(
+            type="time_budget_exhausted",
+            source="orchestrator",
+            message=(
+                "GENERATION TIME BUDGET EXHAUSTED: refusing to start a "
+                f"{file_count}-file generation pass with {remaining:.1f}s remaining; "
+                f"estimated generation plus gate reserve requires {required:.1f}s."
+            ),
+            raw_output=(
+                f"remaining_seconds={remaining:.1f}; estimated_generation_seconds="
+                f"{estimate:.1f}; gate_reserve_seconds="
+                f"{autonomy.generation_gate_reserve_seconds}"
+            ),
+            attempt=state.attempt_number,
+        )
+        raise QualityGateFailure(failure)
+
+
+async def _run_developer_generation(
+    state: GenerationState, ctx: "AttemptContext", **kwargs,
+) -> List[Dict[str, str]]:
+    targets = kwargs.get("known_target_files")
+    file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
+    _ensure_generation_time_budget(state, ctx, file_count=file_count)
+    started = time.monotonic()
+    succeeded = False
+    try:
+        result = await ctx.developer.run_generation(**kwargs)
+        succeeded = True
+        return result
+    finally:
+        duration = time.monotonic() - started
+        state.generation_timings.append({
+            "duration_seconds": duration,
+            "file_count": file_count,
+            "succeeded": succeeded,
+            "model": kwargs.get("model_override") or ctx.kernel.config.llm.model,
+        })
+        state.record_event(RunEvent(
+            kind="generation.completed" if succeeded else "generation.failed",
+            attempt=state.attempt_number,
+            source="developer",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                f"Developer generation {'completed' if succeeded else 'failed'} "
+                f"for {file_count} file(s) in {duration:.2f}s."
+            ),
+            details={
+                "duration_seconds": duration,
+                "file_count": file_count,
+                "model": kwargs.get("model_override") or ctx.kernel.config.llm.model,
+            },
+        ))
 
 
 @dataclass
@@ -422,7 +507,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.model_hops.append(ctx.kernel.config.llm.model)
 
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
+        files = await _run_developer_generation(
+            state, ctx,
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -493,7 +579,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.model_hops.append(model_override)
 
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
+        files = await _run_developer_generation(
+            state, ctx,
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -561,7 +648,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.model_hops.append(ctx.kernel.config.llm.model)
 
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
+        files = await _run_developer_generation(
+            state, ctx,
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -742,7 +830,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         else:
             # Generate code files
             dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-            files = await ctx.developer.run_generation(
+            files = await _run_developer_generation(
+                state, ctx,
                 task_description=task_desc,
                 design_context=ctx.design,
                 existing_code_context=active_code_context,
