@@ -3156,6 +3156,30 @@ async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(
     assert state.gate_outcomes[-1]["type"] == "compile"
     assert state.gate_outcomes[-1]["success"] is False
 
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_create_no_change_before_any_quality_gate(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py",
+        "content": None,
+        "edits": [],
+        "analysis": "No file is needed.",
+    }])
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        side_effect=AssertionError("invalid operation must not reach compilation"),
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "operation_contract"
+    assert "requested create_full_file" in exc_info.value.failure.message
+    assert not (tmp_path / "app.py").exists()
+
 @pytest.mark.asyncio
 async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded(tmp_path):
     """Independent brutal review finding #2, end-to-end: RunVerifierAgent.judge()

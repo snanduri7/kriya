@@ -29,6 +29,7 @@ def test_retry_package_is_bounded_revision_labelled_and_target_first(tmp_path):
         source_context={target: "source line\n" * 1000},
         max_chars=5000,
         max_error_chars=1000,
+        advisory_context="public library documentation excerpt",
     )
 
     assert len(package.authoritative_error) <= 1000
@@ -37,6 +38,8 @@ def test_retry_package_is_bounded_revision_labelled_and_target_first(tmp_path):
     assert package.target_projections[0].revision == content_revision(target_content)
     assert package.target_projections[0].level is ProjectionLevel.IMPLEMENTATION_EXCERPT
     assert len(package.source_context[target]) <= 2000
+    assert "Advisory reference evidence" in package.render_error()
+    assert "public library documentation excerpt" in package.render_error()
     assert "canonical source remains local" in package.render_context()
 
 

@@ -27,6 +27,7 @@ class RetryPackage:
 
     failure_type: str
     authoritative_error: str
+    advisory_context: str
     target_files: tuple[str, ...]
     target_projections: tuple[FileProjection, ...]
     reference_projections: tuple[FileProjection, ...]
@@ -34,10 +35,16 @@ class RetryPackage:
     omitted_files: tuple[str, ...]
 
     def render_error(self) -> str:
-        return (
+        rendered = (
             f"Failure type: {self.failure_type}\n"
             f"Authoritative validator evidence:\n{self.authoritative_error}"
         )
+        if self.advisory_context:
+            rendered += (
+                "\n\nAdvisory reference evidence (verify against local validators):\n"
+                + self.advisory_context
+            )
+        return rendered
 
     def render_context(self) -> str:
         blocks: List[str] = []
@@ -73,6 +80,7 @@ def build_retry_package(
     source_context: Optional[Dict[str, str]],
     max_chars: int,
     max_error_chars: int = 6000,
+    advisory_context: str = "",
 ) -> RetryPackage:
     """Build a deterministic package without sending or resolving data remotely.
 
@@ -129,6 +137,7 @@ def build_retry_package(
     return RetryPackage(
         failure_type=failure.type,
         authoritative_error=_bounded_text(error, max_error_chars),
+        advisory_context=_bounded_text(advisory_context, 3000),
         target_files=requested_targets,
         target_projections=tuple(target_projections),
         reference_projections=tuple(reference_projections),

@@ -103,6 +103,13 @@ def _retry_package_for_attempt(
         target_files=target_files,
         source_context=state.last_error_source_context,
         max_chars=max_chars,
+        advisory_context=(
+            state.error_context[
+                state.error_context.index("=== Reference material found"):
+            ]
+            if "\n\n=== Reference material found" in state.error_context
+            else ""
+        ),
     )
 
 
