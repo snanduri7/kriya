@@ -34,6 +34,7 @@ from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.state import GenerationState
 from kriya.workflow.worktree import remove_git_worktree
+from kriya.workflow.retry_policy import RetryAction, decide_for_state
 
 logger = logging.getLogger(__name__)
 
@@ -301,13 +302,14 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
         state.gate_outcomes.append(failure.to_gate_outcome())
 
-    budgets_exhausted = state.environment_failure is not None or (
-        state.budgets.retry_count >= ctx.max_retries and not (
-            (state.last_implicated_files or state.last_missing_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
-        )
+    retry_decision = decide_for_state(
+        state, max_retries=ctx.max_retries,
+        targeted_max_retries=ctx.targeted_max_retries,
+        has_fallback_model=bool(ctx.chain),
     )
+    budgets_exhausted = not retry_decision.should_continue
     if budgets_exhausted:
-        if state.environment_failure:
+        if retry_decision.action is RetryAction.STOP_ENVIRONMENT:
             logger.error(f"Quality Gates stopped early - {state.environment_failure}")
         else:
             logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
@@ -326,6 +328,6 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         # check), this can fire on the very first attempt, well before
         # retry_count reaches max_retries, and the loop would otherwise
         # continue straight into another pointless Developer retry.
-        if state.environment_failure:
+        if retry_decision.action is RetryAction.STOP_ENVIRONMENT:
             return True
     return False

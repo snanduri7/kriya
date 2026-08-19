@@ -31,6 +31,7 @@ from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_mi
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.operations import all_results_are_no_change, operation_for_attempt
 from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
@@ -283,6 +284,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         else "missing_files" if use_missing_files
         else "full_set"
     )
+    attempt_operation = operation_for_attempt(
+        state.last_attempt_mode, has_prior_failure=bool(state.error_context),
+    )
+    state.record_event(RunEvent(
+        kind="attempt.started",
+        attempt=state.attempt_number,
+        source="workflow",
+        authority=EventAuthority.ADVISORY,
+        operation=attempt_operation.value,
+        details={"mode": state.last_attempt_mode},
+    ))
     # Needed unconditionally below (both the normal compile/test gate
     # path and the always-run full regression check use it) - imported
     # here rather than only inside the skippable gate block so a
@@ -690,12 +702,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # into a retry signal before any write or gate. If FIX ANALYSIS names a
     # different known file, redirect there; otherwise reject the old scope and
     # let attribute_failure() widen to the full set.
-    all_targets_rejected = bool(files) and all(
-        file_obj.get("content") is None
-        and not file_obj.get("edits")
-        for file_obj in files
-    )
+    all_targets_rejected = all_results_are_no_change(files)
     if state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected:
+        state.record_event(RunEvent(
+            kind="operation.no_change",
+            attempt=state.attempt_number,
+            source="developer",
+            authority=EventAuthority.ADVISORY,
+            operation="no_change_assessment",
+            message="Every targeted result rejected the selected file scope.",
+        ))
         returned_targets = [f.get("filepath", "") for f in files if f.get("filepath")]
         likely_files = list(self_diagnosed)
         evidence = "\n\n".join(

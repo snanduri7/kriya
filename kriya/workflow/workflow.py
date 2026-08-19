@@ -1312,11 +1312,12 @@ class WorkflowEngine:
             approve_web_lookup=self._approve_web_lookup,
         )
 
-        while state.budgets.retry_count < max_retries or (
-            (state.last_implicated_files or state.last_missing_files) and state.budgets.targeted_retry_count < TARGETED_MAX_RETRIES
-        ) or (
-            bool(state.last_implicated_files) and bool(chain) and not state.budgets.fallback_targeted_attempted
-        ):
+        from kriya.workflow.retry_policy import decide_for_state
+        while decide_for_state(
+            state, max_retries=max_retries,
+            targeted_max_retries=TARGETED_MAX_RETRIES,
+            has_fallback_model=bool(chain),
+        ).should_continue:
             # Reset once per loop iteration, unconditionally - NOT just inside the "4.5"
             # section below. Independent review (2026-08-15) found the narrower reset
             # placement genuinely insufficient: run_attempt() (called just below) raises
