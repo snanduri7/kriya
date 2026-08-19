@@ -27,8 +27,9 @@ from kriya.workflow.edit_safety import apply_anchored_edits, atomic_write_file
 
 logger = logging.getLogger(__name__)
 
-SELF_CORRECTION_SYSTEM_PROMPT = (
-    "You are helping fix a compile failure in a sandboxed project workspace. "
+def _repair_system_prompt(failure_label: str, validation_tool_name: str) -> str:
+    return (
+    f"You are helping fix a {failure_label} in a sandboxed project workspace. "
     "You have a SMALL set of tools - use them to diagnose and fix the failure, "
     "then verify your fix actually worked.\n"
     "Rules:\n"
@@ -37,11 +38,11 @@ SELF_CORRECTION_SYSTEM_PROMPT = (
     "enough surrounding text in 'search' to match exactly once.\n"
     "- You can only read/patch files already listed as being in the sandbox - "
     "you cannot create new files here.\n"
-    "- After applying a patch, call recompile to check whether it actually "
-    "fixed the failure. Do not assume a patch worked without recompiling.\n"
-    "- If recompile succeeds, stop calling tools and reply with a short plain-"
+    f"- After applying a patch, call {validation_tool_name} to check whether it actually "
+    f"fixed the failure. Do not assume a patch worked without {validation_tool_name}.\n"
+    f"- If {validation_tool_name} succeeds, stop calling tools and reply with a short plain-"
     "text confirmation."
-)
+    )
 
 READ_FILE_TOOL = {
     "type": "function",
@@ -138,7 +139,15 @@ RECOMPILE_TOOL = {
     },
 }
 
-_TOOLS = [READ_FILE_TOOL, LIST_FILES_TOOL, APPLY_PATCH_TOOL, RECOMPILE_TOOL]
+def _validation_tool(name: str, description: str) -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    }
 
 
 @dataclass
@@ -189,6 +198,8 @@ def _dispatch_tool_call(
     active_code_context: str,
     modified_files: Dict[str, str],
     read_files: Set[str],
+    validation_tool_name: str = "recompile",
+    target_test: Optional[str] = None,
 ) -> str:
     """Executes one tool call and returns the string fed back to the model as
     the tool result. Every branch is small-argument-in, small-string-out -
@@ -279,8 +290,11 @@ def _dispatch_tool_call(
         modified_files[filepath] = new_content
         return f"Patch applied to '{filepath}'. Call recompile to verify it fixed the failure."
 
-    if name == "recompile":
-        result = validator.run_compile_check(list(files_in_scope))
+    if name == validation_tool_name:
+        result = (
+            validator.run_tests(target_test=target_test)
+            if target_test else validator.run_compile_check(list(files_in_scope))
+        )
         output = result.get("output", "")
         return f"SUCCESS: {output}" if result.get("success") else f"FAILURE: {output}"
 
@@ -298,6 +312,8 @@ async def run_self_correction_loop(
     model_override: Optional[str] = None,
     base_url_override: Optional[str] = None,
     api_key_override: Optional[str] = None,
+    failure_type: str = "compile",
+    target_test: Optional[str] = None,
 ) -> SelfCorrectionResult:
     """Runs up to max_turns of native tool-calling against the given llm,
     trying to fix a real compile failure using the 4 small-argument tools
@@ -307,20 +323,30 @@ async def run_self_correction_loop(
     caller (kriya/workflow/attempt.py) treats this exactly the same as if the
     loop had never run, falling through to the existing QualityGateFailure
     path."""
+    validation_tool_name = "retest" if target_test else "recompile"
+    failure_label = "targeted test failure" if target_test else "compile failure"
+    tools = [
+        READ_FILE_TOOL, LIST_FILES_TOOL, APPLY_PATCH_TOOL,
+        _validation_tool(
+            validation_tool_name,
+            "Re-run only the failing targeted test after a patch."
+            if target_test else "Re-run the project's compile check after a patch.",
+        ),
+    ]
     modified_files: Dict[str, str] = {}
     read_files: Set[str] = set()
     transcript: List[Dict[str, Any]] = []
     last_compile_output = compile_error_output
 
     messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": SELF_CORRECTION_SYSTEM_PROMPT},
+        {"role": "system", "content": _repair_system_prompt(failure_label, validation_tool_name)},
         {
             "role": "user",
             "content": (
-                f"The following files failed to compile:\n{compile_error_output}\n\n"
+                f"The project has this {failure_label}:\n{compile_error_output}\n\n"
                 f"Files currently in the sandbox: {', '.join(sorted(files_in_scope))}\n\n"
                 "Use the available tools to diagnose and fix the failure. Call "
-                "recompile after applying a fix to check whether it worked. If it "
+                f"{validation_tool_name} after applying a fix to check whether it worked. If it "
                 "now succeeds, stop calling tools - just reply with a short "
                 "confirmation in plain text."
             ),
@@ -333,7 +359,7 @@ async def run_self_correction_loop(
         try:
             result = await llm.complete_with_tools(
                 messages,
-                _TOOLS,
+                tools,
                 model_override=model_override,
                 base_url_override=base_url_override,
                 api_key_override=api_key_override,
@@ -397,13 +423,14 @@ async def run_self_correction_loop(
         for call in tool_calls:
             tool_result_text = _dispatch_tool_call(
                 call, worktree_path, validator, files_in_scope, active_code_context, modified_files, read_files,
+                validation_tool_name=validation_tool_name, target_test=target_test,
             )
             transcript.append(
                 {"turn": turn, "tool": call["name"], "arguments": call["arguments"], "result": tool_result_text}
             )
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": tool_result_text})
 
-            if call["name"] == "recompile":
+            if call["name"] == validation_tool_name:
                 last_compile_output = tool_result_text
                 if tool_result_text.startswith("SUCCESS"):
                     return SelfCorrectionResult(
@@ -421,3 +448,8 @@ async def run_self_correction_loop(
         modified_files=modified_files,
         transcript=transcript,
     )
+
+
+# Public generic name for new callers. The compatibility name above remains
+# because compile-repair call sites and external tests already import it.
+run_repair_loop = run_self_correction_loop

@@ -1234,7 +1234,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     active_code_context=active_code_context,
                     max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
                 )
-                for incident in self_correction_result.incidents:
+                for incident in getattr(self_correction_result, "incidents", []):
                     state.record_event(RunEvent(
                         kind="auxiliary.failed",
                         attempt=state.attempt_number,
@@ -1290,18 +1290,58 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             logger.info(f"Quality Gates: Running targeted tests: {target_test}")
             test_res = validator.run_tests(target_test=target_test)
             if not test_res["success"]:
-                failure = _build_quality_gate_failure(
-                    "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
-                    test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
-                )
-                state.gate_outcomes.append(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
-            state.gate_outcomes.append({
+                test_repair_result = None
+                if ctx.kernel.config.autonomy.self_correction_loop_enabled:
+                    from kriya.workflow.self_correction import run_repair_loop
+                    test_repair_result = await run_repair_loop(
+                        llm=ctx.developer.llm,
+                        worktree_path=ctx.worktree_path,
+                        validator=validator,
+                        files_in_scope=list(state.all_files_written),
+                        compile_error_output=test_res["output"],
+                        active_code_context=active_code_context,
+                        max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                        failure_type="targeted_test",
+                        target_test=target_test,
+                    )
+                    for incident in getattr(test_repair_result, "incidents", []):
+                        state.record_event(RunEvent(
+                            kind="auxiliary.failed", attempt=state.attempt_number,
+                            source=incident["source"], authority=EventAuthority.AUXILIARY,
+                            message=incident["message"], failure_type=incident["type"],
+                            operation="repair_with_patch",
+                        ))
+                if test_repair_result and test_repair_result.resolved:
+                    state.gate_outcomes.append({
+                        "attempt": state.attempt_number,
+                        "type": "targeted_test",
+                        "success": True,
+                        "output": test_repair_result.final_compile_output,
+                        "self_corrected": True,
+                        "self_correction_turns": test_repair_result.turns_used,
+                        "self_correction_transcript": test_repair_result.transcript,
+                    })
+                    test_res = {"success": True, "output": test_repair_result.final_compile_output}
+                else:
+                    failure = _build_quality_gate_failure(
+                        "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
+                        test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                    )
+                    if test_repair_result is not None:
+                        failure.self_correction_attempt = {
+                            "turns_used": test_repair_result.turns_used,
+                            "transcript": test_repair_result.transcript,
+                            "final_validation_output": test_repair_result.final_compile_output,
+                        }
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+            if not (test_repair_result and test_repair_result.resolved):
+                state.gate_outcomes.append({
                 "attempt": state.attempt_number,
                 "type": "targeted_test",
                 "success": True,
                 "output": test_res.get("output", "")
-            })
+                })
         else:
             test_written = any("test" in f.lower() or "spec" in f.lower() for f in state.all_files_written)
             if test_written:
