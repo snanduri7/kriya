@@ -3075,6 +3075,19 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
     Graph RAG, no worktree. This is the whole point of Opportunity 2 Slice 2:
     a targeted fix to Quality Gates logic no longer needs the full pipeline's
     mock chain to write a test against."""
+    default_run_verifier = AsyncMock()
+    default_run_verifier.judge = AsyncMock(return_value={
+        "should_run": False,
+        "run_commands": [],
+        "command_source": "inferred",
+        "success_criteria": "",
+    })
+    default_run_verifier.grade = AsyncMock(return_value={
+        "passed": False,
+        "reasoning": "Runtime verification was not requested by this test.",
+        "likely_files": [],
+    })
+
     defaults = dict(
         goal="Write a small app",
         plan="Step 1: write it",
@@ -3102,7 +3115,7 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         active_skills=[],
         active_skill_rules_snapshot={},
         developer=AsyncMock(),
-        run_verifier=AsyncMock(),
+        run_verifier=default_run_verifier,
         skill_engine=MagicMock(),
         kernel=Kernel(config=AppConfig()),
         max_retries=4,
