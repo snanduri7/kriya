@@ -49,3 +49,4 @@ def test_unknown_term_requires_explicit_public_declaration_for_auto_approval():
     assert is_known_public_term("internalwidgetlib", ["internalwidgetlib"])
     assert is_known_public_term("Apache Ignite 2.18.0")
     assert is_known_public_term("org.apache.ignite:ignite-core:2.18.0")
+    assert is_known_public_term("org.codehaus.mojo:exec-maven-plugin")

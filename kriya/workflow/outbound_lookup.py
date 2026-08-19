@@ -16,6 +16,8 @@ _SOURCE_SUFFIXES = (
 _PUBLIC_COORDINATE_PREFIXES = (
     ("org.apache.ignite", "ignite-"),
     ("org.apache.qpid", "qpid-"),
+    ("org.apache.maven.plugins", "maven-"),
+    ("org.codehaus.mojo", "exec-maven-plugin"),
     ("org.springframework", "spring-"),
     ("org.junit.jupiter", "junit-"),
     ("org.hibernate", "hibernate-"),
