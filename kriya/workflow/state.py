@@ -225,6 +225,29 @@ class GenerationState:
         if event.failure_type:
             self.failure_ledger.record(event)
 
+    def generation_metrics(self) -> Dict[str, Any]:
+        """Content-free operational telemetry safe to persist in local traces."""
+        return {
+            "calls": len(self.generation_timings),
+            "successful_calls": sum(
+                1 for timing in self.generation_timings if timing.get("succeeded")
+            ),
+            "duration_seconds": sum(
+                float(timing.get("duration_seconds", 0))
+                for timing in self.generation_timings
+            ),
+            "files_requested": sum(
+                int(timing.get("file_count", 0)) for timing in self.generation_timings
+            ),
+            "operation_fallbacks": sum(
+                1 for event in self.run_events if event.kind == "operation.fallback"
+            ),
+            "validation_invalidations": sum(
+                1 for event in self.run_events if event.kind == "validation.invalidated"
+            ),
+            "validated_files": len(self.validated_file_revisions),
+        }
+
     def record_failure(self, failure: Any, *, operation: Optional[str] = None) -> RunEvent:
         try:
             authority = EventAuthority(failure.authority)

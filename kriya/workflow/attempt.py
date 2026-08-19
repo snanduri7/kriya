@@ -54,6 +54,10 @@ from kriya.workflow.operations import (
 )
 from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
+from kriya.workflow.acceptance import (
+    goal_explicitly_requires_tests,
+    test_output_confirms_nonzero_execution,
+)
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
@@ -1636,6 +1640,25 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     failure = _build_quality_gate_failure(
                         "test", f"TEST FAILURE:\n{test_res['output']}",
                         test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                if (
+                    goal_explicitly_requires_tests(ctx.goal)
+                    and not test_output_confirms_nonzero_execution(test_res.get("output", ""))
+                ):
+                    failure = Failure(
+                        type="test_acceptance",
+                        message=(
+                            "TEST ACCEPTANCE FAILURE: the goal explicitly requires tests, "
+                            "but the configured test runner reported that zero tests executed."
+                        ),
+                        raw_output=test_res.get("output", ""),
+                        likely_files=[
+                            path for path in state.all_files_written
+                            if "test" in path.lower() or "spec" in path.lower()
+                        ],
+                        attempt=state.attempt_number,
                     )
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)

@@ -1785,6 +1785,7 @@ class WorkflowEngine:
                 model_hops=state.model_hops,
                 run_events=[event.to_dict() for event in state.run_events],
                 evidence_records=[record.to_dict() for record in state.evidence_records],
+                generation_metrics=state.generation_metrics(),
             )
         except Exception as trace_ex:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
@@ -1880,6 +1881,7 @@ class WorkflowEngine:
                 failure_category=failure_category,
                 run_events=[event.to_dict() for event in state.run_events],
                 evidence_records=[record.to_dict() for record in state.evidence_records],
+                generation_metrics=state.generation_metrics(),
             )
             logger.info(f"Persistent run trace recorded: {trace_id}")
         except Exception as trace_ex:
@@ -1912,6 +1914,7 @@ class WorkflowEngine:
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
             "skill_staleness_warnings": sorted(set(skill_staleness_warnings)) or None,
             "active_skill_manifest": active_skill_manifest,
+            "generation_metrics": state.generation_metrics(),
             "review": review,
             "run_id": run_id,
         }

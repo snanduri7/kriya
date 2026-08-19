@@ -51,3 +51,52 @@ def test_trace_logger_persists_canonical_run_events(tmp_path):
     logger.close()
 
     assert '"authority": "authoritative"' in row[0]
+
+
+def test_trace_logger_persists_content_free_generation_metrics(tmp_path):
+    logger = TraceLogger(str(tmp_path / "traces.db"))
+    metrics = {
+        "calls": 2,
+        "duration_seconds": 12.5,
+        "files_requested": 4,
+        "operation_fallbacks": 1,
+    }
+    logger.log_run(
+        run_id="run-metrics", goal="generate", duration_sec=13, attempts=2,
+        status="success", files_modified=["App.java"], generation_metrics=metrics,
+    )
+    row = logger.conn.execute(
+        "SELECT generation_metrics FROM runs WHERE run_id = ?", ("run-metrics",)
+    ).fetchone()
+    logger.close()
+
+    assert '"calls": 2' in row[0]
+    assert '"files_requested": 4' in row[0]
+
+
+def test_generation_state_metrics_aggregate_events_without_source_content():
+    state = GenerationState(
+        generation_timings=[
+            {"duration_seconds": 2.5, "file_count": 1, "succeeded": True},
+            {"duration_seconds": 4.0, "file_count": 2, "succeeded": False},
+        ],
+        validated_file_revisions={"App.java": "abc"},
+    )
+    state.record_event(RunEvent(
+        kind="operation.fallback", attempt=1, source="developer",
+        authority=EventAuthority.ADVISORY,
+    ))
+    state.record_event(RunEvent(
+        kind="validation.invalidated", attempt=2, source="workflow",
+        authority=EventAuthority.ADVISORY,
+    ))
+
+    assert state.generation_metrics() == {
+        "calls": 2,
+        "successful_calls": 1,
+        "duration_seconds": 6.5,
+        "files_requested": 3,
+        "operation_fallbacks": 1,
+        "validation_invalidations": 1,
+        "validated_files": 1,
+    }
