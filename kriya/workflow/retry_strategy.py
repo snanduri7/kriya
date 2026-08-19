@@ -180,7 +180,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
 
         attribution = await attribute_failure(
             failure,
-            list(state.all_files_written),
+            sorted(state.all_files_written),
             state.budgets.retry_count,
             ctx.chain,
             ctx.developer.llm,

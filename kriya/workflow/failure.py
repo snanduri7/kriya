@@ -41,6 +41,10 @@ class Failure:
     not a wrong-behavior one; see the non-binary grading in
     kriya/workflow/workflow.py's run-verification timeout branch),
     "regression_test", "incomplete_generation", "anchored_edit",
+    "attribution_rejected" (a targeted/fallback-targeted response explicitly
+    reported NO CHANGE NEEDED for every scoped file; its likely_files contains
+    any different known file named by the same response's FIX ANALYSIS, or is
+    empty to force a full-set widening without rerunning an unchanged target),
     "unaddressed_error_location" (an edit applied cleanly - no anchor-match
     failure - but its own search block spanned the exact line a prior
     compile error reported, then left that line byte-identical in its

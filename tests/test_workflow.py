@@ -3633,6 +3633,135 @@ async def test_run_attempt_rejects_a_whole_response_no_op_edit(tmp_path):
     assert exc_info.value.failure.likely_files == ["applicationContext.xml"]
     assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
 
+
+@pytest.mark.asyncio
+async def test_no_op_edit_redirects_to_different_file_named_by_own_analysis(tmp_path):
+    """The exact demo1 retry shape: a targeted XML response changes nothing,
+    while its own analysis correctly identifies Application.java. The
+    edit-level no-op failure must preserve that current-turn evidence instead
+    of routing the next attempt back to XML."""
+    state = GenerationState()
+    xml_content = '<beans><bean id="ignite" class="com.example.IgniteService"/></beans>\n'
+    (tmp_path / "applicationContext.xml").write_text(xml_content, encoding="utf-8")
+    (tmp_path / "Application.java").write_text(
+        "class Application { void run() throws Exception { Thread.currentThread().join(); } }\n",
+        encoding="utf-8",
+    )
+    state.all_files_written = {"applicationContext.xml", "Application.java"}
+    state.last_implicated_files = ["applicationContext.xml"]
+    state.budgets.last_failure_signature = ("run_verification_hung", ("timeout",))
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "applicationContext.xml", "content": None,
+        "edits": [{"search": xml_content, "replace": xml_content}],
+        "analysis": (
+            "The XML is already valid. The lifecycle defect is in Application.java, "
+            "where the main thread joins itself and prevents context shutdown."
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Application.java", "applicationContext.xml"],
+        expected_files_upfront=["Application.java", "applicationContext.xml"],
+        architect_basename_to_path={
+            "Application.java": "Application.java",
+            "applicationContext.xml": "applicationContext.xml",
+        },
+    )
+
+    with pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "no_op_edit"
+    assert exc_info.value.failure.likely_files == ["Application.java"]
+    assert state.last_self_diagnosis == (
+        ("run_verification_hung", ("timeout",)), ["Application.java"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_targeted_no_change_redirects_before_rerunning_quality_gates(tmp_path):
+    """A genuine NO CHANGE NEEDED response is negative attribution evidence,
+    not permission to spend another runtime-verification timeout on an
+    unchanged worktree."""
+    state = GenerationState()
+    (tmp_path / "applicationContext.xml").write_text("<beans/>\n", encoding="utf-8")
+    (tmp_path / "Application.java").write_text("class Application {}\n", encoding="utf-8")
+    state.all_files_written = {"applicationContext.xml", "Application.java"}
+    state.last_implicated_files = ["applicationContext.xml"]
+    state.budgets.last_failure_signature = ("run_verification_hung", ("timeout",))
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "applicationContext.xml", "content": None, "edits": [],
+        "analysis": (
+            "applicationContext.xml is correct. Fix Application.java so its main method "
+            "exits and closes the Spring context."
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Application.java", "applicationContext.xml"],
+        expected_files_upfront=["Application.java", "applicationContext.xml"],
+        architect_basename_to_path={
+            "Application.java": "Application.java",
+            "applicationContext.xml": "applicationContext.xml",
+        },
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check"
+    ) as compile_check, pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "attribution_rejected"
+    assert exc_info.value.failure.likely_files == ["Application.java"]
+    compile_check.assert_not_called()
+
+    # Exercise the real retry handoff too: current-turn likely_files must win
+    # even though the new edit-level failure signature differs from the
+    # run_verification_hung signature that prompted this response.
+    should_break = await handle_attempt_failure(state, ctx, exc_info.value)
+    assert should_break is False
+    assert state.last_implicated_files == ["Application.java"]
+    assert state.last_attribution.tier == "judge"
+    assert state.gate_outcomes[-1]["likely_files"] == ["Application.java"]
+
+
+@pytest.mark.asyncio
+async def test_targeted_no_change_without_fix_analysis_still_widens_before_gates(tmp_path):
+    """Local models sometimes emit only the NO CHANGE NEEDED marker. The
+    parser deliberately represents that as content=None, edits=None,
+    analysis=None; it must still reject the stale target rather than silently
+    rerun gates on an unchanged worktree."""
+    state = GenerationState()
+    (tmp_path / "applicationContext.xml").write_text("<beans/>\n", encoding="utf-8")
+    state.all_files_written = {"applicationContext.xml"}
+    state.last_implicated_files = ["applicationContext.xml"]
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "applicationContext.xml", "content": None,
+        "edits": None, "analysis": None,
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["applicationContext.xml"],
+        expected_files_upfront=["applicationContext.xml"],
+        architect_basename_to_path={"applicationContext.xml": "applicationContext.xml"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check"
+    ) as compile_check, pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "attribution_rejected"
+    assert exc_info.value.failure.likely_files == []
+    compile_check.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_run_attempt_no_op_check_does_not_flag_a_companion_edit(tmp_path):
     """Negative case for the same Layer 0 check: a response with ONE no-op

@@ -676,9 +676,49 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # failure is classified) - see kriya/workflow/attribution.py's
     # extract_self_diagnosed_files() and retry_strategy.py's signature-gated
     # consumption of this field.
-    self_diagnosed = extract_self_diagnosed_files(files, list(state.all_files_written))
-    if self_diagnosed:
-        state.last_self_diagnosis = (state.budgets.last_failure_signature, self_diagnosed)
+    self_diagnosed = extract_self_diagnosed_files(files, sorted(state.all_files_written))
+    state.last_self_diagnosis = (
+        (state.budgets.last_failure_signature, self_diagnosed)
+        if self_diagnosed else None
+    )
+
+    # "NO CHANGE NEEDED" is useful negative attribution evidence, not a
+    # successful repair. In a targeted attempt, rerunning compile/tests/runtime
+    # after every returned target was explicitly left untouched wastes an
+    # expensive gate and routes the same failure back to the same file. Turn it
+    # into a retry signal before any write or gate. If FIX ANALYSIS names a
+    # different known file, redirect there; otherwise reject the old scope and
+    # let attribute_failure() widen to the full set.
+    all_targets_rejected = bool(files) and all(
+        file_obj.get("content") is None
+        and not file_obj.get("edits")
+        for file_obj in files
+    )
+    if state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected:
+        returned_targets = [f.get("filepath", "") for f in files if f.get("filepath")]
+        likely_files = list(self_diagnosed)
+        evidence = "\n\n".join(
+            f"{f.get('filepath', '(unknown file)')}: "
+            f"{f.get('analysis') or '(no FIX ANALYSIS supplied)'}" for f in files
+        )
+        failure = Failure(
+            type="attribution_rejected",
+            message=(
+                "TARGET ATTRIBUTION REJECTED: the Developer reported NO CHANGE NEEDED "
+                f"for every targeted file ({', '.join(returned_targets)}). "
+                + (
+                    f"Its own analysis instead names: {', '.join(likely_files)}."
+                    if likely_files else
+                    "No grounded alternate file was named; widen the next attempt to the full file set."
+                )
+            ),
+            raw_output=evidence,
+            file_locations=[FileLocation(filepath=f) for f in likely_files],
+            likely_files=likely_files,
+            attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
 
     # Read original file contents before overwriting (crucial for fallback mode diffs)
     for file_obj in files:
@@ -829,6 +869,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # already confirmed every search block matched real content -
             # this only fires when the edit(s) that matched changed nothing.
             if find_whole_response_no_op(edits):
+                retry_files = list(self_diagnosed) or [filepath]
                 failure = Failure(
                     type="no_op_edit",
                     message=(
@@ -839,8 +880,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         f"from your SEARCH text."
                     ),
                     raw_output="every edit in the response was a no-op (search == replace)",
-                    file_locations=[FileLocation(filepath=filepath)],
-                    likely_files=[filepath],
+                    file_locations=[FileLocation(filepath=f) for f in retry_files],
+                    likely_files=retry_files,
                     failed_content={filepath: orig_text},
                     attempted_edits=edits,
                     attempt=state.attempt_number,
