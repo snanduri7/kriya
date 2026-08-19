@@ -23,7 +23,10 @@ from typing import Any, Dict, List, Optional, Set
 
 from kriya.core.llm import LLMClient
 from kriya.tools.validate import PolymorphicValidator
-from kriya.workflow.edit_safety import apply_anchored_edits, atomic_write_file
+from kriya.workflow.edit_safety import (
+    FileRevisionConflict, apply_anchored_edits, commit_revision_grounded_file,
+    content_revision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +201,7 @@ def _dispatch_tool_call(
     active_code_context: str,
     modified_files: Dict[str, str],
     read_files: Set[str],
+    observed_revisions: Dict[str, str],
     validation_tool_name: str = "recompile",
     target_test: Optional[str] = None,
 ) -> str:
@@ -221,12 +225,15 @@ def _dispatch_tool_call(
             return f"ERROR: '{filepath}' is not a file in this attempt's sandbox. Known files: {sorted(known_files)}"
         read_files.add(filepath)
         if filepath in modified_files:
+            observed_revisions[filepath] = content_revision(modified_files[filepath])
             return modified_files[filepath]
         full_path = os.path.join(worktree_path, filepath)
         if not os.path.exists(full_path):
             return f"ERROR: '{filepath}' is listed as written but not found on disk."
         with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-            return fh.read()
+            content = fh.read()
+        observed_revisions[filepath] = content_revision(content)
+        return content
 
     if name == "list_files":
         substring = args.get("filter") or ""
@@ -249,6 +256,13 @@ def _dispatch_tool_call(
                 return f"ERROR: '{filepath}' is listed as written but not found on disk."
             with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
                 orig_text = fh.read()
+
+        expected_revision = observed_revisions.get(filepath, content_revision(orig_text))
+        if content_revision(orig_text) != expected_revision:
+            return (
+                f"ERROR: '{filepath}' changed since it was read. Re-read the file before "
+                "submitting another patch."
+            )
 
         # Found live, 2026-08-17 (ignite_qpid_person, run b-10m): apply_patch's
         # OWN edit-application already re-reads the real, current, full file
@@ -286,9 +300,18 @@ def _dispatch_tool_call(
             return f"ERROR: patch did not apply to '{filepath}': {anchor_ex}"
 
         full_path = os.path.join(worktree_path, filepath)
-        atomic_write_file(full_path, new_content)
+        try:
+            new_revision = commit_revision_grounded_file(
+                full_path, new_content, expected_revision=expected_revision,
+            )
+        except FileRevisionConflict as revision_ex:
+            return f"ERROR: {revision_ex}"
         modified_files[filepath] = new_content
-        return f"Patch applied to '{filepath}'. Call recompile to verify it fixed the failure."
+        observed_revisions[filepath] = new_revision
+        return (
+            f"Patch applied to '{filepath}'. Call {validation_tool_name} to verify "
+            "it fixed the failure."
+        )
 
     if name == validation_tool_name:
         result = (
@@ -335,6 +358,12 @@ async def run_self_correction_loop(
     ]
     modified_files: Dict[str, str] = {}
     read_files: Set[str] = set()
+    observed_revisions: Dict[str, str] = {}
+    for filepath in files_in_scope:
+        full_path = os.path.join(worktree_path, filepath)
+        if os.path.exists(full_path):
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                observed_revisions[filepath] = content_revision(fh.read())
     transcript: List[Dict[str, Any]] = []
     last_compile_output = compile_error_output
 
@@ -423,6 +452,7 @@ async def run_self_correction_loop(
         for call in tool_calls:
             tool_result_text = _dispatch_tool_call(
                 call, worktree_path, validator, files_in_scope, active_code_context, modified_files, read_files,
+                observed_revisions,
                 validation_tool_name=validation_tool_name, target_test=target_test,
             )
             transcript.append(

@@ -1,12 +1,41 @@
 """Deterministic sanity checks applied to an anchored edit or full-file write before it reaches disk - whitespace-tolerant anchor matching and structural corruption detection. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization). The "which file does this edit concern" checks that used to live here (find_misdirected_edit_target, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line) moved to kriya/workflow/attribution.py on 2026-08-14 - see that module's own docstring taxonomy for why. What's left here is purely mechanical edit-safety: does the edit apply cleanly, and does the resulting file look structurally sound - never "which file"."""
 
 import logging
+import hashlib
 import os
 import re
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+class FileRevisionConflict(ValueError):
+    """The file changed after Kriya read it and before the staged write."""
+
+
+def content_revision(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def read_file_revision(full_path: str) -> str:
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+            return content_revision(fh.read())
+    except FileNotFoundError:
+        return content_revision("")
+
+
+def commit_revision_grounded_file(full_path: str, content: str, expected_revision: str) -> str:
+    """Atomically commit a fully staged file only if its base is unchanged."""
+    actual_revision = read_file_revision(full_path)
+    if actual_revision != expected_revision:
+        raise FileRevisionConflict(
+            f"Refusing stale write to '{full_path}': expected revision "
+            f"{expected_revision[:12]}, found {actual_revision[:12]}. Re-read the file and retry."
+        )
+    atomic_write_file(full_path, content)
+    return content_revision(content)
 
 
 def atomic_write_file(full_path: str, content: str) -> None:

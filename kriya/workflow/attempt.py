@@ -18,7 +18,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
-from kriya.workflow.edit_safety import apply_anchored_edits, atomic_write_file, find_structural_corruption
+from kriya.workflow.edit_safety import (
+    apply_anchored_edits, atomic_write_file, commit_revision_grounded_file,
+    content_revision, find_structural_corruption,
+)
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
@@ -1027,7 +1030,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # run for this same file still gets its own bounded veto.
                 state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            atomic_write_file(full_path, new_content)
+            commit_revision_grounded_file(
+                full_path, new_content, expected_revision=content_revision(orig_text),
+            )
         else:
             if content is None:
                 continue
