@@ -95,3 +95,9 @@ autonomy:
     - ".*credentials.*"
     - ".*password.*"
   risk_threshold_lines: 500
+  # Leave null for ordinary unbounded CLI runs. A harness with an outer timeout
+  # should set this to the same or a slightly smaller value so Kriya can reserve
+  # validation time and stop before beginning a doomed multi-file model pass.
+  generation_time_budget_seconds: null
+  generation_gate_reserve_seconds: 120
+  generation_seconds_per_file_estimate: 90

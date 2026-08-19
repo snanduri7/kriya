@@ -281,6 +281,9 @@ autonomy:
   self_correction_loop_enabled: false      # Opt-in: a bounded native-tool-calling micro-loop on a compile failure
   self_correction_loop_max_turns: 4
   best_of_n_first_attempt: 1               # >1 tries that many independent candidates for the very first attempt only
+  generation_time_budget_seconds: null     # Set in timeout-bounded harnesses; null keeps normal CLI runs unbounded
+  generation_gate_reserve_seconds: 120     # Time retained for compile/test/runtime gates
+  generation_seconds_per_file_estimate: 90 # Conservative until this run has measured local-model timings
 
 search:
   base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance

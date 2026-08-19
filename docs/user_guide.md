@@ -94,6 +94,9 @@ autonomy:
                                             # failure, before falling back to full-file regeneration.
   best_of_n_first_attempt: 1               # >1 tries that many independent candidates on the very first attempt
                                             # only (never on retries, which already have real error grounding).
+  generation_time_budget_seconds: null     # Set to the harness deadline (or slightly below); null is unbounded
+  generation_gate_reserve_seconds: 120     # Keep enough time for authoritative quality gates
+  generation_seconds_per_file_estimate: 90 # Replaced by observed per-file timing during the run
 
 paths:
   skills: "./skills"                       # Path to engineering skills
