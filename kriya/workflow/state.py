@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
+from kriya.workflow.evidence import EvidenceRecord
 
 
 @dataclass
@@ -193,6 +194,7 @@ class GenerationState:
     # compatible trace projection while callers migrate to this event stream.
     run_events: List[RunEvent] = field(default_factory=list)
     failure_ledger: FailureLedger = field(default_factory=FailureLedger)
+    evidence_records: List[EvidenceRecord] = field(default_factory=list)
     model_hops: List[Dict[str, Any]] = field(default_factory=list)
     budgets: RetryBudgets = field(default_factory=RetryBudgets)
     # Set when the Pre-Apply Human Approval Gate runs the Reviewer early (so its
@@ -225,4 +227,17 @@ class GenerationState:
             details={"likely_files": list(failure.likely_files)},
         )
         self.record_event(event)
+        self.evidence_records.append(EvidenceRecord(
+            kind="failure",
+            source=failure.source,
+            attempt=failure.attempt or self.attempt_number,
+            payload={
+                "type": failure.type,
+                "message": failure.message,
+                "raw_output": failure.raw_output,
+                "likely_files": list(failure.likely_files),
+                "failed_content": dict(failure.failed_content),
+                "attempted_edits": list(failure.attempted_edits),
+            },
+        ))
         return event

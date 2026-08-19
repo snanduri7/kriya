@@ -1761,6 +1761,7 @@ class WorkflowEngine:
                 gate_outcomes=state.gate_outcomes,
                 model_hops=state.model_hops,
                 run_events=[event.to_dict() for event in state.run_events],
+                evidence_records=[record.to_dict() for record in state.evidence_records],
             )
         except Exception as trace_ex:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
@@ -1855,6 +1856,7 @@ class WorkflowEngine:
                 model_hops=state.model_hops,
                 failure_category=failure_category,
                 run_events=[event.to_dict() for event in state.run_events],
+                evidence_records=[record.to_dict() for record in state.evidence_records],
             )
             logger.info(f"Persistent run trace recorded: {trace_id}")
         except Exception as trace_ex:

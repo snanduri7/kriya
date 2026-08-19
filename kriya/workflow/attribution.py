@@ -300,16 +300,11 @@ def _bounded_triage_source(content: str, per_file_budget: int) -> str:
     explicit so the classifier cannot mistake two non-adjacent regions for
     contiguous source.
     """
-    if len(content) <= per_file_budget:
-        return content
-    marker = "\n... [middle truncated for attribution triage] ...\n"
-    if per_file_budget <= len(marker):
-        return content[:per_file_budget]
-    available = per_file_budget - len(marker)
-    head_chars = available // 2
-    tail_chars = available - head_chars
-    tail = content[-tail_chars:] if tail_chars else ""
-    return content[:head_chars] + marker + tail
+    from kriya.workflow.context_projection import project_implementation_source
+    return project_implementation_source(
+        content, "(triage source)", per_file_budget,
+        reason="fault localization requires implementation behavior",
+    ).content
 
 
 async def _tier_triage(
@@ -335,9 +330,12 @@ async def _tier_triage(
         if not content:
             source_sections.append(f"--- {filepath} ---\n(no content available)")
             continue
-        source_sections.append(
-            f"--- {filepath} ---\n{_bounded_triage_source(content, per_file_budget)}"
+        from kriya.workflow.context_projection import project_implementation_source
+        projection = project_implementation_source(
+            content, filepath, per_file_budget,
+            reason="fault localization requires implementation behavior",
         )
+        source_sections.append(projection.render())
 
     raw_text = failure.raw_output or failure.message
     user_prompt = (
