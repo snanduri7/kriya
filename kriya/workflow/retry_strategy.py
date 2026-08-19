@@ -71,6 +71,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     )
     failure.attempt = state.attempt_number
     failure.mode = attempt_mode
+    state.last_failure = failure
     state.record_failure(failure, operation=attempt_mode)
     fail_type = failure.type
     is_incomplete_generation = isinstance(e, IncompleteGenerationError)

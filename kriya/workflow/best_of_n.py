@@ -51,6 +51,7 @@ def reset_state_for_independent_candidate(state) -> None:
       run by design, never resets here (see its own docstring in state.py).
     """
     state.error_context = ""
+    state.last_failure = None
     state.last_implicated_files = None
     state.last_missing_files = None
     state.last_error_source_context = {}

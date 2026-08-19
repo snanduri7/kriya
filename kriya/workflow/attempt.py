@@ -34,6 +34,7 @@ from kriya.workflow.context_budget import (
     build_code_context,
 )
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
+from kriya.workflow.retry_package import RetryPackage, build_retry_package
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -68,6 +69,30 @@ def _operation_map(
         )
         for filepath in filepaths
     }
+
+
+def _retry_package_for_attempt(
+    state: GenerationState,
+    ctx: "AttemptContext",
+    *,
+    target_files: Optional[List[str]],
+    context_window: int,
+) -> Optional[RetryPackage]:
+    if state.last_failure is None:
+        return None
+    # Reserve at most a bounded fraction of the model window for retry source
+    # evidence.  Four characters/token is only an estimate; 1.5 chars per
+    # advertised token deliberately leaves ample room for goal, plan, design,
+    # skills, instructions, and output on local models with smaller windows.
+    max_chars = max(6000, min(48000, int(context_window * 1.5)))
+    return build_retry_package(
+        failure=state.last_failure,
+        worktree_path=ctx.worktree_path,
+        all_files=state.all_files_written,
+        target_files=target_files,
+        source_context=state.last_error_source_context,
+        max_chars=max_chars,
+    )
 
 
 @dataclass
@@ -368,12 +393,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             base_code_context += ctx.learned_rag_context
 
+        retry_package = _retry_package_for_attempt(
+            state, ctx,
+            target_files=state.last_implicated_files,
+            context_window=ctx.kernel.config.llm.context_window,
+        )
+        retry_error_context = (
+            retry_package.authoritative_error if retry_package else state.error_context
+        )
         task_desc, active_code_context = _build_targeted_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
             ecosystem_invariant_block=ctx.ecosystem_invariant_block,
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
+            retry_package=retry_package,
         )
         logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
 
@@ -389,7 +423,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             base_url_override=base_url_override,
             api_key_override=api_key_override,
             known_target_files=state.last_implicated_files,
-            prior_error_context=state.error_context or None,
+            prior_error_context=retry_error_context or None,
             implicated_files=state.last_implicated_files,
             error_source_context=state.last_error_source_context or None,
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
@@ -430,12 +464,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             base_code_context += ctx.learned_rag_context
 
+        retry_package = _retry_package_for_attempt(
+            state, ctx,
+            target_files=state.last_implicated_files,
+            context_window=fallback.context_window,
+        )
+        retry_error_context = (
+            retry_package.authoritative_error if retry_package else state.error_context
+        )
         task_desc, active_code_context = _build_targeted_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
             ecosystem_invariant_block=ctx.ecosystem_invariant_block,
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
+            retry_package=retry_package,
         )
         logger.info(f"Fallback-targeted retry: focusing on {', '.join(state.last_implicated_files)}.")
 
@@ -451,7 +494,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             base_url_override=base_url_override,
             api_key_override=api_key_override,
             known_target_files=state.last_implicated_files,
-            prior_error_context=state.error_context or None,
+            prior_error_context=retry_error_context or None,
             implicated_files=state.last_implicated_files,
             error_source_context=state.last_error_source_context or None,
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
@@ -553,6 +596,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             active_code_context += ctx.learned_rag_context
 
+        retry_package = _retry_package_for_attempt(
+            state, ctx,
+            target_files=state.last_implicated_files,
+            context_window=active_context_window,
+        )
+        retry_error_context = (
+            retry_package.authoritative_error if retry_package else state.error_context
+        )
         task_desc, active_code_context = _build_full_set_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, ctx.required_files_prompt_block,
             state.all_files_written, ctx.worktree_path, active_code_context,
@@ -560,6 +611,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ecosystem_invariant_block=ctx.ecosystem_invariant_block,
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
+            retry_package=retry_package,
         )
 
         # Track model hops
@@ -688,7 +740,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 base_url_override=base_url_override,
                 api_key_override=api_key_override,
                 known_target_files=known_target_files,
-                prior_error_context=state.error_context or None,
+                prior_error_context=retry_error_context or None,
                 implicated_files=state.last_implicated_files,
                 error_source_context=state.last_error_source_context or None,
                 retry_temperature=ctx.kernel.config.llm.retry_temperature,

@@ -79,6 +79,10 @@ class GenerationState:
     # two counters that don't both advance on every iteration.
     attempt_number: int = 0
     error_context: str = ""
+    # The canonical typed failure behind error_context. Retry prompts project
+    # this object into bounded, revision-labelled evidence instead of relying
+    # on an unbounded string concatenation of errors and complete files.
+    last_failure: Optional[Any] = None
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)
     all_original_contents: Dict[str, str] = field(default_factory=dict)
