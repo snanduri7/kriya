@@ -153,8 +153,6 @@ class Failure:
         return {
             "attempt": self.attempt,
             "type": self.type,
-            "source": self.source,
-            "authority": self.authority,
             "success": False,
             "output": self.raw_output or self.message,
             "mode": self.mode,
