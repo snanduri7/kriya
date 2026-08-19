@@ -1421,6 +1421,33 @@ async def test_developer_existing_file_initial_operation_has_unambiguous_full_co
     assert "Return the complete replacement content" in file_prompt
     assert files[0]["content"] == "class App { int value = 2; }"
 
+
+@pytest.mark.asyncio
+async def test_developer_honors_model_full_file_and_non_streaming_capabilities():
+    cfg = AppConfig()
+    cfg.llm.capabilities.streaming = False
+    cfg.llm.capabilities.preferred_edit_protocol = "full_file"
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: replace the stale implementation.\n"
+        "FILE CONTENT:\nclass App { int value = 2; }"
+    ))
+    dev = DeveloperAgent("developer", llm)
+
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        stream_callback=lambda _token: None,
+        known_target_files=["App.java"],
+        prior_error_context="stale value",
+        operation_by_file={"App.java": CodeOperation.REPAIR_WITH_PATCH},
+    )
+
+    system_prompt = llm.complete.await_args.args[0]
+    assert "FILE CONTENT:" in system_prompt
+    assert "SEARCH:" not in system_prompt
+    assert llm.complete.await_args.kwargs["stream_callback"] is None
+    assert files[0]["content"] == "class App { int value = 2; }"
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_no_anchored_edit_preference_without_source_context():
     """Without a known source location (error_source_context has no entry for

@@ -20,6 +20,16 @@ class ConformanceResult:
     violations: List[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class GenerationProtocol:
+    """The ordinary text-generation protocol measured safe for one model."""
+
+    json_mode: bool
+    reliable_multiline_json: bool
+    streaming: bool
+    preferred_edit_protocol: str
+
+
 def validate_tool_call_sample(
     arguments_text: str, capabilities: ModelCapabilities,
 ) -> ConformanceResult:
@@ -48,3 +58,13 @@ def capabilities_for_model(config, model: str) -> ModelCapabilities:
             return candidate.capabilities
     # Explicit role-specific models currently reuse the conservative defaults.
     return ModelCapabilities()
+
+
+def generation_protocol_for_model(config, model: str) -> GenerationProtocol:
+    capabilities = capabilities_for_model(config, model)
+    return GenerationProtocol(
+        json_mode=capabilities.json_mode,
+        reliable_multiline_json=capabilities.reliable_multiline_json,
+        streaming=capabilities.streaming,
+        preferred_edit_protocol=capabilities.preferred_edit_protocol,
+    )

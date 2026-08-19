@@ -959,6 +959,7 @@ class DeveloperAgent(BaseAgent):
         sibling_content_budget: Optional[int] = None,
         operation_by_file: Optional[Dict[str, Any]] = None,
         default_operation: Optional[Any] = None,
+        generation_protocol: Optional[Any] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
@@ -1149,6 +1150,18 @@ class DeveloperAgent(BaseAgent):
             requested_operation_value = getattr(
                 requested_operation, "value", requested_operation,
             )
+            preferred_edit_protocol = getattr(
+                generation_protocol, "preferred_edit_protocol", "small_native_tools",
+            )
+            if (
+                requested_operation_value == "repair_with_patch"
+                and preferred_edit_protocol in {"full_file", "full_file_text"}
+            ):
+                requested_operation_value = "repair_with_full_file"
+                logger.info(
+                    "Developer: model capability profile prefers full-file repair; "
+                    f"using that safe fallback for '{filepath}'."
+                )
 
             # The exact broken source line(s), read fresh from the worktree by
             # extract_error_source_locations()/_build_error_source_context()
@@ -1415,7 +1428,11 @@ class DeveloperAgent(BaseAgent):
             content = await self.llm.complete(
                 file_sys_prompt,
                 file_prompt,
-                stream_callback=stream_callback,
+                stream_callback=(
+                    stream_callback
+                    if generation_protocol is None or generation_protocol.streaming
+                    else None
+                ),
                 json_mode=False,
                 model_override=model_override,
                 base_url_override=base_url_override,
@@ -1599,6 +1616,19 @@ class DeveloperAgent(BaseAgent):
         line locator".
 
         sibling_content_budget: see _fill_missing_content."""
+        from kriya.core.model_capabilities import generation_protocol_for_model
+
+        generation_protocol = generation_protocol_for_model(
+            self.llm.config, model_override or self.llm.model,
+        )
+        effective_stream_callback = (
+            stream_callback if generation_protocol.streaming else None
+        )
+        if stream_callback and not generation_protocol.streaming:
+            logger.info(
+                "Developer: streaming callback disabled by the active model's "
+                "capability profile."
+            )
         if known_target_files:
             file_entries = [{"filepath": p, "content": None, "edits": None} for p in known_target_files]
             return await self._fill_missing_content(
@@ -1606,7 +1636,7 @@ class DeveloperAgent(BaseAgent):
                 stream_callback, model_override, base_url_override, api_key_override,
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
                 extra_fix_instruction, files_with_current_content, sibling_content_budget,
-                operation_by_file, default_operation,
+                operation_by_file, default_operation, generation_protocol,
             )
 
         try:
@@ -1619,7 +1649,7 @@ class DeveloperAgent(BaseAgent):
                     stream_callback, model_override, base_url_override, api_key_override,
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
                     extra_fix_instruction, files_with_current_content, sibling_content_budget,
-                    operation_by_file, default_operation,
+                    operation_by_file, default_operation, generation_protocol,
                 )
 
         except Exception as e:
@@ -1667,8 +1697,8 @@ class DeveloperAgent(BaseAgent):
         response_str = await self.llm.complete(
             self.system_prompt,
             prompt,
-            stream_callback=stream_callback,
-            json_mode=True,
+            stream_callback=effective_stream_callback,
+            json_mode=generation_protocol.json_mode,
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
