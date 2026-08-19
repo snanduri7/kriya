@@ -15,6 +15,12 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.failure import Failure, QualityGateFailure
+from kriya.workflow.edit_safety import (
+    FileRevisionConflict,
+    StagedFileWrite,
+    commit_revision_grounded_batch,
+    content_revision,
+)
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.state import GenerationState
 from kriya.workflow.checkpoint import (
@@ -10095,6 +10101,72 @@ def test_atomic_write_file_overwrites_existing_content_completely():
         atomic_write_file(target, "public class App {}\n")
         with open(target) as f:
             assert f.read() == "public class App {}\n"
+
+
+def test_revision_grounded_batch_preflights_every_file_before_writing(tmp_path):
+    first = tmp_path / "First.java"
+    second = tmp_path / "Second.java"
+    first.write_text("old first")
+    second.write_text("changed after generation")
+    writes = [
+        StagedFileWrite(
+            str(first), "new first", str(first), content_revision("old first"),
+        ),
+        StagedFileWrite(
+            str(second), "new second", str(second), content_revision("old second"),
+        ),
+    ]
+
+    with pytest.raises(FileRevisionConflict):
+        commit_revision_grounded_batch(writes)
+
+    assert first.read_text() == "old first"
+    assert second.read_text() == "changed after generation"
+
+
+def test_revision_grounded_batch_rolls_back_an_interrupted_commit(tmp_path):
+    first = tmp_path / "First.java"
+    second = tmp_path / "Second.java"
+    first.write_text("old first")
+    second.write_text("old second")
+    writes = [
+        StagedFileWrite(
+            str(first), "new first", str(first), content_revision("old first"),
+        ),
+        StagedFileWrite(
+            str(second), "new second", str(second), content_revision("old second"),
+        ),
+    ]
+    real_atomic_write = atomic_write_file
+
+    def fail_second_write(path, content):
+        if path == str(second):
+            raise OSError("simulated disk failure")
+        real_atomic_write(path, content)
+
+    with patch("kriya.workflow.edit_safety.atomic_write_file", side_effect=fail_second_write):
+        with pytest.raises(OSError, match="simulated disk failure"):
+            commit_revision_grounded_batch(writes)
+
+    assert first.read_text() == "old first"
+    assert second.read_text() == "old second"
+
+
+def test_revision_grounded_batch_can_guard_workspace_source_for_new_sandbox_target(tmp_path):
+    workspace_file = tmp_path / "workspace" / "App.java"
+    sandbox_file = tmp_path / "sandbox" / "App.java"
+    workspace_file.parent.mkdir()
+    workspace_file.write_text("class App { int value = 1; }")
+
+    revisions = commit_revision_grounded_batch([StagedFileWrite(
+        target_path=str(sandbox_file),
+        content="class App { int value = 2; }",
+        base_path=str(workspace_file),
+        expected_base_revision=content_revision(workspace_file.read_text()),
+    )])
+
+    assert sandbox_file.read_text() == "class App { int value = 2; }"
+    assert revisions[str(sandbox_file)] == content_revision(sandbox_file.read_text())
 
 
 @pytest.mark.asyncio

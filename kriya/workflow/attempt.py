@@ -19,8 +19,11 @@ from typing import Any, Callable, Dict, List, Optional
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
 from kriya.workflow.edit_safety import (
-    apply_anchored_edits, atomic_write_file, commit_revision_grounded_file,
-    content_revision, find_structural_corruption,
+    StagedFileWrite,
+    apply_anchored_edits,
+    commit_revision_grounded_batch,
+    content_revision,
+    find_structural_corruption,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
@@ -844,6 +847,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
 
     # Write files to worktree sandbox
     state.files_written = []
+    staged_writes: List[StagedFileWrite] = []
     for file_obj in files:
         filepath = file_obj.get("filepath", "")
         content = file_obj.get("content", "")
@@ -1119,12 +1123,26 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # run for this same file still gets its own bounded veto.
                 state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            commit_revision_grounded_file(
-                full_path, new_content, expected_revision=content_revision(orig_text),
-            )
+            staged_writes.append(StagedFileWrite(
+                target_path=full_path,
+                content=new_content,
+                base_path=current_file_path,
+                expected_base_revision=content_revision(orig_text),
+            ))
         else:
             if content is None:
                 continue
+
+            current_file_path = os.path.join(ctx.worktree_path, filepath)
+            if not os.path.exists(current_file_path):
+                workspace_file_path = os.path.join(ctx.workspace_path, filepath)
+                if os.path.exists(workspace_file_path):
+                    current_file_path = workspace_file_path
+            prior_content = ""
+            if os.path.exists(current_file_path):
+                with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
+                    prior_content = fh.read()
+
             structural_problem = find_structural_corruption(filepath, content)
             if structural_problem:
                 failure = Failure(
@@ -1145,13 +1163,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # check against, to avoid the extra I/O on the common (no prior error)
             # case.
             if analysis:
-                current_file_path = os.path.join(ctx.worktree_path, filepath)
-                if not os.path.exists(current_file_path):
-                    current_file_path = os.path.join(ctx.workspace_path, filepath)
-                prior_content = ""
-                if os.path.exists(current_file_path):
-                    with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
-                        prior_content = fh.read()
                 diagnosis_mismatch = find_edits_ignoring_own_diagnosis(analysis, None, content, prior_content)
                 if diagnosis_mismatch:
                     bypass_reason = _diagnosis_mismatch_bypass_reason(state, ctx, filepath, content)
@@ -1181,54 +1192,53 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 else:
                     state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            atomic_write_file(full_path, content)
+            staged_writes.append(StagedFileWrite(
+                target_path=full_path,
+                content=content,
+                base_path=current_file_path,
+                expected_base_revision=content_revision(prior_content),
+            ))
 
+    # Nothing reaches the sandbox until every candidate has passed its cheap
+    # deterministic checks.  The batch commit re-checks all source revisions
+    # before the first write and rolls back already-written targets if an OS
+    # error or last-moment revision conflict interrupts the commit.
+    commit_revision_grounded_batch(staged_writes)
+    for staged in staged_writes:
+        filepath = os.path.relpath(staged.target_path, ctx.worktree_path)
         state.files_written.append(filepath)
         state.all_files_written.add(filepath)
-        logger.info(f"Wrote generated/edited file to sandbox: {filepath}")
+        logger.info(f"Committed generated/edited candidate to sandbox: {filepath}")
 
-        if os.path.basename(filepath) == "pom.xml":
-            # Cheap, semantic pre-check for pom.xml specifically - see
-            # PolymorphicValidator.run_pom_validate()'s own docstring for the
-            # real incident this closes (a well-formed-but-wrong-root-element
-            # POM sailing straight past find_structural_corruption's XML
-            # well-formedness check above, only caught by paying for the full
-            # compile gate's own dependency resolution + javac invocation,
-            # after every OTHER file in the batch had already been written
-            # for nothing - nothing else in the project can possibly compile
-            # without a usable POM). Checked here, immediately after the
-            # write, not deferred to after the whole batch - pom.xml has no
-            # cross-file dependency on sibling files (unlike a proactive
-            # unresolved-symbol check on a .java file would), so there's no
-            # "sibling not written yet" false-positive risk in checking it
-            # this early, and this is exactly where the payoff is: the loop
-            # stops right here, before any of the other files this attempt
-            # would otherwise write are generated.
-            #
-            # Deliberately a fresh, minimal validator instance, not the one
-            # built later for the real compile gate - "mvn validate" never
-            # invokes javac or runs the application, so it doesn't need the
-            # goal-specific JAVA_HOME override that compilation/execution
-            # does (that override is resolved further below, after this
-            # point in the loop, specifically to close a real JDK-version
-            # mismatch gap for actual compilation - not applicable here).
-            from kriya.tools.validate import PolymorphicValidator
-            pom_validator = PolymorphicValidator(ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy)
-            pom_validate_res = pom_validator.run_pom_validate()
-            if not pom_validate_res["success"]:
-                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                    failed_pom_content = fh.read()
-                failure = Failure(
-                    type="pom_semantic_validation",
-                    message=f"POM VALIDATION FAILED for {filepath}: {pom_validate_res['output']}",
-                    raw_output=pom_validate_res["output"],
-                    file_locations=[FileLocation(filepath=filepath)],
-                    likely_files=[filepath],
-                    failed_content={filepath: failed_pom_content},
-                    attempt=state.attempt_number,
-                )
-                state.gate_outcomes.append(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
+    # A POM has no dependency on sibling source files, but it is now validated
+    # after the atomic candidate batch so no quality gate can observe a partial
+    # model response.  This remains much cheaper than dependency resolution and
+    # compilation, and a failed attempt is discarded by the worktree lifecycle.
+    pom_files = [
+        filepath for filepath in state.files_written
+        if os.path.basename(filepath) == "pom.xml"
+    ]
+    if pom_files:
+        pom_validator = PolymorphicValidator(
+            ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy,
+        )
+        pom_validate_res = pom_validator.run_pom_validate()
+        if not pom_validate_res["success"]:
+            filepath = pom_files[0]
+            full_path = os.path.join(ctx.worktree_path, filepath)
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                failed_pom_content = fh.read()
+            failure = Failure(
+                type="pom_semantic_validation",
+                message=f"POM VALIDATION FAILED for {filepath}: {pom_validate_res['output']}",
+                raw_output=pom_validate_res["output"],
+                file_locations=[FileLocation(filepath=filepath)],
+                likely_files=[filepath],
+                failed_content={filepath: failed_pom_content},
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
 
     if not resuming_developer_stage:
         # Completeness Check: catch the Developer Agent silently under-delivering
