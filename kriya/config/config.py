@@ -158,6 +158,9 @@ class SearchConfig(BaseModel):
     # search backend) - trying several in order meaningfully improves the odds of
     # actually finding something usable, which is the whole point of the feature.
     top_k: int = Field(default=3)
+    # Extra identifiers the project owner explicitly declares public. Unknown
+    # terms never receive unattended auto-approval.
+    public_terms: List[str] = Field(default_factory=list)
 
 class FallbackModelConfig(BaseModel):
     model: str

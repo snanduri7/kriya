@@ -5391,6 +5391,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["widgetlib"]
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5612,6 +5613,7 @@ async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extr
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["widgetlib"]
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 2
     kernel = Kernel(config=cfg)
@@ -5670,6 +5672,7 @@ async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["widgetlib"]
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5721,6 +5724,7 @@ async def test_workflow_web_lookup_accepted_but_empty_falls_back_to_human_ask(tm
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["widgetlib"]
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 1
     kernel = Kernel(config=cfg)
@@ -5811,6 +5815,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["gizmolib"]
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5865,6 +5870,7 @@ async def test_workflow_web_lookup_design_derived_falls_back_to_human_ask_on_emp
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["gizmolib"]
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 1
     kernel = Kernel(config=cfg)
@@ -7325,6 +7331,18 @@ async def test_approve_web_lookup_true_when_auto_approve_set():
     we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     # No callback needed at all - the config opt-in alone is sufficient.
     assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", None) is True
+
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_auto_approve_rejects_unknown_term_without_public_declaration():
+    cfg = AppConfig()
+    cfg.autonomy.web_lookup_auto_approve = True
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+    assert await we._approve_web_lookup(["internalwidgetlib"], "http://fake-search:8080", None) is False
+
+    cfg.search.public_terms = ["internalwidgetlib"]
+    assert await we._approve_web_lookup(["internalwidgetlib"], "http://fake-search:8080", None) is True
 
 @pytest.mark.asyncio
 async def test_approve_web_lookup_fails_closed_with_no_callback_and_no_opt_in():

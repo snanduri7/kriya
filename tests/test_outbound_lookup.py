@@ -2,7 +2,8 @@ import pytest
 
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.outbound_lookup import (
-    OutboundLookupRequest, UnsafeLookupTerm, sanitize_public_technology_term,
+    OutboundLookupRequest, UnsafeLookupTerm, is_known_public_term,
+    sanitize_public_technology_term,
 )
 
 
@@ -39,3 +40,12 @@ def test_canonical_local_evidence_cannot_be_used_as_lookup_terms():
         OutboundLookupRequest.from_extracted_terms(
             [evidence], origin="invalid",
         )
+
+
+def test_unknown_term_requires_explicit_public_declaration_for_auto_approval():
+    assert not is_known_public_term("internalwidgetlib")
+    assert not is_known_public_term("internal apache payroll")
+    assert not is_known_public_term("org.apache.private:company-secret:1.0")
+    assert is_known_public_term("internalwidgetlib", ["internalwidgetlib"])
+    assert is_known_public_term("Apache Ignite 2.18.0")
+    assert is_known_public_term("org.apache.ignite:ignite-core:2.18.0")

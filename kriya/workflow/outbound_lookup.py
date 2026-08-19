@@ -13,6 +13,23 @@ _SOURCE_SUFFIXES = (
     ".java", ".py", ".js", ".ts", ".xml", ".yaml", ".yml", ".properties",
     ".cs", ".go", ".rb", ".kt", ".scala",
 )
+_PUBLIC_COORDINATE_PREFIXES = (
+    ("org.apache.ignite", "ignite-"),
+    ("org.apache.qpid", "qpid-"),
+    ("org.springframework", "spring-"),
+    ("org.junit.jupiter", "junit-"),
+    ("org.hibernate", "hibernate-"),
+    ("org.slf4j", "slf4j-"),
+    ("com.fasterxml.jackson", "jackson-"),
+    ("io.netty", "netty-"),
+    ("io.micrometer", "micrometer-"),
+)
+_PUBLIC_TECHNOLOGY_WORDS = {
+    "apache", "ignite", "qpid", "spring", "maven", "gradle", "java",
+    "python", "django", "pytest", "junit", "hibernate", "jackson", "netty",
+    "postgresql", "mysql", "mongodb", "redis", "kafka", "rabbitmq", "artemis",
+}
+_VERSION_WORD_RE = re.compile(r"v?\d+(?:\.\d+)*(?:[-._][a-z0-9]+)*$")
 
 
 class UnsafeLookupTerm(ValueError):
@@ -30,6 +47,25 @@ def sanitize_public_technology_term(term: str) -> str:
     if normalized.lower().endswith(_SOURCE_SUFFIXES):
         raise UnsafeLookupTerm("source filenames are never valid outward lookup terms")
     return normalized
+
+
+def is_known_public_term(term: str, extra_public_terms: Iterable[str] = ()) -> bool:
+    normalized = sanitize_public_technology_term(term)
+    lowered = normalized.lower()
+    if lowered in {value.strip().lower() for value in extra_public_terms}:
+        return True
+    coordinate = lowered.split(":")
+    if 2 <= len(coordinate) <= 3:
+        group, artifact = coordinate[:2]
+        return any(
+            group == public_group and artifact.startswith(artifact_prefix)
+            for public_group, artifact_prefix in _PUBLIC_COORDINATE_PREFIXES
+        )
+    words = lowered.split()
+    return bool(words) and all(
+        word in _PUBLIC_TECHNOLOGY_WORDS or _VERSION_WORD_RE.fullmatch(word)
+        for word in words
+    )
 
 
 @dataclass(frozen=True)
