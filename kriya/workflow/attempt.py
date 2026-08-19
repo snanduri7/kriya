@@ -1293,9 +1293,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         target_test = extract_target_test(state.error_context, list(state.all_files_written))
         if target_test:
             logger.info(f"Quality Gates: Running targeted tests: {target_test}")
+            test_repair_result = None
             test_res = validator.run_tests(target_test=target_test)
             if not test_res["success"]:
-                test_repair_result = None
                 if ctx.kernel.config.autonomy.self_correction_loop_enabled:
                     from kriya.workflow.self_correction import run_repair_loop
                     test_repair_result = await run_repair_loop(
@@ -1342,10 +1342,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     raise QualityGateFailure(failure)
             if not (test_repair_result and test_repair_result.resolved):
                 state.gate_outcomes.append({
-                "attempt": state.attempt_number,
-                "type": "targeted_test",
-                "success": True,
-                "output": test_res.get("output", "")
+                    "attempt": state.attempt_number,
+                    "type": "targeted_test",
+                    "success": True,
+                    "output": test_res.get("output", "")
                 })
         else:
             test_written = any("test" in f.lower() or "spec" in f.lower() for f in state.all_files_written)
