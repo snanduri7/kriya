@@ -331,7 +331,24 @@ class LLMClient:
         raw_tool_calls = message.tool_calls or []
         tool_calls = []
         for tc in raw_tool_calls:
-            sample = validate_tool_call_sample(tc.function.arguments, capabilities)
+            raw_arguments = tc.function.arguments
+            try:
+                arguments = json.loads(raw_arguments)
+            except (json.JSONDecodeError, TypeError):
+                # Preserve the established caller contract for malformed local-
+                # model JSON: an empty argument object becomes an ordinary,
+                # bounded missing-field tool error in the repair loop.
+                logger.warning(
+                    "Local model returned malformed tool arguments for '%s'; "
+                    "using an empty argument object.",
+                    tc.function.name,
+                )
+                tool_calls.append({
+                    "id": tc.id, "name": tc.function.name, "arguments": {},
+                })
+                continue
+
+            sample = validate_tool_call_sample(raw_arguments, capabilities)
             if not sample.compatible:
                 logger.warning(
                     "Rejected incompatible local-model tool arguments for '%s': %s",
@@ -342,13 +359,5 @@ class LLMClient:
                     "argument_error": "; ".join(sample.violations),
                 })
                 continue
-            try:
-                arguments = json.loads(tc.function.arguments)
-            except (json.JSONDecodeError, TypeError):
-                # A malformed/truncated arguments string is a real, observed local-model
-                # failure mode even at small tool-call-argument scale - falling back to {}
-                # (surfaced to the caller as a missing-field tool error) rather than raising
-                # keeps one bad tool call from crashing the whole self-correction loop.
-                arguments = {}
             tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": arguments})
         return {"content": (message.content or "").strip(), "tool_calls": tool_calls}
