@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
 from kriya.workflow.evidence import EvidenceRecord
+from kriya.workflow.edit_safety import content_revision
 
 
 @dataclass
@@ -236,7 +237,13 @@ class GenerationState:
                 "message": failure.message,
                 "raw_output": failure.raw_output,
                 "likely_files": list(failure.likely_files),
-                "failed_content": dict(failure.failed_content),
+                # Full failed source already exists once in the compatibility
+                # gate outcome. Store revisions here to avoid doubling trace DB
+                # size while preserving a canonical identity link.
+                "failed_content_revisions": {
+                    path: content_revision(content)
+                    for path, content in failure.failed_content.items()
+                },
                 "attempted_edits": list(failure.attempted_edits),
             },
         ))
