@@ -86,6 +86,10 @@ class GenerationState:
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)
     all_original_contents: Dict[str, str] = field(default_factory=dict)
+    # Revisions that passed the real compile gate. A later candidate invalidates
+    # only changed files and their manifest dependents; unrelated validated files
+    # remain stable across targeted/dependency-scoped retries.
+    validated_file_revisions: Dict[str, str] = field(default_factory=dict)
     # Captures the last attempt's file contents before worktree cleanup, so the
     # Reviewer stage has something to review even when quality gates never
     # passed (those files never get copied to workspace_path - only ever lived

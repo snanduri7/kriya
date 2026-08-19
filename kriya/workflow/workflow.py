@@ -1329,6 +1329,10 @@ class WorkflowEngine:
             max_retries=max_retries,
             web_lookup_query_callback=web_lookup_query_callback,
             approve_web_lookup=self._approve_web_lookup,
+            generation_dependencies={
+                entry.path: list(entry.depends_on)
+                for entry in generation_manifest.entries
+            },
         )
 
         from kriya.workflow.retry_policy import decide_for_state

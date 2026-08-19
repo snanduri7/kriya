@@ -13,7 +13,7 @@ stays in workflow.py - out of scope for this slice.
 import asyncio
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from kriya.agents.agent import DeveloperAgent
@@ -24,6 +24,11 @@ from kriya.workflow.edit_safety import (
     commit_revision_grounded_batch,
     content_revision,
     find_structural_corruption,
+    read_file_revision,
+)
+from kriya.workflow.dependency_invalidation import (
+    dependent_closure,
+    invalidate_validated_revisions,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
@@ -143,6 +148,9 @@ class AttemptContext:
     # function - already carries its own `self` reference, so it's just
     # another callable from this module's perspective.
     approve_web_lookup: Callable[..., Any]
+    # path -> direct manifest dependencies, in generation order. Default keeps
+    # isolated tests and old checkpoints backward compatible.
+    generation_dependencies: Dict[str, List[str]] = field(default_factory=dict)
 
 
 def _extract_grounded_contract_verdict(
@@ -670,10 +678,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # the specific gap (a failure that's never once been targeted,
             # inheriting a spent budget from a different, already-resolved bug)
             # gets the cheaper, narrower first try.
-            known_target_files = state.last_implicated_files
+            known_target_files = dependent_closure(
+                state.last_implicated_files, ctx.generation_dependencies,
+            )
             logger.info(
                 f"First full-set attempt after targeted-budget exhaustion, but the "
-                f"current failure already has known implicated file(s) - scoping to "
+                f"current failure already has known implicated file(s) - scoping to their "
+                f"dependency closure "
                 f"{', '.join(known_target_files)} instead of the full file set."
             )
 
@@ -1256,6 +1267,27 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # before the first write and rolls back already-written targets if an OS
     # error or last-moment revision conflict interrupts the commit.
     commit_revision_grounded_batch(staged_writes)
+    changed_files = [
+        os.path.relpath(staged.target_path, ctx.worktree_path)
+        for staged in staged_writes
+    ]
+    invalidated = invalidate_validated_revisions(
+        state.validated_file_revisions,
+        changed_files,
+        ctx.generation_dependencies,
+    )
+    if invalidated:
+        state.record_event(RunEvent(
+            kind="validation.invalidated",
+            attempt=state.attempt_number,
+            source="workflow",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                "Candidate changes invalidated compiled revisions for: "
+                + ", ".join(invalidated)
+            ),
+            details={"changed_files": changed_files, "invalidated_files": invalidated},
+        ))
     for staged in staged_writes:
         filepath = os.path.relpath(staged.target_path, ctx.worktree_path)
         state.files_written.append(filepath)
@@ -1440,6 +1472,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "success": True,
                 "output": compile_res.get("output", "")
             })
+
+        # A successful real compile is the authority for cross-file signature,
+        # import, classpath, and build consistency. Record exact revisions only
+        # after that gate; heuristics never mark a file validated.
+        state.validated_file_revisions = {
+            filepath: read_file_revision(os.path.join(ctx.worktree_path, filepath))
+            for filepath in state.all_files_written
+        }
 
         target_test = extract_target_test(state.error_context, list(state.all_files_written))
         if target_test:
