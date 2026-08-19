@@ -1581,6 +1581,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             for filepath in state.all_files_written
         }
 
+        accepted_test_output: Optional[str] = None
         target_test = extract_target_test(state.error_context, list(state.all_files_written))
         if target_test:
             logger.info(f"Quality Gates: Running targeted tests: {target_test}")
@@ -1638,6 +1639,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "success": True,
                     "output": test_res.get("output", "")
                 })
+            accepted_test_output = test_res.get("output", "")
         else:
             test_written = any("test" in f.lower() or "spec" in f.lower() for f in state.all_files_written)
             if test_written:
@@ -1650,31 +1652,37 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     )
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
-                if (
-                    goal_explicitly_requires_tests(ctx.goal)
-                    and not test_output_confirms_nonzero_execution(test_res.get("output", ""))
-                ):
-                    failure = Failure(
-                        type="test_acceptance",
-                        message=(
-                            "TEST ACCEPTANCE FAILURE: the goal explicitly requires tests, "
-                            "but the configured test runner reported that zero tests executed."
-                        ),
-                        raw_output=test_res.get("output", ""),
-                        likely_files=[
-                            path for path in state.all_files_written
-                            if "test" in path.lower() or "spec" in path.lower()
-                        ],
-                        attempt=state.attempt_number,
-                    )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
-                    raise QualityGateFailure(failure)
                 state.gate_outcomes.append({
                     "attempt": state.attempt_number,
                     "type": "test",
                     "success": True,
                     "output": test_res.get("output", "")
                 })
+                accepted_test_output = test_res.get("output", "")
+
+        # The same acceptance rule applies whether extract_target_test() chose
+        # one test or the validator ran the suite. Test-selection strategy must
+        # never change an explicit user contract.
+        if (
+            accepted_test_output is not None
+            and goal_explicitly_requires_tests(ctx.goal)
+            and not test_output_confirms_nonzero_execution(accepted_test_output)
+        ):
+            failure = Failure(
+                type="test_acceptance",
+                message=(
+                    "TEST ACCEPTANCE FAILURE: the goal explicitly requires tests, "
+                    "but the configured test runner reported that zero tests executed."
+                ),
+                raw_output=accepted_test_output,
+                likely_files=[
+                    path for path in state.all_files_written
+                    if "test" in path.lower() or "spec" in path.lower()
+                ],
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
 
         # Quality Gates: Runtime Verification. Compiling and passing whatever tests
         # exist only proves the code is valid - it says nothing about whether it does

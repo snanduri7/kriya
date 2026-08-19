@@ -3180,6 +3180,39 @@ async def test_run_attempt_rejects_create_no_change_before_any_quality_gate(tmp_
     assert "requested create_full_file" in exc_info.value.failure.message
     assert not (tmp_path / "app.py").exists()
 
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_zero_tests_for_explicit_test_contract(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "def add(a, b): return a + b\n"},
+        {"filepath": "test_app.py", "content": "# test placeholder\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create a small app and include unit tests",
+        developer=developer,
+        architect_files=["app.py", "test_app.py"],
+        expected_files_upfront=["app.py", "test_app.py"],
+        architect_basename_to_path={
+            "app.py": "app.py", "test_app.py": "test_app.py",
+        },
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": "collected 0 items"},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "test_acceptance"
+    assert "zero tests executed" in exc_info.value.failure.message
+
 @pytest.mark.asyncio
 async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded(tmp_path):
     """Independent brutal review finding #2, end-to-end: RunVerifierAgent.judge()
