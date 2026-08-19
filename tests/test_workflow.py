@@ -7344,6 +7344,17 @@ async def test_approve_web_lookup_auto_approve_rejects_unknown_term_without_publ
     cfg.search.public_terms = ["internalwidgetlib"]
     assert await we._approve_web_lookup(["internalwidgetlib"], "http://fake-search:8080", None) is True
 
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_auto_approve_fails_closed_for_unsafe_term():
+    cfg = AppConfig()
+    cfg.autonomy.web_lookup_auto_approve = True
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+    assert await we._approve_web_lookup(
+        ["src/main/java/com/acme/Secret.java"], "http://fake-search:8080", None,
+    ) is False
+
 @pytest.mark.asyncio
 async def test_approve_web_lookup_fails_closed_with_no_callback_and_no_opt_in():
     cfg = AppConfig()

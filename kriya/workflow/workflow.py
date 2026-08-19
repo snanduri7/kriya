@@ -188,10 +188,17 @@ class WorkflowEngine:
         outbound query and then silently discarded the result - the query had
         already left the machine with zero human visibility, for zero benefit."""
         if self.kernel.config.autonomy.web_lookup_auto_approve:
-            from kriya.workflow.outbound_lookup import is_known_public_term
-            if all(is_known_public_term(
-                term, self.kernel.config.search.public_terms,
-            ) for term in terms):
+            from kriya.workflow.outbound_lookup import (
+                UnsafeLookupTerm, is_known_public_term,
+            )
+            try:
+                all_terms_are_public = all(is_known_public_term(
+                    term, self.kernel.config.search.public_terms,
+                ) for term in terms)
+            except UnsafeLookupTerm as exc:
+                logger.warning(f"Unattended web lookup blocked by egress sanitizer: {exc}")
+                return False
+            if all_terms_are_public:
                 return True
             logger.warning(
                 "Unattended web lookup blocked: at least one term is not in Kriya's "
