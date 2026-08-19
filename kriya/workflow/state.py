@@ -9,6 +9,8 @@ function) possible to unit-test without invoking the whole method.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
+
 
 @dataclass
 class RetryBudgets:
@@ -187,6 +189,10 @@ class GenerationState:
     jdtls_unavailable: bool = False
     lsp_warning: Optional[str] = None
     gate_outcomes: List[Dict[str, Any]] = field(default_factory=list)
+    # Canonical append-only runtime facts. gate_outcomes stays as a backwards-
+    # compatible trace projection while callers migrate to this event stream.
+    run_events: List[RunEvent] = field(default_factory=list)
+    failure_ledger: FailureLedger = field(default_factory=FailureLedger)
     model_hops: List[Dict[str, Any]] = field(default_factory=list)
     budgets: RetryBudgets = field(default_factory=RetryBudgets)
     # Set when the Pre-Apply Human Approval Gate runs the Reviewer early (so its
@@ -197,3 +203,26 @@ class GenerationState:
     # whenever no human-approval escalation happened this run (the common
     # autonomous-mode path), or the run never reached that gate at all.
     pre_approval_review: Optional[str] = None
+
+    def record_event(self, event: RunEvent) -> None:
+        self.run_events.append(event)
+        if event.failure_type:
+            self.failure_ledger.record(event)
+
+    def record_failure(self, failure: Any, *, operation: Optional[str] = None) -> RunEvent:
+        try:
+            authority = EventAuthority(failure.authority)
+        except (ValueError, TypeError):
+            authority = EventAuthority.AUTHORITATIVE
+        event = RunEvent(
+            kind="failure.recorded",
+            attempt=failure.attempt or self.attempt_number,
+            source=failure.source,
+            authority=authority,
+            message=failure.message,
+            failure_type=failure.type,
+            operation=operation,
+            details={"likely_files": list(failure.likely_files)},
+        )
+        self.record_event(event)
+        return event

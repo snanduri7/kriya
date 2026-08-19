@@ -66,9 +66,11 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # way so everything downstream always reads one shape.
     failure: Failure = getattr(e, "failure", None) or Failure(
         type="general_error", message=raw_error_context, raw_output=raw_error_context,
+        source="orchestrator",
     )
     failure.attempt = state.attempt_number
     failure.mode = attempt_mode
+    state.record_failure(failure, operation=attempt_mode)
     fail_type = failure.type
     is_incomplete_generation = isinstance(e, IncompleteGenerationError)
 

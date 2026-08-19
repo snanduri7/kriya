@@ -36,6 +36,10 @@ class TraceLogger:
             cursor.execute("ALTER TABLE runs ADD COLUMN failure_category TEXT")
         except Exception:
             pass
+        try:
+            cursor.execute("ALTER TABLE runs ADD COLUMN run_events TEXT")
+        except Exception:
+            pass
         self.conn.commit()
 
     def log_run(
@@ -51,7 +55,8 @@ class TraceLogger:
         prompt_rendered: str = "",
         gate_outcomes: list = None,
         model_hops: list = None,
-        failure_category: Optional[str] = None
+        failure_category: Optional[str] = None,
+        run_events: list = None,
     ) -> None:
         cursor = self.conn.cursor()
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -61,18 +66,19 @@ class TraceLogger:
         skills_str = ",".join(active_skills or [])
         gates_json = json.dumps(gate_outcomes or [])
         hops_json = json.dumps(model_hops or [])
+        events_json = json.dumps(run_events or [])
 
         cursor.execute("""
             INSERT OR REPLACE INTO runs (
                 run_id, timestamp, goal, duration_sec, attempts, status, files_modified,
                 retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops,
-                failure_category
+                failure_category, run_events
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             run_id, timestamp, goal, duration_sec, attempts, status, files_str,
             chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
-            failure_category
+            failure_category, events_json
         ))
         self.conn.commit()
 

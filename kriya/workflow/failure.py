@@ -81,6 +81,13 @@ class Failure:
     """
     type: str
     message: str
+    # Which subsystem produced the failure. Kept separate from `type` so retry
+    # policy never has to infer authority from an SDK exception string.
+    source: str = "quality_gate"
+    # Authoritative failures may drive retry/terminal state. Advisory and
+    # auxiliary failures are trace evidence only and can never replace the
+    # current validator failure (enforced by GenerationState.record_failure).
+    authority: str = "authoritative"
     raw_output: str = ""
     file_locations: List[FileLocation] = field(default_factory=list)
     likely_files: List[str] = field(default_factory=list)
@@ -146,6 +153,8 @@ class Failure:
         return {
             "attempt": self.attempt,
             "type": self.type,
+            "source": self.source,
+            "authority": self.authority,
             "success": False,
             "output": self.raw_output or self.message,
             "mode": self.mode,

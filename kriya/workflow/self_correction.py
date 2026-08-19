@@ -158,6 +158,9 @@ class SelfCorrectionResult:
     modified_files: Dict[str, str] = field(default_factory=dict)
     # every tool call + its result this loop made, for gate_outcomes/traces.db
     transcript: List[Dict[str, Any]] = field(default_factory=list)
+    # Optional-loop failures are returned as secondary incidents. They are
+    # never raised over the authoritative compile failure.
+    incidents: List[Dict[str, str]] = field(default_factory=list)
 
 
 def _to_openai_tool_call_dicts(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -370,6 +373,11 @@ async def run_self_correction_loop(
                 final_compile_output=last_compile_output,
                 modified_files=modified_files,
                 transcript=transcript,
+                incidents=[{
+                    "source": "self_correction",
+                    "type": "model_or_tool_error",
+                    "message": str(exc),
+                }],
             )
         tool_calls = result["tool_calls"]
         if not tool_calls:

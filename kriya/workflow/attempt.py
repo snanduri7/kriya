@@ -30,6 +30,7 @@ from kriya.workflow.context_budget import (
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
+from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
@@ -1217,6 +1218,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     active_code_context=active_code_context,
                     max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
                 )
+                for incident in self_correction_result.incidents:
+                    state.record_event(RunEvent(
+                        kind="auxiliary.failed",
+                        attempt=state.attempt_number,
+                        source=incident["source"],
+                        authority=EventAuthority.AUXILIARY,
+                        message=incident["message"],
+                        failure_type=incident["type"],
+                        operation="repair_with_patch",
+                    ))
 
             if self_correction_result and self_correction_result.resolved:
                 logger.info(
