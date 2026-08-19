@@ -1,6 +1,7 @@
 from kriya.config.config import (
     AppConfig,
     FallbackModelConfig,
+    ModelCapabilities,
     LLMConfig,
     LoggingConfig,
     MCPServerConfig,
@@ -17,5 +18,6 @@ __all__ = [
     "LoggingConfig",
     "MCPServerConfig",
     "FallbackModelConfig",
+    "ModelCapabilities",
     "load_config"
 ]

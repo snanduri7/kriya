@@ -14,6 +14,13 @@ llm:
   # identical review block 250 times before hitting the token ceiling).
   reviewer_temperature: 0.7
   max_tokens: 16384
+  capabilities:
+    native_tool_calls: true
+    json_mode: true
+    reliable_multiline_json: false
+    streaming: true
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: "small_native_tools"
   extra_body:
     options:
       num_ctx: 32768        # Sets a 32K context window so the code doesn't truncate

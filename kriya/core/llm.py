@@ -298,6 +298,15 @@ class LLMClient:
                 )
 
         model = model_override or self.model
+        from kriya.core.model_capabilities import (
+            ModelCapabilityError, capabilities_for_model, validate_tool_call_sample,
+        )
+        capabilities = capabilities_for_model(self.config, model)
+        if not capabilities.native_tool_calls:
+            raise ModelCapabilityError(
+                f"Model '{model}' is configured without reliable native tool calling. "
+                "Use the ordinary operation-specific generation path instead."
+            )
         client = self.client
         if base_url_override or api_key_override:
             client = AsyncOpenAI(
@@ -322,6 +331,17 @@ class LLMClient:
         raw_tool_calls = message.tool_calls or []
         tool_calls = []
         for tc in raw_tool_calls:
+            sample = validate_tool_call_sample(tc.function.arguments, capabilities)
+            if not sample.compatible:
+                logger.warning(
+                    "Rejected incompatible local-model tool arguments for '%s': %s",
+                    tc.function.name, "; ".join(sample.violations),
+                )
+                tool_calls.append({
+                    "id": tc.id, "name": tc.function.name, "arguments": {},
+                    "argument_error": "; ".join(sample.violations),
+                })
+                continue
             try:
                 arguments = json.loads(tc.function.arguments)
             except (json.JSONDecodeError, TypeError):

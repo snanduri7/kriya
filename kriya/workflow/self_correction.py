@@ -215,6 +215,8 @@ def _dispatch_tool_call(
     read_files (mutated in place, owned by the caller's per-loop scope) tracks
     which files this conversation has genuinely seen the real content of via
     read_file - see apply_patch's own use of it below for why this exists."""
+    if call.get("argument_error"):
+        return f"ERROR: incompatible tool arguments: {call['argument_error']}"
     name = call["name"]
     args = call["arguments"] if isinstance(call["arguments"], dict) else {}
     known_files = set(files_in_scope) | set(modified_files.keys())

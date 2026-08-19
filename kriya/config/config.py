@@ -7,6 +7,17 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+
+class ModelCapabilities(BaseModel):
+    """Measured local-model protocol capabilities, never inferred from API shape."""
+
+    native_tool_calls: bool = Field(default=True)
+    json_mode: bool = Field(default=True)
+    reliable_multiline_json: bool = Field(default=False)
+    streaming: bool = Field(default=True)
+    max_tool_argument_chars: int = Field(default=8192, ge=256)
+    preferred_edit_protocol: str = Field(default="small_native_tools")
+
 class LLMConfig(BaseModel):
     provider: str = Field(default="openai")
     model: str = Field(default="llama3")
@@ -51,6 +62,7 @@ class LLMConfig(BaseModel):
     # which would silently require re-specifying model/base_url/max_tokens/etc. too
     # just to change one sampling parameter.
     reviewer_temperature: Optional[float] = Field(default=None)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
@@ -148,6 +160,7 @@ class FallbackModelConfig(BaseModel):
     api_key: str = Field(default="local-key")
     temperature: float = Field(default=0.2)
     max_tokens: int = Field(default=4096)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     reasoning: bool = Field(default=False)
     context_window: int = Field(default=32768)
     knowledge_cutoff: str = Field(default="2023-12-01")
