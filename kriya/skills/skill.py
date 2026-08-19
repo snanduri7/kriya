@@ -1,5 +1,5 @@
-import json
 import hashlib
+import json
 import logging
 import os
 import re
@@ -319,8 +319,15 @@ class Skill(BaseModel):
 class SkillEngine:
     """Discovers, validates, and manages engineering skills."""
 
-    def __init__(self, skills_dir: str, load_global: bool = True, load_cwd: bool = True) -> None:
+    def __init__(
+        self, skills_dir: str, load_global: bool = True,
+        load_cwd: Optional[bool] = None,
+    ) -> None:
         self.skills_dirs = []
+        # Backward compatibility: the historic load_global=False flag disabled
+        # both implicit sources. New config callers pass load_cwd explicitly.
+        if load_cwd is None:
+            load_cwd = load_global
 
         # 1. Determine Kriya Installation Directory
         KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
