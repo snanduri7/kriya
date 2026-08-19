@@ -78,6 +78,7 @@ from kriya.workflow.file_resolution import (
     find_missing_expected_files,
     normalize_written_filepath,
 )
+from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.skill_extraction import (
     _IDENTITY_GENERIC_WORDS,
     _RULE_DEDUP_STOPWORDS,
@@ -387,7 +388,7 @@ class WorkflowEngine:
                 f"them. If that's not intended, stop this run and set paths.skills in this "
                 f"project's kriya.yaml, e.g. \"./skills\"."
             )
-        se = SkillEngine(skills_dir)
+        se = SkillEngine.from_config(self.kernel.config)
         se.discover_and_load()
         
         convention_prompt = ""
@@ -1176,6 +1177,11 @@ class WorkflowEngine:
                 active_skill_rules_snapshot[active_skill_name] = list(se.get_skill(active_skill_name).rules)
             except Exception as ex:
                 logger.debug(f"Failed to snapshot rules for skill '{active_skill_name}': {ex}")
+        active_skill_manifest = se.manifest_for(active_skills)
+        state.evidence_records.append(EvidenceRecord(
+            kind="active_skills", source="skill_engine", attempt=0,
+            payload={"skills": active_skill_manifest},
+        ))
 
         # 4. Developer & Quality Gates (Auto-debugging loop)
         logger.info("Developer Agent implementing source files...")
@@ -1888,6 +1894,7 @@ class WorkflowEngine:
             "lsp_warning": state.lsp_warning,
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
             "skill_staleness_warnings": sorted(set(skill_staleness_warnings)) or None,
+            "active_skill_manifest": active_skill_manifest,
             "review": review,
             "run_id": run_id,
         }

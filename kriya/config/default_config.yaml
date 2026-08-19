@@ -36,6 +36,10 @@ paths:
   memory: "./memory"
   logs: "./logs"
 
+skills:
+  load_global: true
+  load_cwd: true
+
 logging:
   level: "INFO"
   file: "./logs/kriya.log"

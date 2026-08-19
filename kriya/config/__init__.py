@@ -6,6 +6,7 @@ from kriya.config.config import (
     LoggingConfig,
     MCPServerConfig,
     PathsConfig,
+    SkillsConfig,
     PluginsConfig,
     load_config,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "LLMConfig",
     "PluginsConfig",
     "PathsConfig",
+    "SkillsConfig",
     "LoggingConfig",
     "MCPServerConfig",
     "FallbackModelConfig",

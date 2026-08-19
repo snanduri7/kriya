@@ -1,4 +1,5 @@
 import json
+import hashlib
 import logging
 import os
 import re
@@ -318,7 +319,7 @@ class Skill(BaseModel):
 class SkillEngine:
     """Discovers, validates, and manages engineering skills."""
 
-    def __init__(self, skills_dir: str, load_global: bool = True) -> None:
+    def __init__(self, skills_dir: str, load_global: bool = True, load_cwd: bool = True) -> None:
         self.skills_dirs = []
 
         # 1. Determine Kriya Installation Directory
@@ -340,7 +341,7 @@ class SkillEngine:
         # opposite of expected precedence whenever supplied_dir differs from
         # CWD/skills (e.g. an absolute path elsewhere).
         local_cwd_skills = os.path.abspath(os.path.join(os.getcwd(), "skills"))
-        if load_global and os.path.exists(local_cwd_skills) and local_cwd_skills not in self.skills_dirs:
+        if load_cwd and os.path.exists(local_cwd_skills) and local_cwd_skills not in self.skills_dirs:
             self.skills_dirs.append(local_cwd_skills)
 
         # 4. Add the explicitly supplied skills directory LAST (highest
@@ -352,6 +353,14 @@ class SkillEngine:
 
         self.skills_dir = supplied_dir
         self._skills: Dict[str, Skill] = {}
+
+    @classmethod
+    def from_config(cls, config: Any) -> "SkillEngine":
+        return cls(
+            config.paths.skills,
+            load_global=config.skills.load_global,
+            load_cwd=config.skills.load_cwd,
+        )
 
     def discover_and_load(self) -> None:
         """Walks the skills directories to discover and parse skills (later paths override earlier ones)."""
@@ -430,6 +439,30 @@ class SkillEngine:
     def list_skills(self) -> List[Skill]:
         """Returns all discovered skills."""
         return list(self._skills.values())
+
+    def manifest_for(self, names: List[str]) -> List[Dict[str, Any]]:
+        """Return a stable local provenance manifest for active prompt inputs."""
+        manifest = []
+        for name in sorted(set(names), key=str.lower):
+            skill = self.get_skill(name)
+            canonical = json.dumps({
+                "name": skill.name,
+                "description": skill.description,
+                "tags": skill.tags,
+                "instructions": skill.instructions,
+                "rules": skill.rules,
+                "examples": skill.examples,
+                "supported_versions": skill.supported_versions,
+                "verified": skill.verified,
+            }, sort_keys=True, separators=(",", ":"))
+            manifest.append({
+                "name": skill.name,
+                "source_path": skill.source_path,
+                "content_hash": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                "verified": skill.verified,
+                "supported_versions": skill.supported_versions,
+            })
+        return manifest
 
     def get_skill(self, name: str) -> Skill:
         """Retrieves a skill by name."""

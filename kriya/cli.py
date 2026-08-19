@@ -682,7 +682,7 @@ def skills_group() -> None:
 def skills_list(ctx: click.Context) -> None:
     """List all registered skills and staged/active conventions."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
     
     skills = se.list_skills()
@@ -731,7 +731,7 @@ def skills_list(ctx: click.Context) -> None:
 def skills_show(ctx: click.Context, skill_name: str) -> None:
     """Display information about a specific skill."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
     
     try:
@@ -782,7 +782,7 @@ def skills_readiness(ctx: click.Context, skill_name: str) -> None:
     """Score a skill's knowledge against the 10-category readiness rubric (0-4 per
     category, scoring both staged and already-approved structured facts together)."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:
@@ -815,7 +815,7 @@ def skills_gaps(ctx: click.Context, skill_name: str, interactive: bool) -> None:
     """Show targeted questions for whatever the readiness rubric says is still thin,
     instead of a blank rules.txt - optionally answer them right here with --interactive."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:
@@ -869,7 +869,7 @@ def skills_create(ctx: click.Context, skill_name: str) -> None:
 
     os.makedirs(cfg.paths.skills, exist_ok=True)
 
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     try:
         path = se.create_skill_skeleton(skill_name)
         click.secho(f"Successfully created skill skeleton at: {path}", fg="green")
@@ -1062,7 +1062,7 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
     show <name>' first to see when/what it was last verified for.
     """
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:

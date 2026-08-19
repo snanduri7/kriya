@@ -73,6 +73,11 @@ class PathsConfig(BaseModel):
     memory: str = Field(default="./memory")
     logs: str = Field(default="./logs")
 
+
+class SkillsConfig(BaseModel):
+    load_global: bool = Field(default=True)
+    load_cwd: bool = Field(default=True)
+
 class LoggingConfig(BaseModel):
     level: str = Field(default="INFO")
     file: Optional[str] = Field(default="./logs/kriya.log")
@@ -232,6 +237,7 @@ class AppConfig(BaseModel):
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     mcp: Dict[str, MCPServerConfig] = Field(default_factory=dict)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
