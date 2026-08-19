@@ -1214,8 +1214,11 @@ class WorkflowEngine:
         # generating - not just a punitive check afterward. This is the prevention
         # half of the completeness fix; the missing-file recovery retry below is the
         # cheaper, targeted recovery half for when prevention still doesn't work.
-        required_files_prompt_block = ""
-        _expected_files_upfront = sorted(set(architect_files))
+        from kriya.workflow.generation_manifest import build_generation_manifest
+
+        generation_manifest = build_generation_manifest(architect_files)
+        required_files_prompt_block = generation_manifest.render_prompt()
+        _expected_files_upfront = generation_manifest.ordered_paths
         # basename -> full path, built once from the already-resolved architect_files
         # list (see the Architect call above) so a missing-file recovery retry (below)
         # can resolve a bare basename back to its real path via a simple lookup instead
@@ -1225,12 +1228,6 @@ class WorkflowEngine:
         _architect_basename_to_path: Dict[str, str] = {}
         for _f in architect_files:
             _architect_basename_to_path.setdefault(os.path.basename(_f), _f)
-        if _expected_files_upfront:
-            required_files_prompt_block = (
-                "\n\nRequired files (from the Architect's design - you must generate ALL of these, "
-                "not a subset; do not omit any or defer them to a future step):\n"
-                + "\n".join(f"- {f}" for f in _expected_files_upfront)
-            )
         # Same prevention-over-punishment pattern as required_files_prompt_block
         # above, for a different completeness failure: a full-set regeneration of
         # pom.xml naturally rewrites it to match the current goal, and can
