@@ -25,7 +25,10 @@ def test_multiple_edits_are_staged_before_atomic_commit(tmp_path):
     target = tmp_path / "pricing.py"
     original = "rate = 1\nfee = 2\n"
     target.write_text(original, encoding="utf-8")
-    with pytest.raises(ValueError, match="matched 0 times"):
+    # Depending on which deterministic guard sees the fabricated second
+    # anchor first, it is rejected as ungrounded or as a zero-match edit. The
+    # transaction guarantee under test is that edit #1 never reaches disk.
+    with pytest.raises(ValueError, match="edit #2"):
         candidate = apply_anchored_edits(original, [
             {"search": "rate = 1", "replace": "rate = 3"},
             {"search": "missing = 2", "replace": "fee = 4"},
