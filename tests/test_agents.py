@@ -14,6 +14,7 @@ from kriya.agents.agent import (
 )
 from kriya.config import AppConfig, FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
+from kriya.workflow.operations import CodeOperation
 
 
 @pytest.mark.asyncio
@@ -1375,6 +1376,50 @@ async def test_fill_missing_content_prefers_anchored_edit_when_source_context_kn
         "search": "public class Person {",
         "replace": "public class Person implements java.io.Serializable {",
     }]
+
+
+@pytest.mark.asyncio
+async def test_developer_explicit_patch_operation_overrides_locator_heuristic():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: update the stale value.\n"
+        "SEARCH:\noldValue\nREPLACE:\nnewValue"
+    ))
+    dev = DeveloperAgent("developer", llm)
+
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="runtime result is stale",
+        operation_by_file={"App.java": CodeOperation.REPAIR_WITH_PATCH},
+    )
+
+    system_prompt, file_prompt = llm.complete.await_args.args[:2]
+    assert "MODE: REPAIR" in system_prompt
+    assert "SEARCH:" in file_prompt
+    assert files[0]["content"] is None
+    assert files[0]["edits"] == [{"search": "oldValue", "replace": "newValue"}]
+
+
+@pytest.mark.asyncio
+async def test_developer_existing_file_initial_operation_has_unambiguous_full_contract():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="class App { int value = 2; }")
+    dev = DeveloperAgent("developer", llm)
+
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        operation_by_file={"App.java": CodeOperation.REPAIR_WITH_FULL_FILE},
+    )
+
+    system_prompt, file_prompt = llm.complete.await_args.args[:2]
+    assert "MODE: REPAIR_WITH_FULL_FILE" in system_prompt
+    assert "FIX ANALYSIS:" not in file_prompt
+    assert "Return the complete replacement content" in file_prompt
+    assert files[0]["content"] == "class App { int value = 2; }"
 
 @pytest.mark.asyncio
 async def test_fill_missing_content_no_anchored_edit_preference_without_source_context():

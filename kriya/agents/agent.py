@@ -957,6 +957,8 @@ class DeveloperAgent(BaseAgent):
         extra_fix_instruction: str = "",
         files_with_current_content: Optional[Iterable[str]] = None,
         sibling_content_budget: Optional[int] = None,
+        operation_by_file: Optional[Dict[str, Any]] = None,
+        default_operation: Optional[Any] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
@@ -1141,6 +1143,13 @@ class DeveloperAgent(BaseAgent):
             file_is_implicated = implicated_files is None or filepath in implicated_files
             apply_fix_analysis = bool(prior_error_context) and file_is_implicated
 
+            requested_operation = (operation_by_file or {}).get(filepath)
+            if requested_operation is None:
+                requested_operation = default_operation
+            requested_operation_value = getattr(
+                requested_operation, "value", requested_operation,
+            )
+
             # The exact broken source line(s), read fresh from the worktree by
             # extract_error_source_locations()/_build_error_source_context()
             # (kriya/workflow/workflow.py) - generic across any compile error
@@ -1186,8 +1195,13 @@ class DeveloperAgent(BaseAgent):
             # the file's real current content is available to copy verbatim from
             # (true whenever it's already been written this run), a small anchored
             # patch is just as well-grounded as it is for a compile-error locator.
-            prefer_anchored_edit = apply_fix_analysis and (
-                bool(source_context_block) or filepath in (files_with_current_content or ())
+            prefer_anchored_edit = (
+                requested_operation_value == "repair_with_patch"
+                if requested_operation is not None
+                else apply_fix_analysis and (
+                    bool(source_context_block)
+                    or filepath in (files_with_current_content or ())
+                )
             )
 
             # 2026-08-15 external adversarial review, Finding 2 (of that review's own
@@ -1209,7 +1223,12 @@ class DeveloperAgent(BaseAgent):
             # module's own already-validated "repeat critical instructions near the
             # generation point" pattern (see the "only this file" comment further down)
             # rather than duplicating the whole spec twice.
-            if not apply_fix_analysis:
+            create_full_file = requested_operation_value == "create_full_file"
+            repair_full_file_without_failure = (
+                requested_operation_value == "repair_with_full_file"
+                and not apply_fix_analysis
+            )
+            if create_full_file or (requested_operation is None and not apply_fix_analysis):
                 file_sys_prompt = (
                     "You are the Kriya Developer Agent. MODE: CREATE_FULL_FILE.\n"
                     "Write the complete content of exactly one file - the requested file path. Return ONLY "
@@ -1218,6 +1237,14 @@ class DeveloperAgent(BaseAgent):
                     "you're told is also part of this batch. If you believe another file also needs a "
                     "change, that is out of scope for this response and will be handled separately; do not "
                     "act on it here, and do not prepend or append its content."
+                )
+            elif repair_full_file_without_failure:
+                file_sys_prompt = (
+                    "You are the Kriya Developer Agent. MODE: REPAIR_WITH_FULL_FILE.\n"
+                    "Return the complete replacement content of exactly one existing file - the "
+                    "requested path. Preserve every correct declaration and behavior not changed by "
+                    "the task. Return ONLY raw file content: no markers, markdown, explanation, or "
+                    "content for any sibling file."
                 )
             elif prefer_anchored_edit:
                 file_sys_prompt = (
@@ -1253,7 +1280,9 @@ class DeveloperAgent(BaseAgent):
                     "Never return raw file content with no FIX ANALYSIS line first."
                 )
 
-            if prefer_anchored_edit:
+            if create_full_file or repair_full_file_without_failure:
+                fix_analysis_instruction = ""
+            elif prefer_anchored_edit:
                 fix_analysis_instruction = (
                     "\nThis is a RETRY: the previous attempt at this file failed the error described "
                     "in the Task section above. Before writing any code, you MUST first write a line "
@@ -1340,7 +1369,17 @@ class DeveloperAgent(BaseAgent):
             # test_fill_missing_content_no_anchored_edit_preference_without_source_context/
             # ..._when_file_not_in_current_content_set (existing tests, not new ones)
             # failing after this change; both were passing before it.
-            if prefer_anchored_edit:
+            if create_full_file:
+                generation_directive = (
+                    f"Generate the complete new file '{filepath}' ONLY. Return raw file content "
+                    "with no markers, explanation, markdown wrapper, or sibling-file content.\n"
+                )
+            elif repair_full_file_without_failure:
+                generation_directive = (
+                    f"Return the complete replacement content for existing file '{filepath}' ONLY. "
+                    "Preserve unrelated correct content and return no markers or explanation.\n"
+                )
+            elif prefer_anchored_edit:
                 generation_directive = (
                     f"Follow the REPAIR contract above for '{filepath}' ONLY - do not touch or return "
                     "content for any other file, even one mentioned above: write FIX ANALYSIS first, then "
@@ -1521,6 +1560,8 @@ class DeveloperAgent(BaseAgent):
         extra_fix_instruction: str = "",
         files_with_current_content: Optional[Iterable[str]] = None,
         sibling_content_budget: Optional[int] = None,
+        operation_by_file: Optional[Dict[str, Any]] = None,
+        default_operation: Optional[Any] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -1565,6 +1606,7 @@ class DeveloperAgent(BaseAgent):
                 stream_callback, model_override, base_url_override, api_key_override,
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
                 extra_fix_instruction, files_with_current_content, sibling_content_budget,
+                operation_by_file, default_operation,
             )
 
         try:
@@ -1577,6 +1619,7 @@ class DeveloperAgent(BaseAgent):
                     stream_callback, model_override, base_url_override, api_key_override,
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
                     extra_fix_instruction, files_with_current_content, sibling_content_budget,
+                    operation_by_file, default_operation,
                 )
 
         except Exception as e:

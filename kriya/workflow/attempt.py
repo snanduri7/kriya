@@ -34,7 +34,13 @@ from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_mi
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
 from kriya.workflow.run_events import EventAuthority, RunEvent
-from kriya.workflow.operations import all_results_are_no_change, operation_for_attempt
+from kriya.workflow.operations import (
+    CodeOperation,
+    all_results_are_no_change,
+    operation_for_attempt,
+    operation_for_file,
+    validate_operation_result,
+)
 from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
@@ -42,6 +48,23 @@ from kriya.workflow.verification_contract import extract_contract_verdict, pass_
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
+
+
+def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
+    return os.path.exists(os.path.join(ctx.worktree_path, filepath)) or os.path.exists(
+        os.path.join(ctx.workspace_path, filepath)
+    )
+
+
+def _operation_map(
+    ctx: "AttemptContext", filepaths: List[str], attempt_operation: CodeOperation,
+) -> Dict[str, CodeOperation]:
+    return {
+        filepath: operation_for_file(
+            attempt_operation, file_exists=_target_exists(ctx, filepath),
+        )
+        for filepath in filepaths
+    }
 
 
 @dataclass
@@ -370,6 +393,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
             files_with_current_content=state.all_files_written,
             sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+            operation_by_file=_operation_map(
+                ctx, state.last_implicated_files, attempt_operation,
+            ),
+            default_operation=attempt_operation,
         )
     elif use_fallback_targeted:
         # One-shot targeted fix on the first fallback model (see
@@ -428,6 +455,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
             files_with_current_content=state.all_files_written,
             sibling_content_budget=_reserve_sibling_content_budget(fallback.context_window),
+            operation_by_file=_operation_map(
+                ctx, state.last_implicated_files, attempt_operation,
+            ),
+            default_operation=attempt_operation,
         )
     elif use_missing_files:
         # Missing-file recovery: same primary-model-only, non-escalating
@@ -486,6 +517,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             api_key_override=api_key_override,
             known_target_files=resolved_missing_files,
             sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+            operation_by_file=_operation_map(
+                ctx, resolved_missing_files, attempt_operation,
+            ),
+            default_operation=attempt_operation,
         )
     else:
         # Re-run context budget allocator dynamically for escalated model context window size
@@ -657,6 +692,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                 files_with_current_content=state.all_files_written,
                 sibling_content_budget=_reserve_sibling_content_budget(active_context_window),
+                operation_by_file=(
+                    _operation_map(ctx, known_target_files, attempt_operation)
+                    if known_target_files else None
+                ),
+                default_operation=attempt_operation,
             )
 
     # Recorded now, not derived by the caller afterward - see the fields'
@@ -682,6 +722,55 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         file_obj["filepath"] = normalized
         normalized_files.append(file_obj)
     files = normalized_files
+
+    # Enforce the selected response contract before attribution heuristics or
+    # writes.  Classification is based on the target's real existence, so the
+    # same full-content shape is CREATE for an absent file and REPAIR for an
+    # existing one.  Repair fallbacks are explicit and observable; creation has
+    # no permissive fallback that could turn a missing file into a silent no-op.
+    for file_obj in files:
+        filepath = file_obj["filepath"]
+        file_exists = _target_exists(ctx, filepath)
+        expected_operation = operation_for_file(
+            attempt_operation, file_exists=file_exists,
+        )
+        actual_operation, contract_error = validate_operation_result(
+            file_obj,
+            expected=expected_operation,
+            file_exists=file_exists,
+        )
+        if contract_error:
+            failure = Failure(
+                type="operation_contract",
+                message=(
+                    f"OPERATION CONTRACT FAILURE in {filepath}: {contract_error}. "
+                    f"Return exactly the {expected_operation.value} response shape requested."
+                ),
+                raw_output=contract_error,
+                file_locations=[FileLocation(filepath=filepath)],
+                likely_files=[filepath],
+                attempted_edits=file_obj.get("edits") or [],
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if actual_operation is not expected_operation:
+            state.record_event(RunEvent(
+                kind="operation.fallback",
+                attempt=state.attempt_number,
+                source="developer",
+                authority=EventAuthority.ADVISORY,
+                operation=actual_operation.value,
+                message=(
+                    f"{filepath}: accepted safe fallback from "
+                    f"{expected_operation.value} to {actual_operation.value}."
+                ),
+                details={
+                    "filepath": filepath,
+                    "requested": expected_operation.value,
+                    "returned": actual_operation.value,
+                },
+            ))
 
     # Captured here (before any write can raise) rather than after the write
     # loop below, so a self-diagnosis is never lost to an anchored-edit
