@@ -568,11 +568,16 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
         # Filename-token boundaries matter: ``App.java`` is not evidence for
         # that file when the validator actually named ``IntegrationApp.java``.
         # A plain substring check used to fabricate precisely that attribution.
+        # The trailing boundary deliberately excludes ``.`` from the disallowed
+        # set (unlike the leading one) - free-form prose (e.g. a Developer's own
+        # FIX ANALYSIS text, read by extract_self_diagnosed_files()) routinely
+        # ends a sentence with "...the real issue is in Config.json." and a
+        # sentence-final period must not suppress an otherwise-real match.
         path_named = bool(re.search(
-            rf"(?<![\w.-]){re.escape(filepath)}(?![\w.-])", scan_text,
+            rf"(?<![\w.-]){re.escape(filepath)}(?![\w-])", scan_text,
         ))
         basename_named = bool(basename and re.search(
-            rf"(?<![\w.-]){re.escape(basename)}(?![\w.-])", scan_text,
+            rf"(?<![\w.-]){re.escape(basename)}(?![\w-])", scan_text,
         ))
         if path_named or basename_named:
             implicated.append(filepath)
