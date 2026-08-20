@@ -45,6 +45,14 @@ Kriya runs entirely on **local infrastructure** — local LLMs, local tools, loc
 - **MCP Tool Server**: Integrates native tool sets into workspace workflows as a standardized MCP server (via the `mcp` SDK's `MCPServer`).
 - **Interactive Session** (`kriya repl`, or just bare `kriya`/`kriya -c kriya.yaml` on a real terminal): a persistent process for issuing several commands in a row instead of restarting the CLI each time — a boxed, multi-line-capable prompt (via `prompt_toolkit`), with `--config` applied automatically to every command. Bare invocation only starts the session on an actual interactive terminal (checked via `sys.stdin.isatty()`) — piped/non-TTY input (scripts, CI) falls back to today's help text instead, so nothing hangs waiting on stdin by accident. Deliberately thin: each typed line dispatches straight into the exact same command group the regular one-shot CLI uses, so there's no separate parser or duplicated logic to drift out of sync. Type `/` to see every command Kriya supports, filtered live as you keep typing.
   - **Natural-language routing** (`routing.enabled`, on by default): type plain English instead of an explicit command inside the session — Kriya routes it to the right command (`generate`/`ask`/`fix`/`review`/`analyze`/`skills`) via an embeddings classifier plus a narrow LLM in-scope gate, asking which you meant if it's not confident rather than guessing, and saying so plainly if it's not something Kriya does (installing packages, deploying, git operations, and similar stay explicitly out of scope). Explicit commands are unaffected either way - routing only activates when a typed line's first word isn't already a real command name. Needs `ollama pull embeddinggemma` — a separate, dedicated embedding model from whatever `embedding.model` you use for code search, since it measurably outperformed the packaged default at this specific short-phrase classification task; if it isn't pulled, routing fails loudly with the exact pull command needed and disables itself for the rest of the session (or set `routing.enabled: false` to opt out entirely). See `spikes/version_b_routing/README.md` for the feasibility investigation this was validated against.
+- **Milestone-Based Goal Decomposition** (`kriya plan-milestones` + `kriya generate --from-milestones`, opt-in): decomposes one large goal into an ordered sequence of small, independently executable and verifiable vertical slices — sliced by observable runtime behavior, never by code structure ("write these classes") or the goal's own numbered layers/phases. `plan-milestones` writes the proposed plan to a file for you to review/hand-edit first; nothing executes until you run `generate --from-milestones` against it. Each milestone runs through the existing, unmodified Quality Gates loop against the same growing workspace, with a dependency-drop guard (catches a later milestone silently regressing an earlier one's `pom.xml` dependencies) and a replay step that re-verifies every completed milestone's own runtime behavior before a final integration pass. See "Milestone-Based Goal Decomposition" in the Usage Guide below.
+- **Fail-Closed Repair Protocol**: a retry-mode Developer completion must return one of three explicit, structurally-required shapes — a `SEARCH:`/`REPLACE:` anchored patch, an explicit `FILE CONTENT:` block, or `NO CHANGE NEEDED` — or it's rejected as malformed before ever touching disk or a quality gate, instead of ambiguous prose being silently treated as source code. Backed by explicit `create_full_file`/`repair_with_patch`/`repair_with_full_file`/`no_change_assessment` response contracts checked before attribution or writes; a whole batch is committed atomically (revision-grounded, SHA-256-checked against the file it's patching) so a quality gate never sees a partially-applied response.
+- **Generation Manifest & Dependency-Aware Invalidation**: the Architect's design is converted into a stack-neutral manifest (build/model/source/configuration/entrypoint/test/documentation/asset roles, each with its own direct dependencies) so generation order is dependency-correct (build files before the source that needs them) instead of alphabetical. After a real compile succeeds, Kriya records exactly which file revisions were validated; a later edit invalidates only that file and its transitive dependents, so an unrelated already-validated file is never needlessly regenerated. When a narrow retry is exhausted, broadening goes to this dependency closure first, before paying for a full regeneration.
+- **Executable-Test Selection & Zero-Test Detection**: a "targeted test" must actually be a runnable test artifact (pytest/Maven/Gradle/RSpec/minitest file-naming conventions), not just any path under a test directory — a package `__init__.py`/`conftest.py` is never mistaken for the real test. A test run that deterministically reports zero tests executed is treated as a distinct `test_selection`/`test_acceptance` failure (with an immediate full-suite fallback, no extra LLM call), not silently accepted as passing just because nothing failed.
+- **Static Pre-Checks** (`kriya/workflow/static_checks.py`, always on, zero LLM calls): six deterministic, conservative scans of everything the Developer just wrote, run before the expensive compile gate — each added after a specific confirmed live failure, not speculatively. Catches: Apache Ignite's two startup mechanisms mixed in one app; the same `IgniteSpringBean` Spring XML resource loaded via `ClassPathXmlApplicationContext` more than once in one file (real XML parsing, not a text match — each load auto-starts the same Ignite node, so a second throws a deterministic "already been started" exception); an `Ignition.start()` left unclosed (hangs the JVM indefinitely); Kriya's own `[VERIFICATION]` marker text embedded unprinted; a generated test asserting empty stdout that structurally contradicts the same entrypoint's required verification marker; and a `.html`/`.htm` file with no actual HTML tag anywhere in it (catches a sibling file's content landing under the wrong filename during a repair).
+- **Model-Capability-Aware Generation** (`llm.capabilities`, auto-detected defaults): local-model protocol capabilities (native tool calls, JSON mode, streaming, reliable multiline JSON, preferred edit protocol) are explicit, measured configuration — never inferred from API response shape — so generation, JSON-mode requests, and patch-vs-full-file preference adapt to what a configured model can actually do instead of assuming every OpenAI-compatible endpoint behaves identically.
+- **Standalone Planner-Artifact Validation**: when the Planner's own draft is reused directly instead of a fresh Developer call, a conventional-artifact registry checks whether reused content is a genuinely complete standalone instance of an ecosystem file (e.g. a real Maven POM's root element must be `<project>`) — a plausible-looking XML fragment (like a bare `<dependencies>` block) is retained as prose but never accepted as a real `pom.xml`.
+- **Single-Presentation Reviewer**: exactly one Reviewer completion runs per human-approval decision point; the final report is reused (and explicitly logged as reused), never re-requested from the model or re-printed to the terminal/log a second time, so what looks like a duplicate review in your output is never actually a second LLM call.
 
 ---
 
@@ -188,6 +196,21 @@ Generate or refactor code autonomously based on a goal:
 ```
 Resume is opt-in only - never automatic - and strict: if the workspace's git state, the resolved config, or the goal/error text has changed at all since the checkpoint was saved, Kriya refuses to resume and starts a fresh run instead (with a warning), rather than attempting a partial or best-effort resume. A checkpoint is deleted the moment its run completes normally (success or an explicit rejection) - it only survives on disk after a kill or crash. Requires the workspace to be a git repository (needed to reliably detect whether anything changed).
 
+### Milestone-Based Goal Decomposition
+For a goal too large to reliably fit in one `generate` call - a fixed token budget forces reasoning and content to compete, and the highest-risk code (integration/wiring logic) is often the last thing written, so it's the first thing cut off when the budget runs out - decompose it into small, independently executable and verifiable vertical slices first:
+```bash
+# Step 1: propose a plan. Nothing executes - this only writes a plan file for you to review.
+.venv/bin/kriya plan-milestones "Build a Java app combining an embedded Ignite cache and a Qpid AMQP broker, wired together"
+```
+Kriya writes the proposed milestones to `.kriya/milestones/<group_id>.plan.json` and prints each one's goal and success criterion. Review it, hand-edit the file directly if a slice looks wrong (merge two milestones, reorder them, tighten a success criterion), then execute the (possibly edited) plan:
+```bash
+# Step 2: execute the plan - one real `generate` call per milestone against the same growing workspace.
+.venv/bin/kriya generate --from-milestones .kriya/milestones/<group_id>.plan.json -y
+```
+Each milestone runs through the exact same, unmodified Developer + Quality Gates loop as an ordinary `generate` call, applied to the same workspace so each milestone sees every prior one's real, already-applied output. Two extra checks run that a single-goal `generate` call doesn't need: a dependency-drop guard (fails a milestone outright if it silently drops a Maven dependency an earlier milestone established) and a replay step, before the final integration pass, that re-executes every completed milestone's own captured verification command and re-checks its `[VERIFICATION]` marker against the *current* workspace state - catching a later milestone that quietly broke an earlier one's behavior, which the end-of-run regression suite (framework tests only) doesn't cover. If a milestone exhausts its own retry budget, you're asked whether to abandon (keep what already applied) or retry it from scratch - a later milestone is never built on top of a known-broken one. The whole sequence is resumable: re-running the same `generate --from-milestones <file>` command picks up from the last completed milestone via a sidecar state file, rather than restarting the sequence.
+
+Deliberately opt-in, never automatic goal-size detection - the Milestone Planner's own slicing quality has to earn your trust goal by goal, and auto-triggering on every "large-looking" goal would silently change behavior for every existing user with no proven size heuristic behind it.
+
 ### Manage Engineering Skills
 List, inspect, and maintain the verification status of skills:
 ```bash
@@ -244,6 +267,13 @@ llm:
                                             # overrides temperature ONLY for a Developer completion directly
                                             # responding to a real prior Quality Gate failure.
   context_window: 32768                    # Used for context-budget allocation, not sent to the server
+  capabilities:                            # Measured local-model protocol capabilities, never inferred from API
+    native_tool_calls: true                # shape. Defaults shown are correct for most modern OpenAI-compatible
+    json_mode: true                        # local servers (Ollama, LM Studio) - override only for a model/server
+    reliable_multiline_json: false         # you've confirmed behaves differently (e.g. can't reliably emit JSON
+    streaming: true                        # with embedded newlines).
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: "small_native_tools"
 
 # Ordered fallback/escalation chain, tried after llm above on a Quality Gate failure.
 # reasoning: false here matters - escalating to a reasoning model was measured to cost
@@ -338,6 +368,13 @@ paths:
   skills: "./skills"
   memory: "./memory"
   logs: "./logs"
+
+# Set both false for a reproducible plain-Kriya run using only paths.skills above -
+# load_global also pulls in Kriya's own shared skill library, load_cwd pulls in any
+# skills directory sitting in your current working directory beyond paths.skills.
+skills:
+  load_global: true
+  load_cwd: true
 
 logging:
   level: "INFO"

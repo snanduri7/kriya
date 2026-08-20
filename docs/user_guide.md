@@ -58,6 +58,13 @@ llm:
                                             # temperature entered a verbatim repetition loop (the same MoE-
                                             # repetition failure class `temperature` itself exists to avoid,
                                             # just for a call site a single global value doesn't reach).
+  capabilities:                            # Measured local-model protocol capabilities, EXPLICIT configuration -
+    native_tool_calls: true                # never inferred from API response shape. Defaults shown are correct
+    json_mode: true                        # for most modern OpenAI-compatible local servers (Ollama, LM Studio).
+    reliable_multiline_json: false         # Native tools fail closed when disabled (never silently degrade to a
+    streaming: true                        # different protocol); oversized/malformed tool call arguments are
+    max_tool_argument_chars: 8192          # rejected rather than truncated. See §4.13 below.
+    preferred_edit_protocol: "small_native_tools"
 
 # Ordered fallback/escalation chain - tried in order after a quality-gate failure
 llm_chain:
@@ -235,6 +242,38 @@ Four things can pause a `generate` run beyond the usual human-approval gate:
 kriya -c kriya.yaml generate "Create a Spring-XML Java 17 app running Ignite 2.18.0" --resume
 ```
 This is opt-in only - Kriya never guesses that you're resuming from goal text alone. It's also strict: if anything about the workspace (a new commit, uncommitted changes), the config, or the goal text has changed since the checkpoint was saved, Kriya refuses to resume and starts over instead, with a warning explaining why. A checkpoint is deleted the moment its run finishes normally (success or an explicit rejection at the approval gate) - it only ever survives a kill/crash. Requires the workspace to be a git repository.
+
+#### 3.4.1 Milestone-Based Goal Decomposition (`plan-milestones` + `generate --from-milestones`)
+A single `generate` call has a fixed token budget the whole response has to fit inside - for a goal combining several real subsystems (e.g. a cache plus a message broker plus the wiring between them), that budget forces reasoning and content to compete, and the highest-risk code (the integration/wiring logic, usually written last) is the first thing cut off when the budget runs out. Milestone decomposition splits a goal like that into an ordered sequence of small, independently executable and verifiable slices before any code is generated.
+
+**Step 1 - propose a plan** (writes a file, executes nothing):
+```bash
+kriya -c kriya.yaml plan-milestones "Build a Java app combining an embedded Ignite cache and a Qpid AMQP broker, wired together"
+```
+The Milestone Planner slices by *observable runtime behavior*, never by code structure - a milestone is never "write these classes" or "implement the X layer," it's "the smallest next slice of real, runnable, checkable behavior." For the example goal above, this produces something like:
+```
+1. Start the cache node, confirm it started, shut it down cleanly - no cache definitions, no messaging yet.
+2. Define one cache, write one object to it, read it back, print it - still no messaging.
+3. Start the broker alongside the cache, send one message, consume it back synchronously.
+4. Wire the two together - the consumed message's payload is what gets stored in and read back from the cache.
+```
+Each milestone carries its own plain-language success criterion, which becomes that milestone's own runtime-verification target. The plan is written to `.kriya/milestones/<group_id>.plan.json` - review it, and hand-edit the file directly if a slice looks wrong (merge two that don't stand alone, reorder them, tighten a criterion) before running anything.
+
+**Step 2 - execute the (possibly edited) plan:**
+```bash
+kriya -c kriya.yaml generate --from-milestones .kriya/milestones/<group_id>.plan.json -y
+```
+This calls the exact same, unmodified Developer + Quality Gates loop as an ordinary `generate` call, once per milestone, against the same growing workspace - so milestone 2 sees milestone 1's real, already-applied output on disk (a plain file copy, never a git commit, so there's nothing new to keep in sync). Two checks run here that a single-goal `generate` doesn't need:
+- **Dependency-drop guard**: after each milestone, Kriya diffs the current `pom.xml` against every dependency established by prior milestones. If one silently disappeared (a real, previously-observed failure mode across a long multi-attempt run), the milestone is treated as failed rather than letting the regression through.
+- **Prior-milestone verification replay**: before the final integration pass, Kriya re-executes every already-completed milestone's own captured runtime-verification command against the *current* workspace and re-checks its `[VERIFICATION]` marker - catching a later milestone that quietly broke an earlier one's behavior. Nothing else in Kriya covers this: the end-of-run regression suite is framework-tests-only, and a normal run never re-verifies an earlier goal's behavior while working on a later one.
+
+A final **integration pass** then runs once more against the whole assembled project - goal text synthesized from the original goal plus every milestone's own success criterion, explicitly told not to rewrite working code, only to confirm the complete system and fix what's actually broken.
+
+**If a milestone fails** (exhausts its own retry budget, or trips the dependency-drop guard), you're asked to abandon (stop here, keep whatever earlier milestones already applied) or retry it from scratch - never a silent skip-ahead, since a later milestone building on a known-broken one directly contradicts the whole point of slicing by runnable behavior. Under `-y`, this defaults to abandon.
+
+**Resuming**: re-running the identical `generate --from-milestones <file>` command picks up from the last completed milestone via a sidecar state file (`.kriya/milestones/<group_id>.json`) instead of restarting the whole sequence - but the milestones/goal themselves are always re-read fresh from the plan file, so an edit you make to the plan between runs still takes effect.
+
+Deliberately opt-in - there's no automatic "this goal looks too big" detection. The Milestone Planner's own slicing quality has to earn your trust goal by goal; auto-triggering on every large-looking goal would silently change behavior for every existing user with no proven size heuristic behind it.
 
 ### 3.5 Fix Bugs (`fix`)
 Locate and repair bugs in your project using reproduced test outputs or stack traces:
@@ -475,7 +514,13 @@ This only asks about categories still below the readiness threshold - a category
 Doc ingestion (PDFs/README's/vendor docs) and package-registry lookups are natural next sources for this same pipeline but aren't wired up yet - see `docs/design.md` for the current state.
 
 ### 4.11 Static Pre-Checks and Best-of-N First Attempts
-No configuration needed, always on: before the (expensive) compile gate runs, Kriya scans everything the Developer just wrote for a small set of known-bad patterns already documented in your active skills' rules - e.g. Apache Ignite's two startup mechanisms mixed in the same app (throws `IgniteException: ... already been started` at runtime), or an `Ignition.start()` left unclosed (hangs the JVM indefinitely after everything else already finished). If one matches, that retry attempt is redirected immediately, before ever invoking Maven/the JVM - the same rule the model already had in context, just enforced deterministically instead of hoped for.
+No configuration needed, always on: before the (expensive) compile gate runs, Kriya scans everything the Developer just wrote for a small, deliberately narrow set of known-bad patterns (`kriya/workflow/static_checks.py`) - each one added after a specific, confirmed live failure, not speculatively. If one matches, that retry attempt is redirected immediately, before ever invoking Maven/the JVM/a compiler - a false positive here just costs one more retry cycle, so each check stays conservative rather than trying to be exhaustive. Six checks run today:
+- Apache Ignite's two startup mechanisms (`Ignition.start()` directly vs. an `IgniteSpringBean`) mixed in the same app - throws `IgniteException: ... already been started` at runtime.
+- The same `IgniteSpringBean` Spring XML resource loaded via `ClassPathXmlApplicationContext` more than once from a single Java source file (§4.16 below) - each load auto-starts the same named Ignite node, so a second one throws the same "already been started" exception.
+- An `Ignition.start()` left unclosed - hangs the JVM indefinitely after everything else already finished.
+- Kriya's own `[VERIFICATION] PASS`/`FAIL` runtime-verification marker text embedded unprinted (e.g. inside a string literal instead of an actual print statement) - language-generic, scans every written file regardless of extension.
+- A generated test asserting a subprocess's stdout is exactly empty, while that same entrypoint is required to print a `[VERIFICATION]` line per the verification contract - two facts that can never both be true, so the test itself (not the application) is flagged as broken.
+- A `.html`/`.htm` file with no actual HTML tag anywhere in its content (matches a real opening/closing tag or `<!DOCTYPE`/comment shape, not just a bare `<` - a bare-`<` version was tried first and found to false-positive on ordinary JS comparison operators like `x < 0.000001`) - catches a sibling file's content (e.g. `script.js`) getting written under the wrong filename during a repair, the one class of project (plain HTML/CSS/JS, no recognized build manifest) where nothing else in the pipeline validates file content by language at all.
 
 Separately, for goals where the same skill context sometimes produces a compliant first attempt and sometimes doesn't, you can ask Kriya to try more than one independent attempt before reacting to a real failure:
 ```yaml
@@ -483,6 +528,50 @@ autonomy:
   best_of_n_first_attempt: 2   # default 1 - today's exact single-attempt behavior
 ```
 This only ever applies to the very first attempt of a run (not later retries, which already have real error context to react to), and is strictly sequential - never parallel - so it never uses more resources at any given moment than a normal single-attempt run; the only cost is bounded extra wall-clock in the worst case (every candidate fails). It also only activates when Kriya actually has an isolated worktree sandbox to run each candidate in (the normal case for any real git repo) - without one, a discarded candidate would have nowhere safe to reset to, so it's silently skipped rather than risk writing a failed attempt's files into your real project.
+
+### 4.12 Fail-Closed Repair Protocol & Operation Contracts
+No configuration needed, always on. Every Developer response for a create/repair attempt is checked against an explicit, executable contract before it can reach attribution logic or disk:
+- **Creation** (`create_full_file`): must return complete file content; can never silently become a no-op, and can never overwrite a file that already exists under create semantics.
+- **Patch repair** (`repair_with_patch`): must return at least one complete, line-anchored `SEARCH:`/`REPLACE:` pair.
+- **Full-file repair** (`repair_with_full_file`): must return an explicit `FILE CONTENT:` block.
+- **No-change assessment** (`no_change_assessment`): the model's `NO CHANGE NEEDED` response, contributing no write at all.
+
+A retry-mode response missing all of these markers (ambiguous prose that isn't clearly any of the four shapes above) is rejected as malformed *before* it's ever treated as source code - closing a real gap where a local model's explanatory prose could previously get written to disk verbatim as if it were the fix. Patch and full-file repairs may safely fall back to each other, or to an explicit no-change assessment, when the target file already exists; creation has no such fallback, since a missing file silently becoming a no-op would be a much worse failure than a loud rejection. Every candidate file in a response is fully validated before any of them are written - the whole batch commits atomically as one revision-grounded unit (each file's current on-disk SHA-256 is checked against what the edit was computed against, immediately before writing), so a quality gate can never see a partially-applied response.
+
+### 4.13 Model-Capability-Aware Generation (`llm.capabilities`)
+Local models and local inference servers don't all support the same protocol features, and assuming otherwise from "it's OpenAI-compatible" alone is unreliable. `llm.capabilities` (see §2 above) makes this explicit, measured configuration instead of an inferred guess:
+```yaml
+llm:
+  capabilities:
+    native_tool_calls: true          # Model reliably supports native function/tool-calling
+    json_mode: true                  # Model reliably honors a JSON-mode response_format request
+    reliable_multiline_json: false   # Model can emit JSON containing embedded newlines without corrupting it
+    streaming: true                  # Model/server supports streaming completions
+    max_tool_argument_chars: 8192    # Native tool-call argument size ceiling before Kriya rejects it as oversized
+    preferred_edit_protocol: "small_native_tools"  # or "full_file"/"full_file_text" for a model whose patch
+                                                    # repairs are unreliable - forces repair_with_full_file
+                                                    # instead of repair_with_patch as the safe fallback.
+```
+These control ordinary generation streaming, whether a JSON-mode request is even attempted, and whether Kriya prefers a small anchored patch or a full-file repair for a given model - not just native-tool-call call sites specifically. Native tools fail closed when disabled (never silently degrade to a different, unrequested protocol), and an oversized or malformed tool-call argument is rejected outright rather than truncated. The packaged defaults are correct for most modern local OpenAI-compatible servers (Ollama, LM Studio); override only for a specific model/server you've confirmed behaves differently.
+
+### 4.14 Generation Manifest & Dependency-Aware Invalidation
+No configuration needed, always on for goals where the Architect produces a real file plan. The Architect's design is converted into a stack-neutral generation manifest - every planned file tagged with a role (build/model/source/configuration/entrypoint/test/documentation/asset) and its own direct dependencies on other planned files. Generation order follows this manifest (providers before consumers - a build file before the source that needs it), rather than an arbitrary or alphabetical order.
+
+After a real compile succeeds, Kriya records exactly which file revisions were validated together. A later edit invalidates only that specific file and its transitive dependents in the manifest - an unrelated, already-validated provider file is never needlessly regenerated just because something else in the same project changed. When a narrow (targeted) retry's budget is exhausted, broadening goes to this dependency closure first (every file that actually depends on what's currently broken) before ever paying for a full, whole-project regeneration.
+
+### 4.15 Executable-Test Selection & Zero-Test Detection
+No configuration needed, always on. A "targeted test" selected for a focused retry must be an actual executable test artifact - recognized by the filename conventions of the runners Kriya supports (pytest, Maven/Gradle Surefire, RSpec/minitest) - not merely any path that happens to sit under a directory named `test`/`tests`. A Python package initializer (`__init__.py`) or test-runner configuration file (`conftest.py`) is explicitly excluded, even though both commonly live alongside real tests.
+
+Separately, a test run that deterministically reports **zero tests executed** (recognized across pytest, Surefire/Gradle-style "no matching tests," and other common "none collected/executed/found/ran" phrasings) is treated as its own distinct failure - `test_selection` if a bad target was chosen (triggers one immediate full-suite run, no extra LLM call needed) or `test_acceptance` if the goal explicitly required tests and none ran at all. Either way, this is never silently accepted as "the tests passed" just because nothing reported as failing - a genuinely empty test run is a failure in its own right when your goal asked for tests.
+
+### 4.16 Lifecycle Validation Contracts
+No configuration needed, always on for Java/Spring+Ignite projects specifically. This is `IgniteDuplicateSpringContextCheck`, one of §4.11's six static pre-checks, called out in its own subsection because it's a distinct *kind* of check from the others: not a syntactic pattern match, but an ecosystem lifecycle invariant checked with real XML parsing. A generated Java file that constructs `ClassPathXmlApplicationContext` against the same Spring XML resource more than once, when that resource's root bean is genuinely an `IgniteSpringBean` (the XML is actually parsed and the bean's `class` attribute inspected - not a text-mention heuristic), is rejected before compile - each construction starts the named Ignite node, so a second one throws a deterministic "already been started" exception at runtime. Comments and string-literal contents are stripped before matching (the same offset-preserving structural mirror used elsewhere in Kriya) so a documentation example or code comment mentioning the pattern can't fabricate a violation. Deliberately conservative: it only flags multiple loads within a *single* source file - one load in an entrypoint plus a separate load in a genuinely independent class (e.g. a test running in its own process) is not flagged, since without real call-graph evidence that combination would risk a false veto.
+
+### 4.17 Standalone Planner-Artifact Validation
+No configuration needed, always on. When the Planner's own draft already contains what looks like complete code for every file the Architect's design calls for (§4.8), Kriya can reuse it directly instead of a fresh Developer call. Before reusing a file this way, a conventional-artifact registry checks whether it's genuinely a complete, standalone instance of its target ecosystem file format - today's one rule: a Maven `pom.xml`'s root XML element must actually be `<project>` (namespace-insensitive). A plausible-looking fragment - e.g. a bare `<dependencies>...</dependencies>` block that happens to be well-formed XML - is retained as ordinary Planner prose but is never accepted as a real, standalone `pom.xml`; it falls through to normal Developer generation instead. The registry intentionally contains no project-specific class names, library combinations, or demo-specific strings - only standard, ecosystem-level artifact invariants.
+
+### 4.18 Single-Presentation Reviewer Lifecycle
+No configuration needed, always on. When a run needs a human approval decision, the Reviewer's report is computed once (a single completion), shown to you in full as part of that approval decision, and reused as-is for the run's own returned `review` field - it is never re-requested from the model, and the CLI never prints or re-streams it a second time at the end of the same run. An autonomous run with no approval gate shows the report once, in the final summary, exactly as before. Either way the full report is presented to you exactly once, in exactly one of those two places - if you ever previously saw what looked like the same review twice in a `generate`/`fix` run's output, that was a presentation-layer duplication (the same single result printed/logged more than once), not two separate Reviewer completions; `kriya.log`'s own escalation-reason line for an approval gate now records only a short marker ("automated code review attached") instead of the full report text, so the complete report itself only appears once in your terminal/log output too.
 
 ---
 
