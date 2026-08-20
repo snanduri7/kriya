@@ -950,9 +950,12 @@ async def test_workflow_syntax_error_auto_debugging_loop(tmp_path):
         # design's "math.py" mention activates known_target_files on attempt 1,
         # skipping straight to a plain per-file content completion (broken: missing colon).
         "def add(a,b)\n    return a+b",
-        # Syntax error implicates math.py -> targeted retry, also known_target_files,
-        # also a plain per-file content completion (fixed this time).
-        "def add(a,b):\n    return a+b",
+        # Syntax error implicates math.py -> targeted retry, also known_target_files.
+        # A repair-mode completion must carry the FILE CONTENT: marker (the
+        # fail-closed repair protocol, kriya/agents/agent.py's
+        # _repair_protocol_error) or it's rejected as a malformed response
+        # before ever reaching the compile gate.
+        "FILE CONTENT:\ndef add(a,b):\n    return a+b",
         "Review: Approved"
     ])
 
@@ -962,10 +965,10 @@ async def test_workflow_syntax_error_auto_debugging_loop(tmp_path):
         goal="Create math library with auto-debugging",
         workspace_path=str(tmp_path)
     )
-    
+
     assert res["quality_gates_passed"] is True
     assert "math.py" in res["files"]
-    
+
     # Check that file was rewritten with correct code
     with open(os.path.join(tmp_path, "math.py"), "r") as f:
         content = f.read()
@@ -1078,20 +1081,29 @@ async def test_workflow_fallback_chain(tmp_path):
             # known_target_files (extract_implicated_files already knows it's
             # math.py) skips the file-list call entirely here, so this is a
             # plain per-file text completion, not a JSON file-list response.
-            return "def add(a,b)\n    return a+b"
+            # Still needs the FILE CONTENT: marker (fail-closed repair
+            # protocol) so it's accepted as a real (still-broken) candidate
+            # rather than rejected upfront as a malformed response.
+            return "FILE CONTENT:\ndef add(a,b)\n    return a+b"
         elif n == 7:
             # Targeted budget now exhausted - a one-shot fallback-targeted fix
             # (fallback-1, still scoped to just math.py, no file-list call
             # needed) gets tried before the expensive full-set path. Also
             # broken here, so the run falls through to a real full-set
             # escalation next.
-            return "def add(a,b)\n    return a+b"
+            return "FILE CONTENT:\ndef add(a,b)\n    return a+b"
         elif n == 8:
             # Full-set path, still escalated to fallback-1 (retry_count is
             # still only 1 - only attempt 1 ever incremented it; the
             # fallback-targeted attempt deliberately doesn't touch retry_count).
-            # Fixed this time - Step 1 + content in one shot.
-            return '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]'
+            # Fixed this time. Progressive broadening (kriya/workflow/
+            # attempt.py's scoped_full_set_failure_signature) scopes the
+            # FIRST full-set attempt for a given failure signature to the
+            # dependency closure of the implicated file(s) - here just
+            # math.py - so this is still a single-file MODE: REPAIR
+            # completion needing the FILE CONTENT: marker, not a file-list/
+            # batch-JSON call.
+            return "FILE CONTENT:\ndef add(a,b):\n    return a+b"
         elif n == 9:
             return '[{"category": "Rules", "value": "Avoid missing colon in function definition.", "quote": "SyntaxError: expected \':\'"}]'
         else:
@@ -1207,7 +1219,9 @@ async def test_workflow_does_not_extract_lesson_from_a_single_targeted_retry(tmp
         "Step 1: Write code",
         "Design: Write math.py",
         "def add(a,b)\n    return a+b",
-        "def add(a,b):\n    return a+b",
+        # A repair-mode targeted retry needs the FILE CONTENT: marker (fail-
+        # closed repair protocol) or it's rejected as malformed before compile.
+        "FILE CONTENT:\ndef add(a,b):\n    return a+b",
         "Review: Approved",
     ])
     we = WorkflowEngine(kernel, llm)
@@ -1500,9 +1514,13 @@ async def test_workflow_self_correction_loop_disabled_by_default_zero_new_code_p
 @pytest.mark.asyncio
 async def test_workflow_fallback_targeted_fix_skipped_without_fallback_chain(tmp_path):
     """Without a configured fallback chain, exhausting the targeted budget must
-    fall straight through to a plain, primary-model full-set retry - exactly
-    today's behavior. use_fallback_targeted requires a non-empty chain, so
-    this is a pure regression check, not new behavior."""
+    fall straight through to a plain, primary-model full-set retry (never the
+    fallback-targeted branch, which requires a non-empty chain). The first
+    such full-set attempt for a given failure signature is dependency-closure
+    scoped (progressive broadening, see kriya/workflow/attempt.py's
+    scoped_full_set_failure_signature) rather than a blind file-list re-derive
+    - here that closure is just the same single implicated file, since no
+    generation-dependency manifest is configured for this test."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -1539,7 +1557,9 @@ async def test_workflow_fallback_targeted_fix_skipped_without_fallback_chain(tmp
     assert we.developer.run_generation.call_count == 5
     fifth_call_kwargs = we.developer.run_generation.call_args_list[4].kwargs
     assert fifth_call_kwargs.get("model_override") is None
-    assert fifth_call_kwargs.get("known_target_files") is None  # full-set: re-derives the file list
+    # First full-set attempt for this failure signature: dependency-closure
+    # scoped to the implicated file, not a blind file-list re-derive.
+    assert fifth_call_kwargs.get("known_target_files") == ["App.java"]
 
 
 @pytest.mark.asyncio
@@ -3939,13 +3959,17 @@ async def test_targeted_no_change_redirects_before_rerunning_quality_gates(tmp_p
     assert exc_info.value.failure.likely_files == ["Application.java"]
     compile_check.assert_not_called()
 
-    # Exercise the real retry handoff too: current-turn likely_files must win
-    # even though the new edit-level failure signature differs from the
-    # run_verification_hung signature that prompted this response.
+    # Exercise the real retry handoff too. attribution_rejected is an advisory/
+    # protocol-feedback failure type, so retry_strategy.py's failure-signature
+    # computation deliberately inherits the active authoritative family's
+    # signature (run_verification_hung here) rather than minting a fresh one -
+    # which means it matches the signature last_self_diagnosis was recorded
+    # against, so the model's own current-turn FIX ANALYSIS (self_diagnosis,
+    # ranked above locator/judge) wins, not a fresh judge()-tier inference.
     should_break = await handle_attempt_failure(state, ctx, exc_info.value)
     assert should_break is False
     assert state.last_implicated_files == ["Application.java"]
-    assert state.last_attribution.tier == "judge"
+    assert state.last_attribution.tier == "self_diagnosis"
     assert state.gate_outcomes[-1]["likely_files"] == ["Application.java"]
 
 
@@ -4742,8 +4766,11 @@ async def test_workflow_run_verification_judgment_cached_across_retry_attempts(t
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",     # Planner
         "Design: Write app.py",   # Architect
-        file_content_response,    # Developer attempt 1
-        file_content_response,    # Developer attempt 2 (full-set retry)
+        file_content_response,    # Developer attempt 1 (fresh CREATE, no marker needed)
+        # Developer attempt 2 (full-set retry) - a repair-mode completion needs
+        # the FILE CONTENT: marker (fail-closed repair protocol) or it's
+        # rejected as malformed before ever reaching grade().
+        "FILE CONTENT:\n" + file_content_response,
         "Review: Approved",       # Reviewer
     ])
 
@@ -8251,9 +8278,11 @@ async def test_workflow_targeted_retry_fixes_implicated_file_without_escalating(
             # known_target_files, a plain per-file content completion (broken).
             return "def add(a,b)\n    return a+b"
         elif n == 4:
-            # Targeted retry (implicated file), also known_target_files - plain
-            # per-file content completion (fixed this time).
-            return "def add(a,b):\n    return a+b"
+            # Targeted retry (implicated file), also known_target_files - a
+            # repair-mode completion needs the FILE CONTENT: marker (fail-
+            # closed repair protocol) or it's rejected as malformed before
+            # ever reaching compile.
+            return "FILE CONTENT:\ndef add(a,b):\n    return a+b"
         else:
             return "Review: Approved"
 
