@@ -153,6 +153,21 @@ from kriya.workflow.verification_contract import extract_contract_verdict, pass_
 
 logger = logging.getLogger(__name__)
 
+_PHASE_BANNER_WIDTH = 70
+
+
+def _log_phase_banner(title: str) -> None:
+    """Logs a full-width, solid-line-bordered banner announcing a new top-
+    level pipeline phase (Planning/Architecture/Development/Review). A single
+    logger.info() call reaches both the console and kriya.log identically -
+    configure_logging() (kriya/cli.py) attaches a console StreamHandler and an
+    optional file FileHandler to the SAME root logger with the SAME
+    formatter, so there is no separate console-only/file-only rendering path
+    to keep in sync. Purely cosmetic (log-scanning aid for a human watching
+    a run) - never gates or changes control flow."""
+    bar = "=" * _PHASE_BANNER_WIDTH
+    logger.info(f"\n{bar}\n{title.center(_PHASE_BANNER_WIDTH)}\n{bar}")
+
 
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
@@ -947,6 +962,7 @@ class WorkflowEngine:
             plan = resume_state["plan"]
             logger.info(f"Resuming checkpoint '{run_id}': using saved Plan, skipping Planner Agent call.")
         else:
+            _log_phase_banner("PLANNING")
             logger.info("Planner Agent drafting execution steps...")
             plan_stream = (lambda token: stream_callback("Planning", token)) if stream_callback else None
             plan = await self.planner.run(
@@ -1018,6 +1034,7 @@ class WorkflowEngine:
             architect_files = resume_state.get("architect_files")
             logger.info(f"Resuming checkpoint '{run_id}': using saved Design, skipping Architect Agent call.")
         else:
+            _log_phase_banner("ARCHITECTURE")
             logger.info("Architect Agent defining interface designs...")
             architect_stream = (lambda token: stream_callback("Architect Design", token)) if stream_callback else None
             design, architect_files = await self.architect.run_with_file_list(
@@ -1249,6 +1266,7 @@ class WorkflowEngine:
         ))
 
         # 4. Developer & Quality Gates (Auto-debugging loop)
+        _log_phase_banner("DEVELOPMENT & QUALITY GATES")
         logger.info("Developer Agent implementing source files...")
         chain = self.kernel.config.llm_chain
         max_retries = max(4, 1 + len(chain)) if chain else 4
@@ -1863,6 +1881,7 @@ class WorkflowEngine:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
 
         # 5. Reviewer
+        _log_phase_banner("REVIEW")
         if state.pre_approval_review is not None:
             # Stage 6 SME review, Finding 1: already ran at the
             # Pre-Apply Human Approval Gate, against the exact same final content - a

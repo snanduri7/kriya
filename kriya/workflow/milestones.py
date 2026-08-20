@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from kriya.agents.contracts import Milestone
 from kriya.workflow.file_resolution import _resolve_run_command
 from kriya.workflow.verification_contract import extract_contract_verdict
+from kriya.workflow.workflow import _log_phase_banner
 
 logger = logging.getLogger(__name__)
 
@@ -346,6 +347,7 @@ async def run_milestones(
             logger.info(f"Milestone {idx}/{total} already completed (resume) - skipping.")
             continue
 
+        _log_phase_banner(f"MILESTONE {idx}/{total}: {milestone.goal[:40]}")
         milestone_goal = build_milestone_goal_text(
             milestone, idx, total, run_state.established_dependencies
         )
@@ -448,6 +450,7 @@ async def run_milestones(
             "failures": replay_failures,
         }
 
+    _log_phase_banner("INTEGRATION")
     integration_goal = build_integration_goal_text(run_state.original_goal, run_state.milestones)
     integration_result = await we.run_generation_workflow(
         goal=integration_goal,
