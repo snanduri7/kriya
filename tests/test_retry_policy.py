@@ -100,6 +100,17 @@ def test_retry_reducer_prefers_grounded_cheap_work_before_full_set():
     assert decision.action is RetryAction.TARGETED
 
 
+def test_retry_reducer_honors_authoritative_fallback_target_request():
+    decision = decide_retry_action(
+        retry_count=0, max_retries=4, targeted_retry_count=1,
+        targeted_max_retries=3, has_implicated_files=True,
+        has_missing_files=False, has_fallback_model=True,
+        fallback_targeted_attempted=False, environment_failure=None,
+        fallback_targeted_requested=True,
+    )
+    assert decision.action is RetryAction.FALLBACK_TARGETED
+
+
 def test_retry_reducer_stops_environment_failures_immediately():
     decision = decide_retry_action(
         retry_count=0, max_retries=4, targeted_retry_count=0,

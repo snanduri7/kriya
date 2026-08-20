@@ -69,10 +69,20 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         type="general_error", message=raw_error_context, raw_output=raw_error_context,
         source="orchestrator",
     )
+    previous_primary_failure = state.last_failure
+    previous_error_source_context = dict(state.last_error_source_context)
     failure.attempt = state.attempt_number
     failure.mode = attempt_mode
-    state.last_failure = failure
     state.record_failure(failure, operation=attempt_mode)
+    failure_is_authoritative = getattr(failure, "authority", "authoritative") == "authoritative"
+    # Advisory Developer feedback is useful retry/attribution evidence, but
+    # may not replace the compiler/test/runtime failure the next repair prompt
+    # must solve. FailureLedger enforces the same rule for event history; keep
+    # GenerationState's active typed failure aligned with that authority model.
+    if failure_is_authoritative or previous_primary_failure is None:
+        state.last_failure = failure
+    else:
+        state.last_failure = previous_primary_failure
     fail_type = failure.type
     is_incomplete_generation = isinstance(e, IncompleteGenerationError)
 
@@ -255,8 +265,13 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # actually implicated, not broadcast to every file in a
     # full-set batch (same scoping fix as prior_error_context
     # below).
-    state.last_error_source_context = _build_error_source_context(
+    fresh_error_source_context = _build_error_source_context(
         ctx.worktree_path, raw_error_context, state.all_files_written
+    )
+    state.last_error_source_context = (
+        fresh_error_source_context
+        if failure_is_authoritative or previous_primary_failure is None
+        else previous_error_source_context
     )
 
     # LSP grounding (Java only, silently skipped if jdtls isn't

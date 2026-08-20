@@ -409,6 +409,27 @@ async def attribute_failure(
             "and supplied no grounded alternate file; widening to the full file set.",
         )
 
+    # A repair model's NO CHANGE assessment or byte-identical edit is advisory.
+    # When the raise site
+    # explicitly preserved a prior deterministic locator, retain that
+    # provenance instead of relabeling the same file as a medium-confidence
+    # filename/judge inference merely because this new advisory response does
+    # not itself repeat the compiler/test line number.
+    preserved = (failure.diagnostics or {}).get("preserved_prior_attribution", {})
+    if (
+        failure.type in ("attribution_rejected", "no_op_edit")
+        and failure.likely_files
+        and preserved.get("tier") == "locator"
+        and preserved.get("files") == failure.likely_files
+    ):
+        return AttributionResult(
+            tier="locator", files=list(failure.likely_files), confidence="high",
+            reasoning=(
+                "The advisory repair response rejected the edit, but the target is retained "
+                "from the preceding authoritative file:line locator."
+            ),
+        )
+
     result = _attribute_from_existing_evidence(failure, known_files)
     if result:
         return result

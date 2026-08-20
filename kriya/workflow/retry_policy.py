@@ -36,9 +36,18 @@ def decide_retry_action(
     has_fallback_model: bool,
     fallback_targeted_attempted: bool,
     environment_failure: Optional[str],
+    fallback_targeted_requested: bool = False,
 ) -> RetryDecision:
     if environment_failure:
         return RetryDecision(RetryAction.STOP_ENVIRONMENT, environment_failure)
+    if (
+        fallback_targeted_requested and has_implicated_files
+        and has_fallback_model and not fallback_targeted_attempted
+    ):
+        return RetryDecision(
+            RetryAction.FALLBACK_TARGETED,
+            "authoritative target retained after primary model rejected it",
+        )
     if has_implicated_files and targeted_retry_count < targeted_max_retries:
         return RetryDecision(RetryAction.TARGETED, "grounded implicated files remain")
     if has_missing_files and targeted_retry_count < targeted_max_retries:
@@ -61,4 +70,5 @@ def decide_for_state(state, *, max_retries: int, targeted_max_retries: int, has_
         has_fallback_model=has_fallback_model,
         fallback_targeted_attempted=state.budgets.fallback_targeted_attempted,
         environment_failure=state.environment_failure,
+        fallback_targeted_requested=state.budgets.fallback_targeted_requested,
     )

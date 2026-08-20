@@ -82,6 +82,58 @@ def _operation_map(
     }
 
 
+def _preserved_authoritative_locator_files(
+    state: GenerationState, target_files: List[str], self_diagnosed: List[str],
+) -> List[str]:
+    """Return current targets backed by the preceding authoritative locator.
+
+    Developer analysis is advisory and cannot erase deterministic evidence.
+    A different file explicitly named by current-turn analysis is allowed to
+    redirect (root cause and surfacing location may differ), so preservation
+    applies only when there is no such alternate.  Intersecting with this
+    attempt's actual targets prevents stale locator evidence from widening or
+    redirecting a later, unrelated repair.
+    """
+    prior_attribution = state.last_attribution
+    prior_failure = state.last_failure
+    if (
+        self_diagnosed
+        or state.last_attempt_mode not in ("targeted", "fallback_targeted")
+        or prior_attribution is None
+        or getattr(prior_attribution, "tier", None) != "locator"
+        or prior_failure is None
+        or getattr(prior_failure, "authority", None) != "authoritative"
+    ):
+        return []
+    return [
+        filepath for filepath in getattr(prior_attribution, "files", [])
+        if filepath in target_files
+    ]
+
+
+def _request_fallback_for_rejected_authoritative_target(
+    state: GenerationState, ctx: "AttemptContext", preserved_files: List[str],
+) -> None:
+    if (
+        preserved_files
+        and state.last_attempt_mode == "targeted"
+        and ctx.chain
+        and not state.budgets.fallback_targeted_attempted
+    ):
+        state.budgets.fallback_targeted_requested = True
+
+
+def _preserved_attribution_diagnostics(preserved_files: List[str]) -> Optional[dict]:
+    if not preserved_files:
+        return None
+    return {
+        "preserved_prior_attribution": {
+            "tier": "locator",
+            "files": list(preserved_files),
+        }
+    }
+
+
 def _retry_package_for_attempt(
     state: GenerationState,
     ctx: "AttemptContext",
@@ -428,15 +480,26 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
     state.attempt_number += 1
-    use_targeted = bool(state.last_implicated_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
+    prefer_fallback_targeted = (
+        state.budgets.fallback_targeted_requested
+        and bool(state.last_implicated_files)
+        and bool(ctx.chain)
+        and not state.budgets.fallback_targeted_attempted
+    )
+    use_targeted = (
+        not prefer_fallback_targeted
+        and bool(state.last_implicated_files)
+        and state.budgets.targeted_retry_count < ctx.targeted_max_retries
+    )
     use_missing_files = (
         not use_targeted and bool(state.last_missing_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
     )
     # One-shot fallback-model targeted fix (see fallback_targeted_attempted's
-    # own docstring above) - only eligible once the primary-model targeted
-    # budget is exhausted (never competes with use_targeted/use_missing_files
-    # for the same attempt) and only when there's still a real implicated-file
-    # set and a fallback model to try it on.
+    # own docstring above) - normally eligible once the primary-model targeted
+    # budget is exhausted. It may also be requested early when an advisory
+    # no-op rejects a still-authoritative locator; in that case it deliberately
+    # outranks another attempt by the same model. Requires a real implicated
+    # file set and a configured fallback model in both cases.
     use_fallback_targeted = (
         not use_targeted and not use_missing_files
         and bool(state.last_implicated_files) and bool(ctx.chain) and not state.budgets.fallback_targeted_attempted
@@ -557,6 +620,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # a result is known, so a crash/exception mid-attempt can
         # never cause this to be retried in a loop.
         state.budgets.fallback_targeted_attempted = True
+        state.budgets.fallback_targeted_requested = False
         fallback = ctx.chain[0]
         current_limit = _reserve_graph_context_budget(
             fallback.context_window, ctx.skills_prompt, ctx.learned_rag_context
@@ -565,8 +629,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         base_url_override = fallback.base_url
         api_key_override = fallback.api_key
         logger.info(
-            f"Primary-model targeted retries exhausted - trying ONE targeted fix on "
-            f"fallback model {model_override} before falling back to full-set regeneration."
+            f"Trying ONE targeted fix on fallback model {model_override} before "
+            "falling back to full-set regeneration."
         )
 
         current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
@@ -965,8 +1029,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # after every returned target was explicitly left untouched wastes an
     # expensive gate and routes the same failure back to the same file. Turn it
     # into a retry signal before any write or gate. If FIX ANALYSIS names a
-    # different known file, redirect there; otherwise reject the old scope and
-    # let attribute_failure() widen to the full set.
+    # different known file, redirect there. Otherwise preserve a preceding
+    # deterministic locator; only genuinely ungrounded scope widens.
     all_targets_rejected = all_results_are_no_change(files)
     if state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected:
         state.record_event(RunEvent(
@@ -978,25 +1042,51 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             message="Every targeted result rejected the selected file scope.",
         ))
         returned_targets = [f.get("filepath", "") for f in files if f.get("filepath")]
-        likely_files = list(self_diagnosed)
+        # An advisory NO CHANGE response may redirect a weak/judgment-based
+        # attribution, but it must not erase an authoritative deterministic
+        # locator.  Preserve only the files that were both locator-backed and
+        # actually in this response's target set; this cannot pull unrelated
+        # stale evidence forward.  A grounded alternate named by the response
+        # still wins because it is explicit current-turn root-cause evidence.
+        preserved_locator_files = _preserved_authoritative_locator_files(
+            state, returned_targets, self_diagnosed,
+        )
+        likely_files = list(self_diagnosed or preserved_locator_files)
+        _request_fallback_for_rejected_authoritative_target(
+            state, ctx, preserved_locator_files,
+        )
         evidence = "\n\n".join(
             f"{f.get('filepath', '(unknown file)')}: "
             f"{f.get('analysis') or '(no FIX ANALYSIS supplied)'}" for f in files
         )
+        if self_diagnosed:
+            attribution_message = (
+                f"Its own analysis instead names: {', '.join(self_diagnosed)}."
+            )
+        elif preserved_locator_files:
+            attribution_message = (
+                "The advisory response supplied no grounded alternate; retaining the "
+                "preceding authoritative locator for: "
+                f"{', '.join(preserved_locator_files)}."
+            )
+        else:
+            attribution_message = (
+                "No grounded alternate file or authoritative locator was available; "
+                "widen the next attempt to the full file set."
+            )
         failure = Failure(
             type="attribution_rejected",
             message=(
                 "TARGET ATTRIBUTION REJECTED: the Developer reported NO CHANGE NEEDED "
                 f"for every targeted file ({', '.join(returned_targets)}). "
-                + (
-                    f"Its own analysis instead names: {', '.join(likely_files)}."
-                    if likely_files else
-                    "No grounded alternate file was named; widen the next attempt to the full file set."
-                )
+                + attribution_message
             ),
             raw_output=evidence,
+            source="developer",
+            authority="advisory",
             file_locations=[FileLocation(filepath=f) for f in likely_files],
             likely_files=likely_files,
+            diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
             attempt=state.attempt_number,
         )
         state.gate_outcomes.append(failure.to_gate_outcome())
@@ -1152,7 +1242,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # already confirmed every search block matched real content -
             # this only fires when the edit(s) that matched changed nothing.
             if find_whole_response_no_op(edits):
-                retry_files = list(self_diagnosed) or [filepath]
+                preserved_locator_files = _preserved_authoritative_locator_files(
+                    state, [filepath], self_diagnosed,
+                )
+                retry_files = list(self_diagnosed or preserved_locator_files) or [filepath]
+                _request_fallback_for_rejected_authoritative_target(
+                    state, ctx, preserved_locator_files,
+                )
                 failure = Failure(
                     type="no_op_edit",
                     message=(
@@ -1163,10 +1259,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         f"from your SEARCH text."
                     ),
                     raw_output="every edit in the response was a no-op (search == replace)",
+                    source="developer",
+                    authority="advisory",
                     file_locations=[FileLocation(filepath=f) for f in retry_files],
                     likely_files=retry_files,
                     failed_content={filepath: orig_text},
                     attempted_edits=edits,
+                    diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
                     attempt=state.attempt_number,
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())

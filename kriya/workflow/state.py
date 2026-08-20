@@ -39,6 +39,13 @@ class RetryBudgets:
     # model only, never escalate) or retry_count (the full-set path's own
     # counter).
     fallback_targeted_attempted: bool = False
+    # Set when a primary-model targeted response returns advisory NO CHANGE
+    # against a target backed by a deterministic file:line locator.  The
+    # authoritative locator remains the scope, but retrying the same model's
+    # rejected opinion is low-value; consume the existing one-shot fallback
+    # targeted attempt next.  This is evidence-based and stack-neutral (no
+    # filenames/failure-type allowlist), and is cleared as that attempt starts.
+    fallback_targeted_requested: bool = False
     # (fail_type, signature) of the previous attempt's failure, so a REPEATED
     # failure (the model isn't self-correcting) can be distinguished from a
     # normal first-time failure - only a repeat is eligible for error-triggered
@@ -84,9 +91,11 @@ class GenerationState:
     # per-file estimate without persisting prompt or proprietary source content.
     generation_timings: List[Dict[str, Any]] = field(default_factory=list)
     error_context: str = ""
-    # The canonical typed failure behind error_context. Retry prompts project
-    # this object into bounded, revision-labelled evidence instead of relying
-    # on an unbounded string concatenation of errors and complete files.
+    # The active canonical typed failure behind repair prompts. Advisory and
+    # auxiliary events remain in run_events/gate_outcomes but cannot replace an
+    # existing authoritative failure here. Retry prompts project this object
+    # into bounded, revision-labelled evidence instead of relying on an
+    # unbounded string concatenation of errors and complete files.
     last_failure: Optional[Any] = None
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)

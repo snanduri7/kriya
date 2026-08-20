@@ -14,7 +14,8 @@ from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext, run_attempt
-from kriya.workflow.failure import Failure, QualityGateFailure
+from kriya.workflow.attribution import AttributionResult
+from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.file_resolution import (
     extract_target_test,
     find_runnable_test_files,
@@ -829,6 +830,30 @@ def test_extract_planner_code_blocks_still_accepts_real_xml_content():
     )
     result = extract_planner_code_blocks(plan, ["ignite-config.xml"])
     assert result.get("ignite-config.xml", "").strip().startswith("<?xml")
+
+def test_extract_planner_code_blocks_rejects_valid_xml_fragment_as_pom():
+    """A Planner dependency example is valid XML but is not a complete POM.
+
+    This is artifact validation, not an Ignite/Qpid rule: every Maven pom.xml
+    is a standalone project document, regardless of what it depends on.
+    """
+    plan = (
+        "### pom.xml Dependencies\n"
+        "```xml\n<dependencies>\n"
+        "  <dependency><groupId>org.example</groupId><artifactId>lib</artifactId></dependency>\n"
+        "</dependencies>\n```\n"
+    )
+    assert extract_planner_code_blocks(plan, ["pom.xml"]) == {}
+
+def test_extract_planner_code_blocks_accepts_namespaced_complete_pom():
+    plan = (
+        "### pom.xml\n```xml\n"
+        '<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
+        "  <modelVersion>4.0.0</modelVersion>\n"
+        "  <groupId>org.example</groupId><artifactId>app</artifactId><version>1</version>\n"
+        "</project>\n```\n"
+    )
+    assert "pom.xml" in extract_planner_code_blocks(plan, ["pom.xml"])
 
 def test_extract_planner_code_blocks_rejects_run_command_for_json_file():
     # Same shape, .json - added alongside .xml for the same reason (equally
@@ -3954,6 +3979,86 @@ async def test_targeted_no_change_without_fix_analysis_still_widens_before_gates
     assert exc_info.value.failure.type == "attribution_rejected"
     assert exc_info.value.failure.likely_files == []
     compile_check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_targeted_byte_identical_edit_cannot_erase_authoritative_locator(tmp_path):
+    """Compiler/test locations outrank a repair model's advisory no-op.
+
+    The target is stack-neutral and intentionally named App.java rather than
+    any live-incident class. The next attempt changes model, not scope.
+    """
+    state = GenerationState()
+    source = "class App { MissingType value; }\n"
+    (tmp_path / "App.java").write_text(source, encoding="utf-8")
+    state.all_files_written = {"App.java"}
+    state.last_implicated_files = ["App.java"]
+    state.last_failure = Failure(
+        type="compile",
+        message="App.java:[1,13] cannot find symbol MissingType",
+        raw_output="App.java:[1,13] cannot find symbol MissingType",
+        file_locations=[FileLocation("App.java", line=1, col=13)],
+    )
+    state.last_attribution = AttributionResult(
+        tier="locator", files=["App.java"], confidence="high",
+        reasoning="Precise file:line locator found in compiler output.",
+    )
+    state.last_error_source_context = {
+        "App.java": "=== Reported error location: App.java:1:13 ===\nclass App { MissingType value; }",
+    }
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "App.java", "content": None,
+        "edits": [{"search": source, "replace": source}],
+        "analysis": "App.java needs an import for MissingType, but no change is required.",
+    }])
+    fallback = MagicMock(
+        model="fallback-coder", base_url="http://127.0.0.1:11434/v1",
+        api_key="test", context_window=32768,
+    )
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, chain=[fallback],
+        architect_files=["App.java"], expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+    )
+
+    with pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    failure = exc_info.value.failure
+    assert failure.type == "no_op_edit"
+    assert failure.likely_files == ["App.java"]
+    assert failure.diagnostics["preserved_prior_attribution"]["tier"] == "locator"
+    assert state.budgets.fallback_targeted_requested is True
+
+    assert await handle_attempt_failure(state, ctx, exc_info.value) is False
+    assert state.last_implicated_files == ["App.java"]
+    assert state.last_attribution.tier == "locator"
+    assert state.last_failure.type == "compile"
+    assert "App.java" in state.last_error_source_context
+
+    # The existing one-shot fallback path is now selected immediately even
+    # though the primary targeted budget has attempts remaining.
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "App.java",
+        "content": "class App { Object value; }\n",
+        "edits": [],
+        "analysis": "Replace the unresolved type with a valid type.",
+    }])
+    ctx.kernel.config.autonomy.run_verification_enabled = False
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled"},
+    ):
+        await run_attempt(state, ctx)
+
+    assert state.last_attempt_mode == "fallback_targeted"
+    assert state.budgets.fallback_targeted_requested is False
+    assert developer.run_generation.call_args.kwargs["model_override"] == "fallback-coder"
+    assert "cannot find symbol MissingType" in developer.run_generation.call_args.kwargs[
+        "prior_error_context"
+    ]
 
 
 @pytest.mark.asyncio
