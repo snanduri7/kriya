@@ -25,7 +25,7 @@ from kriya.workflow.attribution import _detect_missing_build_manifest, attribute
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
-    _normalize_error_for_repeat_detection,
+    build_failure_signature,
     classify_environment_failure,
     extract_error_search_terms,
 )
@@ -37,6 +37,18 @@ from kriya.workflow.worktree import remove_git_worktree
 from kriya.workflow.retry_policy import RetryAction, decide_for_state
 
 logger = logging.getLogger(__name__)
+
+
+_REPAIR_FEEDBACK_FAILURE_TYPES = {
+    "anchored_edit",
+    "attribution_rejected",
+    "diagnosis_mismatch",
+    "misdirected_edit",
+    "no_op_edit",
+    "operation_contract",
+    "structural_corruption",
+    "unaddressed_error_location",
+}
 
 
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
@@ -132,13 +144,31 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         exclude_coordinates=[own_project_coordinate] if own_project_coordinate else None,
         dependency_coordinates=worktree_dependency_coordinates,
     )
-    current_failure_signature = (
-        fail_type,
-        tuple(sorted(error_terms)) if error_terms else _normalize_error_for_repeat_detection(raw_error_context),
+    previous_failure_signature = state.budgets.last_failure_signature
+    current_failure_signature = build_failure_signature(fail_type, raw_error_context)
+    # Edit/protocol feedback is about the validator failure the attempted
+    # repair was already addressing, not a new defect family entitled to fresh
+    # retry budgets. Advisory failures follow the same rule structurally.
+    if previous_failure_signature is not None and (
+        not failure_is_authoritative or fail_type in _REPAIR_FEEDBACK_FAILURE_TYPES
+    ):
+        current_failure_signature = previous_failure_signature
+
+    failure_family_changed = (
+        previous_failure_signature is not None
+        and current_failure_signature != previous_failure_signature
     )
+    if failure_family_changed:
+        logger.info(
+            "Quality Gates surfaced a new failure family - resetting scoped "
+            "targeted/fallback budgets while preserving the global attempt bound."
+        )
+        state.budgets.targeted_retry_count = 0
+        state.budgets.fallback_targeted_attempted = False
+        state.budgets.fallback_targeted_requested = False
     state.error_context = raw_error_context
     if (
-        current_failure_signature == state.budgets.last_failure_signature
+        current_failure_signature == previous_failure_signature
         # unaddressed_error_location included alongside compile: it's a
         # cheaper, earlier-firing variant of the same signal (the model's
         # own edit didn't address the reported location) - repeating it
@@ -303,7 +333,12 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 )
 
     if state.last_attempt_mode in ("targeted", "missing_files"):
-        state.budgets.targeted_retry_count += 1
+        if not failure_family_changed:
+            state.budgets.targeted_retry_count += 1
+        # When the narrow repair resolved its original defect and exposed a
+        # different validator family, the new family starts at targeted zero.
+        # The attempt_number ceiling already counts the model call; do not
+        # mischarge it to the unrelated full-set budget below.
     elif state.last_attempt_mode == "fallback_targeted":
         # Deliberately counts against NEITHER budget - it's a genuinely
         # separate, one-shot step (fallback_targeted_attempted, already

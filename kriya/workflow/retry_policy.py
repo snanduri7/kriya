@@ -37,9 +37,19 @@ def decide_retry_action(
     fallback_targeted_attempted: bool,
     environment_failure: Optional[str],
     fallback_targeted_requested: bool = False,
+    attempt_number: Optional[int] = None,
+    max_total_attempts: Optional[int] = None,
 ) -> RetryDecision:
     if environment_failure:
         return RetryDecision(RetryAction.STOP_ENVIRONMENT, environment_failure)
+    if (
+        attempt_number is not None and max_total_attempts is not None
+        and attempt_number >= max_total_attempts
+    ):
+        return RetryDecision(
+            RetryAction.STOP_EXHAUSTED,
+            "global attempt bound reached across all failure families",
+        )
     if (
         fallback_targeted_requested and has_implicated_files
         and has_fallback_model and not fallback_targeted_attempted
@@ -71,4 +81,9 @@ def decide_for_state(state, *, max_retries: int, targeted_max_retries: int, has_
         fallback_targeted_attempted=state.budgets.fallback_targeted_attempted,
         environment_failure=state.environment_failure,
         fallback_targeted_requested=state.budgets.fallback_targeted_requested,
+        attempt_number=state.attempt_number,
+        max_total_attempts=(
+            max_retries + targeted_max_retries + (1 if has_fallback_model else 0)
+            + state.budgets.best_of_n_candidates_tried
+        ),
     )

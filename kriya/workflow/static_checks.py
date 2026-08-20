@@ -39,7 +39,10 @@ just one more retry cycle, not a hard block.
 """
 import os
 import re
+import xml.etree.ElementTree as ET
 from typing import Dict, Iterable, Optional
+
+from kriya.workflow.edit_safety import _strip_java_comments_and_strings
 
 
 class StaticCheck:
@@ -71,6 +74,91 @@ class IgniteMethodMixingCheck(StaticCheck):
                 "ClassPathXmlApplicationContext and retrieve the already-started instance with "
                 "context.getBean(...) - never call Ignition.start() at all under that approach."
             )
+        return None
+
+
+class IgniteDuplicateSpringContextCheck(StaticCheck):
+    """Rejects loading the same IgniteSpringBean XML more than once.
+
+    ``IgniteSpringBean`` starts during Spring context initialization. Creating
+    a second context for the same resource therefore starts the same named node
+    again even when the helper only wanted an unrelated bean from that XML.
+    This is an ecosystem lifecycle invariant, not an application-name rule.
+    """
+
+    name = "ignite_duplicate_spring_context"
+    _CONTEXT_LOAD_RE = re.compile(
+        r"new\s+ClassPathXmlApplicationContext\s*\(\s*[\"']([^\"']+)[\"']\s*\)"
+    )
+
+    @staticmethod
+    def _defines_ignite_spring_bean(content: str) -> bool:
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            # A malformed XML document is handled by the ordinary XML/build
+            # gate. Raw substring fallback would turn comments or partial text
+            # into false lifecycle evidence.
+            return False
+        return any(
+            element.attrib.get("class", "").rsplit(".", 1)[-1] == "IgniteSpringBean"
+            for element in root.iter()
+        )
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        spring_resources = {
+            filepath: content
+            for filepath, content in files.items()
+            if filepath.endswith(".xml") and self._defines_ignite_spring_bean(content)
+        }
+        if not spring_resources:
+            return None
+
+        loads: Dict[str, Dict[str, int]] = {}
+        for filepath, content in sorted(files.items()):
+            if not filepath.endswith(".java"):
+                continue
+            structural = _strip_java_comments_and_strings(content)
+            for match in self._CONTEXT_LOAD_RE.finditer(content):
+                # The structural mirror preserves offsets but blanks comments
+                # and strings. The constructor token must still be present at
+                # this raw match's offset; examples inside comments/string data
+                # therefore cannot become false violations.
+                if structural[match.start():match.start() + 3] != "new":
+                    continue
+                resource = match.group(1).lstrip("/")
+                matching_xml = next(
+                    (
+                        xml_path for xml_path in spring_resources
+                        if (
+                            xml_path.replace("\\", "/").lstrip("/") == resource
+                            or xml_path.replace("\\", "/").lstrip("/").endswith("/" + resource)
+                            or os.path.basename(xml_path) == os.path.basename(resource)
+                        )
+                    ),
+                    None,
+                )
+                if matching_xml:
+                    per_file = loads.setdefault(matching_xml, {})
+                    per_file[filepath] = per_file.get(filepath, 0) + 1
+
+        for _xml_path, per_file_counts in sorted(loads.items()):
+            for java_file, load_count in sorted(per_file_counts.items()):
+                if load_count <= 1:
+                    continue
+                # Cross-file loads are not rejected without call-graph evidence:
+                # a test and an entrypoint can legitimately initialize the same
+                # resource in separate processes. Multiple loads in one source
+                # file are the bounded, deterministic incident shape.
+                return (
+                    f"{java_file} constructs ClassPathXmlApplicationContext for the "
+                    f"same Spring XML resource {load_count} times, and that resource "
+                    "defines IgniteSpringBean. Each context load auto-starts the "
+                    "Ignite node, so the second load fails with 'Ignite instance with this "
+                    "name has already been started'. Construct the context exactly once, "
+                    "keep it open for the application lifetime, and pass that same context "
+                    "to every helper that needs any bean from the XML."
+                )
         return None
 
 
@@ -226,6 +314,7 @@ class TestContradictsVerificationMarkerCheck(StaticCheck):
 
 STATIC_CHECKS = [
     IgniteMethodMixingCheck(),
+    IgniteDuplicateSpringContextCheck(),
     IgniteUnclosedResourceCheck(),
     BareVerificationMarkerCheck(),
     TestContradictsVerificationMarkerCheck(),

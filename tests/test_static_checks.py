@@ -4,10 +4,10 @@ live 2026-08-12 (ignite_qpid_protocol), plus the language-generic
 bare-verification-marker bug found live 2026-08-13 (python_greeter), that
 motivated this module and its checks.
 """
-import os
-
+from kriya.workflow.failure_grounding import extract_implicated_files
 from kriya.workflow.static_checks import (
     BareVerificationMarkerCheck,
+    IgniteDuplicateSpringContextCheck,
     IgniteMethodMixingCheck,
     IgniteUnclosedResourceCheck,
     TestContradictsVerificationMarkerCheck,
@@ -75,6 +75,25 @@ public class ProtocolApp {
     _SPRING_BEAN_XML,
 )
 
+_DUPLICATE_SPRING_CONTEXT_JAVA = """
+public class MainApp {
+    public static void main(String[] args) {
+        try (ConfigurableApplicationContext context =
+                 new ClassPathXmlApplicationContext("applicationContext.xml")) {
+            send(context);
+        }
+    }
+
+    static void send(ConfigurableApplicationContext ignored) {
+        // This second load auto-starts the same IgniteSpringBean again.
+        try (ConfigurableApplicationContext context =
+                 new ClassPathXmlApplicationContext("applicationContext.xml")) {
+            context.getBean("qpidConnectionFactory");
+        }
+    }
+}
+"""
+
 
 def test_ignite_method_mixing_check_detects_direct_start_plus_spring_bean():
     files = {"src/ProtocolApp.java": _METHOD_MIXING_JAVA, "ignite-config.xml": _SPRING_BEAN_XML}
@@ -93,6 +112,72 @@ def test_ignite_method_mixing_check_clean_when_only_method_b_used():
 def test_ignite_method_mixing_check_clean_when_no_xml_at_all():
     files = {"src/ProtocolApp.java": _METHOD_MIXING_JAVA}
     assert IgniteMethodMixingCheck().check(files) is None
+
+
+def test_ignite_duplicate_spring_context_check_detects_live_incident_shape():
+    files = {
+        "src/MainApp.java": _DUPLICATE_SPRING_CONTEXT_JAVA,
+        "src/main/resources/applicationContext.xml": _SPRING_BEAN_XML,
+    }
+    violation = IgniteDuplicateSpringContextCheck().check(files)
+    assert violation is not None
+    assert "MainApp.java" in violation
+    assert "2 times" in violation
+    assert extract_implicated_files(violation, files) == ["src/MainApp.java"]
+
+
+def test_ignite_duplicate_spring_context_check_accepts_one_shared_context():
+    java, xml = _METHOD_B_XML_AND_JAVA
+    assert IgniteDuplicateSpringContextCheck().check({
+        "src/ProtocolApp.java": java,
+        "ignite-config.xml": xml,
+    }) is None
+
+
+def test_ignite_duplicate_spring_context_check_does_not_conflate_separate_programs():
+    files = {
+        "src/MainApp.java": (
+            'class MainApp { void run() { new ClassPathXmlApplicationContext('
+            '"applicationContext.xml"); } }'
+        ),
+        "src/test/MainAppTest.java": (
+            'class MainAppTest { void test() { new ClassPathXmlApplicationContext('
+            '"applicationContext.xml"); } }'
+        ),
+        "src/main/resources/applicationContext.xml": _SPRING_BEAN_XML,
+    }
+    assert IgniteDuplicateSpringContextCheck().check(files) is None
+
+
+def test_ignite_duplicate_spring_context_check_ignores_xml_comment_mentions():
+    files = {
+        "App.java": _DUPLICATE_SPRING_CONTEXT_JAVA,
+        "applicationContext.xml": (
+            "<beans><!-- Do not use IgniteSpringBean here. --><bean "
+            'id="plain" class="java.lang.Object"/></beans>'
+        ),
+    }
+    assert IgniteDuplicateSpringContextCheck().check(files) is None
+
+
+def test_ignite_duplicate_spring_context_check_requires_resource_path_boundary():
+    files = {
+        "App.java": _DUPLICATE_SPRING_CONTEXT_JAVA,
+        "src/main/resources/otherapplicationContext.xml": _SPRING_BEAN_XML,
+    }
+    assert IgniteDuplicateSpringContextCheck().check(files) is None
+
+
+def test_ignite_duplicate_spring_context_check_ignores_examples_in_comments_and_strings():
+    java = r'''
+public class App {
+    // new ClassPathXmlApplicationContext("applicationContext.xml")
+    String example = "new ClassPathXmlApplicationContext(\"applicationContext.xml\")";
+    void run() { new ClassPathXmlApplicationContext("applicationContext.xml"); }
+}
+'''
+    files = {"App.java": java, "applicationContext.xml": _SPRING_BEAN_XML}
+    assert IgniteDuplicateSpringContextCheck().check(files) is None
 
 
 def test_ignite_unclosed_resource_check_detects_missing_close():

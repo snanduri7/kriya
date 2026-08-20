@@ -276,6 +276,18 @@ class WorkflowEngine:
         # `state.error_context` later. See kriya/workflow/state.py for the
         # rationale behind every other field.
         state = GenerationState(error_context=error_context or "")
+        generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
+        if generation_budget is None:
+            logger.info(
+                "Internal generation time budget: inactive (no "
+                "autonomy.generation_time_budget_seconds configured)."
+            )
+        else:
+            logger.info(
+                f"Internal generation time budget: active ({generation_budget}s, with "
+                f"{self.kernel.config.autonomy.generation_gate_reserve_seconds}s reserved "
+                "for gates/review)."
+            )
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
         run_id = None

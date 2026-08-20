@@ -814,47 +814,25 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # case above, from _resolve_file_paths_from_design already) - no
         # separate resolution step needed here anymore.
         known_target_files = None
-        if state.budgets.retry_count == 0 and ctx.expected_files_upfront:
+        active_failure_signature = state.budgets.last_failure_signature
+        if state.budgets.retry_count == 0 and ctx.expected_files_upfront and active_failure_signature is None:
             known_target_files = ctx.expected_files_upfront
-        elif state.budgets.retry_count == 0 and state.last_implicated_files:
-            # First full-set attempt reached via TARGETED-BUDGET EXHAUSTION,
-            # not via this exact failure genuinely resisting narrow scoping -
-            # found live, 2026-08-14 (spikes/eval_harness/runs/a-3, a-4,
-            # ignite_qpid_protocol): targeted_retry_count/fallback_targeted_attempted
-            # are single counters shared across the WHOLE run (kriya/workflow/
-            # state.py's RetryBudgets), not per-failure. A run that spends its
-            # entire targeted budget resolving one bug (a-4: 4 targeted attempts
-            # + 1 fallback-targeted fixing an unclosed Ignite resource) has ZERO
-            # scoped-retry runway left for the NEXT, completely different failure,
-            # even when that new failure has a precise, high-confidence locator
-            # (a-4: `Protocol.java:[17,5] variable dataLength might not have been
-            # initialized`, a one-line javac error) that's never once been given a
-            # targeted shot. Without this, that brand-new, trivially-scoped failure
-            # falls straight into a full, unscoped "regenerate every file" walk on
-            # a fallback model, chosen here purely by an unrelated earlier bug's
-            # bad luck - confirmed live as the actual mechanism behind BOTH runs'
-            # eventual 2400s timeout, not the fallback model's raw speed on its
-            # own (glm-4.7-flash then pays one multi-minute completion PER FILE,
-            # ~9 files, for a fix that only ever needed one).
-            #
-            # Fixed by reusing known_target_files here too - same mechanism
-            # already used for expected_files_upfront just above, and already
-            # trusted unconditionally (regardless of attribution confidence tier)
-            # by every targeted/fallback_targeted branch above. Deliberately
-            # gated to retry_count == 0 (the FIRST full-set attempt only, not
-            # every one) so the existing "broaden to a clean full regeneration"
-            # escape hatch is fully preserved for a failure that keeps recurring
-            # despite already being given a scoped shot at THIS level too - only
-            # the specific gap (a failure that's never once been targeted,
-            # inheriting a spent budget from a different, already-resolved bug)
-            # gets the cheaper, narrower first try.
+        elif (
+            active_failure_signature is not None
+            and state.last_implicated_files
+            and state.budgets.scoped_full_set_failure_signature != active_failure_signature
+        ):
+            # Each distinct, grounded validator failure gets exactly one
+            # dependency-closure repair before broad regeneration, independent
+            # of global retry_count consumed by earlier, unrelated failures.
+            # Repetition of the SAME signature broadens after this one shot.
             known_target_files = dependent_closure(
                 state.last_implicated_files, ctx.generation_dependencies,
             )
+            state.budgets.scoped_full_set_failure_signature = active_failure_signature
             logger.info(
-                f"First full-set attempt after targeted-budget exhaustion, but the "
-                f"current failure already has known implicated file(s) - scoping to their "
-                f"dependency closure "
+                f"First full-set attempt for this failure family has grounded implicated "
+                f"file(s) - scoping to their dependency closure "
                 f"{', '.join(known_target_files)} instead of the full file set."
             )
 

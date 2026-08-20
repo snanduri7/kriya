@@ -23,21 +23,26 @@ class RetryBudgets:
 
     # Full-set retry attempt counter, bounded by max_retries (max(4, 1+len(chain))).
     retry_count: int = 0
-    # Independent budget for targeted (single/few-file) retries - deliberately
+    # Failure-scoped budget for targeted (single/few-file) retries. It resets
+    # when authoritative validator evidence identifies a genuinely different
+    # failure family, while attempt_number supplies the run-wide ceiling. It is
+    # deliberately
     # NOT folded into retry_count, which governs the full-file-set path and its
     # model-escalation chain. Targeted attempts always use the primary model
     # (never escalate - a measured 19-43s Ollama model-swap cost made "swap on
-    # every targeted attempt" a bad trade). Exhausting this budget falls
+    # every targeted attempt" a bad trade). Exhausting this scoped budget falls
     # through to the full-set path's own budget/escalation, unchanged.
     targeted_retry_count: int = 0
-    # A single, one-shot opportunity to try a TARGETED fix on the fallback model
+    # A single, one-shot opportunity per authoritative failure family to try a
+    # TARGETED fix on the fallback model
     # before escalating all the way to a full-set regeneration (found live,
     # 2026-08-10, ignite_qpid_protocol): a full-set escalation already pays a
     # model-swap cost, so trying one targeted fix on that same fallback model
     # first spends a swap cost that was coming anyway on a much cheaper shot.
     # Deliberately its own flag, not folded into targeted_retry_count (primary
     # model only, never escalate) or retry_count (the full-set path's own
-    # counter).
+    # counter). A new failure family clears it; the global attempt ceiling still
+    # bounds the run.
     fallback_targeted_attempted: bool = False
     # Set when a primary-model targeted response returns advisory NO CHANGE
     # against a target backed by a deterministic file:line locator.  The
@@ -46,6 +51,11 @@ class RetryBudgets:
     # targeted attempt next.  This is evidence-based and stack-neutral (no
     # filenames/failure-type allowlist), and is cleared as that attempt starts.
     fallback_targeted_requested: bool = False
+    # Failure signature for which a dependency-closure-scoped full-set repair
+    # has already been attempted. A different validator failure receives its
+    # own one narrow closure attempt even when earlier failures consumed global
+    # full-set retries; the same failure broadens after that one shot.
+    scoped_full_set_failure_signature: Optional[Tuple[str, Any]] = None
     # (fail_type, signature) of the previous attempt's failure, so a REPEATED
     # failure (the model isn't self-correcting) can be distinguished from a
     # normal first-time failure - only a repeat is eligible for error-triggered

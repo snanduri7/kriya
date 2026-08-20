@@ -16,6 +16,7 @@ from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.failure_grounding import build_failure_signature
 from kriya.workflow.file_resolution import (
     extract_target_test,
     find_runnable_test_files,
@@ -3999,6 +4000,9 @@ async def test_targeted_byte_identical_edit_cannot_erase_authoritative_locator(t
         raw_output="App.java:[1,13] cannot find symbol MissingType",
         file_locations=[FileLocation("App.java", line=1, col=13)],
     )
+    state.budgets.last_failure_signature = build_failure_signature(
+        "compile", state.last_failure.raw_output,
+    )
     state.last_attribution = AttributionResult(
         tier="locator", files=["App.java"], confidence="high",
         reasoning="Precise file:line locator found in compiler output.",
@@ -4037,6 +4041,8 @@ async def test_targeted_byte_identical_edit_cannot_erase_authoritative_locator(t
     assert state.last_attribution.tier == "locator"
     assert state.last_failure.type == "compile"
     assert "App.java" in state.last_error_source_context
+    assert state.budgets.targeted_retry_count == 1
+    assert state.budgets.last_failure_signature[0] == "compile"
 
     # The existing one-shot fallback path is now selected immediately even
     # though the primary targeted budget has attempts remaining.
@@ -4059,6 +4065,87 @@ async def test_targeted_byte_identical_edit_cannot_erase_authoritative_locator(t
     assert "cannot find symbol MissingType" in developer.run_generation.call_args.kwargs[
         "prior_error_context"
     ]
+
+
+@pytest.mark.asyncio
+async def test_new_validator_failure_gets_fresh_scoped_retry_budget(tmp_path):
+    """A runtime defect after compile repair is a new family, not attempt 4
+    of the old compile defect; global attempt_number still remains unchanged."""
+    (tmp_path / "App.java").write_text("class App {}\n", encoding="utf-8")
+    state = GenerationState()
+    state.attempt_number = 4
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"App.java"}
+    state.last_implicated_files = ["App.java"]
+    state.budgets.targeted_retry_count = 3
+    state.budgets.retry_count = 1
+    state.budgets.fallback_targeted_attempted = True
+    prior_text = "App.java:[1,1] cannot find symbol\n"
+    state.budgets.last_failure_signature = build_failure_signature("compile", prior_text)
+    state.last_failure = Failure(type="compile", message=prior_text, raw_output=prior_text)
+
+    runtime_text = (
+        "RUNTIME VERIFICATION FAILURE: duplicate startup\n"
+        "at com.example.App.run(App.java:47)\n"
+        "Caused by: org.example.DuplicateResourceException: resource already started\n"
+    )
+    failure = Failure(
+        type="run_verification", message=runtime_text, raw_output=runtime_text,
+        file_locations=[FileLocation("App.java", line=47)],
+        likely_files=["App.java"],
+    )
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        architect_files=["App.java"],
+        expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+        chain=[MagicMock(model="fallback", context_window=16384)],
+    )
+
+    assert await handle_attempt_failure(state, ctx, QualityGateFailure(failure)) is False
+    assert state.attempt_number == 4
+    assert state.budgets.targeted_retry_count == 0
+    assert state.budgets.retry_count == 1
+    assert state.budgets.fallback_targeted_attempted is False
+    assert state.budgets.last_failure_signature[0] == "run_verification"
+    assert state.last_implicated_files == ["App.java"]
+
+
+def test_failure_signature_distinguishes_unrelated_javac_errors_behind_same_wrapper():
+    missing_import = (
+        "App.java:[10,5] cannot find symbol\n"
+        "org.apache.maven.plugins:maven-compiler-plugin:3.11.0:compile\n"
+    )
+    incompatible_type = (
+        "App.java:[25,9] incompatible types: Object cannot be converted to Person\n"
+        "org.apache.maven.plugins:maven-compiler-plugin:3.11.0:compile\n"
+    )
+    assert build_failure_signature("compile", missing_import) != build_failure_signature(
+        "compile", incompatible_type,
+    )
+
+
+def test_failure_signature_distinguishes_missing_symbols_with_same_javac_headline():
+    first = (
+        "App.java:[10,5] cannot find symbol\n"
+        "[ERROR] symbol: class FirstType\n"
+        "[ERROR] location: class App\n"
+    )
+    second = first.replace("FirstType", "SecondType").replace("[10,5]", "[25,5]")
+    assert build_failure_signature("compile", first) != build_failure_signature(
+        "compile", second,
+    )
+
+
+def test_failure_signature_treats_line_shift_as_same_runtime_exception():
+    first = (
+        "at com.example.App.send(App.java:46)\n"
+        "Caused by: org.example.DuplicateResourceException: resource already started\n"
+    )
+    shifted = first.replace("App.java:46", "App.java:47")
+    assert build_failure_signature("run_verification", first) == build_failure_signature(
+        "run_verification", shifted,
+    )
 
 
 @pytest.mark.asyncio
@@ -4127,26 +4214,14 @@ async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_after_budget_exhaustion(tmp_path):
-    """Regression test for a real live gap found this session (2026-08-14,
-    spikes/eval_harness/runs/a-3 and a-4, ignite_qpid_protocol): targeted_retry_count/
-    fallback_targeted_attempted are single counters shared across the WHOLE run, not
-    per-failure - a run that spends its entire targeted budget resolving one bug has
-    zero scoped-retry runway left for a completely different, freshly-diagnosed
-    failure that arrives right after, even when THAT failure has a precise
-    single-file locator. Confirmed live: a-4's targeted budget was spent fixing an
-    unclosed-Ignite-resource bug across 4 targeted attempts + 1 fallback-targeted
-    attempt; the very next, unrelated compile error (`Protocol.java:[17,5] variable
-    dataLength might not have been initialized`) then fell straight into an unscoped
-    full-file-set walk on the slow fallback model - one multi-minute completion PER
-    FILE (9 files) for a fix that only ever needed one - and the run timed out.
-
-    Confirms the FIRST full-set attempt reached via budget exhaustion (not via this
-    exact failure resisting narrow scoping) still passes
-    known_target_files=state.last_implicated_files, instead of falling through to an
-    unscoped full-file-set request."""
+    """A failure's first full-set escalation stays dependency-scoped even if
+    global full-set history is zero and its own narrow budgets are exhausted."""
     state = GenerationState()
     state.budgets.targeted_retry_count = 3
     state.budgets.fallback_targeted_attempted = True
+    state.budgets.last_failure_signature = (
+        "compile", (("Protocol.java",), "javac", ("variable might not have been initialized",)),
+    )
     state.last_implicated_files = ["Protocol.java"]
     state.all_files_written = {"Protocol.java", "ProtocolApp.java", "ProtocolParser.java"}
     developer = AsyncMock()
@@ -4173,17 +4248,15 @@ async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_aft
 
 @pytest.mark.asyncio
 async def test_run_attempt_does_not_scope_a_later_full_set_attempt(tmp_path):
-    """Sibling/negative case: the scoping above is deliberately gated to the FIRST
-    full-set attempt only (state.budgets.retry_count == 0) - once a scoped full-set
-    attempt has already been tried and the same failure persists (retry_count now
-    >= 1), the existing "broaden to a clean full regeneration" escape hatch must
-    still apply completely unchanged, exactly as before this fix - a failure that
-    genuinely resists narrow scoping still gets a real clean-slate attempt, not an
-    endless narrower and narrower retry on the same wrong diagnosis."""
+    """The same failure broadens after its one dependency-scoped full-set shot."""
     state = GenerationState()
     state.budgets.retry_count = 1
     state.budgets.targeted_retry_count = 3
     state.budgets.fallback_targeted_attempted = True
+    state.budgets.last_failure_signature = (
+        "compile", (("Protocol.java",), "javac", ("same failure",)),
+    )
+    state.budgets.scoped_full_set_failure_signature = state.budgets.last_failure_signature
     state.last_implicated_files = ["Protocol.java"]
     state.all_files_written = {"Protocol.java", "ProtocolApp.java", "ProtocolParser.java"}
     developer = AsyncMock()
@@ -6505,6 +6578,31 @@ def test_extract_error_search_terms_finds_multiple_distinct_coordinates():
         "org.codehaus.mojo:exec-maven-plugin",
     ]
 
+def test_extract_error_search_terms_drops_maven_wrapper_when_source_locator_exists():
+    error = (
+        "[ERROR] App.java:[17,5] cannot find symbol\n"
+        "[ERROR] Failed to execute goal "
+        "org.apache.maven.plugins:maven-compiler-plugin:3.11.0:compile\n"
+    )
+    assert extract_error_search_terms(error) == []
+
+def test_extract_error_search_terms_drops_exec_wrapper_when_application_stack_exists():
+    error = (
+        "at com.example.MainApp.send(MainApp.java:47)\n"
+        "Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:exec\n"
+    )
+    assert extract_error_search_terms(error) == []
+
+def test_extract_error_search_terms_replaces_wrapper_with_declared_library_exception():
+    error = (
+        "at com.example.MainApp.send(MainApp.java:47)\n"
+        "Caused by: org.apache.ignite.IgniteException: node already started\n"
+        "Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:exec\n"
+    )
+    assert extract_error_search_terms(
+        error, dependency_coordinates=["org.apache.ignite:ignite-core"],
+    ) == ["org.apache.ignite:ignite-core"]
+
 def test_extract_error_search_terms_ignores_plain_symbols_and_paths():
     # Neither a bare class/package name (no colon) nor a filesystem path (colon-free
     # on this platform, and even Windows-style drive letters don't match groupId
@@ -7859,6 +7957,7 @@ async def test_workflow_repeated_failure_live_lookup_resolves_wrong_import_via_d
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Two full-set retries were needed - lesson extraction.",
         "Review: Approved",
     ])
 
@@ -8000,6 +8099,10 @@ def test_extract_implicated_files_empty_when_no_known_file_named():
     error = "Process exited with code 1. No further details available."
     known = ["App.java", "pom.xml"]
     assert extract_implicated_files(error, known) == []
+
+def test_extract_implicated_files_does_not_match_filename_suffix():
+    error = "IntegrationApp.java:[5,31] cannot find symbol"
+    assert extract_implicated_files(error, ["App.java"]) == []
 
 def test_extract_implicated_files_matches_full_relative_path_too():
     error = "Traceback: File \"src/main/py/app.py\", line 3, in <module>"

@@ -318,6 +318,12 @@ def main():
     print(f"Self-correction loop: {'ON' if args.self_correction else 'off'}")
     print(f"Best-of-N (first attempt): {args.best_of_n}")
     print(f"Log level: {args.log_level}")
+    print(f"Harness source: {Path(__file__).resolve()}")
+    internal_deadline = max(1, int(args.timeout_per_goal * 0.8))
+    print(
+        f"Internal Kriya generation deadline: {internal_deadline}s "
+        "(80% of external timeout)"
+    )
     print(f"Goals: {[g.id for g in goals]}\n")
 
     summary_lines = [
@@ -328,6 +334,9 @@ def main():
         f"Self-correction loop: {'ON' if args.self_correction else 'off'}",
         f"Best-of-N (first attempt): {args.best_of_n}",
         f"Log level: {args.log_level}",
+        f"Harness source: {Path(__file__).resolve()}",
+        f"Internal Kriya generation deadline: {internal_deadline}s "
+        "(80% of external timeout)",
         f"traces.db: {os.path.join(logs_dir, 'traces.db')}",
         "",
     ]

@@ -131,3 +131,14 @@ def test_retry_reducer_uses_one_fallback_targeted_attempt_after_primary_budget()
         fallback_targeted_attempted=False, environment_failure=None,
     )
     assert decision.action is RetryAction.FALLBACK_TARGETED
+
+
+def test_retry_reducer_enforces_global_attempt_bound_after_per_failure_resets():
+    decision = decide_retry_action(
+        retry_count=1, max_retries=4, targeted_retry_count=0,
+        targeted_max_retries=3, has_implicated_files=True,
+        has_missing_files=False, has_fallback_model=True,
+        fallback_targeted_attempted=False, environment_failure=None,
+        attempt_number=8, max_total_attempts=8,
+    )
+    assert decision.action is RetryAction.STOP_EXHAUSTED
