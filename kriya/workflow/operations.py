@@ -86,10 +86,13 @@ def operation_for_file(
 ) -> CodeOperation:
     """Resolve a batch-level operation to the contract for one concrete file.
 
-    A clean full-set attempt may contain both new and existing files.  New files
-    need CREATE semantics while existing files must never be silently treated as
-    creations (which would discard their revision and overwrite protections).
+    Any batch may contain both new and existing files: initial generation can
+    update a repository file, while a repair can add a newly-required companion
+    file. New files need CREATE semantics; existing files must never be silently
+    treated as creations (which would discard revision/overwrite protections).
     """
+    if not file_exists:
+        return CodeOperation.CREATE_FULL_FILE
     if attempt_operation is CodeOperation.CREATE_FULL_FILE and file_exists:
         return CodeOperation.REPAIR_WITH_FULL_FILE
     return attempt_operation

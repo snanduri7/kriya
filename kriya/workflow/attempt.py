@@ -56,7 +56,7 @@ from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.acceptance import (
     goal_explicitly_requires_tests,
-    test_output_confirms_nonzero_execution,
+    output_confirms_nonzero_test_execution,
 )
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
@@ -1666,7 +1666,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if (
             accepted_test_output is not None
             and goal_explicitly_requires_tests(ctx.goal)
-            and not test_output_confirms_nonzero_execution(accepted_test_output)
+            and not output_confirms_nonzero_test_execution(accepted_test_output)
         ):
             failure = Failure(
                 type="test_acceptance",

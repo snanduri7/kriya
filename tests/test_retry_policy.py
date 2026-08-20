@@ -24,6 +24,12 @@ def test_operation_contract_classifies_content_using_target_existence():
     assert operation_for_file(
         CodeOperation.CREATE_FULL_FILE, file_exists=True,
     ) is CodeOperation.REPAIR_WITH_FULL_FILE
+    assert operation_for_file(
+        CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=False,
+    ) is CodeOperation.CREATE_FULL_FILE
+    assert operation_for_file(
+        CodeOperation.REPAIR_WITH_PATCH, file_exists=False,
+    ) is CodeOperation.CREATE_FULL_FILE
 
 
 def test_operation_contract_allows_only_explicit_safe_repair_fallbacks():

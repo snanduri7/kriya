@@ -255,7 +255,9 @@ async def test_workflow_falls_back_to_heuristic_file_list_when_architect_respons
 
     assert res["quality_gates_passed"] is True
     first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
-    assert first_call_kwargs["known_target_files"] == ["Main.java", "pom.xml"]
+    # The heuristic path still feeds the dependency manifest: build metadata
+    # must be generated before source files that consume its dependencies.
+    assert first_call_kwargs["known_target_files"] == ["pom.xml", "Main.java"]
     # Exactly 3 completions (Planner, Architect, Reviewer) - no extra
     # corrective follow-up call was made for the malformed file list.
     assert llm.complete.await_count == 3

@@ -21,6 +21,6 @@ def goal_explicitly_requires_tests(goal: str) -> bool:
     return bool(_EXPLICIT_TEST_REQUEST_RE.search(goal or ""))
 
 
-def test_output_confirms_nonzero_execution(output: str) -> bool:
+def output_confirms_nonzero_test_execution(output: str) -> bool:
     """Fail only on known zero-test evidence; unfamiliar runners remain allowed."""
     return not any(pattern.search(output or "") for pattern in _ZERO_TEST_PATTERNS)
