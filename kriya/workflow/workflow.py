@@ -1229,7 +1229,20 @@ class WorkflowEngine:
                 active_skill_rules_snapshot[active_skill_name] = list(se.get_skill(active_skill_name).rules)
             except Exception as ex:
                 logger.debug(f"Failed to snapshot rules for skill '{active_skill_name}': {ex}")
-        active_skill_manifest = se.manifest_for(active_skills)
+        try:
+            active_skill_manifest = se.manifest_for(active_skills)
+        except Exception as ex:
+            # Same failure mode as se.get_skill() above (an active_skills entry
+            # that isn't actually resolvable, e.g. a bootstrapped skill whose
+            # source_path never got set) - manifest_for() calls get_skill()
+            # internally with no guard of its own. This manifest is local
+            # provenance evidence only (recorded into EvidenceRecord below,
+            # never read by any gate), so degrading to an empty list here is
+            # strictly safer than letting an unresolvable skill name crash an
+            # otherwise-successful run right before the Developer stage,
+            # discarding all prior Plan/Design work.
+            logger.debug(f"Failed to build active-skill manifest: {ex}")
+            active_skill_manifest = []
         state.evidence_records.append(EvidenceRecord(
             kind="active_skills", source="skill_engine", attempt=0,
             payload={"skills": active_skill_manifest},

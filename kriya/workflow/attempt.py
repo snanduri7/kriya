@@ -996,11 +996,22 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # failure is classified) - see kriya/workflow/attribution.py's
     # extract_self_diagnosed_files() and retry_strategy.py's signature-gated
     # consumption of this field.
+    # Only overwritten when THIS attempt actually produced a fresh self-
+    # diagnosis - left untouched otherwise, not reset to None. A stale value
+    # here is safe by construction: retry_strategy.py's consumption below
+    # only ever reuses it when its stored signature exactly matches the
+    # CURRENT failure's signature, so an unrelated earlier diagnosis can
+    # never wrongly redirect a different failure. Resetting to None on every
+    # attempt with no fresh diagnosis would instead lose a still-valid
+    # diagnosis the moment one intervening attempt didn't happen to repeat
+    # its own FIX ANALYSIS - e.g. attempt N correctly redirects to a
+    # different file via self-diagnosis, attempt N+1 (now targeting that
+    # file) returns no analysis, and the SAME original failure signature
+    # recurs at attempt N+2: the diagnosis must still be there to redirect
+    # correctly again.
     self_diagnosed = extract_self_diagnosed_files(files, sorted(state.all_files_written))
-    state.last_self_diagnosis = (
-        (state.budgets.last_failure_signature, self_diagnosed)
-        if self_diagnosed else None
-    )
+    if self_diagnosed:
+        state.last_self_diagnosis = (state.budgets.last_failure_signature, self_diagnosed)
 
     # "NO CHANGE NEEDED" is useful negative attribution evidence, not a
     # successful repair. In a targeted attempt, rerunning compile/tests/runtime

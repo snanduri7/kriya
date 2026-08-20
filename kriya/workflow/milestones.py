@@ -173,9 +173,19 @@ def build_milestone_goal_text(
     workspace_path fresh on every call, so "what does milestone N see of
     milestones 1..N-1" is otherwise already free (confirmed: it applies via
     plain file copy, never a git commit, so the next call's repo scan sees
-    the real, current on-disk state)."""
+    the real, current on-disk state).
+
+    index == 1 is treated as non-dependent unconditionally, regardless of
+    milestone.depends_on_previous - a first milestone structurally has no
+    predecessor to depend on. Milestone.depends_on_previous defaults to True
+    (kriya/agents/contracts.py), so a model that simply omits the field for
+    milestone 1 in its JSON output (a plausible under-specification for the
+    smaller local models this project targets) would otherwise silently get
+    the "prior milestones already exist - do NOT recreate/restructure
+    anything" header on a brand-new, empty workspace, discouraging it from
+    creating the very structure this milestone needs to create."""
     header = ""
-    if milestone.depends_on_previous:
+    if index > 1 and milestone.depends_on_previous:
         header = (
             f"This is milestone {index} of {total} in a larger effort. Prior "
             "milestones have already been applied to this project on disk - "
@@ -297,6 +307,7 @@ async def run_milestones(
     web_lookup_callback: Optional[Callable[[List[Dict[str, str]]], Any]] = None,
     web_lookup_query_callback: Optional[Callable[[List[str], str], Any]] = None,
     milestone_failure_callback: Optional[Callable[[int, int, Milestone, Dict[str, Any]], str]] = None,
+    knowledge_risk_confirmed: bool = False,
 ) -> Dict[str, Any]:
     """Executes a (possibly hand-edited) milestone plan: calls the EXISTING,
     unmodified we.run_generation_workflow() once per milestone against the
@@ -304,6 +315,20 @@ async def run_milestones(
     call. Intentionally a thin driver over the existing pipeline, not a
     reimplementation of it - see this module's own top-of-file docstring for
     why that's safe.
+
+    knowledge_risk_confirmed: threaded into EVERY run_generation_workflow()
+    call below (each milestone and the final integration pass alike) -
+    without this, a milestone whose goal mentions a post-cutoff library
+    version hits the same knowledge_gap status plain `kriya generate` can
+    resolve via --knowledge-policy/--ack-knowledge-gap/-y, but a milestone
+    sequence had no equivalent: under -y the run auto-abandoned, and
+    interactively, choosing "retry" via milestone_failure_callback just
+    re-issued the identical goal with the risk still unconfirmed, reproducing
+    the same knowledge_gap forever. The CLI decides this once, up front, for
+    the whole sequence (see kriya/cli.py's `generate --from-milestones`) -
+    unlike plain `generate`, this is not resolved per-gap interactively mid-
+    sequence, since that would require threading gap-detail UI through this
+    orchestrator's own retry loop.
 
     milestone_failure_callback(failed_index, total, milestone, failure_result)
     is consulted whenever a milestone exhausts its own retry budget; it must
@@ -338,6 +363,7 @@ async def run_milestones(
                 milestone_group_id=run_state.group_id,
                 milestone_index=idx,
                 milestone_total=total,
+                knowledge_risk_confirmed=knowledge_risk_confirmed,
             )
 
             if result.get("quality_gates_passed"):
@@ -435,6 +461,7 @@ async def run_milestones(
         milestone_group_id=run_state.group_id,
         milestone_index=total + 1,
         milestone_total=total + 1,
+        knowledge_risk_confirmed=knowledge_risk_confirmed,
     )
 
     return {

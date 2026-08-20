@@ -24,6 +24,17 @@ _JAVA_TEST_FILE_RE = re.compile(
     r"^(?:Test.+|.+(?:Test|Tests|TestCase))\.(?:java|kt|kts|groovy)$",
 )
 _RUBY_TEST_FILE_RE = re.compile(r"^(?:test_.+|.+_(?:test|spec))\.rb$")
+# Additive coverage beyond the three PolymorphicValidator-recognized stacks
+# above - closes a real regression found in review: the goal-explicitly-
+# requires-tests hard-fail gate below fires purely on this module's own
+# filename recognition, independent of whether PolymorphicValidator can
+# actually run anything for the target stack. Without these, a correctly
+# generated JS/TS/Go/C# test file (e.g. calculator.test.js) was silently
+# invisible to is_runnable_test_file(), hard-failing a goal that explicitly
+# required tests even though a real, correctly-named test file existed.
+_JS_TS_TEST_FILE_RE = re.compile(r"^.+\.(?:test|spec)\.(?:js|jsx|ts|tsx|mjs|cjs)$")
+_GO_TEST_FILE_RE = re.compile(r"^.+_test\.go$")
+_CSHARP_TEST_FILE_RE = re.compile(r"^.+(?:Test|Tests)\.cs$")
 
 
 def is_runnable_test_file(filepath: str) -> bool:
@@ -37,9 +48,13 @@ def is_runnable_test_file(filepath: str) -> bool:
     failure.
 
     The filename conventions mirror the runners Kriya actually invokes: pytest,
-    Maven Surefire/Gradle's common Java test names, and RSpec/minitest.  Unknown or
-    unusually named tests remain covered by the full-suite fallback instead of being
-    guessed as a target.
+    Maven Surefire/Gradle's common Java test names, and RSpec/minitest - plus
+    Jest/Mocha/Vitest (JS/TS), `go test` (Go), and common .NET test naming (C#)
+    for goal_explicitly_requires_tests()'s hard-fail acceptance gate, which
+    checks filename recognition independent of PolymorphicValidator's own
+    (narrower) set of stacks it can actually execute tests for. Unknown or
+    unusually named tests remain covered by the full-suite fallback instead of
+    being guessed as a target.
     """
     normalized = (filepath or "").replace("\\", "/")
     basename = normalized.rsplit("/", 1)[-1]
@@ -50,6 +65,9 @@ def is_runnable_test_file(filepath: str) -> bool:
         _PYTHON_TEST_FILE_RE.match(basename)
         or _JAVA_TEST_FILE_RE.match(basename)
         or _RUBY_TEST_FILE_RE.match(basename)
+        or _JS_TS_TEST_FILE_RE.match(basename)
+        or _GO_TEST_FILE_RE.match(basename)
+        or _CSHARP_TEST_FILE_RE.match(basename)
     )
 
 

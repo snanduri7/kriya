@@ -157,6 +157,18 @@ def test_build_milestone_goal_text_first_milestone_has_no_prior_work_header():
     assert "Dependencies established" not in text
 
 
+def test_build_milestone_goal_text_first_milestone_ignores_depends_on_previous_true():
+    """Milestone.depends_on_previous defaults to True (kriya/agents/contracts.py) -
+    a model that simply omits the field for milestone 1 in its JSON output must
+    NOT get the "prior milestones already exist, do NOT recreate/restructure
+    anything" header on a brand-new, empty workspace. index == 1 structurally
+    has no predecessor, regardless of what depends_on_previous says."""
+    m = Milestone(goal="Start Ignite, stop cleanly", success_criterion="Prints PASS", depends_on_previous=True)
+    text = build_milestone_goal_text(m, 1, 3, [])
+    assert "Prior milestones have already been applied" not in text
+    assert "milestone 1 of 3" not in text
+
+
 def test_build_milestone_goal_text_dependent_milestone_gets_prior_work_header():
     m = Milestone(goal="Add caching", success_criterion="Object round-trips", depends_on_previous=True)
     text = build_milestone_goal_text(m, 2, 3, ["org.apache.ignite:ignite-core"])

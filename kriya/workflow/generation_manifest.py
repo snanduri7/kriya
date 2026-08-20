@@ -58,10 +58,23 @@ def classify_file_role(path: str) -> FileRole:
         return FileRole.MODEL
     if stem.endswith(("model", "entity", "dto", "request", "response", "record")):
         return FileRole.MODEL
-    if extension in _SOURCE_EXTENSIONS and stem in {
-        "main", "__main__", "app", "application", "server", "cli", "program",
-        "bootstrap", "runner",
-    }:
+    if extension in _SOURCE_EXTENSIONS and (
+        stem in {
+            "main", "__main__", "app", "application", "server", "cli", "program",
+            "bootstrap", "runner",
+        }
+        # A bare exact-match set misses the standard Spring Boot convention
+        # (e.g. DemoApplication.java, OrderServiceApplication.java) and other
+        # common compound entrypoint names (BrokerServer.java, TaskRunner.java)
+        # entirely - confirmed live to silently drop the Runtime Verification
+        # Contract reminder (kriya/agents/agent.py's only consumer of this
+        # role) for any of them, since a class named exactly "Application" or
+        # "Server" is far rarer in practice than one with a project-specific
+        # prefix. Suffix matching is deliberately narrower than a bare
+        # substring check - the specific project-identifying prefix doesn't
+        # matter, only that the file plausibly IS the thing that gets run.
+        or stem.endswith(("application", "server", "bootstrap", "runner"))
+    ):
         return FileRole.ENTRYPOINT
     if extension in _SOURCE_EXTENSIONS:
         return FileRole.SOURCE

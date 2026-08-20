@@ -1278,6 +1278,20 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             click.secho(f"\n[Milestone {failed_index}/{total} FAILED]", bold=True, fg="red")
             click.echo(f"  Goal: {milestone.goal}")
             click.echo(f"  Status: {failure_result.get('status')}")
+            # A knowledge_gap-shaped failure is not an ordinary quality-gate
+            # failure - "retry" re-issues the IDENTICAL goal, so without the
+            # knowledge risk having been confirmed for this whole run (--yes
+            # or --knowledge-policy permissive), it reproduces the exact same
+            # knowledge_gap every time rather than ever making progress.
+            if failure_result.get("status") == "knowledge_gap":
+                click.secho(
+                    "  This is a knowledge-gap pause, not a quality-gate failure - "
+                    "retrying will reproduce the identical gap. Re-run with -y or "
+                    "--knowledge-policy permissive to accept the risk for this whole "
+                    "milestone sequence, then resume with the same "
+                    "`generate --from-milestones` command.",
+                    fg="yellow",
+                )
             return click.prompt(
                 "What do you want to do? (abandon = stop here, keeping whatever earlier "
                 "milestones already applied; retry = try this milestone again from scratch)",
@@ -1306,6 +1320,14 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 web_lookup_callback=on_web_lookup,
                 web_lookup_query_callback=on_web_lookup_query,
                 milestone_failure_callback=on_milestone_failure,
+                # Decided once, up front, for the whole sequence - unlike plain
+                # `generate`'s per-gap interactive resolution, a milestone
+                # sequence has no equivalent mid-run gap-detail UI (see
+                # run_milestones()'s own docstring). Mirrors plain generate's
+                # "-y or permissive policy already means accept this risk"
+                # convention rather than introducing new milestone-specific
+                # flags.
+                knowledge_risk_confirmed=yes or knowledge_policy == 'permissive',
             )
             await kernel.stop()
             return result
