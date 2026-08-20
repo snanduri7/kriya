@@ -1128,10 +1128,13 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.option('--resume', is_flag=True, default=False, help="Resume the most recently saved checkpoint for this workspace (only exists if a prior run was interrupted mid-Plan/Design/Developer).")
 @click.option('--resume-id', default=None, help="Resume a specific checkpoint by run_id instead of the latest one.")
 @click.option('--json', 'json_output', is_flag=True, default=False, help="Print only the final result as JSON on stdout - all progress/narrative output goes to stderr instead. For CI/scripting use.")
+@click.option('--from-milestones', type=click.Path(exists=True), default=None, help="Execute a milestone plan file produced by `kriya plan-milestones` instead of a single goal - GOAL/--file are ignored.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
-    if file:
+    if from_milestones:
+        pass  # goal text lives inside the milestone plan file - nothing to resolve here
+    elif file:
         try:
             with open(file, "r", encoding="utf-8") as fh:
                 goal = fh.read()
@@ -1254,6 +1257,72 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             "\nSend this search? (only these bare technology-name terms are sent - "
             "never goal/design/code/error text)"
         )
+
+    if from_milestones:
+        # Mirrors on_approval's exact shape (present callback -> ask; -y ->
+        # safe default) - only "abandon"/"retry" are offered, never a silent
+        # skip-ahead, since a later milestone building on a known-broken one
+        # directly contradicts the vertical-slice premise this whole feature
+        # relies on (see kriya/workflow/milestones.py's run_milestones()).
+        def on_milestone_failure(failed_index: int, total: int, milestone, failure_result: Dict[str, Any]) -> str:
+            if yes:
+                click.secho(f"\n[Milestone {failed_index}/{total} FAILED] Auto-abandoning under -y", fg="red")
+                return "abandon"
+            click.secho(f"\n[Milestone {failed_index}/{total} FAILED]", bold=True, fg="red")
+            click.echo(f"  Goal: {milestone.goal}")
+            click.echo(f"  Status: {failure_result.get('status')}")
+            return click.prompt(
+                "What do you want to do? (abandon = stop here, keeping whatever earlier "
+                "milestones already applied; retry = try this milestone again from scratch)",
+                type=click.Choice(["abandon", "retry"]), default="abandon"
+            )
+
+        async def run_milestone_sequence():
+            from kriya.workflow.milestones import load_or_resume_milestone_run_state, run_milestones
+            with open(from_milestones, "r", encoding="utf-8") as fh:
+                plan_data = json.load(fh)
+            workspace_path = os.getcwd()
+            # milestones/original_goal always come from THIS load of the plan
+            # file (so a hand-edit made between runs takes effect); progress
+            # (completed_milestone_indices/established_dependencies/
+            # verification_commands) resumes from an existing same-group_id
+            # sidecar if a prior invocation of this plan got partway through -
+            # see load_or_resume_milestone_run_state's own docstring.
+            run_state = load_or_resume_milestone_run_state(workspace_path, plan_data)
+            await kernel.start()
+            result = await run_milestones(
+                we, run_state, workspace_path,
+                approval_callback=on_approval,
+                stream_callback=on_stream,
+                skill_gap_callback=on_skill_gap,
+                skill_conflict_callback=on_skill_conflict,
+                web_lookup_callback=on_web_lookup,
+                web_lookup_query_callback=on_web_lookup_query,
+                milestone_failure_callback=on_milestone_failure,
+            )
+            await kernel.stop()
+            return result
+
+        try:
+            milestone_result = asyncio.run(run_milestone_sequence())
+        except Exception as e:
+            click.secho(f"Milestone sequence error: {e}", fg="red")
+            if json_output:
+                sys.stdout = real_stdout
+                click.echo(json.dumps({"error": str(e)}, indent=2))
+            sys.exit(1)
+
+        if json_output:
+            sys.stdout = real_stdout
+            click.echo(json.dumps(milestone_result, indent=2, default=str))
+        else:
+            status = milestone_result.get("status")
+            click.secho(
+                f"\n=== Milestone sequence: {status} ===", bold=True,
+                fg="green" if status == "success" else "red"
+            )
+            click.echo(json.dumps(milestone_result, indent=2, default=str))
+        sys.exit(0 if milestone_result.get("status") == "success" else 1)
 
     async def run_workflow():
         nonlocal goal
@@ -1480,6 +1549,75 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         # documented gap for a v1: those paths don't get JSON output,
         # matching their pre-existing narrower, non-structured signal today.
         sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
+
+@main.command(name="plan-milestones")
+@click.argument('goal', required=False)
+@click.option('--file', '-f', type=click.Path(exists=True), help="Path to a text/markdown file containing the goal/prompt.")
+@click.option('--output', '-o', type=click.Path(), default=None, help="Where to write the proposed milestone plan (default: .kriya/milestones/<group_id>.plan.json).")
+@click.pass_context
+def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[str], output: Optional[str]) -> None:
+    """Decompose a large goal into small, independently verifiable milestones.
+
+    Slices by BEHAVIOR, not by code structure - writes the proposed plan to a
+    file for review and possible hand-editing; nothing is executed. Run
+    `kriya generate --from-milestones <file>` to actually execute a
+    (possibly edited) plan against your workspace. Deliberately a separate,
+    no-side-effects step: the slicing quality is worth a human eyeballing
+    before N real generate calls run against a real workspace.
+    """
+    if file:
+        try:
+            with open(file, "r", encoding="utf-8") as fh:
+                goal = fh.read()
+        except Exception as e:
+            click.secho(f"Failed to read goal file: {e}", fg="red")
+            sys.exit(1)
+    elif not goal:
+        if not sys.stdin.isatty():
+            goal = sys.stdin.read()
+        else:
+            click.secho("Error: Missing argument 'GOAL' or '--file' option.", fg="red")
+            sys.exit(1)
+
+    cfg: AppConfig = ctx.obj['config']
+    llm = LLMClient(cfg)
+    kernel = Kernel(config=cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    def on_stream(token: str):
+        click.echo(token, nl=False)
+        sys.stdout.flush()
+
+    async def run_plan():
+        from kriya.workflow.milestones import plan_milestones
+        await kernel.start()
+        result = await plan_milestones(we.milestone_planner, goal, os.getcwd(), stream_callback=on_stream)
+        await kernel.stop()
+        return result
+
+    try:
+        run_state, err = asyncio.run(run_plan())
+    except Exception as e:
+        click.secho(f"Milestone planning error: {e}", fg="red")
+        sys.exit(1)
+
+    if err:
+        click.secho(f"\nMilestone planning failed: {err}", fg="red")
+        sys.exit(1)
+
+    workspace_path = os.getcwd()
+    plan_path = output or os.path.join(workspace_path, ".kriya", "milestones", f"{run_state.group_id}.plan.json")
+    os.makedirs(os.path.dirname(plan_path) or ".", exist_ok=True)
+    with open(plan_path, "w", encoding="utf-8") as fh:
+        json.dump(run_state.to_dict(), fh, indent=2)
+
+    click.secho(f"\n=== Proposed {len(run_state.milestones)} milestone(s) ===", bold=True, fg="green")
+    for i, m in enumerate(run_state.milestones, start=1):
+        click.secho(f"\n{i}. {m.goal}", bold=True)
+        click.echo(f"   Verification: {m.success_criterion}")
+    click.secho(f"\nPlan written to: {plan_path}", fg="cyan")
+    click.echo("Review (and hand-edit if needed), then run:")
+    click.secho(f"  kriya generate --from-milestones {plan_path} -y", fg="yellow")
 
 @main.command()
 @click.argument('file_path', type=click.Path(exists=True))

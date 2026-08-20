@@ -4,7 +4,7 @@ import re
 from abc import ABC
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from kriya.agents.contracts import parse_file_list
+from kriya.agents.contracts import Milestone, parse_file_list, parse_milestone_list
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 
@@ -353,6 +353,105 @@ class PlannerAgent(BaseAgent):
             "the WHOLE implementation, not just part of it - do not let a goal's own multi-part "
             "description (e.g. numbered layers/phases) suggest a multi-module answer on its own."
         )
+
+
+class MilestonePlannerAgent(BaseAgent):
+    """Decomposes one large goal into an ORDERED sequence of small, separately
+    EXECUTABLE goals (kriya/workflow/milestones.py's orchestrator, not the
+    normal single-call pipeline, consumes this). Deliberately a separate agent
+    from PlannerAgent, not an extension of it: PlannerAgent's job is "plan
+    ONE attempt's implementation steps," this agent's job is "split into N
+    attempts" - a structurally different question, and keeping them separate
+    makes the "never propose N build artifacts" boundary structural rather
+    than one more rule inside an already-overloaded single prompt. See
+    PlannerAgent.system_prompt's own MINIMALISM instruction above, added
+    after a real incident where a 3-layer goal got planned as 3 Maven
+    modules - this agent's prompt must not let milestone boundaries
+    reintroduce that exact anti-pattern one level up."""
+
+    @property
+    def system_prompt(self) -> str:
+        return (
+            "You are the Kriya Milestone Planner Agent.\n"
+            "Your task is to decompose one large software goal into an ORDERED "
+            "sequence of SMALL milestones, each of which is independently "
+            "EXECUTABLE and VERIFIABLE - a genuinely working (if minimal) version "
+            "of part of the product, not a horizontal layer that only becomes "
+            "real once every other layer also exists.\n"
+            "\n"
+            "SLICE BY BEHAVIOR, NOT BY STRUCTURE: a milestone is never \"write "
+            "these classes\" or \"implement the X layer/module.\" A milestone is "
+            "\"the smallest next slice of REAL, RUNNABLE, OBSERVABLE behavior.\" "
+            "Ask: if I stopped after this milestone and ran the program, would it "
+            "do something real and verifiable, even if minimal? If the answer is "
+            "no - if this milestone only makes sense once a LATER milestone also "
+            "lands - it is sliced wrong; merge it forward or re-slice by "
+            "behavior.\n"
+            "\n"
+            "CONCRETE WORKED PATTERN: a goal combining a caching system (e.g. "
+            "Apache Ignite) with a messaging system (e.g. Apache Qpid/JMS) is NOT "
+            "sliced as \"Milestone 1: caching layer, Milestone 2: messaging "
+            "layer, Milestone 3: wire them together\" (that is structural "
+            "slicing and produces milestones that don't run anything meaningful "
+            "on their own). It IS sliced as:\n"
+            "  Milestone 1: start the cache node, confirm it started, shut it "
+            "down cleanly - no cache definitions, no object read/write yet.\n"
+            "  Milestone 2: define one cache, write one object to it, read it "
+            "back, print it - still no messaging.\n"
+            "  Milestone 3: start the message broker alongside the cache, send "
+            "one message, consume it back synchronously - still no cache "
+            "interaction from the message.\n"
+            "  Milestone 4: wire the two together - the consumed message's "
+            "payload is what gets stored in and read back from the cache.\n"
+            "Each of these, run alone, does something real and observably "
+            "checkable.\n"
+            "\n"
+            "EACH MILESTONE MUST CARRY ITS OWN CHECKABLE SUCCESS CRITERION "
+            "written as plain, observable behavior (what should print, what "
+            "state should be readable back) - this becomes that milestone's own "
+            "runtime verification target, not a class/file completeness "
+            "checklist.\n"
+            "\n"
+            "DO NOT let the goal's own multi-part description (numbered layers, "
+            "phases, named subsystems) dictate milestone COUNT or boundaries "
+            "directly - the number of things the goal MENTIONS is not the "
+            "number of milestones. Re-derive boundaries from what is "
+            "independently runnable, which is frequently a DIFFERENT number "
+            "and a DIFFERENT order than the goal's own prose structure.\n"
+            "\n"
+            "CRITICAL - DO NOT PROPOSE MULTIPLE BUILD ARTIFACTS: milestones "
+            "describe a SEQUENCE OF GENERATE CALLS against the SAME single "
+            "project (one pom.xml/build.gradle, one entry-point class, growing "
+            "over time) - never separate Maven modules, separate projects, or "
+            "separate entry-point classes per milestone. A later milestone's "
+            "goal must describe EXTENDING the existing entry-point and existing "
+            "build file, not creating a new one. This is the same constraint "
+            "the Kriya Planner Agent enforces within a single goal; it applies "
+            "with equal force across your milestone boundaries.\n"
+            "\n"
+            "Return your milestone list as a fenced JSON code block, the LAST "
+            "thing in your response, of the exact shape:\n"
+            '{"milestones": [{"goal": "...", "success_criterion": "...", '
+            '"depends_on_previous": true}, ...]}\n'
+            'milestone 1 always has "depends_on_previous": false.'
+        )
+
+    async def run_with_milestone_list(
+        self, prompt: str, stream_callback: Optional[Callable[[str], None]] = None
+    ) -> Tuple[str, Optional[List[Milestone]]]:
+        """Same shape as ArchitectAgent.run_with_file_list() above: a single
+        completion, structured output extracted+validated via
+        kriya/agents/contracts.py, never a corrective follow-up call on a
+        validation failure - a malformed milestone list is a real, expected
+        outcome (local models get no schema-constrained decoding from
+        LLMClient today), and the caller (kriya/workflow/milestones.py)
+        degrades by treating (None) milestones as "decomposition failed,"
+        never by crashing."""
+        raw = await self.run(prompt, stream_callback=stream_callback)
+        milestones, err = parse_milestone_list(raw)
+        if milestones is None:
+            logger.warning(f"Milestone Planner output didn't validate ({err}).")
+        return raw, milestones
 
 
 class ArchitectAgent(BaseAgent):

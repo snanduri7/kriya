@@ -32,6 +32,17 @@ generated app worked correctly when run manually; the retry loop spent its
 entire budget chasing a test whose own assertion contradicted a requirement
 the same completion had already (correctly) satisfied elsewhere.
 
+A fifth check (MismatchedFileTypeContentCheck, added 2026-08-19) catches a
+different failure mode entirely: not a defect IN a file's own logic, but a
+file getting the WRONG file's content altogether. Found live on a plain
+static HTML/CSS/JS goal - the one class of project where NOTHING else in the
+pipeline validates content by language at all, since PolymorphicValidator has
+no compile/parse step for an "unknown" stack. A retry asked the Developer to
+repair one file in response to an error that actually implicated a sibling;
+instead of using the REPAIR-mode prompt's "NO CHANGE NEEDED" escape hatch,
+the model wrote the sibling's own content under the wrong filename, and it
+shipped as-is - a `.html` file with no HTML in it.
+
 Best-effort by design, matching this project's own established philosophy for
 this class of check (see kriya/workflow/failure_grounding.py's
 extract_implicated_files() docstring): a false positive is low-cost since it's
@@ -224,11 +235,68 @@ class TestContradictsVerificationMarkerCheck(StaticCheck):
         return None
 
 
+class MismatchedFileTypeContentCheck(StaticCheck):
+    """Catches a file whose content doesn't match its own extension at all -
+    e.g. a `.html` file containing plain JavaScript, with zero HTML markup.
+
+    Found live, 2026-08-19 (a plain static HTML/CSS/JS calculator goal - no
+    pom.xml/Gemfile/requirements.txt, so PolymorphicValidator classifies it
+    as the "unknown" stack and never actually parses or compiles anything;
+    see its own docstring for why that's a deliberate, honest degrade rather
+    than a silent Python fallback - it just means NOTHING else in the
+    pipeline validates file content by language for this stack). During a
+    retry, the Developer agent was asked to repair `calculator/index.html`
+    in response to an error that actually implicated a SIBLING file
+    (`calculator/script.js`). The REPAIR-mode prompt (DeveloperAgent) gives
+    the model an explicit escape hatch for exactly this situation -
+    "NO CHANGE NEEDED: <reason>" when the reported error doesn't implicate
+    the file being repaired - but the model didn't take it: it wrote
+    script.js's own content (the whole Calculator class, verbatim) into
+    index.html's FILE CONTENT: block instead. That got applied to the
+    workspace as-is; the shipped "webpage" had no HTML in it at all.
+
+    Deliberately narrow and conservative, matching this module's established
+    practice (see BareVerificationMarkerCheck's own docstring): only fires
+    on `.html`/`.htm` files with no actual tag-shaped pattern anywhere in
+    their content (`<` immediately followed by a letter, `/`, or `!` - an
+    opening tag, closing tag, or `<!DOCTYPE`/comment). A real HTML document
+    - even a bare fragment - always has at least one such tag. Matching on a
+    bare `<` alone was tried first and found live to under-fire: real
+    JavaScript routinely contains a bare `<` as the less-than operator (e.g.
+    `if (x < 0.000001)`, present in the exact incident's own script.js), so
+    that naive version missed the very file it was built to catch. The
+    tag-shaped pattern has no equivalent false-negative path in ordinary
+    JS/CSS, and no realistic false-positive path for real HTML (even a bare
+    fragment always has a tag). Not extended to `.css`/`.js`/etc. yet - the
+    HTML case is the one with a confirmed live incident and an unambiguous
+    signal; any other extension would need its own confirmed incident before
+    guessing at a detection shape for it."""
+
+    name = "mismatched_file_type_content"
+
+    _HTML_TAG_RE = re.compile(r"<[a-zA-Z!/]")
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not filepath.lower().endswith((".html", ".htm")):
+                continue
+            if not self._HTML_TAG_RE.search(content):
+                return (
+                    f"{filepath} is an HTML file but contains no actual HTML tag anywhere "
+                    "(no '<tagname', '</tagname', or '<!DOCTYPE'/comment pattern) - its content "
+                    "is almost certainly a different file's content (e.g. a sibling .js/.css "
+                    "file) written under this filename by mistake, not a real (even minimal) "
+                    "HTML document. Regenerate this file with actual HTML markup."
+                )
+        return None
+
+
 STATIC_CHECKS = [
     IgniteMethodMixingCheck(),
     IgniteUnclosedResourceCheck(),
     BareVerificationMarkerCheck(),
     TestContradictsVerificationMarkerCheck(),
+    MismatchedFileTypeContentCheck(),
 ]
 
 

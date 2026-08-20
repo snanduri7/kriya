@@ -14,7 +14,7 @@ from kriya.cli import _mark_run_in_progress, main
 
 TOP_LEVEL_COMMANDS = [
     "version", "config", "doctor", "repl", "plugins", "analyze",
-    "generate", "review", "ask", "learn", "fix", "traces", "completion",
+    "generate", "plan-milestones", "review", "ask", "learn", "fix", "traces", "completion",
 ]
 SUBCOMMAND_GROUPS = {
     "prompt": ["render", "generate"],
@@ -419,3 +419,24 @@ def test_skills_list_marks_conflict_lines_distinctly(runner, tmp_path):
     # The plain staged line must NOT go through secho(fg="red") - it's rendered via
     # plain click.echo instead, so no secho call should mention it at all.
     assert not any("port 5672" in c.args[0] for c in mock_secho.call_args_list)
+
+
+def test_plan_milestones_bare_output_filename_does_not_crash(runner, tmp_path):
+    """Regression guard for a real finding: `--output plan.json` (no directory
+    component) made os.path.dirname(plan_path) return "", and
+    os.makedirs("", exist_ok=True) raised an unhandled FileNotFoundError
+    instead of the command's own clean error-handling pattern."""
+    from kriya.agents.contracts import Milestone
+
+    fake_milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    with runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
+        mock_we = MagicMock()
+        mock_we.milestone_planner = MagicMock()
+        mock_we.milestone_planner.run_with_milestone_list = AsyncMock(return_value=("raw", fake_milestones))
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["plan-milestones", "a goal", "--output", "plan.json"])
+
+        assert result.exit_code == 0, result.output
+        assert os.path.exists(os.path.join(cwd, "plan.json"))

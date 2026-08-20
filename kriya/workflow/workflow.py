@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from kriya.agents.agent import (
     ArchitectAgent,
     DeveloperAgent,
+    MilestonePlannerAgent,
     PlannerAgent,
     ReviewerAgent,
     RunVerifierAgent,
@@ -165,6 +166,11 @@ class WorkflowEngine:
         # escalated by the existing quality-gate retry loop below, not this mechanism.
         roles = kernel.config.agent_llms
         self.planner = PlannerAgent("planner", llm_client, roles.planner.llm, roles.planner.llm_chain)
+        # No dedicated agent_llms entry (unlike the roles above) - this agent is
+        # new (kriya/workflow/milestones.py's orchestrator), and adding a config
+        # schema field is out of scope for this feature; falls back to
+        # LLMClient's own default model like DeveloperAgent already does below.
+        self.milestone_planner = MilestonePlannerAgent("milestone_planner", llm_client)
         self.architect = ArchitectAgent("architect", llm_client, roles.architect.llm, roles.architect.llm_chain)
         self.developer = DeveloperAgent("developer", llm_client)
         self.reviewer = ReviewerAgent("reviewer", llm_client, roles.reviewer.llm, roles.reviewer.llm_chain)
@@ -215,8 +221,20 @@ class WorkflowEngine:
         resume: bool = False,
         resume_id: Optional[str] = None,
         trace_id_override: Optional[str] = None,
+        milestone_group_id: Optional[str] = None,
+        milestone_index: Optional[int] = None,
+        milestone_total: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
+
+        milestone_group_id/milestone_index/milestone_total: pure passthrough to
+        every trace_logger.log_run() call below, no other effect on this
+        method's own behavior - kriya/workflow/milestones.py's orchestrator
+        mints one milestone_group_id per decomposed goal and passes it (plus
+        this call's position/total within that sequence) so `kriya milestones`
+        can later group/order what would otherwise be N indistinguishable,
+        unrelated traces.db rows (run_id is that table's PRIMARY KEY). None
+        (the default) preserves today's exact behavior for every other caller.
 
         resume=True resumes the most recently saved checkpoint for this workspace;
         resume_id resumes a specific one. Checkpoints are stage-level (post-Plan,
@@ -341,7 +359,10 @@ class WorkflowEngine:
                     attempts=0,
                     status="knowledge_gap",
                     files_modified=[],
-                    failure_category="knowledge_gap"
+                    failure_category="knowledge_gap",
+                    milestone_group_id=milestone_group_id,
+                    milestone_index=milestone_index,
+                    milestone_total=milestone_total,
                 )
             except Exception as trace_ex:
                 logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -932,7 +953,10 @@ class WorkflowEngine:
                     attempts=0,
                     status="planner_output_incomplete",
                     files_modified=[],
-                    failure_category="planner_output_incomplete"
+                    failure_category="planner_output_incomplete",
+                    milestone_group_id=milestone_group_id,
+                    milestone_index=milestone_index,
+                    milestone_total=milestone_total,
                 )
             except Exception as trace_ex:
                 logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -1494,6 +1518,9 @@ class WorkflowEngine:
                             status=status,
                             files_modified=[],
                             failure_category=status,
+                            milestone_group_id=milestone_group_id,
+                            milestone_index=milestone_index,
+                            milestone_total=milestone_total,
                         )
                     except Exception as trace_ex:
                         logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -1759,6 +1786,9 @@ class WorkflowEngine:
                 prompt_rendered=plan_prompt,
                 gate_outcomes=state.gate_outcomes,
                 model_hops=state.model_hops,
+                milestone_group_id=milestone_group_id,
+                milestone_index=milestone_index,
+                milestone_total=milestone_total,
             )
         except Exception as trace_ex:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
@@ -1851,7 +1881,10 @@ class WorkflowEngine:
                 prompt_rendered=plan_prompt,
                 gate_outcomes=state.gate_outcomes,
                 model_hops=state.model_hops,
-                failure_category=failure_category
+                failure_category=failure_category,
+                milestone_group_id=milestone_group_id,
+                milestone_index=milestone_index,
+                milestone_total=milestone_total,
             )
             logger.info(f"Persistent run trace recorded: {trace_id}")
         except Exception as trace_ex:

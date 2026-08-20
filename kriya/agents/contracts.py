@@ -166,6 +166,95 @@ def _normalize_file_list_paths(files: List[str]) -> List[str]:
     return [corrections.get(f, f) for f in files]
 
 
+class Milestone(BaseModel):
+    """One vertical-slice step of a larger goal, produced by
+    MilestonePlannerAgent (kriya/agents/agent.py) - see kriya/workflow/milestones.py
+    for the orchestrator that consumes this. `goal` must describe a small,
+    independently EXECUTABLE and VERIFIABLE slice of real behavior (never
+    "write these classes"), and `success_criterion` is the plain-language
+    checkable outcome that gets folded into that milestone's own goal text so
+    the EXISTING, already-unconditional verification-contract mechanism
+    (kriya/workflow/retry_prompts.py's VERIFICATION_CONTRACT_HEADER) fires for
+    it with zero further code changes."""
+
+    goal: str
+    success_criterion: str
+    depends_on_previous: bool = True
+
+    @field_validator("goal", "success_criterion")
+    @classmethod
+    def _non_blank(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("must not be blank")
+        return v
+
+
+class MilestoneList(BaseModel):
+    """A validated, ordered decomposition of one goal into small milestones."""
+
+    milestones: List[Milestone]
+
+    @field_validator("milestones")
+    @classmethod
+    def _non_empty_and_bounded(cls, v: List[Milestone]) -> List[Milestone]:
+        if not v:
+            raise ValueError("milestones list must not be empty")
+        # Conservative sanity cap, not evidence-based yet - a goal genuinely
+        # needing more than 8 vertical slices is rare enough that hitting
+        # this should surface as something for a human to look at, not
+        # silently proceed. Revisit once a live run produces real data.
+        if len(v) > 8:
+            raise ValueError(
+                f"{len(v)} milestones suggests over-slicing (by code structure, not "
+                "behavior) rather than genuine complexity - re-slice into fewer, "
+                "larger vertical-slice milestones"
+            )
+        return v
+
+
+_FENCED_MILESTONES_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\"milestones\".*?\})\s*```", re.DOTALL)
+# Deliberately greedy (`.*`, not `.*?`) unlike parse_file_list()'s analogous
+# bare-object fallback (_BARE_FILES_OBJECT, which safely uses [^\]]* since a
+# file PATH can never itself contain ']') - a milestone's goal/success_criterion
+# is free text that legitimately can (a bracketed marker like the goal's own
+# "[VERIFICATION] PASS" convention, an array-index reference, etc.). A
+# non-greedy match stops at the FIRST ']'/'}' it finds anywhere in that free
+# text, well before the real end of the JSON object - confirmed live via
+# direct repro (a milestone goal mentioning "items[0]" truncated the match
+# and broke json.loads). Greedy captures from the first '{' to the LAST '}'
+# in the text instead, which is safe here because this pattern is only ever
+# tried as a fallback when NO fenced block exists at all, so there is no
+# other JSON-shaped content later in the response competing for the match.
+_BARE_MILESTONES_OBJECT = re.compile(r'(\{.*"milestones"\s*:\s*\[.*\]\s*\})', re.DOTALL)
+
+
+def parse_milestone_list(text: str) -> Tuple[Optional[List[Milestone]], Optional[str]]:
+    """Extracts and validates a {"milestones": [...]} JSON block from a
+    MilestonePlannerAgent completion - same last-fenced-JSON-block convention,
+    same never-raises/(value, None)-or-(None, error) contract as
+    parse_file_list() above, deliberately not shared code since the two
+    regexes key off different JSON shapes ("files" vs "milestones") and a
+    generic version would risk one accidentally matching the other's block in
+    a response that (unexpectedly) contains both."""
+    if not text or not text.strip():
+        return None, "text is empty"
+
+    candidates = _FENCED_MILESTONES_BLOCK.findall(text) or _BARE_MILESTONES_OBJECT.findall(text)
+    if not candidates:
+        return None, "no JSON milestones block found in the text"
+
+    try:
+        parsed = json.loads(candidates[-1])
+    except json.JSONDecodeError as e:
+        return None, f"milestones JSON block did not parse: {e}"
+
+    try:
+        milestones = MilestoneList.model_validate(parsed).milestones
+    except ValidationError as e:
+        return None, f"milestones JSON block failed schema validation: {e}"
+    return milestones, None
+
+
 def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
     """Extracts and validates a {"files": [...]} JSON block from a completion
     - a full Architect design (the file list is a trailing block inside a

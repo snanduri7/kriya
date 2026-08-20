@@ -10,6 +10,7 @@ from kriya.workflow.static_checks import (
     BareVerificationMarkerCheck,
     IgniteMethodMixingCheck,
     IgniteUnclosedResourceCheck,
+    MismatchedFileTypeContentCheck,
     TestContradictsVerificationMarkerCheck,
     run_static_checks,
 )
@@ -299,3 +300,103 @@ def test_run_static_checks_reports_test_contradicts_verification_marker_violatio
     violation = run_static_checks(str(tmp_path), ["wordcount.py", "test_wordcount.py"])
     assert violation is not None
     assert violation.startswith("[test_contradicts_verification_marker]")
+
+
+# --- MismatchedFileTypeContentCheck: a .html file must contain SOME HTML ---
+
+# Golden regression fixture, trimmed from the exact real incident (2026-08-19,
+# a plain static HTML/CSS/JS calculator goal): calculator/index.html ended up
+# with calculator/script.js's own JavaScript content instead of markup, after
+# a retry misfired the REPAIR-mode "NO CHANGE NEEDED" escape hatch. Includes
+# the real file's own `<` less-than comparison (`Math.abs(result) < ...`) on
+# purpose - an earlier version of the check that fired on ANY bare `<`
+# character was tested against a simplified fixture without this line, passed,
+# and then silently failed to catch the actual real script.js content, which
+# has exactly this comparison. Keeping it here locks that fix in.
+_CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML = (
+    "function formatResult(result) {\n"
+    "  if (result === Infinity || result === -Infinity) {\n"
+    "    return 'Error';\n"
+    "  }\n"
+    "  if (Math.abs(result) < 0.000001 && result !== 0) {\n"
+    "    return result.toExponential(6);\n"
+    "  }\n"
+    "  return result.toString();\n"
+    "}\n\n"
+    "class Calculator {\n"
+    "  constructor() {\n"
+    "    this.currentOperand = '0';\n"
+    "  }\n"
+    "}\n\n"
+    "const calculator = new Calculator();\n"
+)
+
+_REAL_CALCULATOR_INDEX_HTML = (
+    "<!DOCTYPE html>\n"
+    "<html lang=\"en\">\n"
+    "<head><title>Calculator</title><link rel=\"stylesheet\" href=\"style.css\"></head>\n"
+    "<body>\n"
+    "  <div class=\"calculator\"><div class=\"display\"></div></div>\n"
+    "  <script src=\"script.js\"></script>\n"
+    "</body>\n"
+    "</html>\n"
+)
+
+
+def test_mismatched_file_type_content_check_detects_real_incident():
+    """Regression test for the real bug found live (2026-08-19, a plain
+    static-site calculator goal): calculator/index.html shipped with
+    calculator/script.js's own content instead of HTML markup, and nothing
+    else in the pipeline validates content by language for this stack."""
+    files = {"calculator/index.html": _CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML}
+    violation = MismatchedFileTypeContentCheck().check(files)
+    assert violation is not None
+    assert "calculator/index.html" in violation
+
+
+def test_mismatched_file_type_content_check_clean_for_real_html():
+    files = {"calculator/index.html": _REAL_CALCULATOR_INDEX_HTML}
+    assert MismatchedFileTypeContentCheck().check(files) is None
+
+
+def test_mismatched_file_type_content_check_clean_for_minimal_html_fragment():
+    # Even a bare fragment (no full <!DOCTYPE>/<html> document) has at least
+    # one tag - that's the whole signal this check relies on.
+    files = {"partial.html": "<div>hello</div>"}
+    assert MismatchedFileTypeContentCheck().check(files) is None
+
+
+def test_mismatched_file_type_content_check_ignores_non_html_files():
+    # The exact same JS content is legitimate in script.js - only .html/.htm
+    # filenames are ever checked.
+    files = {"calculator/script.js": _CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML}
+    assert MismatchedFileTypeContentCheck().check(files) is None
+
+
+def test_mismatched_file_type_content_check_covers_htm_extension_too():
+    files = {"page.htm": _CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML}
+    violation = MismatchedFileTypeContentCheck().check(files)
+    assert violation is not None
+    assert "page.htm" in violation
+
+
+def test_run_static_checks_reports_mismatched_file_type_content_violation(tmp_path):
+    (tmp_path / "calculator").mkdir()
+    (tmp_path / "calculator" / "index.html").write_text(_CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML)
+    violation = run_static_checks(str(tmp_path), ["calculator/index.html"])
+    assert violation is not None
+    assert violation.startswith("[mismatched_file_type_content]")
+
+
+def test_mismatched_file_type_content_check_not_fooled_by_bare_less_than_operator():
+    """Regression test for a real false-negative found while building this
+    check: a first version fired on ANY bare '<' character, which correctly
+    flagged a simplified test fixture but silently missed the actual real
+    incident's script.js content, which contains `Math.abs(result) <
+    0.000001` - a bare '<' from ordinary JS, not a tag. A lone comparison
+    operator, with no tag-shaped '<letter'/'</letter'/'<!' pattern anywhere,
+    must still be flagged as non-HTML."""
+    files = {"a.html": "if (x < 5 && y < 10) { return true; }"}
+    violation = MismatchedFileTypeContentCheck().check(files)
+    assert violation is not None
+    assert "a.html" in violation

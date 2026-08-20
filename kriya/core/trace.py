@@ -36,6 +36,24 @@ class TraceLogger:
             cursor.execute("ALTER TABLE runs ADD COLUMN failure_category TEXT")
         except Exception:
             pass
+        # Additive, nullable columns for kriya/workflow/milestones.py's
+        # orchestrator - existing rows get NULL, nothing existing breaks.
+        # milestone_group_id links every milestone (plus the final
+        # integration call) belonging to one decomposed goal under one
+        # shared, orchestrator-minted UUID (NOT any individual call's own
+        # run_id) so a `kriya milestones` view can group/order them; without
+        # this, N milestone calls are indistinguishable from N unrelated runs
+        # since run_id is this table's PRIMARY KEY and INSERT OR REPLACE has
+        # no merge semantics across separate calls.
+        for col, coltype in (
+            ("milestone_group_id", "TEXT"),
+            ("milestone_index", "INTEGER"),
+            ("milestone_total", "INTEGER"),
+        ):
+            try:
+                cursor.execute(f"ALTER TABLE runs ADD COLUMN {col} {coltype}")
+            except Exception:
+                pass
         self.conn.commit()
 
     def log_run(
@@ -51,7 +69,10 @@ class TraceLogger:
         prompt_rendered: str = "",
         gate_outcomes: list = None,
         model_hops: list = None,
-        failure_category: Optional[str] = None
+        failure_category: Optional[str] = None,
+        milestone_group_id: Optional[str] = None,
+        milestone_index: Optional[int] = None,
+        milestone_total: Optional[int] = None,
     ) -> None:
         cursor = self.conn.cursor()
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -66,13 +87,13 @@ class TraceLogger:
             INSERT OR REPLACE INTO runs (
                 run_id, timestamp, goal, duration_sec, attempts, status, files_modified,
                 retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops,
-                failure_category
+                failure_category, milestone_group_id, milestone_index, milestone_total
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             run_id, timestamp, goal, duration_sec, attempts, status, files_str,
             chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
-            failure_category
+            failure_category, milestone_group_id, milestone_index, milestone_total
         ))
         self.conn.commit()
 
