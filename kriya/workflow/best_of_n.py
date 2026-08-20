@@ -51,11 +51,13 @@ def reset_state_for_independent_candidate(state) -> None:
       run by design, never resets here (see its own docstring in state.py).
     """
     state.error_context = ""
+    state.last_failure = None
     state.last_implicated_files = None
     state.last_missing_files = None
     state.last_error_source_context = {}
     state.all_files_written = set()
     state.all_original_contents = {}
+    state.validated_file_revisions = {}
     state.files_written = []
     state.budgets.retry_count = 0
     # Closes a real gap found during design validation: leaving this set would
@@ -65,6 +67,8 @@ def reset_state_for_independent_candidate(state) -> None:
     # (possibly interactive, network-calling) lookup for a candidate that's
     # about to be thrown away anyway.
     state.budgets.last_failure_signature = None
+    state.budgets.scoped_full_set_failure_signature = None
+    state.budgets.fallback_targeted_requested = False
 
 
 async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:

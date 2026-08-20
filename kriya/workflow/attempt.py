@@ -13,30 +13,246 @@ stays in workflow.py - out of scope for this slice.
 import asyncio
 import logging
 import os
-from dataclasses import dataclass
+import statistics
+import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
-from kriya.workflow.edit_safety import apply_anchored_edits, atomic_write_file, find_structural_corruption
+from kriya.workflow.edit_safety import (
+    StagedFileWrite,
+    apply_anchored_edits,
+    commit_revision_grounded_batch,
+    content_revision,
+    find_structural_corruption,
+    read_file_revision,
+)
+from kriya.workflow.dependency_invalidation import (
+    dependent_closure,
+    invalidate_validated_revisions,
+)
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, normalize_written_filepath
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
     build_code_context,
 )
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
+from kriya.workflow.retry_package import RetryPackage, build_retry_package
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
+from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.operations import (
+    CodeOperation,
+    all_results_are_no_change,
+    operation_for_attempt,
+    operation_for_file,
+    validate_operation_result,
+)
 from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
+from kriya.workflow.acceptance import (
+    goal_explicitly_requires_tests,
+    output_confirms_nonzero_test_execution,
+)
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
+
+
+def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
+    return os.path.exists(os.path.join(ctx.worktree_path, filepath)) or os.path.exists(
+        os.path.join(ctx.workspace_path, filepath)
+    )
+
+
+def _operation_map(
+    ctx: "AttemptContext", filepaths: List[str], attempt_operation: CodeOperation,
+) -> Dict[str, CodeOperation]:
+    return {
+        filepath: operation_for_file(
+            attempt_operation, file_exists=_target_exists(ctx, filepath),
+        )
+        for filepath in filepaths
+    }
+
+
+def _preserved_authoritative_locator_files(
+    state: GenerationState, target_files: List[str], self_diagnosed: List[str],
+) -> List[str]:
+    """Return current targets backed by the preceding authoritative locator.
+
+    Developer analysis is advisory and cannot erase deterministic evidence.
+    A different file explicitly named by current-turn analysis is allowed to
+    redirect (root cause and surfacing location may differ), so preservation
+    applies only when there is no such alternate.  Intersecting with this
+    attempt's actual targets prevents stale locator evidence from widening or
+    redirecting a later, unrelated repair.
+    """
+    prior_attribution = state.last_attribution
+    prior_failure = state.last_failure
+    if (
+        self_diagnosed
+        or state.last_attempt_mode not in ("targeted", "fallback_targeted")
+        or prior_attribution is None
+        or getattr(prior_attribution, "tier", None) != "locator"
+        or prior_failure is None
+        or getattr(prior_failure, "authority", None) != "authoritative"
+    ):
+        return []
+    return [
+        filepath for filepath in getattr(prior_attribution, "files", [])
+        if filepath in target_files
+    ]
+
+
+def _request_fallback_for_rejected_authoritative_target(
+    state: GenerationState, ctx: "AttemptContext", preserved_files: List[str],
+) -> None:
+    if (
+        preserved_files
+        and state.last_attempt_mode == "targeted"
+        and ctx.chain
+        and not state.budgets.fallback_targeted_attempted
+    ):
+        state.budgets.fallback_targeted_requested = True
+
+
+def _preserved_attribution_diagnostics(preserved_files: List[str]) -> Optional[dict]:
+    if not preserved_files:
+        return None
+    return {
+        "preserved_prior_attribution": {
+            "tier": "locator",
+            "files": list(preserved_files),
+        }
+    }
+
+
+def _retry_package_for_attempt(
+    state: GenerationState,
+    ctx: "AttemptContext",
+    *,
+    target_files: Optional[List[str]],
+    context_window: int,
+) -> Optional[RetryPackage]:
+    if state.last_failure is None:
+        return None
+    # Reserve at most a bounded fraction of the model window for retry source
+    # evidence.  Four characters/token is only an estimate; 1.5 chars per
+    # advertised token deliberately leaves ample room for goal, plan, design,
+    # skills, instructions, and output on local models with smaller windows.
+    max_chars = max(6000, min(48000, int(context_window * 1.5)))
+    return build_retry_package(
+        failure=state.last_failure,
+        worktree_path=ctx.worktree_path,
+        all_files=state.all_files_written,
+        target_files=target_files,
+        source_context=state.last_error_source_context,
+        max_chars=max_chars,
+        advisory_context=(
+            state.error_context[
+                state.error_context.index("=== Reference material found"):
+            ]
+            if "\n\n=== Reference material found" in state.error_context
+            else ""
+        ),
+    )
+
+
+def _estimated_generation_seconds(
+    state: GenerationState, *, file_count: int, configured_per_file: int,
+    active_model: Optional[str] = None,
+) -> float:
+    observed = [
+        timing["duration_seconds"] / max(1, timing["file_count"])
+        for timing in state.generation_timings
+        if timing.get("duration_seconds", 0) > 0 and timing.get("file_count", 0) > 0
+        and (active_model is None or timing.get("model") == active_model)
+    ]
+    per_file = statistics.median(observed) if observed else configured_per_file
+    return per_file * max(1, file_count)
+
+
+def _ensure_generation_time_budget(
+    state: GenerationState, ctx: "AttemptContext", *, file_count: int,
+    active_model: Optional[str] = None,
+) -> None:
+    autonomy = ctx.kernel.config.autonomy
+    budget = autonomy.generation_time_budget_seconds
+    if budget is None:
+        return
+    elapsed = time.monotonic() - state.generation_started_monotonic
+    remaining = max(0.0, budget - elapsed)
+    estimate = _estimated_generation_seconds(
+        state,
+        file_count=file_count,
+        configured_per_file=autonomy.generation_seconds_per_file_estimate,
+        active_model=active_model,
+    )
+    required = estimate + autonomy.generation_gate_reserve_seconds
+    if remaining < required:
+        failure = Failure(
+            type="time_budget_exhausted",
+            source="orchestrator",
+            message=(
+                "GENERATION TIME BUDGET EXHAUSTED: refusing to start a "
+                f"{file_count}-file generation pass with {remaining:.1f}s remaining; "
+                f"estimated generation plus gate reserve requires {required:.1f}s."
+            ),
+            raw_output=(
+                f"remaining_seconds={remaining:.1f}; estimated_generation_seconds="
+                f"{estimate:.1f}; gate_reserve_seconds="
+                f"{autonomy.generation_gate_reserve_seconds}"
+            ),
+            attempt=state.attempt_number,
+        )
+        raise QualityGateFailure(failure)
+
+
+async def _run_developer_generation(
+    state: GenerationState, ctx: "AttemptContext", **kwargs,
+) -> List[Dict[str, str]]:
+    targets = kwargs.get("known_target_files")
+    file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
+    active_model = kwargs.get("model_override") or ctx.kernel.config.llm.model
+    _ensure_generation_time_budget(
+        state, ctx, file_count=file_count, active_model=active_model,
+    )
+    started = time.monotonic()
+    succeeded = False
+    try:
+        result = await ctx.developer.run_generation(**kwargs)
+        succeeded = True
+        return result
+    finally:
+        duration = time.monotonic() - started
+        state.generation_timings.append({
+            "duration_seconds": duration,
+            "file_count": file_count,
+            "succeeded": succeeded,
+            "model": active_model,
+        })
+        state.record_event(RunEvent(
+            kind="generation.completed" if succeeded else "generation.failed",
+            attempt=state.attempt_number,
+            source="developer",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                f"Developer generation {'completed' if succeeded else 'failed'} "
+                f"for {file_count} file(s) in {duration:.2f}s."
+            ),
+            details={
+                "duration_seconds": duration,
+                "file_count": file_count,
+                "model": active_model,
+            },
+        ))
 
 
 @dataclass
@@ -87,6 +303,9 @@ class AttemptContext:
     # function - already carries its own `self` reference, so it's just
     # another callable from this module's perspective.
     approve_web_lookup: Callable[..., Any]
+    # path -> direct manifest dependencies, in generation order. Default keeps
+    # isolated tests and old checkpoints backward compatible.
+    generation_dependencies: Dict[str, List[str]] = field(default_factory=dict)
 
 
 def _extract_grounded_contract_verdict(
@@ -261,15 +480,26 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
     state.attempt_number += 1
-    use_targeted = bool(state.last_implicated_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
+    prefer_fallback_targeted = (
+        state.budgets.fallback_targeted_requested
+        and bool(state.last_implicated_files)
+        and bool(ctx.chain)
+        and not state.budgets.fallback_targeted_attempted
+    )
+    use_targeted = (
+        not prefer_fallback_targeted
+        and bool(state.last_implicated_files)
+        and state.budgets.targeted_retry_count < ctx.targeted_max_retries
+    )
     use_missing_files = (
         not use_targeted and bool(state.last_missing_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
     )
     # One-shot fallback-model targeted fix (see fallback_targeted_attempted's
-    # own docstring above) - only eligible once the primary-model targeted
-    # budget is exhausted (never competes with use_targeted/use_missing_files
-    # for the same attempt) and only when there's still a real implicated-file
-    # set and a fallback model to try it on.
+    # own docstring above) - normally eligible once the primary-model targeted
+    # budget is exhausted. It may also be requested early when an advisory
+    # no-op rejects a still-authoritative locator; in that case it deliberately
+    # outranks another attempt by the same model. Requires a real implicated
+    # file set and a configured fallback model in both cases.
     use_fallback_targeted = (
         not use_targeted and not use_missing_files
         and bool(state.last_implicated_files) and bool(ctx.chain) and not state.budgets.fallback_targeted_attempted
@@ -282,6 +512,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         else "missing_files" if use_missing_files
         else "full_set"
     )
+    attempt_operation = operation_for_attempt(
+        state.last_attempt_mode, has_prior_failure=bool(state.error_context),
+    )
+    state.record_event(RunEvent(
+        kind="attempt.started",
+        attempt=state.attempt_number,
+        source="workflow",
+        authority=EventAuthority.ADVISORY,
+        operation=attempt_operation.value,
+        details={"mode": state.last_attempt_mode},
+    ))
     # Needed unconditionally below (both the normal compile/test gate
     # path and the always-run full regression check use it) - imported
     # here rather than only inside the skippable gate block so a
@@ -326,19 +567,29 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             base_code_context += ctx.learned_rag_context
 
+        retry_package = _retry_package_for_attempt(
+            state, ctx,
+            target_files=state.last_implicated_files,
+            context_window=ctx.kernel.config.llm.context_window,
+        )
+        retry_error_context = (
+            retry_package.authoritative_error if retry_package else state.error_context
+        )
         task_desc, active_code_context = _build_targeted_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
             ecosystem_invariant_block=ctx.ecosystem_invariant_block,
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
+            retry_package=retry_package,
         )
         logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
 
         state.model_hops.append(ctx.kernel.config.llm.model)
 
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
+        files = await _run_developer_generation(
+            state, ctx,
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -347,13 +598,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             base_url_override=base_url_override,
             api_key_override=api_key_override,
             known_target_files=state.last_implicated_files,
-            prior_error_context=state.error_context or None,
+            prior_error_context=retry_error_context or None,
             implicated_files=state.last_implicated_files,
             error_source_context=state.last_error_source_context or None,
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
             files_with_current_content=state.all_files_written,
             sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+            operation_by_file=_operation_map(
+                ctx, state.last_implicated_files, attempt_operation,
+            ),
+            default_operation=attempt_operation,
         )
     elif use_fallback_targeted:
         # One-shot targeted fix on the first fallback model (see
@@ -365,6 +620,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # a result is known, so a crash/exception mid-attempt can
         # never cause this to be retried in a loop.
         state.budgets.fallback_targeted_attempted = True
+        state.budgets.fallback_targeted_requested = False
         fallback = ctx.chain[0]
         current_limit = _reserve_graph_context_budget(
             fallback.context_window, ctx.skills_prompt, ctx.learned_rag_context
@@ -373,8 +629,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         base_url_override = fallback.base_url
         api_key_override = fallback.api_key
         logger.info(
-            f"Primary-model targeted retries exhausted - trying ONE targeted fix on "
-            f"fallback model {model_override} before falling back to full-set regeneration."
+            f"Trying ONE targeted fix on fallback model {model_override} before "
+            "falling back to full-set regeneration."
         )
 
         current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
@@ -384,19 +640,29 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             base_code_context += ctx.learned_rag_context
 
+        retry_package = _retry_package_for_attempt(
+            state, ctx,
+            target_files=state.last_implicated_files,
+            context_window=fallback.context_window,
+        )
+        retry_error_context = (
+            retry_package.authoritative_error if retry_package else state.error_context
+        )
         task_desc, active_code_context = _build_targeted_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
             ecosystem_invariant_block=ctx.ecosystem_invariant_block,
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
+            retry_package=retry_package,
         )
         logger.info(f"Fallback-targeted retry: focusing on {', '.join(state.last_implicated_files)}.")
 
         state.model_hops.append(model_override)
 
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
+        files = await _run_developer_generation(
+            state, ctx,
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -405,13 +671,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             base_url_override=base_url_override,
             api_key_override=api_key_override,
             known_target_files=state.last_implicated_files,
-            prior_error_context=state.error_context or None,
+            prior_error_context=retry_error_context or None,
             implicated_files=state.last_implicated_files,
             error_source_context=state.last_error_source_context or None,
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
             files_with_current_content=state.all_files_written,
             sibling_content_budget=_reserve_sibling_content_budget(fallback.context_window),
+            operation_by_file=_operation_map(
+                ctx, state.last_implicated_files, attempt_operation,
+            ),
+            default_operation=attempt_operation,
         )
     elif use_missing_files:
         # Missing-file recovery: same primary-model-only, non-escalating
@@ -460,7 +730,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.model_hops.append(ctx.kernel.config.llm.model)
 
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
+        files = await _run_developer_generation(
+            state, ctx,
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -470,6 +741,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             api_key_override=api_key_override,
             known_target_files=resolved_missing_files,
             sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+            operation_by_file=_operation_map(
+                ctx, resolved_missing_files, attempt_operation,
+            ),
+            default_operation=attempt_operation,
         )
     else:
         # Re-run context budget allocator dynamically for escalated model context window size
@@ -499,6 +774,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             active_code_context += ctx.learned_rag_context
 
+        retry_package = _retry_package_for_attempt(
+            state, ctx,
+            target_files=state.last_implicated_files,
+            context_window=active_context_window,
+        )
+        retry_error_context = (
+            retry_package.authoritative_error if retry_package else state.error_context
+        )
         task_desc, active_code_context = _build_full_set_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, ctx.required_files_prompt_block,
             state.all_files_written, ctx.worktree_path, active_code_context,
@@ -506,6 +789,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ecosystem_invariant_block=ctx.ecosystem_invariant_block,
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
+            retry_package=retry_package,
         )
 
         # Track model hops
@@ -530,44 +814,25 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # case above, from _resolve_file_paths_from_design already) - no
         # separate resolution step needed here anymore.
         known_target_files = None
-        if state.budgets.retry_count == 0 and ctx.expected_files_upfront:
+        active_failure_signature = state.budgets.last_failure_signature
+        if state.budgets.retry_count == 0 and ctx.expected_files_upfront and active_failure_signature is None:
             known_target_files = ctx.expected_files_upfront
-        elif state.budgets.retry_count == 0 and state.last_implicated_files:
-            # First full-set attempt reached via TARGETED-BUDGET EXHAUSTION,
-            # not via this exact failure genuinely resisting narrow scoping -
-            # found live, 2026-08-14 (spikes/eval_harness/runs/a-3, a-4,
-            # ignite_qpid_protocol): targeted_retry_count/fallback_targeted_attempted
-            # are single counters shared across the WHOLE run (kriya/workflow/
-            # state.py's RetryBudgets), not per-failure. A run that spends its
-            # entire targeted budget resolving one bug (a-4: 4 targeted attempts
-            # + 1 fallback-targeted fixing an unclosed Ignite resource) has ZERO
-            # scoped-retry runway left for the NEXT, completely different failure,
-            # even when that new failure has a precise, high-confidence locator
-            # (a-4: `Protocol.java:[17,5] variable dataLength might not have been
-            # initialized`, a one-line javac error) that's never once been given a
-            # targeted shot. Without this, that brand-new, trivially-scoped failure
-            # falls straight into a full, unscoped "regenerate every file" walk on
-            # a fallback model, chosen here purely by an unrelated earlier bug's
-            # bad luck - confirmed live as the actual mechanism behind BOTH runs'
-            # eventual 2400s timeout, not the fallback model's raw speed on its
-            # own (glm-4.7-flash then pays one multi-minute completion PER FILE,
-            # ~9 files, for a fix that only ever needed one).
-            #
-            # Fixed by reusing known_target_files here too - same mechanism
-            # already used for expected_files_upfront just above, and already
-            # trusted unconditionally (regardless of attribution confidence tier)
-            # by every targeted/fallback_targeted branch above. Deliberately
-            # gated to retry_count == 0 (the FIRST full-set attempt only, not
-            # every one) so the existing "broaden to a clean full regeneration"
-            # escape hatch is fully preserved for a failure that keeps recurring
-            # despite already being given a scoped shot at THIS level too - only
-            # the specific gap (a failure that's never once been targeted,
-            # inheriting a spent budget from a different, already-resolved bug)
-            # gets the cheaper, narrower first try.
-            known_target_files = state.last_implicated_files
+        elif (
+            active_failure_signature is not None
+            and state.last_implicated_files
+            and state.budgets.scoped_full_set_failure_signature != active_failure_signature
+        ):
+            # Each distinct, grounded validator failure gets exactly one
+            # dependency-closure repair before broad regeneration, independent
+            # of global retry_count consumed by earlier, unrelated failures.
+            # Repetition of the SAME signature broadens after this one shot.
+            known_target_files = dependent_closure(
+                state.last_implicated_files, ctx.generation_dependencies,
+            )
+            state.budgets.scoped_full_set_failure_signature = active_failure_signature
             logger.info(
-                f"First full-set attempt after targeted-budget exhaustion, but the "
-                f"current failure already has known implicated file(s) - scoping to "
+                f"First full-set attempt for this failure family has grounded implicated "
+                f"file(s) - scoping to their dependency closure "
                 f"{', '.join(known_target_files)} instead of the full file set."
             )
 
@@ -625,7 +890,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         else:
             # Generate code files
             dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-            files = await ctx.developer.run_generation(
+            files = await _run_developer_generation(
+                state, ctx,
                 task_description=task_desc,
                 design_context=ctx.design,
                 existing_code_context=active_code_context,
@@ -634,13 +900,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 base_url_override=base_url_override,
                 api_key_override=api_key_override,
                 known_target_files=known_target_files,
-                prior_error_context=state.error_context or None,
+                prior_error_context=retry_error_context or None,
                 implicated_files=state.last_implicated_files,
                 error_source_context=state.last_error_source_context or None,
                 retry_temperature=ctx.kernel.config.llm.retry_temperature,
                 extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                 files_with_current_content=state.all_files_written,
                 sibling_content_budget=_reserve_sibling_content_budget(active_context_window),
+                operation_by_file=(
+                    _operation_map(ctx, known_target_files, attempt_operation)
+                    if known_target_files else None
+                ),
+                default_operation=attempt_operation,
             )
 
     # Recorded now, not derived by the caller afterward - see the fields'
@@ -667,6 +938,55 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         normalized_files.append(file_obj)
     files = normalized_files
 
+    # Enforce the selected response contract before attribution heuristics or
+    # writes.  Classification is based on the target's real existence, so the
+    # same full-content shape is CREATE for an absent file and REPAIR for an
+    # existing one.  Repair fallbacks are explicit and observable; creation has
+    # no permissive fallback that could turn a missing file into a silent no-op.
+    for file_obj in files:
+        filepath = file_obj["filepath"]
+        file_exists = _target_exists(ctx, filepath)
+        expected_operation = operation_for_file(
+            attempt_operation, file_exists=file_exists,
+        )
+        actual_operation, contract_error = validate_operation_result(
+            file_obj,
+            expected=expected_operation,
+            file_exists=file_exists,
+        )
+        if contract_error:
+            failure = Failure(
+                type="operation_contract",
+                message=(
+                    f"OPERATION CONTRACT FAILURE in {filepath}: {contract_error}. "
+                    f"Return exactly the {expected_operation.value} response shape requested."
+                ),
+                raw_output=contract_error,
+                file_locations=[FileLocation(filepath=filepath)],
+                likely_files=[filepath],
+                attempted_edits=file_obj.get("edits") or [],
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if actual_operation is not expected_operation:
+            state.record_event(RunEvent(
+                kind="operation.fallback",
+                attempt=state.attempt_number,
+                source="developer",
+                authority=EventAuthority.ADVISORY,
+                operation=actual_operation.value,
+                message=(
+                    f"{filepath}: accepted safe fallback from "
+                    f"{expected_operation.value} to {actual_operation.value}."
+                ),
+                details={
+                    "filepath": filepath,
+                    "requested": expected_operation.value,
+                    "returned": actual_operation.value,
+                },
+            ))
+
     # Captured here (before any write can raise) rather than after the write
     # loop below, so a self-diagnosis is never lost to an anchored-edit
     # exception on an unrelated file later in the same batch. Paired with
@@ -676,9 +996,79 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # failure is classified) - see kriya/workflow/attribution.py's
     # extract_self_diagnosed_files() and retry_strategy.py's signature-gated
     # consumption of this field.
-    self_diagnosed = extract_self_diagnosed_files(files, list(state.all_files_written))
-    if self_diagnosed:
-        state.last_self_diagnosis = (state.budgets.last_failure_signature, self_diagnosed)
+    self_diagnosed = extract_self_diagnosed_files(files, sorted(state.all_files_written))
+    state.last_self_diagnosis = (
+        (state.budgets.last_failure_signature, self_diagnosed)
+        if self_diagnosed else None
+    )
+
+    # "NO CHANGE NEEDED" is useful negative attribution evidence, not a
+    # successful repair. In a targeted attempt, rerunning compile/tests/runtime
+    # after every returned target was explicitly left untouched wastes an
+    # expensive gate and routes the same failure back to the same file. Turn it
+    # into a retry signal before any write or gate. If FIX ANALYSIS names a
+    # different known file, redirect there. Otherwise preserve a preceding
+    # deterministic locator; only genuinely ungrounded scope widens.
+    all_targets_rejected = all_results_are_no_change(files)
+    if state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected:
+        state.record_event(RunEvent(
+            kind="operation.no_change",
+            attempt=state.attempt_number,
+            source="developer",
+            authority=EventAuthority.ADVISORY,
+            operation="no_change_assessment",
+            message="Every targeted result rejected the selected file scope.",
+        ))
+        returned_targets = [f.get("filepath", "") for f in files if f.get("filepath")]
+        # An advisory NO CHANGE response may redirect a weak/judgment-based
+        # attribution, but it must not erase an authoritative deterministic
+        # locator.  Preserve only the files that were both locator-backed and
+        # actually in this response's target set; this cannot pull unrelated
+        # stale evidence forward.  A grounded alternate named by the response
+        # still wins because it is explicit current-turn root-cause evidence.
+        preserved_locator_files = _preserved_authoritative_locator_files(
+            state, returned_targets, self_diagnosed,
+        )
+        likely_files = list(self_diagnosed or preserved_locator_files)
+        _request_fallback_for_rejected_authoritative_target(
+            state, ctx, preserved_locator_files,
+        )
+        evidence = "\n\n".join(
+            f"{f.get('filepath', '(unknown file)')}: "
+            f"{f.get('analysis') or '(no FIX ANALYSIS supplied)'}" for f in files
+        )
+        if self_diagnosed:
+            attribution_message = (
+                f"Its own analysis instead names: {', '.join(self_diagnosed)}."
+            )
+        elif preserved_locator_files:
+            attribution_message = (
+                "The advisory response supplied no grounded alternate; retaining the "
+                "preceding authoritative locator for: "
+                f"{', '.join(preserved_locator_files)}."
+            )
+        else:
+            attribution_message = (
+                "No grounded alternate file or authoritative locator was available; "
+                "widen the next attempt to the full file set."
+            )
+        failure = Failure(
+            type="attribution_rejected",
+            message=(
+                "TARGET ATTRIBUTION REJECTED: the Developer reported NO CHANGE NEEDED "
+                f"for every targeted file ({', '.join(returned_targets)}). "
+                + attribution_message
+            ),
+            raw_output=evidence,
+            source="developer",
+            authority="advisory",
+            file_locations=[FileLocation(filepath=f) for f in likely_files],
+            likely_files=likely_files,
+            diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
+            attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
 
     # Read original file contents before overwriting (crucial for fallback mode diffs)
     for file_obj in files:
@@ -695,6 +1085,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
 
     # Write files to worktree sandbox
     state.files_written = []
+    staged_writes: List[StagedFileWrite] = []
     for file_obj in files:
         filepath = file_obj.get("filepath", "")
         content = file_obj.get("content", "")
@@ -829,6 +1220,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # already confirmed every search block matched real content -
             # this only fires when the edit(s) that matched changed nothing.
             if find_whole_response_no_op(edits):
+                preserved_locator_files = _preserved_authoritative_locator_files(
+                    state, [filepath], self_diagnosed,
+                )
+                retry_files = list(self_diagnosed or preserved_locator_files) or [filepath]
+                _request_fallback_for_rejected_authoritative_target(
+                    state, ctx, preserved_locator_files,
+                )
                 failure = Failure(
                     type="no_op_edit",
                     message=(
@@ -839,10 +1237,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         f"from your SEARCH text."
                     ),
                     raw_output="every edit in the response was a no-op (search == replace)",
-                    file_locations=[FileLocation(filepath=filepath)],
-                    likely_files=[filepath],
+                    source="developer",
+                    authority="advisory",
+                    file_locations=[FileLocation(filepath=f) for f in retry_files],
+                    likely_files=retry_files,
                     failed_content={filepath: orig_text},
                     attempted_edits=edits,
+                    diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
                     attempt=state.attempt_number,
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())
@@ -969,10 +1370,26 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # run for this same file still gets its own bounded veto.
                 state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            atomic_write_file(full_path, new_content)
+            staged_writes.append(StagedFileWrite(
+                target_path=full_path,
+                content=new_content,
+                base_path=current_file_path,
+                expected_base_revision=content_revision(orig_text),
+            ))
         else:
             if content is None:
                 continue
+
+            current_file_path = os.path.join(ctx.worktree_path, filepath)
+            if not os.path.exists(current_file_path):
+                workspace_file_path = os.path.join(ctx.workspace_path, filepath)
+                if os.path.exists(workspace_file_path):
+                    current_file_path = workspace_file_path
+            prior_content = ""
+            if os.path.exists(current_file_path):
+                with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
+                    prior_content = fh.read()
+
             structural_problem = find_structural_corruption(filepath, content)
             if structural_problem:
                 failure = Failure(
@@ -993,13 +1410,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # check against, to avoid the extra I/O on the common (no prior error)
             # case.
             if analysis:
-                current_file_path = os.path.join(ctx.worktree_path, filepath)
-                if not os.path.exists(current_file_path):
-                    current_file_path = os.path.join(ctx.workspace_path, filepath)
-                prior_content = ""
-                if os.path.exists(current_file_path):
-                    with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
-                        prior_content = fh.read()
                 diagnosis_mismatch = find_edits_ignoring_own_diagnosis(analysis, None, content, prior_content)
                 if diagnosis_mismatch:
                     bypass_reason = _diagnosis_mismatch_bypass_reason(state, ctx, filepath, content)
@@ -1029,54 +1439,74 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 else:
                     state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            atomic_write_file(full_path, content)
+            staged_writes.append(StagedFileWrite(
+                target_path=full_path,
+                content=content,
+                base_path=current_file_path,
+                expected_base_revision=content_revision(prior_content),
+            ))
 
+    # Nothing reaches the sandbox until every candidate has passed its cheap
+    # deterministic checks.  The batch commit re-checks all source revisions
+    # before the first write and rolls back already-written targets if an OS
+    # error or last-moment revision conflict interrupts the commit.
+    commit_revision_grounded_batch(staged_writes)
+    changed_files = [
+        os.path.relpath(staged.target_path, ctx.worktree_path)
+        for staged in staged_writes
+    ]
+    invalidated = invalidate_validated_revisions(
+        state.validated_file_revisions,
+        changed_files,
+        ctx.generation_dependencies,
+    )
+    if invalidated:
+        state.record_event(RunEvent(
+            kind="validation.invalidated",
+            attempt=state.attempt_number,
+            source="workflow",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                "Candidate changes invalidated compiled revisions for: "
+                + ", ".join(invalidated)
+            ),
+            details={"changed_files": changed_files, "invalidated_files": invalidated},
+        ))
+    for staged in staged_writes:
+        filepath = os.path.relpath(staged.target_path, ctx.worktree_path)
         state.files_written.append(filepath)
         state.all_files_written.add(filepath)
-        logger.info(f"Wrote generated/edited file to sandbox: {filepath}")
+        logger.info(f"Committed generated/edited candidate to sandbox: {filepath}")
 
-        if os.path.basename(filepath) == "pom.xml":
-            # Cheap, semantic pre-check for pom.xml specifically - see
-            # PolymorphicValidator.run_pom_validate()'s own docstring for the
-            # real incident this closes (a well-formed-but-wrong-root-element
-            # POM sailing straight past find_structural_corruption's XML
-            # well-formedness check above, only caught by paying for the full
-            # compile gate's own dependency resolution + javac invocation,
-            # after every OTHER file in the batch had already been written
-            # for nothing - nothing else in the project can possibly compile
-            # without a usable POM). Checked here, immediately after the
-            # write, not deferred to after the whole batch - pom.xml has no
-            # cross-file dependency on sibling files (unlike a proactive
-            # unresolved-symbol check on a .java file would), so there's no
-            # "sibling not written yet" false-positive risk in checking it
-            # this early, and this is exactly where the payoff is: the loop
-            # stops right here, before any of the other files this attempt
-            # would otherwise write are generated.
-            #
-            # Deliberately a fresh, minimal validator instance, not the one
-            # built later for the real compile gate - "mvn validate" never
-            # invokes javac or runs the application, so it doesn't need the
-            # goal-specific JAVA_HOME override that compilation/execution
-            # does (that override is resolved further below, after this
-            # point in the loop, specifically to close a real JDK-version
-            # mismatch gap for actual compilation - not applicable here).
-            from kriya.tools.validate import PolymorphicValidator
-            pom_validator = PolymorphicValidator(ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy)
-            pom_validate_res = pom_validator.run_pom_validate()
-            if not pom_validate_res["success"]:
-                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                    failed_pom_content = fh.read()
-                failure = Failure(
-                    type="pom_semantic_validation",
-                    message=f"POM VALIDATION FAILED for {filepath}: {pom_validate_res['output']}",
-                    raw_output=pom_validate_res["output"],
-                    file_locations=[FileLocation(filepath=filepath)],
-                    likely_files=[filepath],
-                    failed_content={filepath: failed_pom_content},
-                    attempt=state.attempt_number,
-                )
-                state.gate_outcomes.append(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
+    # A POM has no dependency on sibling source files, but it is now validated
+    # after the atomic candidate batch so no quality gate can observe a partial
+    # model response.  This remains much cheaper than dependency resolution and
+    # compilation, and a failed attempt is discarded by the worktree lifecycle.
+    pom_files = [
+        filepath for filepath in state.files_written
+        if os.path.basename(filepath) == "pom.xml"
+    ]
+    if pom_files:
+        pom_validator = PolymorphicValidator(
+            ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy,
+        )
+        pom_validate_res = pom_validator.run_pom_validate()
+        if not pom_validate_res["success"]:
+            filepath = pom_files[0]
+            full_path = os.path.join(ctx.worktree_path, filepath)
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                failed_pom_content = fh.read()
+            failure = Failure(
+                type="pom_semantic_validation",
+                message=f"POM VALIDATION FAILED for {filepath}: {pom_validate_res['output']}",
+                raw_output=pom_validate_res["output"],
+                file_locations=[FileLocation(filepath=filepath)],
+                likely_files=[filepath],
+                failed_content={filepath: failed_pom_content},
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
 
     if not resuming_developer_stage:
         # Completeness Check: catch the Developer Agent silently under-delivering
@@ -1176,6 +1606,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     active_code_context=active_code_context,
                     max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
                 )
+                for incident in getattr(self_correction_result, "incidents", []):
+                    state.record_event(RunEvent(
+                        kind="auxiliary.failed",
+                        attempt=state.attempt_number,
+                        source=incident["source"],
+                        authority=EventAuthority.AUXILIARY,
+                        message=incident["message"],
+                        failure_type=incident["type"],
+                        operation="repair_with_patch",
+                    ))
 
             if self_correction_result and self_correction_result.resolved:
                 logger.info(
@@ -1217,26 +1657,114 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "output": compile_res.get("output", "")
             })
 
+        # A successful real compile is the authority for cross-file signature,
+        # import, classpath, and build consistency. Record exact revisions only
+        # after that gate; heuristics never mark a file validated.
+        state.validated_file_revisions = {
+            filepath: read_file_revision(os.path.join(ctx.worktree_path, filepath))
+            for filepath in state.all_files_written
+        }
+
+        accepted_test_output: Optional[str] = None
+        runnable_test_files = find_runnable_test_files(state.all_files_written)
         target_test = extract_target_test(state.error_context, list(state.all_files_written))
         if target_test:
             logger.info(f"Quality Gates: Running targeted tests: {target_test}")
+            test_repair_result = None
             test_res = validator.run_tests(target_test=target_test)
-            if not test_res["success"]:
-                failure = _build_quality_gate_failure(
-                    "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
-                    test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+            if not output_confirms_nonzero_test_execution(test_res.get("output", "")):
+                # A targeted command that collected zero tests says the selector
+                # did not identify an executable test; it says nothing about the
+                # generated application.  Do not route this orchestration error to
+                # the Developer as a source repair.  Retry once with the runner's
+                # native suite discovery, which is the authoritative fallback.
+                logger.warning(
+                    "Quality Gates: Targeted test selection collected zero tests for "
+                    f"{target_test}; retrying the full suite before attributing a code failure."
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
-            state.gate_outcomes.append({
-                "attempt": state.attempt_number,
-                "type": "targeted_test",
-                "success": True,
-                "output": test_res.get("output", "")
-            })
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "test_selection",
+                    "success": False,
+                    "output": test_res.get("output", ""),
+                    "target_test": target_test,
+                    "recovered_by": "full_suite",
+                })
+                target_test = None
+                test_res = validator.run_tests()
+                if not test_res["success"]:
+                    failure = _build_quality_gate_failure(
+                        "test", f"TEST FAILURE:\n{test_res['output']}",
+                        test_res.get("output", ""), ctx.worktree_path,
+                        state.all_files_written, state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "test",
+                    "success": True,
+                    "output": test_res.get("output", ""),
+                    "selection_fallback": True,
+                })
+                accepted_test_output = test_res.get("output", "")
+
+            if target_test and not test_res["success"]:
+                if ctx.kernel.config.autonomy.self_correction_loop_enabled:
+                    from kriya.workflow.self_correction import run_repair_loop
+                    test_repair_result = await run_repair_loop(
+                        llm=ctx.developer.llm,
+                        worktree_path=ctx.worktree_path,
+                        validator=validator,
+                        files_in_scope=list(state.all_files_written),
+                        compile_error_output=test_res["output"],
+                        active_code_context=active_code_context,
+                        max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                        failure_type="targeted_test",
+                        target_test=target_test,
+                    )
+                    for incident in getattr(test_repair_result, "incidents", []):
+                        state.record_event(RunEvent(
+                            kind="auxiliary.failed", attempt=state.attempt_number,
+                            source=incident["source"], authority=EventAuthority.AUXILIARY,
+                            message=incident["message"], failure_type=incident["type"],
+                            operation="repair_with_patch",
+                        ))
+                if test_repair_result and test_repair_result.resolved:
+                    state.gate_outcomes.append({
+                        "attempt": state.attempt_number,
+                        "type": "targeted_test",
+                        "success": True,
+                        "output": test_repair_result.final_compile_output,
+                        "self_corrected": True,
+                        "self_correction_turns": test_repair_result.turns_used,
+                        "self_correction_transcript": test_repair_result.transcript,
+                    })
+                    test_res = {"success": True, "output": test_repair_result.final_compile_output}
+                else:
+                    failure = _build_quality_gate_failure(
+                        "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
+                        test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                    )
+                    if test_repair_result is not None:
+                        failure.self_correction_attempt = {
+                            "turns_used": test_repair_result.turns_used,
+                            "transcript": test_repair_result.transcript,
+                            "final_validation_output": test_repair_result.final_compile_output,
+                        }
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+            if target_test and not (test_repair_result and test_repair_result.resolved):
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "targeted_test",
+                    "success": True,
+                    "output": test_res.get("output", "")
+                })
+            if target_test:
+                accepted_test_output = test_res.get("output", "")
         else:
-            test_written = any("test" in f.lower() or "spec" in f.lower() for f in state.all_files_written)
-            if test_written:
+            if runnable_test_files:
                 logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                 test_res = validator.run_tests()
                 if not test_res["success"]:
@@ -1252,6 +1780,46 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "success": True,
                     "output": test_res.get("output", "")
                 })
+                accepted_test_output = test_res.get("output", "")
+
+        if accepted_test_output is None and goal_explicitly_requires_tests(ctx.goal):
+            failure = Failure(
+                type="test_acceptance",
+                message=(
+                    "TEST ACCEPTANCE FAILURE: the goal explicitly requires tests, "
+                    "but no runnable test module was generated. Package initializers, "
+                    "test-runner configuration, fixtures, and support files do not count as tests."
+                ),
+                raw_output="runnable_test_files=[]",
+                likely_files=sorted(state.all_files_written),
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        # The same acceptance rule applies whether extract_target_test() chose
+        # one test or the validator ran the suite. Test-selection strategy must
+        # never change an explicit user contract.
+        if (
+            accepted_test_output is not None
+            and goal_explicitly_requires_tests(ctx.goal)
+            and not output_confirms_nonzero_test_execution(accepted_test_output)
+        ):
+            failure = Failure(
+                type="test_acceptance",
+                message=(
+                    "TEST ACCEPTANCE FAILURE: the goal explicitly requires tests, "
+                    "but the configured test runner reported that zero tests executed."
+                ),
+                raw_output=accepted_test_output,
+                likely_files=[
+                    path for path in state.all_files_written
+                    if "test" in path.lower() or "spec" in path.lower()
+                ],
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
 
         # Quality Gates: Runtime Verification. Compiling and passing whatever tests
         # exist only proves the code is valid - it says nothing about whether it does

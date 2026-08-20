@@ -25,7 +25,7 @@ from kriya.workflow.attribution import _detect_missing_build_manifest, attribute
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
-    _normalize_error_for_repeat_detection,
+    build_failure_signature,
     classify_environment_failure,
     extract_error_search_terms,
 )
@@ -34,8 +34,21 @@ from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.state import GenerationState
 from kriya.workflow.worktree import remove_git_worktree
+from kriya.workflow.retry_policy import RetryAction, decide_for_state
 
 logger = logging.getLogger(__name__)
+
+
+_REPAIR_FEEDBACK_FAILURE_TYPES = {
+    "anchored_edit",
+    "attribution_rejected",
+    "diagnosis_mismatch",
+    "misdirected_edit",
+    "no_op_edit",
+    "operation_contract",
+    "structural_corruption",
+    "unaddressed_error_location",
+}
 
 
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
@@ -66,9 +79,22 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # way so everything downstream always reads one shape.
     failure: Failure = getattr(e, "failure", None) or Failure(
         type="general_error", message=raw_error_context, raw_output=raw_error_context,
+        source="orchestrator",
     )
+    previous_primary_failure = state.last_failure
+    previous_error_source_context = dict(state.last_error_source_context)
     failure.attempt = state.attempt_number
     failure.mode = attempt_mode
+    state.record_failure(failure, operation=attempt_mode)
+    failure_is_authoritative = getattr(failure, "authority", "authoritative") == "authoritative"
+    # Advisory Developer feedback is useful retry/attribution evidence, but
+    # may not replace the compiler/test/runtime failure the next repair prompt
+    # must solve. FailureLedger enforces the same rule for event history; keep
+    # GenerationState's active typed failure aligned with that authority model.
+    if failure_is_authoritative or previous_primary_failure is None:
+        state.last_failure = failure
+    else:
+        state.last_failure = previous_primary_failure
     fail_type = failure.type
     is_incomplete_generation = isinstance(e, IncompleteGenerationError)
 
@@ -91,7 +117,11 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # is the fallback signature - normalized first to strip Maven's
     # own always-different build-timing lines, or two occurrences
     # of the exact same failure would never compare equal.
-    state.environment_failure = classify_environment_failure(raw_error_context)
+    state.environment_failure = (
+        failure.message
+        if failure.type == "time_budget_exhausted"
+        else classify_environment_failure(raw_error_context)
+    )
 
     # Read fresh from the worktree's CURRENT pom.xml each attempt,
     # not cached once before the loop - the project's own
@@ -114,13 +144,31 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         exclude_coordinates=[own_project_coordinate] if own_project_coordinate else None,
         dependency_coordinates=worktree_dependency_coordinates,
     )
-    current_failure_signature = (
-        fail_type,
-        tuple(sorted(error_terms)) if error_terms else _normalize_error_for_repeat_detection(raw_error_context),
+    previous_failure_signature = state.budgets.last_failure_signature
+    current_failure_signature = build_failure_signature(fail_type, raw_error_context)
+    # Edit/protocol feedback is about the validator failure the attempted
+    # repair was already addressing, not a new defect family entitled to fresh
+    # retry budgets. Advisory failures follow the same rule structurally.
+    if previous_failure_signature is not None and (
+        not failure_is_authoritative or fail_type in _REPAIR_FEEDBACK_FAILURE_TYPES
+    ):
+        current_failure_signature = previous_failure_signature
+
+    failure_family_changed = (
+        previous_failure_signature is not None
+        and current_failure_signature != previous_failure_signature
     )
+    if failure_family_changed:
+        logger.info(
+            "Quality Gates surfaced a new failure family - resetting scoped "
+            "targeted/fallback budgets while preserving the global attempt bound."
+        )
+        state.budgets.targeted_retry_count = 0
+        state.budgets.fallback_targeted_attempted = False
+        state.budgets.fallback_targeted_requested = False
     state.error_context = raw_error_context
     if (
-        current_failure_signature == state.budgets.last_failure_signature
+        current_failure_signature == previous_failure_signature
         # unaddressed_error_location included alongside compile: it's a
         # cheaper, earlier-firing variant of the same signal (the model's
         # own edit didn't address the reported location) - repeating it
@@ -180,7 +228,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
 
         attribution = await attribute_failure(
             failure,
-            list(state.all_files_written),
+            sorted(state.all_files_written),
             state.budgets.retry_count,
             ctx.chain,
             ctx.developer.llm,
@@ -247,8 +295,13 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # actually implicated, not broadcast to every file in a
     # full-set batch (same scoping fix as prior_error_context
     # below).
-    state.last_error_source_context = _build_error_source_context(
+    fresh_error_source_context = _build_error_source_context(
         ctx.worktree_path, raw_error_context, state.all_files_written
+    )
+    state.last_error_source_context = (
+        fresh_error_source_context
+        if failure_is_authoritative or previous_primary_failure is None
+        else previous_error_source_context
     )
 
     # LSP grounding (Java only, silently skipped if jdtls isn't
@@ -280,7 +333,12 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 )
 
     if state.last_attempt_mode in ("targeted", "missing_files"):
-        state.budgets.targeted_retry_count += 1
+        if not failure_family_changed:
+            state.budgets.targeted_retry_count += 1
+        # When the narrow repair resolved its original defect and exposed a
+        # different validator family, the new family starts at targeted zero.
+        # The attempt_number ceiling already counts the model call; do not
+        # mischarge it to the unrelated full-set budget below.
     elif state.last_attempt_mode == "fallback_targeted":
         # Deliberately counts against NEITHER budget - it's a genuinely
         # separate, one-shot step (fallback_targeted_attempted, already
@@ -299,13 +357,14 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
         state.gate_outcomes.append(failure.to_gate_outcome())
 
-    budgets_exhausted = state.environment_failure is not None or (
-        state.budgets.retry_count >= ctx.max_retries and not (
-            (state.last_implicated_files or state.last_missing_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
-        )
+    retry_decision = decide_for_state(
+        state, max_retries=ctx.max_retries,
+        targeted_max_retries=ctx.targeted_max_retries,
+        has_fallback_model=bool(ctx.chain),
     )
+    budgets_exhausted = not retry_decision.should_continue
     if budgets_exhausted:
-        if state.environment_failure:
+        if retry_decision.action is RetryAction.STOP_ENVIRONMENT:
             logger.error(f"Quality Gates stopped early - {state.environment_failure}")
         else:
             logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
@@ -324,6 +383,6 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         # check), this can fire on the very first attempt, well before
         # retry_count reaches max_retries, and the loop would otherwise
         # continue straight into another pointless Developer retry.
-        if state.environment_failure:
+        if retry_decision.action is RetryAction.STOP_ENVIRONMENT:
             return True
     return False

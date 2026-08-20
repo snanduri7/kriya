@@ -1,12 +1,61 @@
 """Deterministic sanity checks applied to an anchored edit or full-file write before it reaches disk - whitespace-tolerant anchor matching and structural corruption detection. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization). The "which file does this edit concern" checks that used to live here (find_misdirected_edit_target, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line) moved to kriya/workflow/attribution.py on 2026-08-14 - see that module's own docstring taxonomy for why. What's left here is purely mechanical edit-safety: does the edit apply cleanly, and does the resulting file look structurally sound - never "which file"."""
 
 import logging
+import hashlib
 import os
 import re
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+class FileRevisionConflict(ValueError):
+    """The file changed after Kriya read it and before the staged write."""
+
+
+class BatchCommitError(RuntimeError):
+    """A staged batch could not be committed or completely rolled back."""
+
+
+@dataclass(frozen=True)
+class StagedFileWrite:
+    """One fully materialized candidate file and the revision it was based on.
+
+    ``base_path`` can differ from ``target_path`` when a sandbox file has not
+    been materialized yet and generation read the corresponding workspace file.
+    The source revision is still guarded before the candidate is committed.
+    """
+
+    target_path: str
+    content: str
+    base_path: str
+    expected_base_revision: str
+
+
+def content_revision(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def read_file_revision(full_path: str) -> str:
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+            return content_revision(fh.read())
+    except FileNotFoundError:
+        return content_revision("")
+
+
+def commit_revision_grounded_file(full_path: str, content: str, expected_revision: str) -> str:
+    """Atomically commit a fully staged file only if its base is unchanged."""
+    actual_revision = read_file_revision(full_path)
+    if actual_revision != expected_revision:
+        raise FileRevisionConflict(
+            f"Refusing stale write to '{full_path}': expected revision "
+            f"{expected_revision[:12]}, found {actual_revision[:12]}. Re-read the file and retry."
+        )
+    atomic_write_file(full_path, content)
+    return content_revision(content)
 
 
 def atomic_write_file(full_path: str, content: str) -> None:
@@ -44,6 +93,77 @@ def atomic_write_file(full_path: str, content: str) -> None:
     with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(content)
     os.replace(tmp_path, full_path)
+
+
+def _atomic_write_bytes(full_path: str, content: bytes) -> None:
+    tmp_path = f"{full_path}.kriya-rollback-{os.getpid()}"
+    with open(tmp_path, "wb") as fh:
+        fh.write(content)
+    os.replace(tmp_path, full_path)
+
+
+def commit_revision_grounded_batch(writes: Iterable[StagedFileWrite]) -> Dict[str, str]:
+    """Commit a candidate set only after every source revision is still current.
+
+    The function performs a full preflight before the first write, repeats each
+    guard immediately before its write to narrow race windows, and restores every
+    already-written target if a later write fails.  Callers therefore never expose
+    a deliberately half-committed model response to compilation or test gates.
+    """
+    staged = list(writes)
+    targets = [item.target_path for item in staged]
+    if len(set(targets)) != len(targets):
+        raise BatchCommitError("A candidate batch contains duplicate target paths.")
+
+    for item in staged:
+        actual = read_file_revision(item.base_path)
+        if actual != item.expected_base_revision:
+            raise FileRevisionConflict(
+                f"Refusing stale batch write to '{item.target_path}': base "
+                f"'{item.base_path}' expected revision "
+                f"{item.expected_base_revision[:12]}, found {actual[:12]}."
+            )
+
+    snapshots: Dict[str, Optional[bytes]] = {}
+    committed: List[str] = []
+    try:
+        for item in staged:
+            actual = read_file_revision(item.base_path)
+            if actual != item.expected_base_revision:
+                raise FileRevisionConflict(
+                    f"Refusing stale batch write to '{item.target_path}': base "
+                    f"changed during commit."
+                )
+            try:
+                with open(item.target_path, "rb") as fh:
+                    snapshots[item.target_path] = fh.read()
+            except FileNotFoundError:
+                snapshots[item.target_path] = None
+            os.makedirs(os.path.dirname(item.target_path), exist_ok=True)
+            atomic_write_file(item.target_path, item.content)
+            committed.append(item.target_path)
+    except Exception as commit_error:
+        rollback_errors = []
+        for target_path in reversed(committed):
+            try:
+                original = snapshots[target_path]
+                if original is None:
+                    os.unlink(target_path)
+                else:
+                    _atomic_write_bytes(target_path, original)
+            except Exception as rollback_error:  # pragma: no cover - rare OS failure
+                rollback_errors.append(f"{target_path}: {rollback_error}")
+        if rollback_errors:
+            raise BatchCommitError(
+                f"Candidate commit failed ({commit_error}); rollback also failed for: "
+                + "; ".join(rollback_errors)
+            ) from commit_error
+        raise
+
+    return {
+        item.target_path: content_revision(item.content)
+        for item in staged
+    }
 
 
 def normalize_whitespace(text: str) -> str:

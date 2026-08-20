@@ -18,17 +18,70 @@ from kriya.workflow.failure import Failure
 logger = logging.getLogger(__name__)
 
 
+_NON_EXECUTABLE_PYTEST_FILES = {"__init__.py", "conftest.py"}
+_PYTHON_TEST_FILE_RE = re.compile(r"^(?:test_.+|.+_test)\.py$")
+_JAVA_TEST_FILE_RE = re.compile(
+    r"^(?:Test.+|.+(?:Test|Tests|TestCase))\.(?:java|kt|kts|groovy)$",
+)
+_RUBY_TEST_FILE_RE = re.compile(r"^(?:test_.+|.+_(?:test|spec))\.rb$")
+
+
+def is_runnable_test_file(filepath: str) -> bool:
+    """Return whether ``filepath`` names a test module a supported runner can execute.
+
+    Directory names such as ``tests/`` and ``src/test/`` are classification
+    context, not proof that every file below them is itself a test.  In particular,
+    package initializers, pytest configuration, fixtures, and helper modules can all
+    live there.  Passing one of those files as pytest's targeted argument produces a
+    valid zero-collection result, which is a test-selection error rather than a code
+    failure.
+
+    The filename conventions mirror the runners Kriya actually invokes: pytest,
+    Maven Surefire/Gradle's common Java test names, and RSpec/minitest.  Unknown or
+    unusually named tests remain covered by the full-suite fallback instead of being
+    guessed as a target.
+    """
+    normalized = (filepath or "").replace("\\", "/")
+    basename = normalized.rsplit("/", 1)[-1]
+    lowered = basename.lower()
+    if lowered in _NON_EXECUTABLE_PYTEST_FILES:
+        return False
+    return bool(
+        _PYTHON_TEST_FILE_RE.match(basename)
+        or _JAVA_TEST_FILE_RE.match(basename)
+        or _RUBY_TEST_FILE_RE.match(basename)
+    )
+
+
+def find_runnable_test_files(files_written: Iterable[str]) -> List[str]:
+    """Return deterministic, deduplicated executable test candidates."""
+    return sorted({path for path in files_written if is_runnable_test_file(path)})
+
+
 def extract_target_test(error_context: str, files_written: List[str]) -> Optional[str]:
-    for f in files_written:
-        if "test" in f.lower() or "spec" in f.lower():
-            return f
-    if error_context:
-        matches = re.findall(r'(?:test_\w+|Test\w+)', error_context)
-        if matches:
-            exclude = {"test", "testing", "tests", "Test"}
-            valid = [m for m in matches if m not in exclude]
-            if valid:
-                return valid[0]
+    """Choose a target only when deterministic evidence identifies one test file.
+
+    A failure that names exactly one known runnable test wins.  Otherwise a single
+    candidate is unambiguous.  Multiple unreferenced candidates deliberately return
+    ``None`` so the caller runs the suite; choosing the first element of a set made
+    this decision nondeterministic and selected ``tests/__init__.py`` in the
+    python_task_tracker live incident (2026-08-20).
+    """
+    candidates = find_runnable_test_files(files_written)
+    if not candidates:
+        return None
+
+    error_lower = (error_context or "").replace("\\", "/").lower()
+    referenced = []
+    for candidate in candidates:
+        normalized = candidate.replace("\\", "/")
+        basename = normalized.rsplit("/", 1)[-1]
+        if normalized.lower() in error_lower or basename.lower() in error_lower:
+            referenced.append(candidate)
+    if len(referenced) == 1:
+        return referenced[0]
+    if len(candidates) == 1:
+        return candidates[0]
     return None
 
 
@@ -342,6 +395,35 @@ _MIN_PLAUSIBLE_CODE_CHECK: Dict[str, Callable[[str], bool]] = {
 }
 
 
+def _is_complete_maven_pom(content: str) -> bool:
+    """A Maven POM is a standalone document rooted at ``project``.
+
+    XML well-formedness alone is insufficient here: Planner prose often uses
+    valid XML fragments (for example ``<dependencies>...</dependencies>``) to
+    illustrate one step.  Such a fragment is useful documentation, but it is
+    not complete content for the conventional Maven artifact ``pom.xml``.
+    Namespace attributes are intentionally ignored by comparing the local
+    name; both minimal test fixtures and normal namespaced Maven POMs remain
+    valid.
+    """
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        return False
+    return root.tag.rsplit("}", 1)[-1] == "project"
+
+
+# Conventional artifact name -> standalone-file contract.  This layer is
+# deliberately separate from the extension parser above: extension checks ask
+# whether a block is syntactically valid source, while these checks ask whether
+# it is a complete instance of the specific standard artifact the Architect
+# requested.  Add only ecosystem conventions with an objective root/container
+# contract; never project class names, dependency names, or use-case strings.
+_STANDALONE_ARTIFACT_CHECK: Dict[str, Callable[[str], bool]] = {
+    "pom.xml": _is_complete_maven_pom,
+}
+
+
 # Coarse "did the Planner call clearly fail" bar - not a quality check, the
 # same kind of cheap sanity gate _MIN_PLAUSIBLE_CODE_CHECK above applies to a
 # single fenced block, just applied to the whole plan. Real, reproduced
@@ -409,6 +491,10 @@ def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -
     the target language is rejected rather than returned, so a filename
     mention followed by an unrelated snippet (e.g. a run-command example) or
     genuinely broken content doesn't get treated as that file's real content.
+    Standard artifacts with an objective whole-document contract are then
+    checked by _STANDALONE_ARTIFACT_CHECK.  This distinguishes a syntactically
+    valid documentation fragment from a complete reusable file (for example a
+    ``<dependencies>`` fragment versus a Maven ``<project>`` document).
 
     Otherwise deliberately does nothing more than this extraction - whether/
     how the result gets used (and re-verified through the exact same
@@ -461,6 +547,13 @@ def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -
                     f"Rejected a Planner code block for '{found_path}': content doesn't look "
                     f"like valid {ext} source - likely an unrelated snippet (e.g. a run-command "
                     "example) near the file's heading, or genuinely broken content."
+                )
+                continue
+            artifact_check = _STANDALONE_ARTIFACT_CHECK.get(os.path.basename(found_path))
+            if artifact_check and not artifact_check(content):
+                logger.debug(
+                    f"Rejected a Planner code block for '{found_path}': content is a valid "
+                    "snippet but not a complete standalone instance of that standard artifact."
                 )
                 continue
             results[found_path] = content

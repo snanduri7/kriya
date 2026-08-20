@@ -14,6 +14,13 @@ llm:
   # identical review block 250 times before hitting the token ceiling).
   reviewer_temperature: 0.7
   max_tokens: 16384
+  capabilities:
+    native_tool_calls: true
+    json_mode: true
+    reliable_multiline_json: false
+    streaming: true
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: "small_native_tools"
   extra_body:
     options:
       num_ctx: 32768        # Sets a 32K context window so the code doesn't truncate
@@ -28,6 +35,10 @@ paths:
   skills: "./skills"
   memory: "./memory"
   logs: "./logs"
+
+skills:
+  load_global: true
+  load_cwd: true
 
 logging:
   level: "INFO"
@@ -84,3 +95,9 @@ autonomy:
     - ".*credentials.*"
     - ".*password.*"
   risk_threshold_lines: 500
+  # Leave null for ordinary unbounded CLI runs. A harness with an outer timeout
+  # should set this to the same or a slightly smaller value so Kriya can reserve
+  # validation time and stop before beginning a doomed multi-file model pass.
+  generation_time_budget_seconds: null
+  generation_gate_reserve_seconds: 120
+  generation_seconds_per_file_estimate: 90

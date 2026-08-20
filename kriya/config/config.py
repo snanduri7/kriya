@@ -7,6 +7,17 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+
+class ModelCapabilities(BaseModel):
+    """Measured local-model protocol capabilities, never inferred from API shape."""
+
+    native_tool_calls: bool = Field(default=True)
+    json_mode: bool = Field(default=True)
+    reliable_multiline_json: bool = Field(default=False)
+    streaming: bool = Field(default=True)
+    max_tool_argument_chars: int = Field(default=8192, ge=256)
+    preferred_edit_protocol: str = Field(default="small_native_tools")
+
 class LLMConfig(BaseModel):
     provider: str = Field(default="openai")
     model: str = Field(default="llama3")
@@ -51,6 +62,7 @@ class LLMConfig(BaseModel):
     # which would silently require re-specifying model/base_url/max_tokens/etc. too
     # just to change one sampling parameter.
     reviewer_temperature: Optional[float] = Field(default=None)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
@@ -60,6 +72,11 @@ class PathsConfig(BaseModel):
     skills: str = Field(default="./skills")
     memory: str = Field(default="./memory")
     logs: str = Field(default="./logs")
+
+
+class SkillsConfig(BaseModel):
+    load_global: bool = Field(default=True)
+    load_cwd: bool = Field(default=True)
 
 class LoggingConfig(BaseModel):
     level: str = Field(default="INFO")
@@ -127,6 +144,13 @@ class AutonomyConfig(BaseModel):
     # effect when a real isolated worktree sandbox exists (see best_of_n.py's own
     # guard) - never risks writing a discarded candidate's files into the real project.
     best_of_n_first_attempt: int = Field(default=1)
+    # Optional end-to-end generation deadline. None preserves unbounded normal
+    # CLI behavior; eval/demo harnesses with an outer timeout should set this to
+    # the same or a slightly smaller value so Kriya can stop cleanly instead of
+    # starting a model pass the harness will kill mid-generation.
+    generation_time_budget_seconds: Optional[int] = Field(default=None, ge=1)
+    generation_gate_reserve_seconds: int = Field(default=120, ge=0)
+    generation_seconds_per_file_estimate: int = Field(default=90, ge=1)
 
 class SearchConfig(BaseModel):
     # Empty by default - live lookup stays fully inert unless a project explicitly
@@ -141,6 +165,9 @@ class SearchConfig(BaseModel):
     # search backend) - trying several in order meaningfully improves the odds of
     # actually finding something usable, which is the whole point of the feature.
     top_k: int = Field(default=3)
+    # Extra identifiers the project owner explicitly declares public. Unknown
+    # terms never receive unattended auto-approval.
+    public_terms: List[str] = Field(default_factory=list)
 
 class FallbackModelConfig(BaseModel):
     model: str
@@ -148,6 +175,7 @@ class FallbackModelConfig(BaseModel):
     api_key: str = Field(default="local-key")
     temperature: float = Field(default=0.2)
     max_tokens: int = Field(default=4096)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     reasoning: bool = Field(default=False)
     context_window: int = Field(default=32768)
     knowledge_cutoff: str = Field(default="2023-12-01")
@@ -219,6 +247,7 @@ class AppConfig(BaseModel):
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     mcp: Dict[str, MCPServerConfig] = Field(default_factory=dict)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)

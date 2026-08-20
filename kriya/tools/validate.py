@@ -2,7 +2,6 @@ import logging
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -10,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+from kriya.tools.process import ProcessController
 
 logger = logging.getLogger(__name__)
 
@@ -273,53 +273,9 @@ class PolymorphicValidator:
             env = dict(env) if env is not None else dict(os.environ)
             env["JAVA_HOME"] = self.java_home_override
             env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
-        # start_new_session=True (POSIX setsid) puts the child in its own
-        # process group - required for the timeout-kill below to actually
-        # work for a command like `mvn exec:exec`, which forks its own
-        # separate `java` child process to run the app (that's the entire
-        # point of exec:exec over exec:java). Confirmed live, 2026-08-03:
-        # subprocess.run()'s own built-in timeout handling only kills the
-        # DIRECT child (mvn) - the grandchild java process it forked
-        # survived the kill, kept an embedded Qpid broker bound to its port
-        # for over an hour, and silently broke a LATER, completely
-        # unrelated validation run that happened to need the same port.
-        # Killing the whole process group on timeout is the only way to
-        # actually terminate what a command like this really started.
-        process = subprocess.Popen(
-            cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env=env, preexec_fn=preexec_fn, start_new_session=True,
-        )
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-            return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr, "timeout": False}
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass  # already exited between the timeout firing and this kill
-            try:
-                # Reap the process, collect whatever output exists. SIGKILL
-                # doesn't guarantee IMMEDIATE death - a child stuck in
-                # uninterruptible I/O sleep (D-state, real under slow/
-                # networked storage) can't be reaped until that I/O
-                # completes, so this call needs its own timeout too or it
-                # can hang indefinitely, defeating the whole point of the
-                # outer timeout (2026-08-12 SME review).
-                stdout, stderr = process.communicate(timeout=10)
-            except subprocess.TimeoutExpired as reap_ex:
-                # .output/.stderr are populated even on a second timeout -
-                # return whatever was captured rather than hang forever.
-                stdout = reap_ex.output or ""
-                stderr = (reap_ex.stderr or "") + (
-                    "\n[REAP TIMEOUT] Process could not be reaped after SIGKILL "
-                    "(possibly stuck in uninterruptible I/O)."
-                )
-            return {
-                "returncode": -1,
-                "stdout": stdout,
-                "stderr": stderr + f"\n[TIMEOUT] Command timed out after {timeout} seconds.",
-                "timeout": True,
-            }
+        return ProcessController().run(
+            cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn,
+        ).to_dict()
 
     def run_pom_validate(self) -> Dict[str, Any]:
         """Cheap, semantic-level pre-check for a Maven pom.xml - catches a

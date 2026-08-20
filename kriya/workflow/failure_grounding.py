@@ -1,16 +1,11 @@
 """Deterministic error-text parsing that grounds a Quality Gate failure in real source locations/files before it reaches the retry loop or the model - environment-failure classification, error-location/search-term extraction, and Failure construction. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
 import hashlib
 import logging
 import os
 import re
-import shutil
-import subprocess
-import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
 from kriya.workflow.failure import Failure, FileLocation
 
 logger = logging.getLogger(__name__)
@@ -47,6 +42,28 @@ _ERROR_UNRESOLVED_IMPORT_PATTERN = re.compile(
 _BUILD_TIMING_NOISE_PATTERNS = (
     re.compile(r"^\[INFO\] Total time:.*$", re.MULTILINE),
     re.compile(r"^\[INFO\] Finished at:.*$", re.MULTILINE),
+)
+
+
+_BUILD_WRAPPER_COORDINATES = {
+    "org.apache.maven.plugins:maven-compiler-plugin",
+    "org.apache.maven.plugins:maven-surefire-plugin",
+    "org.codehaus.mojo:exec-maven-plugin",
+}
+
+_JAVAC_DIAGNOSTIC_PATTERN = re.compile(
+    r"\.java:\[\d+,\d+\]\s*([^\n]+)"
+)
+_JAVAC_DETAIL_PATTERN = re.compile(
+    r"^[ \t]*(?:\[ERROR\][ \t]*)?"
+    r"(symbol|location|required|found|reason):\s*([^\n]+)$",
+    re.MULTILINE,
+)
+_EXCEPTION_CAUSE_PATTERN = re.compile(
+    r"^[ \t]*(?:\[ERROR\][ \t]*)?"
+    r"(?:Exception in thread \"[^\"]+\"\s+|Caused by:\s*)?"
+    r"(?:class\s+)?([\w.$]+(?:Exception|Error))(?::\s*(.*))?$",
+    re.MULTILINE,
 )
 
 
@@ -129,14 +146,48 @@ def classify_environment_failure(error_text: str) -> Optional[str]:
 
 def _normalize_error_for_repeat_detection(error_text: str) -> str:
     """Strips known non-deterministic per-run noise (Maven's own build-timing
-    lines) before error text is used as a repeated-failure signature - see the
-    fallback branch of the current_failure_signature computation below, used
-    only when extract_error_search_terms found no stable coordinate to key
-    on instead."""
+    lines) before unstructured error text is hashed as a repeated-failure
+    signature."""
     normalized = error_text
     for pattern in _BUILD_TIMING_NOISE_PATTERNS:
         normalized = pattern.sub("", normalized)
     return normalized
+
+
+def build_failure_signature(failure_type: str, error_text: str) -> Tuple[str, Any]:
+    """Content-local identity for retry budgets and repeated-failure checks.
+
+    Public artifact coordinates are intentionally not the identity: Maven's
+    compiler/exec plugin wrapper appears around many unrelated source/runtime
+    defects and previously collapsed them into one run-global failure. Prefer
+    stable validator evidence with dynamic line numbers removed; hash the
+    normalized local text only when no structured diagnostic is available.
+    """
+    locations = tuple(sorted({name for name, _ in extract_error_source_locations(error_text)}))
+    javac_diagnostics = tuple(sorted({
+        " ".join(message.split())
+        for message in _JAVAC_DIAGNOSTIC_PATTERN.findall(error_text)
+    }))
+    if javac_diagnostics:
+        javac_details = tuple(sorted({
+            (label, " ".join(value.split()))
+            for label, value in _JAVAC_DETAIL_PATTERN.findall(error_text)
+        }))
+        return failure_type, (locations, "javac", javac_diagnostics, javac_details)
+
+    exception_causes = [
+        (exception_type, " ".join((message or "").split()))
+        for exception_type, message in _EXCEPTION_CAUSE_PATTERN.findall(error_text)
+    ]
+    if exception_causes:
+        # The deepest cause is normally last, after build-tool wrapper
+        # exceptions. Keep locations by basename but not line number so an
+        # edit that shifts a stack frame by one line remains the same failure.
+        return failure_type, (locations, "exception", exception_causes[-1])
+
+    normalized = _normalize_error_for_repeat_detection(error_text)
+    digest = hashlib.sha256(normalized.encode("utf-8", errors="replace")).hexdigest()
+    return failure_type, (locations, "digest", digest)
 
 
 def extract_error_search_terms(
@@ -164,10 +215,10 @@ def extract_error_search_terms(
     that can never find anything useful. Callers pass the workspace's own
     pom.xml coordinate (get_pom_own_coordinate()) here.
 
-    dependency_coordinates covers a DIFFERENT, previously-unhandled failure
-    shape - confirmed live during golden-use-case validation as a real,
-    generalizable gap, not library-specific: "wrong import path within a
-    library the project already, legitimately depends on" (e.g. writing
+    dependency_coordinates covers two failure shapes without widening the
+    egress boundary. The first was confirmed live during golden-use-case
+    validation: "wrong import path within a library the project already,
+    legitimately depends on" (e.g. writing
     `import org.apache.ignite.cache.IgniteCache;` when the class actually
     lives at the top-level `org.apache.ignite` package). Unlike a missing-
     dependency error, javac's diagnostic for this has no groupId:artifactId
@@ -180,14 +231,23 @@ def extract_error_search_terms(
     of the caller-supplied dependency_coordinates - i.e. only for a class
     that demonstrably belongs to a library already declared as a real
     project dependency, never an arbitrary/private symbol name. Pass
-    get_pom_dependencies() here. Renders as "{matched coordinate} {symbol}",
-    e.g. "org.apache.ignite:ignite-core IgniteCache", which _resolve_via_web_
-    lookup() then suffixes with " example" like every other term."""
+    get_pom_dependencies() here. The second is an exception whose package
+    begins with a declared dependency's groupId. Only the already-declared
+    coordinate is emitted for that case—not the exception class or message—so
+    an application stack locator can suppress an irrelevant Maven wrapper
+    without sending any project diagnostic text. The outbound public-catalog
+    gate still decides whether that coordinate may leave the machine."""
     seen = set()
     terms = []
     exclude = set(exclude_coordinates) if exclude_coordinates else set()
+    has_source_evidence = bool(extract_error_source_locations(error_text))
     for m in _ERROR_COORDINATE_PATTERN.finditer(error_text):
         term = f"{m.group(1)}:{m.group(2)}"
+        if term in _BUILD_WRAPPER_COORDINATES and has_source_evidence:
+            # A real source/stack locator proves the Maven plugin is only the
+            # execution wrapper around application evidence. Searching for the
+            # wrapper is safe but irrelevant and wastes the one lookup shot.
+            continue
         if term not in seen and term not in exclude:
             seen.add(term)
             terms.append(term)
@@ -198,6 +258,16 @@ def extract_error_search_terms(
                 group_id = coord.split(":", 1)[0]
                 if wrong_package == group_id or wrong_package.startswith(group_id + "."):
                     term = f"{coord} {symbol}"
+                    if term not in seen and term not in exclude:
+                        seen.add(term)
+                        terms.append(term)
+                    break
+        for exception_type, _message in _EXCEPTION_CAUSE_PATTERN.findall(error_text):
+            exception_package, _, _exception_name = exception_type.rpartition(".")
+            for coord in dependency_coordinates:
+                group_id = coord.split(":", 1)[0]
+                if exception_package == group_id or exception_package.startswith(group_id + "."):
+                    term = coord
                     if term not in seen and term not in exclude:
                         seen.add(term)
                         terms.append(term)
@@ -495,6 +565,15 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
     implicated = []
     for filepath in known_files:
         basename = os.path.basename(filepath)
-        if basename and (basename in scan_text or filepath in scan_text):
+        # Filename-token boundaries matter: ``App.java`` is not evidence for
+        # that file when the validator actually named ``IntegrationApp.java``.
+        # A plain substring check used to fabricate precisely that attribution.
+        path_named = bool(re.search(
+            rf"(?<![\w.-]){re.escape(filepath)}(?![\w.-])", scan_text,
+        ))
+        basename_named = bool(basename and re.search(
+            rf"(?<![\w.-]){re.escape(basename)}(?![\w.-])", scan_text,
+        ))
+        if path_named or basename_named:
             implicated.append(filepath)
     return implicated

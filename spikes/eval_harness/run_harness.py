@@ -120,7 +120,11 @@ def _init_git_repo(path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
-def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url, fallback_model, search_base_url, self_correction, best_of_n, log_level, llm_temperature, reasoning_effort, presence_penalty):
+def _write_config(
+    workspace_path, shared_logs_dir, model, embed_model, base_url,
+    fallback_model, search_base_url, self_correction, best_of_n, log_level,
+    llm_temperature, reasoning_effort, presence_penalty, timeout_per_goal,
+):
     # paths.skills/memory stay relative (resolved against this config file's own
     # directory, i.e. per-goal-isolated - see CLAUDE.md's config-resolution note)
     # so one goal's skill/RAG state can never leak into another's. paths.logs is
@@ -165,6 +169,11 @@ def _write_config(workspace_path, shared_logs_dir, model, embed_model, base_url,
             "run_verification_enabled": True,
             "web_lookup_enabled": True,
             "web_lookup_auto_approve": True,
+            # The subprocess timeout is a hard external kill and cannot persist a
+            # final failure/trace.  Give Kriya an internal deadline at 80% so it can
+            # decline a generation pass that cannot finish and exit cleanly with
+            # enough time left for gates, review, and trace persistence.
+            "generation_time_budget_seconds": max(1, int(timeout_per_goal * 0.8)),
             # Off by default (matches AutonomyConfig's own default) unless
             # --self-correction is passed - lets a batch be run twice, flag
             # on vs. off, for a real before/after comparison of the new
@@ -309,6 +318,12 @@ def main():
     print(f"Self-correction loop: {'ON' if args.self_correction else 'off'}")
     print(f"Best-of-N (first attempt): {args.best_of_n}")
     print(f"Log level: {args.log_level}")
+    print(f"Harness source: {Path(__file__).resolve()}")
+    internal_deadline = max(1, int(args.timeout_per_goal * 0.8))
+    print(
+        f"Internal Kriya generation deadline: {internal_deadline}s "
+        "(80% of external timeout)"
+    )
     print(f"Goals: {[g.id for g in goals]}\n")
 
     summary_lines = [
@@ -319,6 +334,9 @@ def main():
         f"Self-correction loop: {'ON' if args.self_correction else 'off'}",
         f"Best-of-N (first attempt): {args.best_of_n}",
         f"Log level: {args.log_level}",
+        f"Harness source: {Path(__file__).resolve()}",
+        f"Internal Kriya generation deadline: {internal_deadline}s "
+        "(80% of external timeout)",
         f"traces.db: {os.path.join(logs_dir, 'traces.db')}",
         "",
     ]
@@ -331,6 +349,7 @@ def main():
             goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model,
             args.search_base_url, args.self_correction, args.best_of_n, args.log_level,
             args.llm_temperature, args.reasoning_effort, args.presence_penalty,
+            args.timeout_per_goal,
         )
 
         print(f"--- Running goal '{goal.id}' (timeout {args.timeout_per_goal}s) ---")

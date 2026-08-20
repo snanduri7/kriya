@@ -14,6 +14,7 @@ from kriya.agents.agent import (
 )
 from kriya.config import AppConfig, FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
+from kriya.workflow.operations import CodeOperation
 
 
 @pytest.mark.asyncio
@@ -662,6 +663,40 @@ def test_split_fix_analysis_edit_falls_back_when_no_markers_at_all():
     assert edits is None
     assert content == text
 
+def test_split_fix_analysis_edit_does_not_treat_prose_substrings_as_markers():
+    text = (
+        "FIX ANALYSIS: I will search: for the invalid import and replace: it.\n"
+        "FILE CONTENT:\npublic class App {}"
+    )
+
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+
+    assert edits is None
+    assert content == "public class App {}"
+
+@pytest.mark.asyncio
+async def test_repair_generation_fails_closed_on_dangling_search_marker():
+    """The exact malformed envelope that corrupted python_task_tracker source."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: pytest did not discover this file.\n"
+        "SEARCH:\n# package marker\n"
+    ))
+    dev = DeveloperAgent("developer", llm)
+
+    files = await dev.run_generation(
+        "Fix the test failure", "Design", "Existing code",
+        known_target_files=["tests/__init__.py"],
+        prior_error_context="collected 0 items",
+        files_with_current_content={"tests/__init__.py"},
+        operation_by_file={"tests/__init__.py": CodeOperation.REPAIR_WITH_PATCH},
+    )
+
+    assert files[0]["content"] is None
+    assert not files[0].get("edits")
+    assert "incomplete repair markers" in files[0]["protocol_error"]
+
 def test_split_fix_analysis_edit_truncates_redundant_trailing_file_content():
     """Regression test for a real bug found live, 2026-08-04: a model asked
     to prefer an anchored edit sometimes ALSO appends a redundant, unasked-
@@ -1039,6 +1074,21 @@ async def test_fill_missing_content_repeats_verification_contract_reminder_at_en
     assert reminder_pos > only_this_file_pos
 
 @pytest.mark.asyncio
+async def test_fill_missing_content_does_not_add_entrypoint_reminder_to_test_support_file():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="# package marker\n")
+    dev = DeveloperAgent("developer", llm)
+
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["tests/__init__.py"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "this entrypoint must end by printing" not in file_prompt
+
+@pytest.mark.asyncio
 async def test_fill_missing_content_repeats_skill_conventions_reminder_at_end():
     """Regression test for the same shape one section earlier (2026-08-14):
     skills/binary-wire-protocol is confirmed LOADED and injected into
@@ -1375,6 +1425,77 @@ async def test_fill_missing_content_prefers_anchored_edit_when_source_context_kn
         "search": "public class Person {",
         "replace": "public class Person implements java.io.Serializable {",
     }]
+
+
+@pytest.mark.asyncio
+async def test_developer_explicit_patch_operation_overrides_locator_heuristic():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: update the stale value.\n"
+        "SEARCH:\noldValue\nREPLACE:\nnewValue"
+    ))
+    dev = DeveloperAgent("developer", llm)
+
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        prior_error_context="runtime result is stale",
+        operation_by_file={"App.java": CodeOperation.REPAIR_WITH_PATCH},
+    )
+
+    system_prompt, file_prompt = llm.complete.await_args.args[:2]
+    assert "MODE: REPAIR" in system_prompt
+    assert "SEARCH:" in file_prompt
+    assert files[0]["content"] is None
+    assert files[0]["edits"] == [{"search": "oldValue", "replace": "newValue"}]
+
+
+@pytest.mark.asyncio
+async def test_developer_existing_file_initial_operation_has_unambiguous_full_contract():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="class App { int value = 2; }")
+    dev = DeveloperAgent("developer", llm)
+
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["App.java"],
+        operation_by_file={"App.java": CodeOperation.REPAIR_WITH_FULL_FILE},
+    )
+
+    system_prompt, file_prompt = llm.complete.await_args.args[:2]
+    assert "MODE: REPAIR_WITH_FULL_FILE" in system_prompt
+    assert "FIX ANALYSIS:" not in file_prompt
+    assert "Return the complete replacement content" in file_prompt
+    assert files[0]["content"] == "class App { int value = 2; }"
+
+
+@pytest.mark.asyncio
+async def test_developer_honors_model_full_file_and_non_streaming_capabilities():
+    cfg = AppConfig()
+    cfg.llm.capabilities.streaming = False
+    cfg.llm.capabilities.preferred_edit_protocol = "full_file"
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: replace the stale implementation.\n"
+        "FILE CONTENT:\nclass App { int value = 2; }"
+    ))
+    dev = DeveloperAgent("developer", llm)
+
+    files = await dev.run_generation(
+        "Task", "Design", "Existing code",
+        stream_callback=lambda _token: None,
+        known_target_files=["App.java"],
+        prior_error_context="stale value",
+        operation_by_file={"App.java": CodeOperation.REPAIR_WITH_PATCH},
+    )
+
+    system_prompt = llm.complete.await_args.args[0]
+    assert "FILE CONTENT:" in system_prompt
+    assert "SEARCH:" not in system_prompt
+    assert llm.complete.await_args.kwargs["stream_callback"] is None
+    assert files[0]["content"] == "class App { int value = 2; }"
 
 @pytest.mark.asyncio
 async def test_fill_missing_content_no_anchored_edit_preference_without_source_context():

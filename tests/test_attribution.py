@@ -6,6 +6,7 @@ import pytest
 from kriya.config.config import FallbackModelConfig
 from kriya.workflow.attribution import (
     AttributionResult,
+    _bounded_triage_source,
     attribute_failure,
     extract_self_diagnosed_files,
     read_worktree_file,
@@ -21,6 +22,13 @@ def test_read_worktree_file_reads_real_content(tmp_path):
 
 def test_read_worktree_file_returns_none_for_missing_file(tmp_path):
     assert read_worktree_file(str(tmp_path), "DoesNotExist.java") is None
+
+
+def test_bounded_triage_source_honors_even_a_tiny_budget():
+    content = "abcdefghijklmnopqrstuvwxyz"
+    excerpt = _bounded_triage_source(content, 10)
+    assert excerpt == "abcdefghij"
+    assert len(excerpt) <= 10
 
 
 # --- resolve_fallback_model(): the shared model-escalation formula, in isolation ---
@@ -210,6 +218,77 @@ async def test_ignite_qpid_protocol_regression_triage_identifies_real_culprit():
     assert result.tier == "triage"
     assert result.files == ["src/main/java/com/example/protocol/ProtocolParser.java"]
     assert result.confidence == "high"
+
+
+@pytest.mark.asyncio
+async def test_triage_sees_java_method_bodies_needed_to_localize_runtime_hangs():
+    """Regression for demo1: the former signatures-only triage prompt hid
+    Thread.currentThread().join(), so the classifier saw Spring/Ignite names
+    but not the concrete lifecycle defect and guessed applicationContext.xml.
+    Triage must receive bounded implementation evidence, including method
+    bodies, while still making only the same single classification call."""
+    application = (
+        "package com.example;\n"
+        "public class Application {\n"
+        "  public static void main(String[] args) {\n"
+        "    try (var context = startContext()) {\n"
+        "      Thread.currentThread().join();\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+    xml = '<beans><bean id="ignite" class="com.example.IgniteService"/></beans>\n'
+    failure = Failure(
+        type="run_verification_hung",
+        message="The application produced the expected output but did not exit before timeout.",
+        raw_output="Ignite node started and verification passed; process timed out after 90 seconds.",
+        likely_files=[],
+    )
+    llm = MagicMock()
+
+    async def classify(system_prompt, user_prompt, **kwargs):
+        assert "Thread.currentThread().join();" in user_prompt
+        assert "Candidate source excerpts" in user_prompt
+        assert "short skeleton" not in system_prompt
+        return (
+            '{"files": ["src/main/java/com/example/Application.java"], '
+            '"confidence": "high", "reasoning": "The main thread joins itself, '
+            'so the try-with-resources context can never close."}'
+        )
+
+    llm.complete = AsyncMock(side_effect=classify)
+    contents = {
+        "src/main/java/com/example/Application.java": application,
+        "src/main/resources/applicationContext.xml": xml,
+    }
+    result = await attribute_failure(
+        failure, list(contents), 0, [], llm, contents.get,
+    )
+
+    assert result.tier == "triage"
+    assert result.files == ["src/main/java/com/example/Application.java"]
+
+
+@pytest.mark.asyncio
+async def test_rejected_target_without_alternate_widens_without_retriage_call():
+    failure = Failure(
+        type="attribution_rejected",
+        message="Developer reported NO CHANGE NEEDED for applicationContext.xml",
+        raw_output="applicationContext.xml is already correct",
+        likely_files=[],
+    )
+    llm = MagicMock()
+    llm.complete = AsyncMock()
+
+    result = await attribute_failure(
+        failure, ["Application.java", "applicationContext.xml"], 0, [], llm,
+        lambda fp: "content",
+    )
+
+    assert result.tier == "full_set"
+    assert result.files == []
+    assert "rejected" in result.reasoning
+    llm.complete.assert_not_called()
 
 
 # --- Triage tier: model-escalation ladder, and graceful fallback on a bad response ---

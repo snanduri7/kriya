@@ -12,6 +12,8 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.workflow.retry_package import RetryPackage
+
 logger = logging.getLogger(__name__)
 
 
@@ -121,6 +123,7 @@ def _build_targeted_retry_prompt(
     ecosystem_invariant_block: str = "",
     resource_lifecycle_block: str = "",
     verification_contract_block: str = "",
+    retry_package: Optional[RetryPackage] = None,
 ) -> Tuple[str, str]:
     """Builds the task description and code context for a targeted (single/few-
     file) retry: the target file(s) are framed as the fix, every other already-
@@ -133,20 +136,24 @@ def _build_targeted_retry_prompt(
     target_set = set(target_files)
     target_section = ""
     reference_section = ""
-    for filepath in sorted(all_files_written):
-        try:
-            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
-                current_content = fh.read()
-        except Exception as ex:
-            logger.debug(f"Failed to read '{filepath}' from worktree for targeted retry context: {ex}")
-            continue
-        if filepath in target_set:
-            target_section += f"=== File to fix: {filepath} ===\n{current_content}\n\n"
-        else:
-            reference_section += (
-                f"=== Existing file (already correct, reference only - regenerate ONLY if your fix "
-                f"genuinely requires changing it too): {filepath} ===\n{current_content}\n\n"
-            )
+    if retry_package is not None:
+        target_section = retry_package.render_context()
+        error_context = retry_package.render_error()
+    else:
+        for filepath in sorted(all_files_written):
+            try:
+                with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                    current_content = fh.read()
+            except Exception as ex:
+                logger.debug(f"Failed to read '{filepath}' from worktree for targeted retry context: {ex}")
+                continue
+            if filepath in target_set:
+                target_section += f"=== File to fix: {filepath} ===\n{current_content}\n\n"
+            else:
+                reference_section += (
+                    f"=== Existing file (already correct, reference only - regenerate ONLY if your fix "
+                    f"genuinely requires changing it too): {filepath} ===\n{current_content}\n\n"
+                )
 
     task_desc = f"Goal: {goal}\nPlan: {plan}"
     task_desc += ecosystem_invariant_block
@@ -170,6 +177,7 @@ def _build_full_set_retry_prompt(
     ecosystem_invariant_block: str = "",
     resource_lifecycle_block: str = "",
     verification_contract_block: str = "",
+    retry_package: Optional[RetryPackage] = None,
 ) -> Tuple[str, str]:
     """Full-set retries previously never showed the model its own prior attempt's
     content at all, only the abstract error text describing what went wrong -
@@ -194,17 +202,21 @@ def _build_full_set_retry_prompt(
     these" checklist mirrors the required_files_prompt_block pattern that
     already proved effective for the analogous missing-file problem."""
     reference_section = ""
-    for filepath in sorted(all_files_written):
-        try:
-            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
-                current_content = fh.read()
-        except Exception as ex:
-            logger.debug(f"Failed to read '{filepath}' from worktree for full-set retry context: {ex}")
-            continue
-        reference_section += (
-            f"=== Your previous attempt's content for {filepath} (fix/rewrite as needed for the "
-            f"goal and error above, but don't silently drop anything still needed) ===\n{current_content}\n\n"
-        )
+    if retry_package is not None:
+        reference_section = retry_package.render_context()
+        error_context = retry_package.render_error()
+    else:
+        for filepath in sorted(all_files_written):
+            try:
+                with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                    current_content = fh.read()
+            except Exception as ex:
+                logger.debug(f"Failed to read '{filepath}' from worktree for full-set retry context: {ex}")
+                continue
+            reference_section += (
+                f"=== Your previous attempt's content for {filepath} (fix/rewrite as needed for the "
+                f"goal and error above, but don't silently drop anything still needed) ===\n{current_content}\n\n"
+            )
 
     task_desc = f"Goal: {goal}\nPlan: {plan}"
     task_desc += ecosystem_invariant_block

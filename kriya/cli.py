@@ -682,7 +682,7 @@ def skills_group() -> None:
 def skills_list(ctx: click.Context) -> None:
     """List all registered skills and staged/active conventions."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
     
     skills = se.list_skills()
@@ -731,7 +731,7 @@ def skills_list(ctx: click.Context) -> None:
 def skills_show(ctx: click.Context, skill_name: str) -> None:
     """Display information about a specific skill."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
     
     try:
@@ -782,7 +782,7 @@ def skills_readiness(ctx: click.Context, skill_name: str) -> None:
     """Score a skill's knowledge against the 10-category readiness rubric (0-4 per
     category, scoring both staged and already-approved structured facts together)."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:
@@ -815,7 +815,7 @@ def skills_gaps(ctx: click.Context, skill_name: str, interactive: bool) -> None:
     """Show targeted questions for whatever the readiness rubric says is still thin,
     instead of a blank rules.txt - optionally answer them right here with --interactive."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:
@@ -869,7 +869,7 @@ def skills_create(ctx: click.Context, skill_name: str) -> None:
 
     os.makedirs(cfg.paths.skills, exist_ok=True)
 
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     try:
         path = se.create_skill_skeleton(skill_name)
         click.secho(f"Successfully created skill skeleton at: {path}", fg="green")
@@ -1062,7 +1062,7 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
     show <name>' first to see when/what it was last verified for.
     """
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:
@@ -1175,6 +1175,13 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         if current_step != step_name:
             current_step = step_name
             click.secho(f"\n>>> Step: {step_name} <<<", bold=True, fg="green")
+            if step_name == "Review":
+                click.echo("Preparing reviewer report...")
+        # The complete Reviewer artifact has one terminal owner: the approval
+        # context when approval is required, otherwise the final report block.
+        # Token streaming it as well would display the same report twice.
+        if step_name == "Review":
+            return
         click.echo(token, nl=False)
         sys.stdout.flush()
 
@@ -1518,7 +1525,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         "without redoing Plan/Design.",
                         fg="yellow"
                     )
-            if res.get("review"):
+            if res.get("review") and not res.get("review_included_in_approval"):
                 click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
                 click.echo(res.get("review"))
         else:
@@ -2060,6 +2067,11 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
     
     async def run_fix():
         def step_cb(step_name, content):
+            # Review has a dedicated full-report surface below, or was already
+            # shown in the approval context. A truncated preview would be a
+            # second, less useful presentation of the same artifact.
+            if step_name == "Review":
+                return
             click.secho(f"\n[{step_name.upper()}]", bold=True, fg="cyan")
             click.echo(content[:300] + "..." if len(content) > 300 else content)
             
@@ -2123,18 +2135,20 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                     "without redoing Plan/Design.",
                     fg="yellow"
                 )
-        # Stage 6 SME review, Finding 5 (2026-08-15): step_cb above truncates EVERY
-        # step's content to 300 chars, including the Reviewer's full report - unlike
-        # `generate`, which reprints res.get("review") in full at the end under its own
-        # header, `fix` never did, so the mandatory "How to Run the Application"
-        # section and most substantive findings were lost after a 300-char preview
-        # scrolled by mid-run with no second chance to see them. Same reprint `generate`
-        # already has, same guard: gated on res.get("files") too, not just
+        # Stage 6 SME review, Finding 5 (2026-08-15): `fix` historically truncated
+        # every step's content to 300 chars, including the Reviewer's full report,
+        # and never printed the complete report. Review previews are now suppressed
+        # above, so this block is the one full-report owner when an approval context
+        # did not already present it. Same guard as `generate`: gated on
+        # res.get("files") too, not just
         # res.get("review") alone - independent review caught that a human-rejected
         # approval-gate run sets "review" to a one-line rejection notice ("Rejected by
         # user during approval gate review.") with "files": [] - an unguarded reprint
         # would misleadingly label that notice as a "Reviewer Report".
-        if res.get("files") and res.get("review"):
+        if (
+            res.get("files") and res.get("review")
+            and not res.get("review_included_in_approval")
+        ):
             click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
             click.echo(res.get("review"))
 

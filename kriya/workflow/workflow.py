@@ -79,6 +79,7 @@ from kriya.workflow.file_resolution import (
     find_missing_expected_files,
     normalize_written_filepath,
 )
+from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.skill_extraction import (
     _IDENTITY_GENERIC_WORDS,
     _RULE_DEDUP_STOPWORDS,
@@ -193,7 +194,23 @@ class WorkflowEngine:
         outbound query and then silently discarded the result - the query had
         already left the machine with zero human visibility, for zero benefit."""
         if self.kernel.config.autonomy.web_lookup_auto_approve:
-            return True
+            from kriya.workflow.outbound_lookup import (
+                UnsafeLookupTerm, is_known_public_term,
+            )
+            try:
+                all_terms_are_public = all(is_known_public_term(
+                    term, self.kernel.config.search.public_terms,
+                ) for term in terms)
+            except UnsafeLookupTerm as exc:
+                logger.warning(f"Unattended web lookup blocked by egress sanitizer: {exc}")
+                return False
+            if all_terms_are_public:
+                return True
+            logger.warning(
+                "Unattended web lookup blocked: at least one term is not in Kriya's "
+                "public technology catalog or search.public_terms. Explicit per-query "
+                "approval is required."
+            )
         if not web_lookup_query_callback:
             return False
         try:
@@ -277,6 +294,18 @@ class WorkflowEngine:
         # `state.error_context` later. See kriya/workflow/state.py for the
         # rationale behind every other field.
         state = GenerationState(error_context=error_context or "")
+        generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
+        if generation_budget is None:
+            logger.info(
+                "Internal generation time budget: inactive (no "
+                "autonomy.generation_time_budget_seconds configured)."
+            )
+        else:
+            logger.info(
+                f"Internal generation time budget: active ({generation_budget}s, with "
+                f"{self.kernel.config.autonomy.generation_gate_reserve_seconds}s reserved "
+                "for gates/review)."
+            )
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
         run_id = None
@@ -408,7 +437,7 @@ class WorkflowEngine:
                 f"them. If that's not intended, stop this run and set paths.skills in this "
                 f"project's kriya.yaml, e.g. \"./skills\"."
             )
-        se = SkillEngine(skills_dir)
+        se = SkillEngine.from_config(self.kernel.config)
         se.discover_and_load()
         
         convention_prompt = ""
@@ -1200,6 +1229,11 @@ class WorkflowEngine:
                 active_skill_rules_snapshot[active_skill_name] = list(se.get_skill(active_skill_name).rules)
             except Exception as ex:
                 logger.debug(f"Failed to snapshot rules for skill '{active_skill_name}': {ex}")
+        active_skill_manifest = se.manifest_for(active_skills)
+        state.evidence_records.append(EvidenceRecord(
+            kind="active_skills", source="skill_engine", attempt=0,
+            payload={"skills": active_skill_manifest},
+        ))
 
         # 4. Developer & Quality Gates (Auto-debugging loop)
         logger.info("Developer Agent implementing source files...")
@@ -1216,8 +1250,11 @@ class WorkflowEngine:
         # generating - not just a punitive check afterward. This is the prevention
         # half of the completeness fix; the missing-file recovery retry below is the
         # cheaper, targeted recovery half for when prevention still doesn't work.
-        required_files_prompt_block = ""
-        _expected_files_upfront = sorted(set(architect_files))
+        from kriya.workflow.generation_manifest import build_generation_manifest
+
+        generation_manifest = build_generation_manifest(architect_files)
+        required_files_prompt_block = generation_manifest.render_prompt()
+        _expected_files_upfront = generation_manifest.ordered_paths
         # basename -> full path, built once from the already-resolved architect_files
         # list (see the Architect call above) so a missing-file recovery retry (below)
         # can resolve a bare basename back to its real path via a simple lookup instead
@@ -1227,12 +1264,6 @@ class WorkflowEngine:
         _architect_basename_to_path: Dict[str, str] = {}
         for _f in architect_files:
             _architect_basename_to_path.setdefault(os.path.basename(_f), _f)
-        if _expected_files_upfront:
-            required_files_prompt_block = (
-                "\n\nRequired files (from the Architect's design - you must generate ALL of these, "
-                "not a subset; do not omit any or defer them to a future step):\n"
-                + "\n".join(f"- {f}" for f in _expected_files_upfront)
-            )
         # Same prevention-over-punishment pattern as required_files_prompt_block
         # above, for a different completeness failure: a full-set regeneration of
         # pom.xml naturally rewrites it to match the current goal, and can
@@ -1334,13 +1365,18 @@ class WorkflowEngine:
             max_retries=max_retries,
             web_lookup_query_callback=web_lookup_query_callback,
             approve_web_lookup=self._approve_web_lookup,
+            generation_dependencies={
+                entry.path: list(entry.depends_on)
+                for entry in generation_manifest.entries
+            },
         )
 
-        while state.budgets.retry_count < max_retries or (
-            (state.last_implicated_files or state.last_missing_files) and state.budgets.targeted_retry_count < TARGETED_MAX_RETRIES
-        ) or (
-            bool(state.last_implicated_files) and bool(chain) and not state.budgets.fallback_targeted_attempted
-        ):
+        from kriya.workflow.retry_policy import decide_for_state
+        while decide_for_state(
+            state, max_retries=max_retries,
+            targeted_max_retries=TARGETED_MAX_RETRIES,
+            has_fallback_model=bool(chain),
+        ).should_continue:
             # Reset once per loop iteration, unconditionally - NOT just inside the "4.5"
             # section below. Independent review (2026-08-15) found the narrower reset
             # placement genuinely insufficient: run_attempt() (called just below) raises
@@ -1468,13 +1504,20 @@ class WorkflowEngine:
                             [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
                             int(self.kernel.config.llm.context_window * 0.75),
                         )
-                        reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
+                        # The completed report is attached to the approval context
+                        # below, where the human must see it before deciding. Streaming
+                        # the same tokens first creates a second presentation of one
+                        # artifact. Keep a progress signal, but deliver the body once.
+                        if stream_callback:
+                            stream_callback(
+                                "Review", "Preparing automated code review for approval...\n",
+                            )
                         review_parts = []
                         for i, batch in enumerate(review_batches, 1):
                             batch_prompt = f"Goal: {goal}\n\nFiles generated:\n{batch}"
                             label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
                             review_parts.append(label + await self.reviewer.run(
-                                batch_prompt, stream_callback=reviewer_stream,
+                                batch_prompt, stream_callback=None,
                                 temperature_override=self.kernel.config.llm.reviewer_temperature,
                             ))
                         state.pre_approval_review = "\n".join(review_parts)
@@ -1530,11 +1573,21 @@ class WorkflowEngine:
                         "files": [],
                         "quality_gates_passed": False,
                         "review": review_text,
+                        "review_included_in_approval": state.pre_approval_review is not None,
                         "run_id": run_id,
                     }
 
                 if need_human_approval and approval_callback:
-                    logger.info(f"Escalating changes to human approval gate: {escalation_reason}")
+                    review_note = (
+                        " (automated code review attached to approval context)"
+                        if state.pre_approval_review is not None else ""
+                    )
+                    # The full report remains in the local result and approval
+                    # context; duplicating it in the INFO log adds no new evidence.
+                    logger.info(
+                        "Escalating changes to human approval gate: "
+                        f"{escalation_reason.splitlines()[0]}{review_note}"
+                    )
                     approved = approval_callback(diffs_to_show, escalation_reason)
                     if asyncio.iscoroutine(approved):
                         approved = await approved
@@ -1789,20 +1842,26 @@ class WorkflowEngine:
                 milestone_group_id=milestone_group_id,
                 milestone_index=milestone_index,
                 milestone_total=milestone_total,
+                run_events=[event.to_dict() for event in state.run_events],
+                evidence_records=[record.to_dict() for record in state.evidence_records],
+                generation_metrics=state.generation_metrics(),
             )
         except Exception as trace_ex:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
 
         # 5. Reviewer
-        logger.info("Reviewer Agent evaluating results...")
         if state.pre_approval_review is not None:
-            # Stage 6 SME review, Finding 1: already ran (and already streamed) at the
+            # Stage 6 SME review, Finding 1: already ran at the
             # Pre-Apply Human Approval Gate, against the exact same final content - a
             # second call here would be a redundant LLM round-trip for an identical
             # answer. step_callback still fires below so anything consuming the "Review"
             # step in pipeline order sees it at the position it expects.
+            logger.info(
+                "Reusing pre-approval Reviewer report; no second Reviewer call required."
+            )
             review = state.pre_approval_review
         else:
+            logger.info("Reviewer Agent evaluating results...")
             if state.final_attempt_contents:
                 goal_header = (
                     f"Goal: {goal}\n\n"
@@ -1885,6 +1944,9 @@ class WorkflowEngine:
                 milestone_group_id=milestone_group_id,
                 milestone_index=milestone_index,
                 milestone_total=milestone_total,
+                run_events=[event.to_dict() for event in state.run_events],
+                evidence_records=[record.to_dict() for record in state.evidence_records],
+                generation_metrics=state.generation_metrics(),
             )
             logger.info(f"Persistent run trace recorded: {trace_id}")
         except Exception as trace_ex:
@@ -1916,6 +1978,9 @@ class WorkflowEngine:
             "lsp_warning": state.lsp_warning,
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
             "skill_staleness_warnings": sorted(set(skill_staleness_warnings)) or None,
+            "active_skill_manifest": active_skill_manifest,
+            "generation_metrics": state.generation_metrics(),
             "review": review,
+            "review_included_in_approval": state.pre_approval_review is not None,
             "run_id": run_id,
         }

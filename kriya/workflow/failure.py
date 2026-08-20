@@ -41,6 +41,10 @@ class Failure:
     not a wrong-behavior one; see the non-binary grading in
     kriya/workflow/workflow.py's run-verification timeout branch),
     "regression_test", "incomplete_generation", "anchored_edit",
+    "attribution_rejected" (a targeted/fallback-targeted response explicitly
+    reported NO CHANGE NEEDED for every scoped file; its likely_files contains
+    any different known file named by the same response's FIX ANALYSIS, or is
+    empty to force a full-set widening without rerunning an unchanged target),
     "unaddressed_error_location" (an edit applied cleanly - no anchor-match
     failure - but its own search block spanned the exact line a prior
     compile error reported, then left that line byte-identical in its
@@ -77,6 +81,13 @@ class Failure:
     """
     type: str
     message: str
+    # Which subsystem produced the failure. Kept separate from `type` so retry
+    # policy never has to infer authority from an SDK exception string.
+    source: str = "quality_gate"
+    # Authoritative failures may drive retry/terminal state. Advisory and
+    # auxiliary failures are trace evidence only and can never replace the
+    # current validator failure (enforced by GenerationState.record_failure).
+    authority: str = "authoritative"
     raw_output: str = ""
     file_locations: List[FileLocation] = field(default_factory=list)
     likely_files: List[str] = field(default_factory=list)

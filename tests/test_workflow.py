@@ -14,7 +14,20 @@ from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext, run_attempt
-from kriya.workflow.failure import Failure, QualityGateFailure
+from kriya.workflow.attribution import AttributionResult
+from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.failure_grounding import build_failure_signature
+from kriya.workflow.file_resolution import (
+    extract_target_test,
+    find_runnable_test_files,
+    is_runnable_test_file,
+)
+from kriya.workflow.edit_safety import (
+    FileRevisionConflict,
+    StagedFileWrite,
+    commit_revision_grounded_batch,
+    content_revision,
+)
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.state import GenerationState
 from kriya.workflow.checkpoint import (
@@ -249,7 +262,9 @@ async def test_workflow_falls_back_to_heuristic_file_list_when_architect_respons
 
     assert res["quality_gates_passed"] is True
     first_call_kwargs = we.developer.run_generation.call_args_list[0].kwargs
-    assert first_call_kwargs["known_target_files"] == ["Main.java", "pom.xml"]
+    # The heuristic path still feeds the dependency manifest: build metadata
+    # must be generated before source files that consume its dependencies.
+    assert first_call_kwargs["known_target_files"] == ["pom.xml", "Main.java"]
     # Exactly 3 completions (Planner, Architect, Reviewer) - no extra
     # corrective follow-up call was made for the malformed file list.
     assert llm.complete.await_count == 3
@@ -343,6 +358,35 @@ def test_normalize_written_filepath_rejects_path_escaping_workspace():
 
 def test_normalize_written_filepath_rejects_empty():
     assert normalize_written_filepath("", "/workspace") is None
+
+def test_runnable_test_discovery_excludes_python_support_files():
+    files = {
+        "tests/__init__.py",
+        "tests/conftest.py",
+        "tests/helpers.py",
+        "tests/test_store.py",
+    }
+
+    assert not is_runnable_test_file("tests/__init__.py")
+    assert not is_runnable_test_file("tests/conftest.py")
+    assert not is_runnable_test_file("src/main/java/acme/Contest.java")
+    assert find_runnable_test_files(files) == ["tests/test_store.py"]
+
+def test_extract_target_test_is_deterministic_for_live_incident_shape():
+    # python_task_tracker (2026-08-20): all_files_written is a set, and the old
+    # substring-first selector happened to encounter tests/__init__.py before the
+    # real test module.  Input order must no longer affect the result.
+    forward = ["tests/__init__.py", "tests/test_store.py", "task_tracker/store.py"]
+    reverse = list(reversed(forward))
+
+    assert extract_target_test("", forward) == "tests/test_store.py"
+    assert extract_target_test("", reverse) == "tests/test_store.py"
+
+def test_extract_target_test_uses_failure_evidence_or_defers_ambiguous_suite():
+    files = ["tests/test_api.py", "tests/test_store.py"]
+
+    assert extract_target_test("", files) is None
+    assert extract_target_test("tests/test_store.py::test_add failed", files) == "tests/test_store.py"
 
 def test_resolve_run_command_substitutes_when_python_unresolvable():
     with patch("shutil.which", return_value=None):
@@ -787,6 +831,30 @@ def test_extract_planner_code_blocks_still_accepts_real_xml_content():
     )
     result = extract_planner_code_blocks(plan, ["ignite-config.xml"])
     assert result.get("ignite-config.xml", "").strip().startswith("<?xml")
+
+def test_extract_planner_code_blocks_rejects_valid_xml_fragment_as_pom():
+    """A Planner dependency example is valid XML but is not a complete POM.
+
+    This is artifact validation, not an Ignite/Qpid rule: every Maven pom.xml
+    is a standalone project document, regardless of what it depends on.
+    """
+    plan = (
+        "### pom.xml Dependencies\n"
+        "```xml\n<dependencies>\n"
+        "  <dependency><groupId>org.example</groupId><artifactId>lib</artifactId></dependency>\n"
+        "</dependencies>\n```\n"
+    )
+    assert extract_planner_code_blocks(plan, ["pom.xml"]) == {}
+
+def test_extract_planner_code_blocks_accepts_namespaced_complete_pom():
+    plan = (
+        "### pom.xml\n```xml\n"
+        '<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
+        "  <modelVersion>4.0.0</modelVersion>\n"
+        "  <groupId>org.example</groupId><artifactId>app</artifactId><version>1</version>\n"
+        "</project>\n```\n"
+    )
+    assert "pom.xml" in extract_planner_code_blocks(plan, ["pom.xml"])
 
 def test_extract_planner_code_blocks_rejects_run_command_for_json_file():
     # Same shape, .json - added alongside .xml for the same reason (equally
@@ -2239,6 +2307,7 @@ async def test_workflow_reviewer_verdict_reaches_human_before_approval_decision(
     ])
 
     captured_reasons = []
+    streamed_review_tokens = []
     def approval_cb(files, reason):
         captured_reasons.append(reason)
         return True
@@ -2246,6 +2315,7 @@ async def test_workflow_reviewer_verdict_reaches_human_before_approval_decision(
     we = WorkflowEngine(kernel, llm)
     res = await we.run_generation_workflow(
         goal="Create app", workspace_path=str(tmp_path), approval_callback=approval_cb,
+        stream_callback=lambda step, token: streamed_review_tokens.append((step, token)),
     )
 
     assert res["quality_gates_passed"] is True
@@ -2256,6 +2326,11 @@ async def test_workflow_reviewer_verdict_reaches_human_before_approval_decision(
     # "review" field is the SAME text the human already saw at approval time.
     assert llm.complete.await_count == 4
     assert res["review"] == "REJECTED - hardcoded credential on line 4"
+    assert res["review_included_in_approval"] is True
+    assert ("Review", "Preparing automated code review for approval...\n") in streamed_review_tokens
+    assert not any(
+        "hardcoded credential" in token for _, token in streamed_review_tokens
+    )
 
 @pytest.mark.asyncio
 async def test_workflow_reviewer_not_run_early_when_no_approval_needed(tmp_path):
@@ -2289,6 +2364,7 @@ async def test_workflow_reviewer_not_run_early_when_no_approval_needed(tmp_path)
     assert res["quality_gates_passed"] is True
     assert llm.complete.await_count == 4
     assert res["review"] == "Review: Approved"
+    assert res["review_included_in_approval"] is False
 
 @pytest.mark.asyncio
 async def test_workflow_stale_pre_approval_review_not_reused_after_later_attempt_fails(tmp_path):
@@ -3075,6 +3151,19 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
     Graph RAG, no worktree. This is the whole point of Opportunity 2 Slice 2:
     a targeted fix to Quality Gates logic no longer needs the full pipeline's
     mock chain to write a test against."""
+    default_run_verifier = AsyncMock()
+    default_run_verifier.judge = AsyncMock(return_value={
+        "should_run": False,
+        "run_commands": [],
+        "command_source": "inferred",
+        "success_criteria": "",
+    })
+    default_run_verifier.grade = AsyncMock(return_value={
+        "passed": False,
+        "reasoning": "Runtime verification was not requested by this test.",
+        "likely_files": [],
+    })
+
     defaults = dict(
         goal="Write a small app",
         plan="Step 1: write it",
@@ -3102,7 +3191,7 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         active_skills=[],
         active_skill_rules_snapshot={},
         developer=AsyncMock(),
-        run_verifier=AsyncMock(),
+        run_verifier=default_run_verifier,
         skill_engine=MagicMock(),
         kernel=Kernel(config=AppConfig()),
         max_retries=4,
@@ -3136,6 +3225,137 @@ async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(
     assert "app.py" in state.all_files_written
     assert state.gate_outcomes[-1]["type"] == "compile"
     assert state.gate_outcomes[-1]["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_create_no_change_before_any_quality_gate(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py",
+        "content": None,
+        "edits": [],
+        "analysis": "No file is needed.",
+    }])
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        side_effect=AssertionError("invalid operation must not reach compilation"),
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "operation_contract"
+    assert "requested create_full_file" in exc_info.value.failure.message
+    assert not (tmp_path / "app.py").exists()
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_zero_tests_for_explicit_test_contract(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "def add(a, b): return a + b\n"},
+        {"filepath": "test_app.py", "content": "# test placeholder\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create a small app and include unit tests",
+        developer=developer,
+        architect_files=["app.py", "test_app.py"],
+        expected_files_upfront=["app.py", "test_app.py"],
+        architect_basename_to_path={
+            "app.py": "app.py", "test_app.py": "test_app.py",
+        },
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": "collected 0 items"},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "test_acceptance"
+    assert "zero tests executed" in exc_info.value.failure.message
+
+@pytest.mark.asyncio
+async def test_run_attempt_targets_real_test_module_not_package_initializer(tmp_path):
+    """End-to-end regression for the python_task_tracker live failure."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "task_tracker/store.py", "content": "class Store: pass\n"},
+        {"filepath": "tests/__init__.py", "content": ""},
+        {"filepath": "tests/test_store.py", "content": "def test_store(): assert True\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create a task tracker and include tests",
+        developer=developer,
+        architect_files=["task_tracker/store.py", "tests/__init__.py", "tests/test_store.py"],
+        expected_files_upfront=["task_tracker/store.py", "tests/__init__.py", "tests/test_store.py"],
+        architect_basename_to_path={
+            "store.py": "task_tracker/store.py",
+            "__init__.py": "tests/__init__.py",
+            "test_store.py": "tests/test_store.py",
+        },
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": "3 passed in 0.02s"},
+    ) as mock_tests:
+        await run_attempt(state, ctx)
+
+    mock_tests.assert_called_once_with(target_test="tests/test_store.py")
+    assert not any(outcome["type"] == "test_acceptance" for outcome in state.gate_outcomes)
+
+@pytest.mark.asyncio
+async def test_run_attempt_zero_test_target_falls_back_to_suite_without_model_repair(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "def add(a, b): return a + b\n"},
+        {"filepath": "test_app.py", "content": "def test_add(): assert True\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create an app and include tests",
+        developer=developer,
+        architect_files=["app.py", "test_app.py"],
+        expected_files_upfront=["app.py", "test_app.py"],
+        architect_basename_to_path={"app.py": "app.py", "test_app.py": "test_app.py"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        side_effect=[
+            {"success": True, "output": "collected 0 items"},
+            {"success": True, "output": "1 passed in 0.01s"},
+        ],
+    ) as mock_tests:
+        await run_attempt(state, ctx)
+
+    assert [call.kwargs for call in mock_tests.call_args_list] == [
+        {"target_test": "test_app.py"},
+        {},
+    ]
+    assert developer.run_generation.await_count == 1
+    assert any(
+        outcome["type"] == "test_selection" and outcome["recovered_by"] == "full_suite"
+        for outcome in state.gate_outcomes
+    )
 
 @pytest.mark.asyncio
 async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded(tmp_path):
@@ -3633,6 +3853,301 @@ async def test_run_attempt_rejects_a_whole_response_no_op_edit(tmp_path):
     assert exc_info.value.failure.likely_files == ["applicationContext.xml"]
     assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
 
+
+@pytest.mark.asyncio
+async def test_no_op_edit_redirects_to_different_file_named_by_own_analysis(tmp_path):
+    """The exact demo1 retry shape: a targeted XML response changes nothing,
+    while its own analysis correctly identifies Application.java. The
+    edit-level no-op failure must preserve that current-turn evidence instead
+    of routing the next attempt back to XML."""
+    state = GenerationState()
+    xml_content = '<beans><bean id="ignite" class="com.example.IgniteService"/></beans>\n'
+    (tmp_path / "applicationContext.xml").write_text(xml_content, encoding="utf-8")
+    (tmp_path / "Application.java").write_text(
+        "class Application { void run() throws Exception { Thread.currentThread().join(); } }\n",
+        encoding="utf-8",
+    )
+    state.all_files_written = {"applicationContext.xml", "Application.java"}
+    state.last_implicated_files = ["applicationContext.xml"]
+    state.budgets.last_failure_signature = ("run_verification_hung", ("timeout",))
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "applicationContext.xml", "content": None,
+        "edits": [{"search": xml_content, "replace": xml_content}],
+        "analysis": (
+            "The XML is already valid. The lifecycle defect is in Application.java, "
+            "where the main thread joins itself and prevents context shutdown."
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Application.java", "applicationContext.xml"],
+        expected_files_upfront=["Application.java", "applicationContext.xml"],
+        architect_basename_to_path={
+            "Application.java": "Application.java",
+            "applicationContext.xml": "applicationContext.xml",
+        },
+    )
+
+    with pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "no_op_edit"
+    assert exc_info.value.failure.likely_files == ["Application.java"]
+    assert state.last_self_diagnosis == (
+        ("run_verification_hung", ("timeout",)), ["Application.java"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_targeted_no_change_redirects_before_rerunning_quality_gates(tmp_path):
+    """A genuine NO CHANGE NEEDED response is negative attribution evidence,
+    not permission to spend another runtime-verification timeout on an
+    unchanged worktree."""
+    state = GenerationState()
+    (tmp_path / "applicationContext.xml").write_text("<beans/>\n", encoding="utf-8")
+    (tmp_path / "Application.java").write_text("class Application {}\n", encoding="utf-8")
+    state.all_files_written = {"applicationContext.xml", "Application.java"}
+    state.last_implicated_files = ["applicationContext.xml"]
+    state.budgets.last_failure_signature = ("run_verification_hung", ("timeout",))
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "applicationContext.xml", "content": None, "edits": [],
+        "analysis": (
+            "applicationContext.xml is correct. Fix Application.java so its main method "
+            "exits and closes the Spring context."
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Application.java", "applicationContext.xml"],
+        expected_files_upfront=["Application.java", "applicationContext.xml"],
+        architect_basename_to_path={
+            "Application.java": "Application.java",
+            "applicationContext.xml": "applicationContext.xml",
+        },
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check"
+    ) as compile_check, pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "attribution_rejected"
+    assert exc_info.value.failure.likely_files == ["Application.java"]
+    compile_check.assert_not_called()
+
+    # Exercise the real retry handoff too: current-turn likely_files must win
+    # even though the new edit-level failure signature differs from the
+    # run_verification_hung signature that prompted this response.
+    should_break = await handle_attempt_failure(state, ctx, exc_info.value)
+    assert should_break is False
+    assert state.last_implicated_files == ["Application.java"]
+    assert state.last_attribution.tier == "judge"
+    assert state.gate_outcomes[-1]["likely_files"] == ["Application.java"]
+
+
+@pytest.mark.asyncio
+async def test_targeted_no_change_without_fix_analysis_still_widens_before_gates(tmp_path):
+    """Local models sometimes emit only the NO CHANGE NEEDED marker. The
+    parser deliberately represents that as content=None, edits=None,
+    analysis=None; it must still reject the stale target rather than silently
+    rerun gates on an unchanged worktree."""
+    state = GenerationState()
+    (tmp_path / "applicationContext.xml").write_text("<beans/>\n", encoding="utf-8")
+    state.all_files_written = {"applicationContext.xml"}
+    state.last_implicated_files = ["applicationContext.xml"]
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "applicationContext.xml", "content": None,
+        "edits": None, "analysis": None,
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["applicationContext.xml"],
+        expected_files_upfront=["applicationContext.xml"],
+        architect_basename_to_path={"applicationContext.xml": "applicationContext.xml"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check"
+    ) as compile_check, pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "attribution_rejected"
+    assert exc_info.value.failure.likely_files == []
+    compile_check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_targeted_byte_identical_edit_cannot_erase_authoritative_locator(tmp_path):
+    """Compiler/test locations outrank a repair model's advisory no-op.
+
+    The target is stack-neutral and intentionally named App.java rather than
+    any live-incident class. The next attempt changes model, not scope.
+    """
+    state = GenerationState()
+    source = "class App { MissingType value; }\n"
+    (tmp_path / "App.java").write_text(source, encoding="utf-8")
+    state.all_files_written = {"App.java"}
+    state.last_implicated_files = ["App.java"]
+    state.last_failure = Failure(
+        type="compile",
+        message="App.java:[1,13] cannot find symbol MissingType",
+        raw_output="App.java:[1,13] cannot find symbol MissingType",
+        file_locations=[FileLocation("App.java", line=1, col=13)],
+    )
+    state.budgets.last_failure_signature = build_failure_signature(
+        "compile", state.last_failure.raw_output,
+    )
+    state.last_attribution = AttributionResult(
+        tier="locator", files=["App.java"], confidence="high",
+        reasoning="Precise file:line locator found in compiler output.",
+    )
+    state.last_error_source_context = {
+        "App.java": "=== Reported error location: App.java:1:13 ===\nclass App { MissingType value; }",
+    }
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "App.java", "content": None,
+        "edits": [{"search": source, "replace": source}],
+        "analysis": "App.java needs an import for MissingType, but no change is required.",
+    }])
+    fallback = MagicMock(
+        model="fallback-coder", base_url="http://127.0.0.1:11434/v1",
+        api_key="test", context_window=32768,
+    )
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, chain=[fallback],
+        architect_files=["App.java"], expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+    )
+
+    with pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    failure = exc_info.value.failure
+    assert failure.type == "no_op_edit"
+    assert failure.likely_files == ["App.java"]
+    assert failure.diagnostics["preserved_prior_attribution"]["tier"] == "locator"
+    assert state.budgets.fallback_targeted_requested is True
+
+    assert await handle_attempt_failure(state, ctx, exc_info.value) is False
+    assert state.last_implicated_files == ["App.java"]
+    assert state.last_attribution.tier == "locator"
+    assert state.last_failure.type == "compile"
+    assert "App.java" in state.last_error_source_context
+    assert state.budgets.targeted_retry_count == 1
+    assert state.budgets.last_failure_signature[0] == "compile"
+
+    # The existing one-shot fallback path is now selected immediately even
+    # though the primary targeted budget has attempts remaining.
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "App.java",
+        "content": "class App { Object value; }\n",
+        "edits": [],
+        "analysis": "Replace the unresolved type with a valid type.",
+    }])
+    ctx.kernel.config.autonomy.run_verification_enabled = False
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled"},
+    ):
+        await run_attempt(state, ctx)
+
+    assert state.last_attempt_mode == "fallback_targeted"
+    assert state.budgets.fallback_targeted_requested is False
+    assert developer.run_generation.call_args.kwargs["model_override"] == "fallback-coder"
+    assert "cannot find symbol MissingType" in developer.run_generation.call_args.kwargs[
+        "prior_error_context"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_new_validator_failure_gets_fresh_scoped_retry_budget(tmp_path):
+    """A runtime defect after compile repair is a new family, not attempt 4
+    of the old compile defect; global attempt_number still remains unchanged."""
+    (tmp_path / "App.java").write_text("class App {}\n", encoding="utf-8")
+    state = GenerationState()
+    state.attempt_number = 4
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"App.java"}
+    state.last_implicated_files = ["App.java"]
+    state.budgets.targeted_retry_count = 3
+    state.budgets.retry_count = 1
+    state.budgets.fallback_targeted_attempted = True
+    prior_text = "App.java:[1,1] cannot find symbol\n"
+    state.budgets.last_failure_signature = build_failure_signature("compile", prior_text)
+    state.last_failure = Failure(type="compile", message=prior_text, raw_output=prior_text)
+
+    runtime_text = (
+        "RUNTIME VERIFICATION FAILURE: duplicate startup\n"
+        "at com.example.App.run(App.java:47)\n"
+        "Caused by: org.example.DuplicateResourceException: resource already started\n"
+    )
+    failure = Failure(
+        type="run_verification", message=runtime_text, raw_output=runtime_text,
+        file_locations=[FileLocation("App.java", line=47)],
+        likely_files=["App.java"],
+    )
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        architect_files=["App.java"],
+        expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+        chain=[MagicMock(model="fallback", context_window=16384)],
+    )
+
+    assert await handle_attempt_failure(state, ctx, QualityGateFailure(failure)) is False
+    assert state.attempt_number == 4
+    assert state.budgets.targeted_retry_count == 0
+    assert state.budgets.retry_count == 1
+    assert state.budgets.fallback_targeted_attempted is False
+    assert state.budgets.last_failure_signature[0] == "run_verification"
+    assert state.last_implicated_files == ["App.java"]
+
+
+def test_failure_signature_distinguishes_unrelated_javac_errors_behind_same_wrapper():
+    missing_import = (
+        "App.java:[10,5] cannot find symbol\n"
+        "org.apache.maven.plugins:maven-compiler-plugin:3.11.0:compile\n"
+    )
+    incompatible_type = (
+        "App.java:[25,9] incompatible types: Object cannot be converted to Person\n"
+        "org.apache.maven.plugins:maven-compiler-plugin:3.11.0:compile\n"
+    )
+    assert build_failure_signature("compile", missing_import) != build_failure_signature(
+        "compile", incompatible_type,
+    )
+
+
+def test_failure_signature_distinguishes_missing_symbols_with_same_javac_headline():
+    first = (
+        "App.java:[10,5] cannot find symbol\n"
+        "[ERROR] symbol: class FirstType\n"
+        "[ERROR] location: class App\n"
+    )
+    second = first.replace("FirstType", "SecondType").replace("[10,5]", "[25,5]")
+    assert build_failure_signature("compile", first) != build_failure_signature(
+        "compile", second,
+    )
+
+
+def test_failure_signature_treats_line_shift_as_same_runtime_exception():
+    first = (
+        "at com.example.App.send(App.java:46)\n"
+        "Caused by: org.example.DuplicateResourceException: resource already started\n"
+    )
+    shifted = first.replace("App.java:46", "App.java:47")
+    assert build_failure_signature("run_verification", first) == build_failure_signature(
+        "run_verification", shifted,
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_attempt_no_op_check_does_not_flag_a_companion_edit(tmp_path):
     """Negative case for the same Layer 0 check: a response with ONE no-op
@@ -3699,26 +4214,14 @@ async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_after_budget_exhaustion(tmp_path):
-    """Regression test for a real live gap found this session (2026-08-14,
-    spikes/eval_harness/runs/a-3 and a-4, ignite_qpid_protocol): targeted_retry_count/
-    fallback_targeted_attempted are single counters shared across the WHOLE run, not
-    per-failure - a run that spends its entire targeted budget resolving one bug has
-    zero scoped-retry runway left for a completely different, freshly-diagnosed
-    failure that arrives right after, even when THAT failure has a precise
-    single-file locator. Confirmed live: a-4's targeted budget was spent fixing an
-    unclosed-Ignite-resource bug across 4 targeted attempts + 1 fallback-targeted
-    attempt; the very next, unrelated compile error (`Protocol.java:[17,5] variable
-    dataLength might not have been initialized`) then fell straight into an unscoped
-    full-file-set walk on the slow fallback model - one multi-minute completion PER
-    FILE (9 files) for a fix that only ever needed one - and the run timed out.
-
-    Confirms the FIRST full-set attempt reached via budget exhaustion (not via this
-    exact failure resisting narrow scoping) still passes
-    known_target_files=state.last_implicated_files, instead of falling through to an
-    unscoped full-file-set request."""
+    """A failure's first full-set escalation stays dependency-scoped even if
+    global full-set history is zero and its own narrow budgets are exhausted."""
     state = GenerationState()
     state.budgets.targeted_retry_count = 3
     state.budgets.fallback_targeted_attempted = True
+    state.budgets.last_failure_signature = (
+        "compile", (("Protocol.java",), "javac", ("variable might not have been initialized",)),
+    )
     state.last_implicated_files = ["Protocol.java"]
     state.all_files_written = {"Protocol.java", "ProtocolApp.java", "ProtocolParser.java"}
     developer = AsyncMock()
@@ -3745,17 +4248,15 @@ async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_aft
 
 @pytest.mark.asyncio
 async def test_run_attempt_does_not_scope_a_later_full_set_attempt(tmp_path):
-    """Sibling/negative case: the scoping above is deliberately gated to the FIRST
-    full-set attempt only (state.budgets.retry_count == 0) - once a scoped full-set
-    attempt has already been tried and the same failure persists (retry_count now
-    >= 1), the existing "broaden to a clean full regeneration" escape hatch must
-    still apply completely unchanged, exactly as before this fix - a failure that
-    genuinely resists narrow scoping still gets a real clean-slate attempt, not an
-    endless narrower and narrower retry on the same wrong diagnosis."""
+    """The same failure broadens after its one dependency-scoped full-set shot."""
     state = GenerationState()
     state.budgets.retry_count = 1
     state.budgets.targeted_retry_count = 3
     state.budgets.fallback_targeted_attempted = True
+    state.budgets.last_failure_signature = (
+        "compile", (("Protocol.java",), "javac", ("same failure",)),
+    )
+    state.budgets.scoped_full_set_failure_signature = state.budgets.last_failure_signature
     state.last_implicated_files = ["Protocol.java"]
     state.all_files_written = {"Protocol.java", "ProtocolApp.java", "ProtocolParser.java"}
     developer = AsyncMock()
@@ -5262,6 +5763,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["widgetlib"]
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5483,6 +5985,7 @@ async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extr
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["widgetlib"]
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 2
     kernel = Kernel(config=cfg)
@@ -5541,6 +6044,7 @@ async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["widgetlib"]
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5592,6 +6096,7 @@ async def test_workflow_web_lookup_accepted_but_empty_falls_back_to_human_ask(tm
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["widgetlib"]
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 1
     kernel = Kernel(config=cfg)
@@ -5682,6 +6187,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["gizmolib"]
     cfg.search.base_url = "http://fake-search:8080"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -5736,6 +6242,7 @@ async def test_workflow_web_lookup_design_derived_falls_back_to_human_ask_on_emp
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.web_lookup_enabled = True
     cfg.autonomy.web_lookup_auto_approve = True  # bypass the pre-send confirmation gate for this test
+    cfg.search.public_terms = ["gizmolib"]
     cfg.search.base_url = "http://fake-search:8080"
     cfg.search.top_k = 1
     kernel = Kernel(config=cfg)
@@ -6070,6 +6577,31 @@ def test_extract_error_search_terms_finds_multiple_distinct_coordinates():
         "org.apache.maven.plugins:maven-compiler-plugin",
         "org.codehaus.mojo:exec-maven-plugin",
     ]
+
+def test_extract_error_search_terms_drops_maven_wrapper_when_source_locator_exists():
+    error = (
+        "[ERROR] App.java:[17,5] cannot find symbol\n"
+        "[ERROR] Failed to execute goal "
+        "org.apache.maven.plugins:maven-compiler-plugin:3.11.0:compile\n"
+    )
+    assert extract_error_search_terms(error) == []
+
+def test_extract_error_search_terms_drops_exec_wrapper_when_application_stack_exists():
+    error = (
+        "at com.example.MainApp.send(MainApp.java:47)\n"
+        "Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:exec\n"
+    )
+    assert extract_error_search_terms(error) == []
+
+def test_extract_error_search_terms_replaces_wrapper_with_declared_library_exception():
+    error = (
+        "at com.example.MainApp.send(MainApp.java:47)\n"
+        "Caused by: org.apache.ignite.IgniteException: node already started\n"
+        "Failed to execute goal org.codehaus.mojo:exec-maven-plugin:3.1.0:exec\n"
+    )
+    assert extract_error_search_terms(
+        error, dependency_coordinates=["org.apache.ignite:ignite-core"],
+    ) == ["org.apache.ignite:ignite-core"]
 
 def test_extract_error_search_terms_ignores_plain_symbols_and_paths():
     # Neither a bare class/package name (no colon) nor a filesystem path (colon-free
@@ -7197,6 +7729,29 @@ async def test_approve_web_lookup_true_when_auto_approve_set():
     # No callback needed at all - the config opt-in alone is sufficient.
     assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", None) is True
 
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_auto_approve_rejects_unknown_term_without_public_declaration():
+    cfg = AppConfig()
+    cfg.autonomy.web_lookup_auto_approve = True
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+    assert await we._approve_web_lookup(["internalwidgetlib"], "http://fake-search:8080", None) is False
+
+    cfg.search.public_terms = ["internalwidgetlib"]
+    assert await we._approve_web_lookup(["internalwidgetlib"], "http://fake-search:8080", None) is True
+
+
+@pytest.mark.asyncio
+async def test_approve_web_lookup_auto_approve_fails_closed_for_unsafe_term():
+    cfg = AppConfig()
+    cfg.autonomy.web_lookup_auto_approve = True
+    we = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+    assert await we._approve_web_lookup(
+        ["src/main/java/com/acme/Secret.java"], "http://fake-search:8080", None,
+    ) is False
+
 @pytest.mark.asyncio
 async def test_approve_web_lookup_fails_closed_with_no_callback_and_no_opt_in():
     cfg = AppConfig()
@@ -7402,6 +7957,7 @@ async def test_workflow_repeated_failure_live_lookup_resolves_wrong_import_via_d
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
         '[{"filepath": "App.java", "content": "class App {}"}]',
+        "Two full-set retries were needed - lesson extraction.",
         "Review: Approved",
     ])
 
@@ -7543,6 +8099,10 @@ def test_extract_implicated_files_empty_when_no_known_file_named():
     error = "Process exited with code 1. No further details available."
     known = ["App.java", "pom.xml"]
     assert extract_implicated_files(error, known) == []
+
+def test_extract_implicated_files_does_not_match_filename_suffix():
+    error = "IntegrationApp.java:[5,31] cannot find symbol"
+    assert extract_implicated_files(error, ["App.java"]) == []
 
 def test_extract_implicated_files_matches_full_relative_path_too():
     error = "Traceback: File \"src/main/py/app.py\", line 3, in <module>"
@@ -9924,6 +10484,72 @@ def test_atomic_write_file_overwrites_existing_content_completely():
         atomic_write_file(target, "public class App {}\n")
         with open(target) as f:
             assert f.read() == "public class App {}\n"
+
+
+def test_revision_grounded_batch_preflights_every_file_before_writing(tmp_path):
+    first = tmp_path / "First.java"
+    second = tmp_path / "Second.java"
+    first.write_text("old first")
+    second.write_text("changed after generation")
+    writes = [
+        StagedFileWrite(
+            str(first), "new first", str(first), content_revision("old first"),
+        ),
+        StagedFileWrite(
+            str(second), "new second", str(second), content_revision("old second"),
+        ),
+    ]
+
+    with pytest.raises(FileRevisionConflict):
+        commit_revision_grounded_batch(writes)
+
+    assert first.read_text() == "old first"
+    assert second.read_text() == "changed after generation"
+
+
+def test_revision_grounded_batch_rolls_back_an_interrupted_commit(tmp_path):
+    first = tmp_path / "First.java"
+    second = tmp_path / "Second.java"
+    first.write_text("old first")
+    second.write_text("old second")
+    writes = [
+        StagedFileWrite(
+            str(first), "new first", str(first), content_revision("old first"),
+        ),
+        StagedFileWrite(
+            str(second), "new second", str(second), content_revision("old second"),
+        ),
+    ]
+    real_atomic_write = atomic_write_file
+
+    def fail_second_write(path, content):
+        if path == str(second):
+            raise OSError("simulated disk failure")
+        real_atomic_write(path, content)
+
+    with patch("kriya.workflow.edit_safety.atomic_write_file", side_effect=fail_second_write):
+        with pytest.raises(OSError, match="simulated disk failure"):
+            commit_revision_grounded_batch(writes)
+
+    assert first.read_text() == "old first"
+    assert second.read_text() == "old second"
+
+
+def test_revision_grounded_batch_can_guard_workspace_source_for_new_sandbox_target(tmp_path):
+    workspace_file = tmp_path / "workspace" / "App.java"
+    sandbox_file = tmp_path / "sandbox" / "App.java"
+    workspace_file.parent.mkdir()
+    workspace_file.write_text("class App { int value = 1; }")
+
+    revisions = commit_revision_grounded_batch([StagedFileWrite(
+        target_path=str(sandbox_file),
+        content="class App { int value = 2; }",
+        base_path=str(workspace_file),
+        expected_base_revision=content_revision(workspace_file.read_text()),
+    )])
+
+    assert sandbox_file.read_text() == "class App { int value = 2; }"
+    assert revisions[str(sandbox_file)] == content_revision(sandbox_file.read_text())
 
 
 @pytest.mark.asyncio

@@ -193,13 +193,55 @@ def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
     assert "looks good" in result.stdout
 
 
+def test_generate_renders_streamed_reviewer_report_only_once(runner, tmp_path):
+    """Reviewer tokens are progress, while the final report owns presentation."""
+    mock_we = MagicMock()
+
+    async def run_with_review_stream(**kwargs):
+        kwargs["stream_callback"]("Review", "looks good")
+        return dict(_FAKE_GENERATE_RESULT)
+
+    mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_review_stream)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert result.output.count("looks good") == 1
+    assert result.output.count("=== Reviewer Report & Run Instructions ===") == 1
+
+
+def test_generate_does_not_reprint_review_already_in_approval(runner, tmp_path):
+    report = "UNIQUE PRE-APPROVAL REVIEW"
+    mock_we = MagicMock()
+
+    async def run_with_preapproval_review(**kwargs):
+        reason = f"Human-in-the-loop review policy\n\n=== Automated Code Review ===\n{report}"
+        assert kwargs["approval_callback"](
+            [{"filepath": "a.py", "content": "+print('ok')"}], reason,
+        )
+        return dict(
+            _FAKE_GENERATE_RESULT,
+            review=report,
+            review_included_in_approval=True,
+        )
+
+    mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_preapproval_review)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert result.output.count(report) == 1
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
 def test_fix_reprints_full_reviewer_report(runner, tmp_path):
-    """Stage 6 SME review, Finding 5 (2026-08-15): `fix`'s step_cb truncates every
-    step's content to 300 chars, including the Reviewer's full report - unlike
-    `generate`, which reprints res.get("review") in full at the end under its own
-    header, `fix` never did, so the mandatory "How to Run the Application" section
-    and most findings were lost after a 300-char preview scrolled by mid-run with
-    no second chance to see them."""
+    """The dedicated final surface preserves a complete non-approval review."""
     long_review = "## How to Run the Application\n" + ("Detailed instructions. " * 30)
     assert len(long_review) > 300  # must actually exceed step_cb's truncation length
     fake_result = dict(_FAKE_GENERATE_RESULT, review=long_review)
@@ -230,6 +272,34 @@ def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tm
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
     assert result.exit_code == 0, result.output
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
+def test_fix_does_not_preview_or_reprint_review_already_in_approval(runner, tmp_path):
+    report = "UNIQUE FIX PRE-APPROVAL REVIEW"
+    mock_we = MagicMock()
+
+    async def run_with_preapproval_review(**kwargs):
+        reason = f"Human-in-the-loop review policy\n\n=== Automated Code Review ===\n{report}"
+        assert kwargs["approval_callback"](
+            [{"filepath": "a.py", "content": "+print('fixed')"}], reason,
+        )
+        kwargs["step_callback"]("Review", report)
+        return dict(
+            _FAKE_GENERATE_RESULT,
+            review=report,
+            review_included_in_approval=True,
+        )
+
+    mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_preapproval_review)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["fix", "--error", "compile failed", "-y"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count(report) == 1
     assert "=== Reviewer Report & Run Instructions ===" not in result.output
 
 

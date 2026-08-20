@@ -7,7 +7,12 @@ makes the next slices (an isolable attempt executor and retry-decision
 function) possible to unit-test without invoking the whole method.
 """
 from dataclasses import dataclass, field
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
+from kriya.workflow.evidence import EvidenceRecord
+from kriya.workflow.edit_safety import content_revision
 
 
 @dataclass
@@ -18,22 +23,39 @@ class RetryBudgets:
 
     # Full-set retry attempt counter, bounded by max_retries (max(4, 1+len(chain))).
     retry_count: int = 0
-    # Independent budget for targeted (single/few-file) retries - deliberately
+    # Failure-scoped budget for targeted (single/few-file) retries. It resets
+    # when authoritative validator evidence identifies a genuinely different
+    # failure family, while attempt_number supplies the run-wide ceiling. It is
+    # deliberately
     # NOT folded into retry_count, which governs the full-file-set path and its
     # model-escalation chain. Targeted attempts always use the primary model
     # (never escalate - a measured 19-43s Ollama model-swap cost made "swap on
-    # every targeted attempt" a bad trade). Exhausting this budget falls
+    # every targeted attempt" a bad trade). Exhausting this scoped budget falls
     # through to the full-set path's own budget/escalation, unchanged.
     targeted_retry_count: int = 0
-    # A single, one-shot opportunity to try a TARGETED fix on the fallback model
+    # A single, one-shot opportunity per authoritative failure family to try a
+    # TARGETED fix on the fallback model
     # before escalating all the way to a full-set regeneration (found live,
     # 2026-08-10, ignite_qpid_protocol): a full-set escalation already pays a
     # model-swap cost, so trying one targeted fix on that same fallback model
     # first spends a swap cost that was coming anyway on a much cheaper shot.
     # Deliberately its own flag, not folded into targeted_retry_count (primary
     # model only, never escalate) or retry_count (the full-set path's own
-    # counter).
+    # counter). A new failure family clears it; the global attempt ceiling still
+    # bounds the run.
     fallback_targeted_attempted: bool = False
+    # Set when a primary-model targeted response returns advisory NO CHANGE
+    # against a target backed by a deterministic file:line locator.  The
+    # authoritative locator remains the scope, but retrying the same model's
+    # rejected opinion is low-value; consume the existing one-shot fallback
+    # targeted attempt next.  This is evidence-based and stack-neutral (no
+    # filenames/failure-type allowlist), and is cleared as that attempt starts.
+    fallback_targeted_requested: bool = False
+    # Failure signature for which a dependency-closure-scoped full-set repair
+    # has already been attempted. A different validator failure receives its
+    # own one narrow closure attempt even when earlier failures consumed global
+    # full-set retries; the same failure broadens after that one shot.
+    scoped_full_set_failure_signature: Optional[Tuple[str, Any]] = None
     # (fail_type, signature) of the previous attempt's failure, so a REPEATED
     # failure (the model isn't self-correcting) can be distinguished from a
     # normal first-time failure - only a repeat is eligible for error-triggered
@@ -74,10 +96,24 @@ class GenerationState:
     # chronological attempt number reads far more sensibly in the trace than
     # two counters that don't both advance on every iteration.
     attempt_number: int = 0
+    generation_started_monotonic: float = field(default_factory=time.monotonic)
+    # Completed/failed Developer calls used to refine the conservative configured
+    # per-file estimate without persisting prompt or proprietary source content.
+    generation_timings: List[Dict[str, Any]] = field(default_factory=list)
     error_context: str = ""
+    # The active canonical typed failure behind repair prompts. Advisory and
+    # auxiliary events remain in run_events/gate_outcomes but cannot replace an
+    # existing authoritative failure here. Retry prompts project this object
+    # into bounded, revision-labelled evidence instead of relying on an
+    # unbounded string concatenation of errors and complete files.
+    last_failure: Optional[Any] = None
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)
     all_original_contents: Dict[str, str] = field(default_factory=dict)
+    # Revisions that passed the real compile gate. A later candidate invalidates
+    # only changed files and their manifest dependents; unrelated validated files
+    # remain stable across targeted/dependency-scoped retries.
+    validated_file_revisions: Dict[str, str] = field(default_factory=dict)
     # Captures the last attempt's file contents before worktree cleanup, so the
     # Reviewer stage has something to review even when quality gates never
     # passed (those files never get copied to workspace_path - only ever lived
@@ -187,6 +223,11 @@ class GenerationState:
     jdtls_unavailable: bool = False
     lsp_warning: Optional[str] = None
     gate_outcomes: List[Dict[str, Any]] = field(default_factory=list)
+    # Canonical append-only runtime facts. gate_outcomes stays as a backwards-
+    # compatible trace projection while callers migrate to this event stream.
+    run_events: List[RunEvent] = field(default_factory=list)
+    failure_ledger: FailureLedger = field(default_factory=FailureLedger)
+    evidence_records: List[EvidenceRecord] = field(default_factory=list)
     model_hops: List[Dict[str, Any]] = field(default_factory=list)
     budgets: RetryBudgets = field(default_factory=RetryBudgets)
     # Set when the Pre-Apply Human Approval Gate runs the Reviewer early (so its
@@ -197,3 +238,68 @@ class GenerationState:
     # whenever no human-approval escalation happened this run (the common
     # autonomous-mode path), or the run never reached that gate at all.
     pre_approval_review: Optional[str] = None
+
+    def record_event(self, event: RunEvent) -> None:
+        self.run_events.append(event)
+        if event.failure_type:
+            self.failure_ledger.record(event)
+
+    def generation_metrics(self) -> Dict[str, Any]:
+        """Content-free operational telemetry safe to persist in local traces."""
+        return {
+            "calls": len(self.generation_timings),
+            "successful_calls": sum(
+                1 for timing in self.generation_timings if timing.get("succeeded")
+            ),
+            "duration_seconds": sum(
+                float(timing.get("duration_seconds", 0))
+                for timing in self.generation_timings
+            ),
+            "files_requested": sum(
+                int(timing.get("file_count", 0)) for timing in self.generation_timings
+            ),
+            "operation_fallbacks": sum(
+                1 for event in self.run_events if event.kind == "operation.fallback"
+            ),
+            "validation_invalidations": sum(
+                1 for event in self.run_events if event.kind == "validation.invalidated"
+            ),
+            "validated_files": len(self.validated_file_revisions),
+        }
+
+    def record_failure(self, failure: Any, *, operation: Optional[str] = None) -> RunEvent:
+        try:
+            authority = EventAuthority(failure.authority)
+        except (ValueError, TypeError):
+            authority = EventAuthority.AUTHORITATIVE
+        event = RunEvent(
+            kind="failure.recorded",
+            attempt=failure.attempt or self.attempt_number,
+            source=failure.source,
+            authority=authority,
+            message=failure.message,
+            failure_type=failure.type,
+            operation=operation,
+            details={"likely_files": list(failure.likely_files)},
+        )
+        self.record_event(event)
+        self.evidence_records.append(EvidenceRecord(
+            kind="failure",
+            source=failure.source,
+            attempt=failure.attempt or self.attempt_number,
+            payload={
+                "type": failure.type,
+                "message": failure.message,
+                "raw_output": failure.raw_output,
+                "likely_files": list(failure.likely_files),
+                # Full failed source already exists once in the compatibility
+                # gate outcome. Store revisions here to avoid doubling trace DB
+                # size while preserving a canonical identity link.
+                "failed_content_revisions": {
+                    path: content_revision(content)
+                    for path, content in failure.failed_content.items()
+                },
+                "attempted_edits": list(failure.attempted_edits),
+            },
+        ))
+        return event

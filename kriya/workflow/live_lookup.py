@@ -52,10 +52,19 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
     from kriya.tools.search import search_web
     from kriya.tools.web import fetch_url_text
 
+    from kriya.workflow.outbound_lookup import OutboundLookupRequest, UnsafeLookupTerm
+    try:
+        request = OutboundLookupRequest.from_extracted_terms(
+            terms, origin="bounded_code_extraction",
+        )
+    except UnsafeLookupTerm as ex:
+        logger.warning(f"Blocked unsafe outward lookup request: {ex}")
+        return []
+
     resolved = []
-    for term in terms:
+    for term, query in zip(request.terms, request.queries()):
         try:
-            results = await search_web(f"{term} example", search_base_url, top_k=top_k)
+            results = await search_web(query, search_base_url, top_k=top_k)
         except Exception as ex:
             logger.debug(f"Live lookup search failed for '{term}': {ex}")
             continue
