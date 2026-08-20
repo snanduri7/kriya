@@ -2247,6 +2247,7 @@ async def test_workflow_reviewer_verdict_reaches_human_before_approval_decision(
     ])
 
     captured_reasons = []
+    streamed_review_tokens = []
     def approval_cb(files, reason):
         captured_reasons.append(reason)
         return True
@@ -2254,6 +2255,7 @@ async def test_workflow_reviewer_verdict_reaches_human_before_approval_decision(
     we = WorkflowEngine(kernel, llm)
     res = await we.run_generation_workflow(
         goal="Create app", workspace_path=str(tmp_path), approval_callback=approval_cb,
+        stream_callback=lambda step, token: streamed_review_tokens.append((step, token)),
     )
 
     assert res["quality_gates_passed"] is True
@@ -2264,6 +2266,11 @@ async def test_workflow_reviewer_verdict_reaches_human_before_approval_decision(
     # "review" field is the SAME text the human already saw at approval time.
     assert llm.complete.await_count == 4
     assert res["review"] == "REJECTED - hardcoded credential on line 4"
+    assert res["review_included_in_approval"] is True
+    assert ("Review", "Preparing automated code review for approval...\n") in streamed_review_tokens
+    assert not any(
+        "hardcoded credential" in token for _, token in streamed_review_tokens
+    )
 
 @pytest.mark.asyncio
 async def test_workflow_reviewer_not_run_early_when_no_approval_needed(tmp_path):
@@ -2297,6 +2304,7 @@ async def test_workflow_reviewer_not_run_early_when_no_approval_needed(tmp_path)
     assert res["quality_gates_passed"] is True
     assert llm.complete.await_count == 4
     assert res["review"] == "Review: Approved"
+    assert res["review_included_in_approval"] is False
 
 @pytest.mark.asyncio
 async def test_workflow_stale_pre_approval_review_not_reused_after_later_attempt_fails(tmp_path):

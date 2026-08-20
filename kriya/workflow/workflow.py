@@ -1468,13 +1468,20 @@ class WorkflowEngine:
                             [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
                             int(self.kernel.config.llm.context_window * 0.75),
                         )
-                        reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
+                        # The completed report is attached to the approval context
+                        # below, where the human must see it before deciding. Streaming
+                        # the same tokens first creates a second presentation of one
+                        # artifact. Keep a progress signal, but deliver the body once.
+                        if stream_callback:
+                            stream_callback(
+                                "Review", "Preparing automated code review for approval...\n",
+                            )
                         review_parts = []
                         for i, batch in enumerate(review_batches, 1):
                             batch_prompt = f"Goal: {goal}\n\nFiles generated:\n{batch}"
                             label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
                             review_parts.append(label + await self.reviewer.run(
-                                batch_prompt, stream_callback=reviewer_stream,
+                                batch_prompt, stream_callback=None,
                                 temperature_override=self.kernel.config.llm.reviewer_temperature,
                             ))
                         state.pre_approval_review = "\n".join(review_parts)
@@ -1527,11 +1534,21 @@ class WorkflowEngine:
                         "files": [],
                         "quality_gates_passed": False,
                         "review": review_text,
+                        "review_included_in_approval": state.pre_approval_review is not None,
                         "run_id": run_id,
                     }
 
                 if need_human_approval and approval_callback:
-                    logger.info(f"Escalating changes to human approval gate: {escalation_reason}")
+                    review_note = (
+                        " (automated code review attached to approval context)"
+                        if state.pre_approval_review is not None else ""
+                    )
+                    # The full report remains in the local result and approval
+                    # context; duplicating it in the INFO log adds no new evidence.
+                    logger.info(
+                        "Escalating changes to human approval gate: "
+                        f"{escalation_reason.splitlines()[0]}{review_note}"
+                    )
                     approved = approval_callback(diffs_to_show, escalation_reason)
                     if asyncio.iscoroutine(approved):
                         approved = await approved
@@ -1791,15 +1808,18 @@ class WorkflowEngine:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
 
         # 5. Reviewer
-        logger.info("Reviewer Agent evaluating results...")
         if state.pre_approval_review is not None:
-            # Stage 6 SME review, Finding 1: already ran (and already streamed) at the
+            # Stage 6 SME review, Finding 1: already ran at the
             # Pre-Apply Human Approval Gate, against the exact same final content - a
             # second call here would be a redundant LLM round-trip for an identical
             # answer. step_callback still fires below so anything consuming the "Review"
             # step in pipeline order sees it at the position it expects.
+            logger.info(
+                "Reusing pre-approval Reviewer report; no second Reviewer call required."
+            )
             review = state.pre_approval_review
         else:
+            logger.info("Reviewer Agent evaluating results...")
             if state.final_attempt_contents:
                 goal_header = (
                     f"Goal: {goal}\n\n"
@@ -1916,5 +1936,6 @@ class WorkflowEngine:
             "active_skill_manifest": active_skill_manifest,
             "generation_metrics": state.generation_metrics(),
             "review": review,
+            "review_included_in_approval": state.pre_approval_review is not None,
             "run_id": run_id,
         }
