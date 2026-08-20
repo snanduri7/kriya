@@ -74,6 +74,22 @@ def test_operation_contract_rejects_mixed_write_shapes_and_create_overwrite():
     assert error is not None
 
 
+def test_operation_contract_rejects_malformed_repair_protocol_before_shape_fallback():
+    actual, error = validate_operation_result(
+        {
+            "filepath": "tests/__init__.py",
+            "content": None,
+            "edits": [],
+            "protocol_error": "incomplete repair markers",
+        },
+        expected=CodeOperation.REPAIR_WITH_PATCH,
+        file_exists=True,
+    )
+
+    assert actual is CodeOperation.NO_CHANGE_ASSESSMENT
+    assert error == "malformed repair response: incomplete repair markers"
+
+
 def test_retry_reducer_prefers_grounded_cheap_work_before_full_set():
     decision = decide_retry_action(
         retry_count=0, max_retries=4, targeted_retry_count=0,

@@ -18,17 +18,70 @@ from kriya.workflow.failure import Failure
 logger = logging.getLogger(__name__)
 
 
+_NON_EXECUTABLE_PYTEST_FILES = {"__init__.py", "conftest.py"}
+_PYTHON_TEST_FILE_RE = re.compile(r"^(?:test_.+|.+_test)\.py$")
+_JAVA_TEST_FILE_RE = re.compile(
+    r"^(?:Test.+|.+(?:Test|Tests|TestCase))\.(?:java|kt|kts|groovy)$",
+)
+_RUBY_TEST_FILE_RE = re.compile(r"^(?:test_.+|.+_(?:test|spec))\.rb$")
+
+
+def is_runnable_test_file(filepath: str) -> bool:
+    """Return whether ``filepath`` names a test module a supported runner can execute.
+
+    Directory names such as ``tests/`` and ``src/test/`` are classification
+    context, not proof that every file below them is itself a test.  In particular,
+    package initializers, pytest configuration, fixtures, and helper modules can all
+    live there.  Passing one of those files as pytest's targeted argument produces a
+    valid zero-collection result, which is a test-selection error rather than a code
+    failure.
+
+    The filename conventions mirror the runners Kriya actually invokes: pytest,
+    Maven Surefire/Gradle's common Java test names, and RSpec/minitest.  Unknown or
+    unusually named tests remain covered by the full-suite fallback instead of being
+    guessed as a target.
+    """
+    normalized = (filepath or "").replace("\\", "/")
+    basename = normalized.rsplit("/", 1)[-1]
+    lowered = basename.lower()
+    if lowered in _NON_EXECUTABLE_PYTEST_FILES:
+        return False
+    return bool(
+        _PYTHON_TEST_FILE_RE.match(basename)
+        or _JAVA_TEST_FILE_RE.match(basename)
+        or _RUBY_TEST_FILE_RE.match(basename)
+    )
+
+
+def find_runnable_test_files(files_written: Iterable[str]) -> List[str]:
+    """Return deterministic, deduplicated executable test candidates."""
+    return sorted({path for path in files_written if is_runnable_test_file(path)})
+
+
 def extract_target_test(error_context: str, files_written: List[str]) -> Optional[str]:
-    for f in files_written:
-        if "test" in f.lower() or "spec" in f.lower():
-            return f
-    if error_context:
-        matches = re.findall(r'(?:test_\w+|Test\w+)', error_context)
-        if matches:
-            exclude = {"test", "testing", "tests", "Test"}
-            valid = [m for m in matches if m not in exclude]
-            if valid:
-                return valid[0]
+    """Choose a target only when deterministic evidence identifies one test file.
+
+    A failure that names exactly one known runnable test wins.  Otherwise a single
+    candidate is unambiguous.  Multiple unreferenced candidates deliberately return
+    ``None`` so the caller runs the suite; choosing the first element of a set made
+    this decision nondeterministic and selected ``tests/__init__.py`` in the
+    python_task_tracker live incident (2026-08-20).
+    """
+    candidates = find_runnable_test_files(files_written)
+    if not candidates:
+        return None
+
+    error_lower = (error_context or "").replace("\\", "/").lower()
+    referenced = []
+    for candidate in candidates:
+        normalized = candidate.replace("\\", "/")
+        basename = normalized.rsplit("/", 1)[-1]
+        if normalized.lower() in error_lower or basename.lower() in error_lower:
+            referenced.append(candidate)
+    if len(referenced) == 1:
+        return referenced[0]
+    if len(candidates) == 1:
+        return candidates[0]
     return None
 
 

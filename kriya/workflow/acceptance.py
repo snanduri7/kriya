@@ -12,6 +12,8 @@ _ZERO_TEST_PATTERNS = (
     re.compile(r"collected\s+0\s+items?", re.IGNORECASE),
     re.compile(r"tests?\s+run:\s*0\b", re.IGNORECASE),
     re.compile(r"\bno\s+tests?\s+to\s+run\b", re.IGNORECASE),
+    re.compile(r"\bno\s+tests?\s+(?:were\s+)?(?:collected|executed|found|ran)\b", re.IGNORECASE),
+    re.compile(r"\bno\s+tests?\s+matching\s+pattern\b", re.IGNORECASE),
     re.compile(r"\b0\s+tests?\s+(?:passed|executed|run)\b", re.IGNORECASE),
     re.compile(r"\btest\b.*\bno[- ]source\b", re.IGNORECASE),
 )

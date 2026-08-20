@@ -663,6 +663,40 @@ def test_split_fix_analysis_edit_falls_back_when_no_markers_at_all():
     assert edits is None
     assert content == text
 
+def test_split_fix_analysis_edit_does_not_treat_prose_substrings_as_markers():
+    text = (
+        "FIX ANALYSIS: I will search: for the invalid import and replace: it.\n"
+        "FILE CONTENT:\npublic class App {}"
+    )
+
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+
+    assert edits is None
+    assert content == "public class App {}"
+
+@pytest.mark.asyncio
+async def test_repair_generation_fails_closed_on_dangling_search_marker():
+    """The exact malformed envelope that corrupted python_task_tracker source."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=(
+        "FIX ANALYSIS: pytest did not discover this file.\n"
+        "SEARCH:\n# package marker\n"
+    ))
+    dev = DeveloperAgent("developer", llm)
+
+    files = await dev.run_generation(
+        "Fix the test failure", "Design", "Existing code",
+        known_target_files=["tests/__init__.py"],
+        prior_error_context="collected 0 items",
+        files_with_current_content={"tests/__init__.py"},
+        operation_by_file={"tests/__init__.py": CodeOperation.REPAIR_WITH_PATCH},
+    )
+
+    assert files[0]["content"] is None
+    assert not files[0].get("edits")
+    assert "incomplete repair markers" in files[0]["protocol_error"]
+
 def test_split_fix_analysis_edit_truncates_redundant_trailing_file_content():
     """Regression test for a real bug found live, 2026-08-04: a model asked
     to prefer an anchored edit sometimes ALSO appends a redundant, unasked-
@@ -1038,6 +1072,21 @@ async def test_fill_missing_content_repeats_verification_contract_reminder_at_en
     only_this_file_pos = file_prompt.index("Return ONLY the content of")
     reminder_pos = file_prompt.index("[VERIFICATION] PASS")
     assert reminder_pos > only_this_file_pos
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_does_not_add_entrypoint_reminder_to_test_support_file():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="# package marker\n")
+    dev = DeveloperAgent("developer", llm)
+
+    await dev.run_generation(
+        "Task", "Design", "Existing code",
+        known_target_files=["tests/__init__.py"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "this entrypoint must end by printing" not in file_prompt
 
 @pytest.mark.asyncio
 async def test_fill_missing_content_repeats_skill_conventions_reminder_at_end():

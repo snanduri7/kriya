@@ -15,6 +15,11 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.failure import Failure, QualityGateFailure
+from kriya.workflow.file_resolution import (
+    extract_target_test,
+    find_runnable_test_files,
+    is_runnable_test_file,
+)
 from kriya.workflow.edit_safety import (
     FileRevisionConflict,
     StagedFileWrite,
@@ -351,6 +356,35 @@ def test_normalize_written_filepath_rejects_path_escaping_workspace():
 
 def test_normalize_written_filepath_rejects_empty():
     assert normalize_written_filepath("", "/workspace") is None
+
+def test_runnable_test_discovery_excludes_python_support_files():
+    files = {
+        "tests/__init__.py",
+        "tests/conftest.py",
+        "tests/helpers.py",
+        "tests/test_store.py",
+    }
+
+    assert not is_runnable_test_file("tests/__init__.py")
+    assert not is_runnable_test_file("tests/conftest.py")
+    assert not is_runnable_test_file("src/main/java/acme/Contest.java")
+    assert find_runnable_test_files(files) == ["tests/test_store.py"]
+
+def test_extract_target_test_is_deterministic_for_live_incident_shape():
+    # python_task_tracker (2026-08-20): all_files_written is a set, and the old
+    # substring-first selector happened to encounter tests/__init__.py before the
+    # real test module.  Input order must no longer affect the result.
+    forward = ["tests/__init__.py", "tests/test_store.py", "task_tracker/store.py"]
+    reverse = list(reversed(forward))
+
+    assert extract_target_test("", forward) == "tests/test_store.py"
+    assert extract_target_test("", reverse) == "tests/test_store.py"
+
+def test_extract_target_test_uses_failure_evidence_or_defers_ambiguous_suite():
+    files = ["tests/test_api.py", "tests/test_store.py"]
+
+    assert extract_target_test("", files) is None
+    assert extract_target_test("tests/test_store.py::test_add failed", files) == "tests/test_store.py"
 
 def test_resolve_run_command_substitutes_when_python_unresolvable():
     with patch("shutil.which", return_value=None):
@@ -3222,6 +3256,80 @@ async def test_run_attempt_rejects_zero_tests_for_explicit_test_contract(tmp_pat
 
     assert exc_info.value.failure.type == "test_acceptance"
     assert "zero tests executed" in exc_info.value.failure.message
+
+@pytest.mark.asyncio
+async def test_run_attempt_targets_real_test_module_not_package_initializer(tmp_path):
+    """End-to-end regression for the python_task_tracker live failure."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "task_tracker/store.py", "content": "class Store: pass\n"},
+        {"filepath": "tests/__init__.py", "content": ""},
+        {"filepath": "tests/test_store.py", "content": "def test_store(): assert True\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create a task tracker and include tests",
+        developer=developer,
+        architect_files=["task_tracker/store.py", "tests/__init__.py", "tests/test_store.py"],
+        expected_files_upfront=["task_tracker/store.py", "tests/__init__.py", "tests/test_store.py"],
+        architect_basename_to_path={
+            "store.py": "task_tracker/store.py",
+            "__init__.py": "tests/__init__.py",
+            "test_store.py": "tests/test_store.py",
+        },
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": "3 passed in 0.02s"},
+    ) as mock_tests:
+        await run_attempt(state, ctx)
+
+    mock_tests.assert_called_once_with(target_test="tests/test_store.py")
+    assert not any(outcome["type"] == "test_acceptance" for outcome in state.gate_outcomes)
+
+@pytest.mark.asyncio
+async def test_run_attempt_zero_test_target_falls_back_to_suite_without_model_repair(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "def add(a, b): return a + b\n"},
+        {"filepath": "test_app.py", "content": "def test_add(): assert True\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create an app and include tests",
+        developer=developer,
+        architect_files=["app.py", "test_app.py"],
+        expected_files_upfront=["app.py", "test_app.py"],
+        architect_basename_to_path={"app.py": "app.py", "test_app.py": "test_app.py"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        side_effect=[
+            {"success": True, "output": "collected 0 items"},
+            {"success": True, "output": "1 passed in 0.01s"},
+        ],
+    ) as mock_tests:
+        await run_attempt(state, ctx)
+
+    assert [call.kwargs for call in mock_tests.call_args_list] == [
+        {"target_test": "test_app.py"},
+        {},
+    ]
+    assert developer.run_generation.await_count == 1
+    assert any(
+        outcome["type"] == "test_selection" and outcome["recovered_by"] == "full_suite"
+        for outcome in state.gate_outcomes
+    )
 
 @pytest.mark.asyncio
 async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded(tmp_path):

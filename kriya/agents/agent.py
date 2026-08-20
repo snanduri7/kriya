@@ -142,6 +142,8 @@ _BUFFER_CAPACITY_RE = re.compile(r"java\.nio\.Buffer(Overflow|Underflow)Exceptio
 # requiring that closes the false-positive without narrowing the prose-phrased
 # match this regex was broadened for in the first place.
 _TRAILING_FILE_CONTENT_RE = re.compile(r"^[^\n]*?file content[^\n:]{0,60}:[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_SEARCH_MARKER_RE = re.compile(r"^[ \t]*SEARCH:", re.IGNORECASE | re.MULTILINE)
+_REPLACE_MARKER_RE = re.compile(r"^[ \t]*REPLACE:", re.IGNORECASE | re.MULTILINE)
 
 # See _fix_xml_comment_double_hyphens's own docstring - matches every <!-- ... -->
 # block (DOTALL so a multi-line comment body is captured whole) so its own hyphen
@@ -701,8 +703,11 @@ class DeveloperAgent(BaseAgent):
         file_content_match = _TRAILING_FILE_CONTENT_RE.search(text)
         bound = file_content_match.start() if file_content_match else len(text)
 
-        search_matches = list(re.finditer(r"search:", text[:bound], re.IGNORECASE))
-        replace_matches = list(re.finditer(r"replace:", text[:bound], re.IGNORECASE))
+        # Markers are structural only when they start a line.  An analysis sentence
+        # such as "replace: the invalid import" is prose, not a patch delimiter.
+        # Treating arbitrary substrings as delimiters lets explanations become code.
+        search_matches = list(_SEARCH_MARKER_RE.finditer(text[:bound]))
+        replace_matches = list(_REPLACE_MARKER_RE.finditer(text[:bound]))
         if not search_matches or not replace_matches:
             analysis, content = DeveloperAgent._split_fix_analysis(text)
             return analysis, None, content
@@ -764,6 +769,35 @@ class DeveloperAgent(BaseAgent):
             return (analysis or None), edits, None
         analysis, content = DeveloperAgent._split_fix_analysis(text)
         return analysis, None, content
+
+    @staticmethod
+    def _repair_protocol_error(text: str, *, patch_preferred: bool) -> Optional[str]:
+        """Validate a retry completion's envelope before any text becomes source.
+
+        Repair prompts require an explicit SEARCH/REPLACE pair, FILE CONTENT block,
+        or NO CHANGE NEEDED assessment.  The legacy parser intentionally preserves
+        raw text when no marker exists because first-pass/plain-content callers rely
+        on that behavior; this repair-only check closes the unsafe transition where a
+        malformed retry explanation was accepted as a full-file fallback.
+        """
+        if _NO_CHANGE_NEEDED_RE.search(text):
+            return None
+        has_file_content = _TRAILING_FILE_CONTENT_RE.search(text) is not None
+        searches = list(_SEARCH_MARKER_RE.finditer(text))
+        replaces = list(_REPLACE_MARKER_RE.finditer(text))
+        if patch_preferred and searches and replaces:
+            return None
+        if has_file_content:
+            return None
+        if searches or replaces:
+            return (
+                "incomplete repair markers: SEARCH and REPLACE must form at least "
+                "one complete pair, or the response must use FILE CONTENT"
+            )
+        return (
+            "missing repair outcome marker: expected SEARCH/REPLACE, FILE CONTENT, "
+            "or NO CHANGE NEEDED"
+        )
 
     @staticmethod
     def _normalize_file_entries(parsed: Any) -> Optional[List[Dict[str, Any]]]:
@@ -1026,6 +1060,11 @@ class DeveloperAgent(BaseAgent):
         _reserve_sibling_content_budget(context_window) so the budget scales with
         whichever model is generating; None (a caller that hasn't been updated, or
         a direct test call) falls back to DEFAULT_SIBLING_CONTENT_BUDGET below."""
+        # Deferred because importing a kriya.workflow submodule at module load time
+        # executes kriya.workflow.__init__, which imports WorkflowEngine and loops
+        # back to this agent module.
+        from kriya.workflow.generation_manifest import FileRole, classify_file_role
+
         all_paths = [e["filepath"] for e in file_entries]
         files_out = []
         for entry in file_entries:
@@ -1411,15 +1450,18 @@ class DeveloperAgent(BaseAgent):
                     f"Please generate the complete, correct file content for: '{filepath}'\n"
                     f"Return ONLY the content of '{filepath}' - nothing before it, nothing after it, no other file.\n"
                 )
+            verification_reminder = (
+                "Reminder: per the Verification Contract above, this entrypoint must end by "
+                "printing \"[VERIFICATION] PASS\" or \"[VERIFICATION] FAIL: <reason>\"."
+                if classify_file_role(filepath) is FileRole.ENTRYPOINT else ""
+            )
             file_prompt = (
                 f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
                 f"=== Architecture Design ===\n{design_context}\n\n"
                 f"=== Task ===\n{task_description}\n\n"
                 f"{sibling_section}"
                 f"{generation_directive}"
-                "Reminder: per the Verification Contract above, if this file is (or contains) the "
-                "entrypoint and the goal describes a checkable runtime outcome, it must end by printing "
-                "\"[VERIFICATION] PASS\" or \"[VERIFICATION] FAIL: <reason>\"."
+                f"{verification_reminder}"
                 f"{skill_reminder}"
                 f"{source_context_block}"
                 f"{fix_analysis_instruction}"
@@ -1466,18 +1508,34 @@ class DeveloperAgent(BaseAgent):
             # visible verbatim, not swallowed by print-formatting.
             logger.debug(f"Developer raw completion for '{filepath}' (pre-parse): {content!r}")
 
+            raw_completion = content
             edits = None
             analysis = None
+            protocol_error = None
             if prefer_anchored_edit:
                 analysis, edits, content = self._split_fix_analysis_edit(content)
+                protocol_error = self._repair_protocol_error(
+                    raw_completion, patch_preferred=True,
+                )
                 if analysis:
                     logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
                 if edits:
                     logger.info(f"Developer returned an anchored edit for '{filepath}' instead of full content.")
             elif apply_fix_analysis:
                 analysis, content = self._split_fix_analysis(content)
+                protocol_error = self._repair_protocol_error(
+                    raw_completion, patch_preferred=False,
+                )
                 if analysis:
                     logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
+
+            if protocol_error:
+                logger.warning(
+                    f"Developer returned a malformed repair response for '{filepath}': "
+                    f"{protocol_error}. Refusing to treat response prose as source code."
+                )
+                edits = None
+                content = None
 
             # Threaded out (not just logged) so kriya/workflow/attribution.py's
             # self_diagnosis tier can check whether this text names a DIFFERENT
@@ -1491,6 +1549,8 @@ class DeveloperAgent(BaseAgent):
                 file_entry = {"filepath": filepath, "content": self.sanitize_generated_content(content)}
             if analysis:
                 file_entry["analysis"] = analysis
+            if protocol_error:
+                file_entry["protocol_error"] = protocol_error
             files_out.append(file_entry)
         return files_out
 

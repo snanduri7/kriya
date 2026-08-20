@@ -34,7 +34,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, normalize_written_filepath
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -115,11 +115,13 @@ def _retry_package_for_attempt(
 
 def _estimated_generation_seconds(
     state: GenerationState, *, file_count: int, configured_per_file: int,
+    active_model: Optional[str] = None,
 ) -> float:
     observed = [
         timing["duration_seconds"] / max(1, timing["file_count"])
         for timing in state.generation_timings
         if timing.get("duration_seconds", 0) > 0 and timing.get("file_count", 0) > 0
+        and (active_model is None or timing.get("model") == active_model)
     ]
     per_file = statistics.median(observed) if observed else configured_per_file
     return per_file * max(1, file_count)
@@ -127,6 +129,7 @@ def _estimated_generation_seconds(
 
 def _ensure_generation_time_budget(
     state: GenerationState, ctx: "AttemptContext", *, file_count: int,
+    active_model: Optional[str] = None,
 ) -> None:
     autonomy = ctx.kernel.config.autonomy
     budget = autonomy.generation_time_budget_seconds
@@ -138,6 +141,7 @@ def _ensure_generation_time_budget(
         state,
         file_count=file_count,
         configured_per_file=autonomy.generation_seconds_per_file_estimate,
+        active_model=active_model,
     )
     required = estimate + autonomy.generation_gate_reserve_seconds
     if remaining < required:
@@ -164,7 +168,10 @@ async def _run_developer_generation(
 ) -> List[Dict[str, str]]:
     targets = kwargs.get("known_target_files")
     file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
-    _ensure_generation_time_budget(state, ctx, file_count=file_count)
+    active_model = kwargs.get("model_override") or ctx.kernel.config.llm.model
+    _ensure_generation_time_budget(
+        state, ctx, file_count=file_count, active_model=active_model,
+    )
     started = time.monotonic()
     succeeded = False
     try:
@@ -177,7 +184,7 @@ async def _run_developer_generation(
             "duration_seconds": duration,
             "file_count": file_count,
             "succeeded": succeeded,
-            "model": kwargs.get("model_override") or ctx.kernel.config.llm.model,
+            "model": active_model,
         })
         state.record_event(RunEvent(
             kind="generation.completed" if succeeded else "generation.failed",
@@ -191,7 +198,7 @@ async def _run_developer_generation(
             details={
                 "duration_seconds": duration,
                 "file_count": file_count,
-                "model": kwargs.get("model_override") or ctx.kernel.config.llm.model,
+                "model": active_model,
             },
         ))
 
@@ -1582,12 +1589,50 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         }
 
         accepted_test_output: Optional[str] = None
+        runnable_test_files = find_runnable_test_files(state.all_files_written)
         target_test = extract_target_test(state.error_context, list(state.all_files_written))
         if target_test:
             logger.info(f"Quality Gates: Running targeted tests: {target_test}")
             test_repair_result = None
             test_res = validator.run_tests(target_test=target_test)
-            if not test_res["success"]:
+            if not output_confirms_nonzero_test_execution(test_res.get("output", "")):
+                # A targeted command that collected zero tests says the selector
+                # did not identify an executable test; it says nothing about the
+                # generated application.  Do not route this orchestration error to
+                # the Developer as a source repair.  Retry once with the runner's
+                # native suite discovery, which is the authoritative fallback.
+                logger.warning(
+                    "Quality Gates: Targeted test selection collected zero tests for "
+                    f"{target_test}; retrying the full suite before attributing a code failure."
+                )
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "test_selection",
+                    "success": False,
+                    "output": test_res.get("output", ""),
+                    "target_test": target_test,
+                    "recovered_by": "full_suite",
+                })
+                target_test = None
+                test_res = validator.run_tests()
+                if not test_res["success"]:
+                    failure = _build_quality_gate_failure(
+                        "test", f"TEST FAILURE:\n{test_res['output']}",
+                        test_res.get("output", ""), ctx.worktree_path,
+                        state.all_files_written, state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "test",
+                    "success": True,
+                    "output": test_res.get("output", ""),
+                    "selection_fallback": True,
+                })
+                accepted_test_output = test_res.get("output", "")
+
+            if target_test and not test_res["success"]:
                 if ctx.kernel.config.autonomy.self_correction_loop_enabled:
                     from kriya.workflow.self_correction import run_repair_loop
                     test_repair_result = await run_repair_loop(
@@ -1632,17 +1677,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         }
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
-            if not (test_repair_result and test_repair_result.resolved):
+            if target_test and not (test_repair_result and test_repair_result.resolved):
                 state.gate_outcomes.append({
                     "attempt": state.attempt_number,
                     "type": "targeted_test",
                     "success": True,
                     "output": test_res.get("output", "")
                 })
-            accepted_test_output = test_res.get("output", "")
+            if target_test:
+                accepted_test_output = test_res.get("output", "")
         else:
-            test_written = any("test" in f.lower() or "spec" in f.lower() for f in state.all_files_written)
-            if test_written:
+            if runnable_test_files:
                 logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                 test_res = validator.run_tests()
                 if not test_res["success"]:
@@ -1659,6 +1704,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "output": test_res.get("output", "")
                 })
                 accepted_test_output = test_res.get("output", "")
+
+        if accepted_test_output is None and goal_explicitly_requires_tests(ctx.goal):
+            failure = Failure(
+                type="test_acceptance",
+                message=(
+                    "TEST ACCEPTANCE FAILURE: the goal explicitly requires tests, "
+                    "but no runnable test module was generated. Package initializers, "
+                    "test-runner configuration, fixtures, and support files do not count as tests."
+                ),
+                raw_output="runnable_test_files=[]",
+                likely_files=sorted(state.all_files_written),
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
 
         # The same acceptance rule applies whether extract_target_test() chose
         # one test or the validator ran the suite. Test-selection strategy must

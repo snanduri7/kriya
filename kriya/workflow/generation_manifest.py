@@ -59,7 +59,8 @@ def classify_file_role(path: str) -> FileRole:
     if stem.endswith(("model", "entity", "dto", "request", "response", "record")):
         return FileRole.MODEL
     if extension in _SOURCE_EXTENSIONS and stem in {
-        "main", "app", "application", "server", "cli", "program", "bootstrap",
+        "main", "__main__", "app", "application", "server", "cli", "program",
+        "bootstrap", "runner",
     }:
         return FileRole.ENTRYPOINT
     if extension in _SOURCE_EXTENSIONS:

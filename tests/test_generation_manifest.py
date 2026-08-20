@@ -11,6 +11,8 @@ def test_manifest_classifies_common_roles_without_stack_specific_names():
     assert classify_file_role("src/main/java/acme/PersonService.java") is FileRole.SOURCE
     assert classify_file_role("src/main/resources/applicationContext.xml") is FileRole.CONFIG
     assert classify_file_role("src/main/java/acme/Application.java") is FileRole.ENTRYPOINT
+    assert classify_file_role("task_tracker/__main__.py") is FileRole.ENTRYPOINT
+    assert classify_file_role("bin/runner.rb") is FileRole.ENTRYPOINT
     assert classify_file_role("src/test/java/acme/ApplicationTest.java") is FileRole.TEST
 
 

@@ -123,6 +123,8 @@ def validate_operation_result(
     file, and an existing file is never accepted under the creation contract.
     """
     actual = classify_result_operation(result, file_exists=file_exists)
+    if result.get("protocol_error"):
+        return actual, f"malformed repair response: {result['protocol_error']}"
     allowed = {expected}
     if expected is CodeOperation.REPAIR_WITH_PATCH:
         allowed.update({

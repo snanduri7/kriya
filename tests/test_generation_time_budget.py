@@ -36,6 +36,20 @@ def test_generation_estimate_learns_median_per_file_duration():
     ) == 60
 
 
+def test_generation_estimate_does_not_apply_primary_timing_to_fallback_model():
+    state = GenerationState(generation_timings=[
+        {"duration_seconds": 20, "file_count": 2, "model": "fast-local"},
+        {"duration_seconds": 180, "file_count": 2, "model": "slow-local"},
+    ])
+
+    assert _estimated_generation_seconds(
+        state, file_count=2, configured_per_file=45, active_model="slow-local",
+    ) == 180
+    assert _estimated_generation_seconds(
+        state, file_count=2, configured_per_file=45, active_model="unseen-local",
+    ) == 90
+
+
 def test_time_budget_rejects_doomed_generation_before_model_call():
     config = AppConfig()
     config.autonomy.generation_time_budget_seconds = 100
