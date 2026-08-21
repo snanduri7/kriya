@@ -2001,9 +2001,18 @@ class WorkflowEngine:
             # Full success - nothing left a resumed run would need to redo.
             delete_checkpoint(workspace_path, run_id)
         else:
+            # Deliberately just the total (state.attempt_number), not a
+            # full-set/targeted breakdown: state.budgets.targeted_retry_count
+            # (and .fallback_targeted_attempted) get reset to 0/False every
+            # time retry_strategy.py sees a new failure family, while
+            # attempt_number never does - live-confirmed the two can diverge
+            # badly enough that "full-set X, targeted Y" adds up to far less
+            # than the real total (a live run: attempt_number=8, but
+            # retry_count=1 + targeted_retry_count=2 after two mid-run
+            # resets). Same lesson as banners.py's dropped "N/M": don't
+            # juxtapose numbers whose relationship isn't actually guaranteed.
             logger.info(
-                f"Quality Gates never passed after {state.attempt_number} attempt(s) "
-                f"(full-set {state.budgets.retry_count}, targeted {state.budgets.targeted_retry_count}) - "
+                f"Quality Gates never passed after {state.attempt_number} attempt(s) - "
                 f"checkpoint '{run_id}' left on disk in case a later `--resume-id` run wants to skip "
                 "Plan/Design and retry Developer."
             )
