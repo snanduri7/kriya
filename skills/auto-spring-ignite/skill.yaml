@@ -8,4 +8,7 @@ name: auto-spring-ignite
 tags:
 - spring-ignite
 - auto-generated
-verification_gap_acknowledged: true
+verification_gap_acknowledged: false
+verified: true
+verified_at: '2026-08-21'
+verified_context: version unspecified
