@@ -17,6 +17,7 @@ from kriya.agents.agent import (
     ReviewerAgent,
     RunVerifierAgent,
     SkillGapAgent,
+    SpecComplianceAgent,
 )
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
@@ -192,6 +193,7 @@ class WorkflowEngine:
         self.reviewer = ReviewerAgent("reviewer", llm_client, roles.reviewer.llm, roles.reviewer.llm_chain)
         self.run_verifier = RunVerifierAgent("run_verifier", llm_client, roles.run_verifier.llm, roles.run_verifier.llm_chain)
         self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client, roles.skill_gap.llm, roles.skill_gap.llm_chain)
+        self.spec_compliance = SpecComplianceAgent("spec_compliance", llm_client, roles.spec_compliance.llm, roles.spec_compliance.llm_chain)
 
     async def _approve_web_lookup(
         self, terms: List[str], base_url: str,
@@ -257,6 +259,7 @@ class WorkflowEngine:
         milestone_index: Optional[int] = None,
         milestone_total: Optional[int] = None,
         supplementary_context: str = "",
+        established_files: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -294,6 +297,26 @@ class WorkflowEngine:
         workspace git state, resolved config, or goal/error text since the
         checkpoint was saved invalidates it (strict - falls back to a fresh run
         with a warning, never a partial/best-effort resume).
+
+        established_files: filepaths known to exist from OUTSIDE this call's own
+        generation - for kriya/workflow/milestones.py's run_milestones(), every
+        file an earlier, already-completed milestone wrote (the same set
+        supplementary_context's rendered content comes from - see
+        MilestoneRunState.established_file_context). Threaded onto
+        AttemptContext.established_files and unioned into the "known files"
+        candidate set self-diagnosis/attribution matching uses (kriya/workflow/
+        attempt.py's extract_self_diagnosed_files() call and retry_strategy.py's
+        attribute_failure() call) - WITHOUT touching state.all_files_written
+        itself, which ~30 other call sites read as "written by THIS attempt"
+        and must stay that way. Exists because supplementary_context alone
+        only fixes what the model ASSUMES about an earlier file's shape; it
+        does nothing for a LATER compile/runtime failure whose real fix
+        requires editing that earlier file - found live, 2026-08-21
+        (ignite_qpid_protocol): the Developer's own FIX ANALYSIS correctly,
+        repeatedly said an earlier milestone's file needed a change, but that
+        file was never a valid redirect target, since only files THIS attempt
+        itself wrote were ever considered "known". None (the default)
+        preserves today's exact behavior for every other caller.
 
         web_lookup_query_callback gates every outbound live-lookup search (goal-
         stage, design-stage, and the retry loop's repeated-failure lookup alike)
@@ -1412,6 +1435,7 @@ class WorkflowEngine:
             active_skill_rules_snapshot=active_skill_rules_snapshot,
             developer=self.developer,
             run_verifier=self.run_verifier,
+            spec_compliance=self.spec_compliance,
             skill_engine=se,
             kernel=self.kernel,
             max_retries=max_retries,
@@ -1421,6 +1445,7 @@ class WorkflowEngine:
                 entry.path: list(entry.depends_on)
                 for entry in generation_manifest.entries
             },
+            established_files=established_files or [],
         )
 
         from kriya.workflow.retry_policy import decide_for_state

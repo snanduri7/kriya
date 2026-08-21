@@ -29,6 +29,31 @@ _ZERO_TEST_PATTERNS = (
     re.compile(r"\b0\s+tests?\s+(?:passed|executed|run)\b", re.IGNORECASE),
     re.compile(r"\btest\b.*\bno[- ]source\b", re.IGNORECASE),
 )
+# A runtime-verification command whose target simply doesn't exist - found
+# live, 2026-08-21 (ignite_qpid_protocol milestone 2/4): RunVerifierAgent.
+# judge() inferred `java -cp . ProtocolParserTest` (a test class that was
+# never generated), and that judgment stays cached for the rest of the run
+# (kriya/workflow/attempt.py's state.cached_run_verification_judgment) -
+# already a documented, not-yet-fixed gap (SME review finding #8: "a stale
+# inferred entrypoint path from attempt 1 can persist even after the file
+# layout changes"). Confirmed live: attempt 5 added a main() method directly
+# to ProtocolParser.java specifically to satisfy verification, but the
+# cached command still tried to run the never-existent ProtocolParserTest -
+# identical failure, 6 attempts straight, budget exhausted. Deliberately
+# broad, not Java-only (Python/Ruby covered too) - the cost of a false
+# positive here is one extra judge() call, not a wrongly-rejected fix, so
+# erring toward re-checking more often than strictly necessary is the right
+# tradeoff (contrast _EXPLICIT_TEST_REQUEST_RE above, where a false positive
+# actually burns a retry budget on an unwinnable gate).
+_MISSING_ENTRYPOINT_PATTERNS = (
+    re.compile(r"could not find or load main class", re.IGNORECASE),
+    re.compile(r"\bClassNotFoundException\b"),
+    re.compile(r"\bNoClassDefFoundError\b"),
+    re.compile(r"\bModuleNotFoundError\b"),
+    re.compile(r"\bNo module named\b", re.IGNORECASE),
+    re.compile(r"\bcannot load such file\b", re.IGNORECASE),
+    re.compile(r"\bLoadError\b"),
+)
 
 
 def goal_explicitly_requires_tests(goal: str) -> bool:
@@ -38,3 +63,13 @@ def goal_explicitly_requires_tests(goal: str) -> bool:
 def output_confirms_nonzero_test_execution(output: str) -> bool:
     """Fail only on known zero-test evidence; unfamiliar runners remain allowed."""
     return not any(pattern.search(output or "") for pattern in _ZERO_TEST_PATTERNS)
+
+
+def run_command_targets_missing_entrypoint(output: str) -> bool:
+    """True when captured runtime-verification output shows the run command
+    itself targeted a class/module/file that doesn't exist - as opposed to a
+    genuine application-logic failure. The caller's job (kriya/workflow/
+    attempt.py) is to invalidate a cached RunVerifierAgent.judge() judgment
+    when this fires, so the NEXT attempt re-infers a fresh command against
+    the CURRENT file layout instead of repeating the same broken one."""
+    return any(pattern.search(output or "") for pattern in _MISSING_ENTRYPOINT_PATTERNS)

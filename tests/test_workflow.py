@@ -3184,6 +3184,13 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         "reasoning": "Runtime verification was not requested by this test.",
         "likely_files": [],
     })
+    default_spec_compliance = AsyncMock()
+    default_spec_compliance.check = AsyncMock(return_value={
+        "compliant": True,
+        "reasoning": "Spec compliance was not requested by this test.",
+        "missing_requirements": [],
+        "likely_files": [],
+    })
 
     defaults = dict(
         goal="Write a small app",
@@ -3213,6 +3220,7 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         active_skill_rules_snapshot={},
         developer=AsyncMock(),
         run_verifier=default_run_verifier,
+        spec_compliance=default_spec_compliance,
         skill_engine=MagicMock(),
         kernel=Kernel(config=AppConfig()),
         max_retries=4,
@@ -3339,6 +3347,140 @@ async def test_run_attempt_allows_a_repair_that_reuses_its_own_existing_class_na
             await run_attempt(state, ctx)
         except QualityGateFailure as exc:
             assert exc.failure.type != "duplicate_type_across_files"
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_output_missing_a_goal_named_field(tmp_path):
+    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
+    milestone 1): the goal literally named required fields, but the
+    generated class had a different, incompatible set - compile and tests
+    both passed (nothing in that class was actually broken), and the goal
+    had no observable runtime behavior for RunVerifierAgent.judge() to
+    engage on, so nothing else in Quality Gates ever caught it. Confirms the
+    new gate raises goal_spec_compliance, opt-in via
+    autonomy.spec_compliance_enabled (default False - see kriya/config/
+    config.py's own comment for why this is NOT on by default like
+    run_verification_enabled)."""
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    state = GenerationState()
+    state.all_files_written = {"Protocol.java"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "Protocol.java",
+        "content": "class Protocol {\n    int version;\n    String type;\n}\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": False,
+        "reasoning": "The goal requires a protocolVersion field but the class only has version.",
+        "missing_requirements": ["protocolVersion"],
+        "likely_files": ["Protocol.java"],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create a Protocol class with a protocolVersion field",
+        developer=developer,
+        architect_files=["Protocol.java"],
+        expected_files_upfront=["Protocol.java"],
+        architect_basename_to_path={"Protocol.java": "Protocol.java"},
+        spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "goal_spec_compliance"
+    assert "protocolVersion" in exc_info.value.failure.message
+    assert "Protocol.java" in exc_info.value.failure.likely_files
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_passes_when_spec_compliant(tmp_path):
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    state = GenerationState()
+    state.all_files_written = {"Protocol.java"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "Protocol.java",
+        "content": "class Protocol {\n    int protocolVersion;\n}\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": True,
+        "reasoning": "protocolVersion is present as required.",
+        "missing_requirements": [],
+        "likely_files": [],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create a Protocol class with a protocolVersion field",
+        developer=developer,
+        architect_files=["Protocol.java"],
+        expected_files_upfront=["Protocol.java"],
+        architect_basename_to_path={"Protocol.java": "Protocol.java"},
+        spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    spec_compliance.check.assert_called_once()
+    assert any(g.get("type") == "goal_spec_compliance" and g.get("success") for g in state.gate_outcomes)
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_skips_spec_compliance_gate_when_disabled(tmp_path):
+    """autonomy.spec_compliance_enabled defaults False - confirms the gate
+    genuinely doesn't fire (never even calls the agent) unless a project
+    explicitly opts in, unlike run_verification_enabled's default-True gate."""
+    state = GenerationState()
+    state.all_files_written = {"app.py"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "def add(a, b): return a + b\n"}
+    ])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": False,
+        "reasoning": "Would reject if called.",
+        "missing_requirements": ["whatever"],
+        "likely_files": [],
+    })
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer, spec_compliance=spec_compliance)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    spec_compliance.check.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -4951,6 +5093,76 @@ async def test_workflow_run_verification_judgment_cached_across_retry_attempts(t
     assert res["quality_gates_passed"] is True
     we.run_verifier.judge.assert_called_once()
     assert we.run_verifier.grade.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_verification_judgment_reinferred_after_missing_entrypoint(tmp_path):
+    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
+    milestone 2/4): the caching fix above is correct for the common case (the
+    judgment doesn't change between retries) but wrong once the inferred
+    command's own target stops existing - RunVerifierAgent.judge() inferred a
+    test class that was never generated, and that broken judgment stayed
+    cached for the rest of the run (SME review finding #8, already documented
+    as NOT YET FIXED), unchanged even after a later attempt changed the file
+    layout specifically to try to satisfy it - 6 attempts straight, identical
+    failure, budget exhausted. Confirms the fix: a "missing entrypoint" shaped
+    failure (kriya/workflow/acceptance.py's run_command_targets_missing_
+    entrypoint()) must invalidate state.cached_run_verification_judgment, so
+    judge() is called AGAIN on the next attempt - the mirror image of the
+    "called exactly once" test above, proving re-invocation happens when, and
+    only when, it's actually warranted."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",     # Planner
+        "Design: Write app.py",   # Architect
+        "Review: Approved",       # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    # Developer mocked directly (not via raw completions) so this test doesn't
+    # need to predict exactly which retry mode (targeted vs full-set) the
+    # attribution ladder picks for an unlocatable "module not found" failure -
+    # the content itself doesn't matter here, only that runtime verification
+    # runs twice and judge() gets called again for the second attempt.
+    we.developer.run_generation = AsyncMock(
+        return_value=[{"filepath": "app.py", "content": "print('[SUCCESS] it worked')\n"}]
+    )
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Output contains [SUCCESS]",
+    })
+    we.run_verifier.grade = AsyncMock(side_effect=[
+        {"passed": False, "reasoning": "The run command's target module doesn't exist."},
+        {"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."},
+    ])
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        side_effect=[
+            {
+                "success": False, "timed_out": False, "returncode": 1,
+                "output": "ModuleNotFoundError: No module named 'nonexistent_entrypoint'",
+            },
+            {
+                "success": True, "timed_out": False, "returncode": 0,
+                "output": "[SUCCESS] it worked",
+            },
+        ],
+    ):
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should print [SUCCESS]",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert we.run_verifier.judge.call_count == 2
+
 
 @pytest.mark.asyncio
 async def test_workflow_scopes_retry_to_grader_likely_files_on_run_verification_failure(tmp_path):
@@ -11524,6 +11736,73 @@ async def test_workflow_self_diagnosis_redirects_after_confirmed_repeat_failure(
     second_failure = [g for g in gate_outcomes if g["type"] == "compile" and g["success"] is False][1]
     assert second_failure["attribution_tier"] == "self_diagnosis"
     assert second_failure["likely_files"] == ["B.java"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_self_diagnosis_redirects_to_an_established_file_this_run_never_wrote(tmp_path):
+    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
+    milestone 2/4): unlike the confirmed-repeat test above (where B.java is
+    written by THIS SAME run's own attempt 1), a milestone's own
+    state.all_files_written only ever contains files IT wrote - an earlier,
+    already-completed milestone's file is invisible to it. The Developer's own
+    FIX ANALYSIS correctly, repeatedly said "the fix requires adding public
+    getter methods to the Protocol class" (an earlier milestone's file), but
+    that file was never a valid redirect candidate at all, since only files
+    THIS attempt itself wrote were ever considered "known" - the retry loop
+    burned its full budget regenerating only the file it was originally asked
+    for, 8 attempts straight, never touching the file the diagnosis actually
+    named. Fixed via the new established_files parameter on
+    run_generation_workflow(), unioned into the "known files" candidate set
+    both extract_self_diagnosed_files() (attempt.py) and attribute_failure()
+    (retry_strategy.py) use - WITHOUT touching state.all_files_written itself.
+
+    This test never generates B.java at all (it's never in architect_files/
+    expected_files_upfront, matching the real incident where the earlier
+    milestone's file was never part of THIS milestone's own scope) - only
+    established_files=["B.java"] makes it visible as a redirect target."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write A.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        # Attempt 1 (full-set): writes only A.java - B.java is never in this
+        # milestone's own scope at all, matching the real incident.
+        [{"filepath": "A.java", "content": "class A {\n  Object x;\n}"}],
+        # Attempt 2 (targeted retry of A.java) - the model's own analysis
+        # names B.java (an EARLIER milestone's file) as the real cause.
+        [{
+            "filepath": "A.java", "content": "class A {\n  Object x2;\n}",
+            "analysis": "A.java itself is fine - the real problem is in B.java's own field type.",
+        }],
+        # Attempt 3 - should now be targeted at B.java via self_diagnosis,
+        # even though B.java was never written by this run.
+        [{"filepath": "B.java", "content": "class B { int y; }"}],
+    ])
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},  # identical - same signature
+            {"success": True, "output": ""},
+        ]
+        res = await we.run_generation_workflow(
+            goal="Create a Java app", workspace_path=str(tmp_path),
+            established_files=["B.java"],
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert we.developer.run_generation.call_count == 3
+    third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
+    assert third_call_kwargs["known_target_files"] == ["B.java"]
 
 
 @pytest.mark.asyncio

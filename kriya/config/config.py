@@ -108,6 +108,22 @@ class AutonomyConfig(BaseModel):
     sandbox_memory_mb: int = Field(default=4096)
     run_verification_enabled: bool = Field(default=True)
     run_verification_timeout_seconds: int = Field(default=90)
+    # Gates on SpecComplianceAgent (kriya/agents/agent.py): unlike compile/test/
+    # run-verification, checks whether the goal's LITERALLY named requirements
+    # (an exact field/method/class name, exact type, exact constant) actually
+    # appear in the generated code - closes a gap compile/test/LSP grounding
+    # structurally can't (syntactically valid, semantically non-compliant code
+    # passes every other gate). Runs once, only after every other gate already
+    # passed. Default False (opt-in), unlike run_verification_enabled's
+    # default True - this is a genuinely NEW unconditional agent call, and
+    # run_verification_enabled's own introduction required ~110 explicit
+    # `cfg.autonomy.run_verification_enabled = False` opt-outs across
+    # tests/test_workflow.py just to keep its shared llm.complete mock
+    # side_effect sequencing intact; repeating that blast radius for a new,
+    # separately-optional gate isn't warranted. Same "new capability, off
+    # until proven" default already used for web_lookup_enabled and
+    # self_correction_loop_enabled above.
+    spec_compliance_enabled: bool = Field(default=False)
     web_lookup_enabled: bool = Field(default=False)
     # A live-lookup query's CONTENT is already hard-restricted (bare technology-name
     # strings only, enforced in code, never goal/design/code/error text) - this is a
@@ -201,6 +217,7 @@ class AgentRolesConfig(BaseModel):
     reviewer: AgentModelConfig = Field(default_factory=AgentModelConfig)
     run_verifier: AgentModelConfig = Field(default_factory=AgentModelConfig)
     skill_gap: AgentModelConfig = Field(default_factory=AgentModelConfig)
+    spec_compliance: AgentModelConfig = Field(default_factory=AgentModelConfig)
 
 class RoutingConfig(BaseModel):
     # On by default (since 2026-08-02) - a first-time kriya repl user typing a

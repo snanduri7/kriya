@@ -76,8 +76,13 @@ class Failure:
     element; caught immediately after pom.xml is written, before any other
     file in the batch is generated, since nothing else can compile without a
     usable POM anyway; see PolymorphicValidator.run_pom_validate() in
-    kriya/tools/validate.py), or "general_error" (fallback for a bare,
-    non-QualityGateFailure Exception).
+    kriya/tools/validate.py), "goal_spec_compliance" (compile/tests/run-
+    verification all passed, but the goal names a CONCRETE, literal requirement
+    - an exact field/method/class name, an exact type, an exact constant - that
+    the generated code doesn't actually satisfy; a gap none of the other gates
+    can structurally catch, since the code is otherwise valid; see
+    SpecComplianceAgent in kriya/agents/agent.py), or "general_error" (fallback
+    for a bare, non-QualityGateFailure Exception).
     """
     type: str
     message: str

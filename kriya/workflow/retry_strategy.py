@@ -229,9 +229,17 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         if state.last_self_diagnosis and state.last_self_diagnosis[0] == current_failure_signature:
             self_diagnosed_files = state.last_self_diagnosis[1]
 
+        # Unioned with ctx.established_files (kriya/workflow/attempt.py's
+        # AttemptContext field - see its own docstring) so the locator/judge
+        # tiers can also implicate an EARLIER milestone's file the raw failure
+        # text names (e.g. a javac error literally saying "... in Protocol"),
+        # not just files this attempt itself has written - this is what lets
+        # a genuinely new failure (not yet a "confirmed repeat") redirect
+        # immediately, one attempt earlier than self_diagnosed_files alone
+        # (which only kicks in on the signature-matched repeat) would allow.
         attribution = await attribute_failure(
             failure,
-            sorted(state.all_files_written),
+            sorted(set(state.all_files_written) | set(ctx.established_files)),
             state.budgets.retry_count,
             ctx.chain,
             ctx.developer.llm,

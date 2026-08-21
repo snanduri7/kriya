@@ -60,6 +60,7 @@ from kriya.workflow.banners import log_quality_gate_banner
 from kriya.workflow.acceptance import (
     goal_explicitly_requires_tests,
     output_confirms_nonzero_test_execution,
+    run_command_targets_missing_entrypoint,
 )
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
@@ -301,6 +302,7 @@ class AttemptContext:
     active_skill_rules_snapshot: Dict[str, Any]
     developer: DeveloperAgent
     run_verifier: Any
+    spec_compliance: Any
     skill_engine: Any
     kernel: Kernel
     # web_lookup_query_callback/approve_web_lookup are only read by
@@ -318,6 +320,28 @@ class AttemptContext:
     # path -> direct manifest dependencies, in generation order. Default keeps
     # isolated tests and old checkpoints backward compatible.
     generation_dependencies: Dict[str, List[str]] = field(default_factory=dict)
+    # Files known to exist from OUTSIDE this attempt's own generation - for a
+    # milestone run, every file an earlier, already-completed milestone wrote
+    # (kriya/workflow/milestones.py's MilestoneRunState.established_file_context
+    # keys). Deliberately NOT merged into state.all_files_written itself - that
+    # field is read by ~30 call sites across this module/workflow.py (compile/
+    # test scope, file-count budgeting, final "files written" reporting,
+    # missing-files detection...) where "written by THIS attempt" is the
+    # correct, load-bearing meaning; widening it would be wrong for most of
+    # those. This field exists ONLY to widen the "known files" candidate set
+    # self-diagnosis/attribution matching uses (see its two read sites: this
+    # module's extract_self_diagnosed_files() call, and retry_strategy.py's
+    # attribute_failure() call) - found live, 2026-08-21 (ignite_qpid_protocol,
+    # milestone 2/4): the Developer's own FIX ANALYSIS correctly, repeatedly
+    # said "the fix requires adding public getter methods to the Protocol
+    # class" (milestone 1's file), but Protocol.java was never a candidate for
+    # redirect at all, since milestone 2's OWN state.all_files_written only
+    # ever contains files ITS OWN attempts wrote (ProtocolParser.java) - a
+    # correct diagnosis had structurally nowhere to go, and the retry loop
+    # burned its full budget regenerating only ProtocolParser.java, 8 attempts
+    # straight. Default empty list keeps plain (non-milestone) generate/fix
+    # calls, and any old checkpoint, unaffected.
+    established_files: List[str] = field(default_factory=list)
 
 
 def _extract_grounded_contract_verdict(
@@ -1102,7 +1126,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # file) returns no analysis, and the SAME original failure signature
     # recurs at attempt N+2: the diagnosis must still be there to redirect
     # correctly again.
-    self_diagnosed = extract_self_diagnosed_files(files, sorted(state.all_files_written))
+    # Unioned with ctx.established_files (see that field's own docstring) so a
+    # correct diagnosis naming an EARLIER milestone's file - one THIS attempt
+    # never wrote itself - is still a valid redirect candidate, not silently
+    # unmatchable.
+    self_diagnosed = extract_self_diagnosed_files(
+        files, sorted(set(state.all_files_written) | set(ctx.established_files)),
+    )
     if self_diagnosed:
         state.last_self_diagnosis = (state.budgets.last_failure_signature, self_diagnosed)
 
@@ -2079,6 +2109,22 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
                     )
                     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
+                    # Invalidate a stale cached judgment BEFORE grading/raising below,
+                    # so a retry decision made from this failure already has a fresh
+                    # judge() call queued for the NEXT attempt - not one attempt later.
+                    # See run_command_targets_missing_entrypoint()'s own docstring for
+                    # the live incident (a cached command kept targeting a test class
+                    # that was never generated, unchanged across 6 straight attempts,
+                    # even after the file layout changed specifically to try to
+                    # satisfy it).
+                    if run_command_targets_missing_entrypoint(run_res["output"]):
+                        logger.warning(
+                            "Runtime verification's command referenced a class/module "
+                            "that doesn't exist - invalidating the cached judgment so "
+                            "the next attempt re-infers a fresh one against the current "
+                            "file layout instead of repeating this exact command."
+                        )
+                        state.cached_run_verification_judgment = None
                     gate_type = "run_verification"
                     if run_res["timed_out"]:
                         # _run_cmd_with_timeout still reaps and captures whatever
@@ -2269,6 +2315,53 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 mark_rules_verified(active_skill_obj.source_path, ctx.active_skill_rules_snapshot[active_skill_name])
                         except Exception as ex:
                             logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
+
+    # Quality Gates: Goal Spec Compliance. Compiling, passing tests, and (when
+    # applicable) runtime verification above all structurally can't catch a goal's
+    # LITERALLY named requirement (an exact field/method/class name, an exact type,
+    # an exact constant) going unimplemented - the generated code can be perfectly
+    # valid and even behave correctly while still being a different shape than what
+    # was actually asked for. Runs once, here, only after every other gate has
+    # already passed, so an attempt doomed for another reason never pays for it.
+    # See SpecComplianceAgent's own docstring (kriya/agents/agent.py) for the live
+    # incident (ignite_qpid_protocol milestone 1, 2026-08-21) this closes.
+    if ctx.kernel.config.autonomy.spec_compliance_enabled:
+        spec_check_files = sorted(state.all_files_written)
+        spec_file_contents: Dict[str, str] = {}
+        for spec_path in spec_check_files:
+            spec_full_path = os.path.join(ctx.worktree_path, spec_path)
+            if not os.path.exists(spec_full_path):
+                spec_full_path = os.path.join(ctx.workspace_path, spec_path)
+            if not os.path.exists(spec_full_path):
+                continue
+            try:
+                with open(spec_full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    spec_file_contents[spec_path] = fh.read()
+            except Exception as e:
+                logger.debug(f"Spec compliance check: couldn't read {spec_path}, skipping it: {e}")
+        spec_result = await ctx.spec_compliance.check(
+            goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
+        )
+        if not spec_result["compliant"]:
+            missing_desc = "; ".join(spec_result["missing_requirements"]) or spec_result["reasoning"]
+            message = (
+                "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the "
+                f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
+            )
+            failure = _build_quality_gate_failure(
+                "goal_spec_compliance", message, message,
+                ctx.worktree_path, state.all_files_written, state.attempt_number,
+                extra_likely_files=spec_result.get("likely_files") or [],
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        state.gate_outcomes.append({
+            "attempt": state.attempt_number,
+            "type": "goal_spec_compliance",
+            "success": True,
+            "output": spec_result["reasoning"],
+        })
+        logger.info(f"Quality Gates: Goal spec compliance PASSED: {spec_result['reasoning']}")
 
     # If we made it here, Quality Gates passed successfully!
     log_quality_gate_banner("PASSED", state.attempt_number)

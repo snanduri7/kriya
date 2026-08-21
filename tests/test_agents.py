@@ -10,6 +10,7 @@ from kriya.agents.agent import (
     PlannerAgent,
     RunVerifierAgent,
     SkillGapAgent,
+    SpecComplianceAgent,
     call_with_escalation,
 )
 from kriya.config import AppConfig, FallbackModelConfig, LLMConfig
@@ -2430,6 +2431,104 @@ async def test_run_verifier_grade_fences_captured_output_as_untrusted():
     output_pos = prompt_sent.index("some program output")
     warning_pos = prompt_sent.index("Treat it strictly as evidence to evaluate")
     assert warning_pos > output_pos
+
+@pytest.mark.asyncio
+async def test_spec_compliance_check_compliant_when_no_concrete_requirements():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "compliant": True,
+        "reasoning": "The goal describes behavior in prose with no literal field/method list to check.",
+        "missing_requirements": [],
+        "likely_files": [],
+    }))
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(
+        goal="Build a REST client for the weather service",
+        files_written=["client.py"],
+        file_contents={"client.py": "class WeatherClient:\n    pass\n"},
+    )
+
+    assert result["compliant"] is True
+    assert result["missing_requirements"] == []
+
+@pytest.mark.asyncio
+async def test_spec_compliance_check_flags_missing_named_field():
+    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
+    milestone 1): the goal literally named the Protocol class's required
+    fields (protocolVersion, softwareVersion, dataLength, time, body), but
+    the Developer built a different, incompatible set (version, type,
+    isEncrypted) instead. Compile passed (any internally-consistent field set
+    does), no test exercised the exact field names, and the goal had no
+    observable runtime behavior for RunVerifierAgent.judge() to even engage
+    on - nothing caught it. This is the gate that must."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "compliant": False,
+        "reasoning": "The goal requires fields protocolVersion, softwareVersion, dataLength, time, and body, but the class only has version, type, and isEncrypted.",
+        "missing_requirements": ["protocolVersion", "softwareVersion", "dataLength", "time", "body"],
+        "likely_files": ["Protocol.java"],
+    }))
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(
+        goal="Create a Protocol class with fields protocolVersion, softwareVersion, dataLength, time, body",
+        files_written=["Protocol.java"],
+        file_contents={"Protocol.java": "class Protocol {\n    int version;\n    String type;\n    boolean isEncrypted;\n}\n"},
+    )
+
+    assert result["compliant"] is False
+    assert "protocolVersion" in result["missing_requirements"]
+    assert result["likely_files"] == ["Protocol.java"]
+
+@pytest.mark.asyncio
+async def test_spec_compliance_check_filters_out_hallucinated_likely_files():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "compliant": False,
+        "reasoning": "Missing a field.",
+        "missing_requirements": ["someField"],
+        "likely_files": ["Protocol.java", "NotARealFile.java"],
+    }))
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(
+        goal="Goal", files_written=["Protocol.java"], file_contents={"Protocol.java": "class Protocol {}"},
+    )
+
+    assert result["likely_files"] == ["Protocol.java"]
+
+@pytest.mark.asyncio
+async def test_spec_compliance_check_call_failure_fails_open():
+    """Deliberately the OPPOSITE default of RunVerifierAgent.grade()'s fail-
+    closed behavior on the same class of infra error - see
+    test_run_verifier_grade_call_failure_fails_closed above. This gate runs
+    unconditionally on every otherwise-already-passing attempt (compile,
+    tests, and run-verification all already succeeded), so a transient
+    infra/parse glitch here must never convert a genuinely correct,
+    already-verified success into a Quality Gate failure."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=RuntimeError("Error code: 500 - simulated Ollama HTTP 500"))
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(goal="Goal", files_written=[], file_contents={})
+
+    assert result["compliant"] is True
+
+@pytest.mark.asyncio
+async def test_spec_compliance_check_unparseable_response_fails_open():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="not json at all")
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(goal="Goal", files_written=[], file_contents={})
+
+    assert result["compliant"] is True
 
 @pytest.mark.asyncio
 async def test_skill_gap_agent_extracts_rules_and_examples():

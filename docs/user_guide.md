@@ -96,6 +96,12 @@ autonomy:
   sandbox_execution: true                  # Restrict env vars + resource-limit quality-gate/shell subprocess execution
   run_verification_enabled: true           # After compile/test gates pass, actually run the app and LLM-grade its output
   run_verification_timeout_seconds: 90     # Kill the run if it hangs past this many seconds
+  spec_compliance_enabled: false           # Opt-in: after every other gate passes, an LLM checks whether the goal's
+                                            # LITERALLY named requirements (an exact field/method/class name, type,
+                                            # or constant) actually appear in the generated code - catches a
+                                            # syntactically-valid, semantically-noncompliant result compile/test/
+                                            # run-verification can't. Off by default (unlike run_verification_enabled)
+                                            # since it's a genuinely new unconditional agent call.
   web_lookup_enabled: false                # Opt-in per project - see "search:" below and Section 4.6
   self_correction_loop_enabled: false      # Opt-in: a bounded native-tool-calling micro-loop on a compile
                                             # failure, before falling back to full-file regeneration.
@@ -572,6 +578,9 @@ No configuration needed, always on. When the Planner's own draft already contain
 
 ### 4.18 Single-Presentation Reviewer Lifecycle
 No configuration needed, always on. When a run needs a human approval decision, the Reviewer's report is computed once (a single completion), shown to you in full as part of that approval decision, and reused as-is for the run's own returned `review` field - it is never re-requested from the model, and the CLI never prints or re-streams it a second time at the end of the same run. An autonomous run with no approval gate shows the report once, in the final summary, exactly as before. Either way the full report is presented to you exactly once, in exactly one of those two places - if you ever previously saw what looked like the same review twice in a `generate`/`fix` run's output, that was a presentation-layer duplication (the same single result printed/logged more than once), not two separate Reviewer completions; `kriya.log`'s own escalation-reason line for an approval gate now records only a short marker ("automated code review attached") instead of the full report text, so the complete report itself only appears once in your terminal/log output too.
+
+### 4.19 Goal Spec Compliance Gate
+Opt-in (`autonomy.spec_compliance_enabled: true`, default `false`). Compile checks, tests, and the Runtime Verification Gate (§3.4) all prove the generated code is *valid* - none of them prove it matches a CONCRETE requirement your goal literally named. If your goal states an exact field/property name, method/class name, type, or constant, and the generated code implements something different (or omits it entirely) while still compiling and passing whatever tests exist, none of the other gates can catch that - the code is syntactically correct, just the wrong shape. When enabled, this runs once per attempt, only after every other gate has already passed: an LLM checks the goal's literally-named requirements against the actual generated file content and, if something concrete and named is genuinely missing, rejects the attempt with the specific missing identifier(s) named in the retry prompt. It deliberately ignores anything vague, stylistic, or left to the model's own judgment - only an exact, named requirement counts, so ordinary prose goals with no literal field/method list are unaffected. Off by default because it's a new agent call on every generation, not because it's unreliable - turn it on for goals where getting an exact API/data shape right matters (e.g. matching an existing wire protocol or external contract).
 
 ---
 

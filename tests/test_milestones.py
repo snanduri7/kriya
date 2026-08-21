@@ -416,15 +416,25 @@ async def test_run_milestones_grounds_later_milestones_on_earlier_ones_real_file
     # Milestone 1's own call had nothing established yet.
     first_call_kwargs = we.run_generation_workflow.await_args_list[0].kwargs
     assert first_call_kwargs["supplementary_context"] == ""
+    assert first_call_kwargs["established_files"] == []
 
-    # Milestone 2's call must carry milestone 1's real file content forward.
+    # Milestone 2's call must carry milestone 1's real file content forward,
+    # AND the filepath itself via established_files - the latter is what lets
+    # a correct self-diagnosis naming "the Protocol class" actually redirect a
+    # targeted retry to src/Protocol.java (found live, 2026-08-21,
+    # ignite_qpid_protocol milestone 2/4: supplementary_context alone grounds
+    # what the model ASSUMES about an earlier file, but does nothing for a
+    # LATER failure whose fix requires editing that file, since only files
+    # THIS milestone's own attempts wrote were ever valid redirect targets).
     second_call_kwargs = we.run_generation_workflow.await_args_list[1].kwargs
     assert real_signature in second_call_kwargs["supplementary_context"]
     assert "src/Protocol.java" in second_call_kwargs["supplementary_context"]
+    assert second_call_kwargs["established_files"] == ["src/Protocol.java"]
 
-    # The integration pass gets it too.
+    # The integration pass gets both too.
     integration_call_kwargs = we.run_generation_workflow.await_args_list[2].kwargs
     assert real_signature in integration_call_kwargs["supplementary_context"]
+    assert integration_call_kwargs["established_files"] == ["src/Protocol.java"]
 
 
 @pytest.mark.asyncio

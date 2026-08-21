@@ -2167,6 +2167,119 @@ class RunVerifierAgent(BaseAgent):
         }
 
 
+class SpecComplianceAgent(BaseAgent):
+    """Drives the Goal Spec Compliance Gate: checks whether the goal's LITERALLY
+    named requirements (an exact field/method/class name, an exact type, an exact
+    constant) actually appear in the generated code. Compile checks, existing tests,
+    and RunVerifierAgent's runtime grading all structurally can't catch this - they
+    prove the code is valid and (when applicable) behaves observably, never that it
+    matches a specific stated shape. Found live, 2026-08-21 (ignite_qpid_protocol
+    milestone 1): a goal named exact fields (protocolVersion, softwareVersion,
+    dataLength, time, body) but the generated class had a different, incompatible
+    set (version, type, isEncrypted) - it compiled, no test exercised the field
+    names, and the milestone had no observable runtime behavior for
+    RunVerifierAgent.judge() to even engage on, so nothing ever caught it.
+
+    Deliberately narrow: only flags CONCRETE, LITERALLY-NAMED requirements, never
+    implementation choices, style, or paraphrased/vague behavior the goal left to
+    the model's judgment - a second, vaguer ReviewerAgent-style critique here would
+    burn retry budget on unwinnable, subjective gates (the exact failure mode
+    _EXPLICIT_TEST_REQUEST_RE's own docstring already documents for an overly broad
+    deterministic pattern)."""
+
+    @property
+    def system_prompt(self) -> str:
+        return (
+            "You are the Kriya Goal Spec Compliance Checker.\n"
+            "You will be given a goal and the real content of every file generated for it "
+            "(already compiled and passing any existing tests). Check ONLY whether the "
+            "goal's CONCRETE, LITERALLY-NAMED requirements actually appear in the code:\n"
+            "- An exact field/property name the goal states (e.g. the goal says "
+            "\"a protocolVersion field\" - does a field with that exact name exist?)\n"
+            "- An exact method/function/class name the goal states\n"
+            "- An exact type the goal states for a named field/parameter/return value\n"
+            "- An exact string/numeric constant or literal value the goal states\n"
+            "Do NOT flag anything else: never reject for style, architecture, missing "
+            "tests/docs, a paraphrased or renamed identifier that plausibly means the same "
+            "thing, or any requirement the goal describes only in general/behavioral terms "
+            "rather than naming a specific identifier or value. If the goal contains NO "
+            "concrete named requirement to check at all (the common case - most goals "
+            "describe behavior in prose, not a literal field/method list), that is fully "
+            "compliant by definition - say so, do not invent a requirement that isn't "
+            "actually there.\n"
+            "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
+            '{"compliant": true or false, "reasoning": "one or two sentences", '
+            '"missing_requirements": ["exact identifier/value from the goal that is '
+            'absent from the code", ...] or [], '
+            '"likely_files": ["exact/path/from/the/list/below", ...] or []}'
+        )
+
+    async def check(
+        self,
+        goal: str,
+        files_written: List[str],
+        file_contents: Dict[str, str],
+    ) -> Dict[str, Any]:
+        files_block = "\n\n".join(
+            f"=== {path} ===\n{file_contents[path]}"
+            for path in files_written
+            if path in file_contents
+        )
+        prompt = (
+            f"=== Goal ===\n{goal}\n\n"
+            f"=== Files Generated ===\n{files_block}\n\n"
+            "Does this code satisfy every concrete, literally-named requirement in the "
+            "goal, per the rules above?"
+        )
+        # Fail OPEN (compliant=True), not closed like grade() - this check runs
+        # unconditionally on every otherwise-already-passing attempt (compile, tests,
+        # and run-verification all already succeeded by the time this fires), so a
+        # transient infra/parse glitch here must never convert a genuinely correct,
+        # already-verified success into a Quality Gate failure. Deliberately the
+        # opposite of grade()'s own fail-closed default: grade() only ever runs when
+        # the goal explicitly warranted a runtime check the caller specifically
+        # decided to require, so getting nothing back from it is itself informative;
+        # this gate has no such precondition. Same "optional judgment call, don't let
+        # its own failure fail an otherwise-correct run" reasoning RunVerifierAgent.
+        # judge() already documents for its identical exception path.
+        try:
+            response_str = await call_with_escalation(
+                self.llm, self.system_prompt, prompt, self._candidates(),
+                json_mode=True, is_failure=_is_unparseable_json,
+            )
+        except Exception as e:
+            logger.warning(f"Spec Compliance check() call failed entirely, skipping check: {e}")
+            return {"compliant": True, "reasoning": f"Check call failed: {e}", "missing_requirements": [], "likely_files": []}
+        try:
+            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+        except Exception as e:
+            logger.warning(f"Spec Compliance check() returned unparseable JSON, skipping check: {e}")
+            return {"compliant": True, "reasoning": f"Response could not be parsed: {e}", "missing_requirements": [], "likely_files": []}
+
+        if not isinstance(parsed, dict):
+            return {"compliant": True, "reasoning": "Response was not a JSON object.", "missing_requirements": [], "likely_files": []}
+
+        # Same trust boundary as RunVerifierAgent.grade()'s likely_files: never let a
+        # hallucinated/malformed entry reach the retry loop's file-scoping logic.
+        raw_likely = parsed.get("likely_files")
+        known_files = set(files_written or [])
+        likely_files = (
+            [f for f in raw_likely if isinstance(f, str) and f in known_files]
+            if isinstance(raw_likely, list) else []
+        )
+        raw_missing = parsed.get("missing_requirements")
+        missing_requirements = (
+            [m for m in raw_missing if isinstance(m, str)]
+            if isinstance(raw_missing, list) else []
+        )
+        return {
+            "compliant": _coerce_bool_field(parsed.get("compliant"), "compliant", "Spec Compliance check()"),
+            "reasoning": parsed.get("reasoning") or "",
+            "missing_requirements": missing_requirements,
+            "likely_files": likely_files,
+        }
+
+
 class SkillGapAgent(BaseAgent):
     """Turns user-supplied reference material (a fetched URL, a local file, or pasted
     text) into concrete skill rules/examples when Kriya doesn't have verified

@@ -432,6 +432,7 @@ async def run_milestones(
                 resume=resume,
                 resume_id=resume_id,
                 supplementary_context=render_established_file_context(run_state.established_file_context),
+                established_files=sorted(run_state.established_file_context.keys()),
             )
 
             if result.get("quality_gates_passed"):
@@ -547,6 +548,7 @@ async def run_milestones(
         resume=resume,
         resume_id=resume_id,
         supplementary_context=render_established_file_context(run_state.established_file_context),
+        established_files=sorted(run_state.established_file_context.keys()),
     )
 
     return {
