@@ -3531,6 +3531,69 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git(tmp_path):
+    """Regression test for a real live gap found 2026-08-21
+    (milestone_task_cli, a fresh non-git workspace): the fix above
+    (test_run_attempt_cleans_up_runtime_artifacts_between_attempts) only
+    closes the leak when `git status` actually works.
+    snapshot_untracked_files() silently returned None on any git failure,
+    and clean_untracked_files_since() silently no-ops on a None baseline -
+    so a workspace that was never `git init`-ed (exactly what
+    create_git_worktree() itself already has a documented fallback for) hit
+    the ORIGINAL incident again with zero warning: a stateful app's runtime
+    file (tasks.json) accumulated across every retry attempt, task IDs
+    climbing 1->5, and the model burned its whole retry budget chasing a
+    "duplication bug" that was really just unrelated leftover state.
+
+    Identical to the git-backed test above, just without _init_git_repo() -
+    snapshot_untracked_files() must now fall back to a plain filesystem diff
+    instead of giving up."""
+    assert not os.path.exists(os.path.join(str(tmp_path), ".git"))
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints a [VERIFICATION] verdict line",
+    })
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    tasks_json_path = os.path.join(str(tmp_path), "tasks.json")
+    pre_call_leftover_content = []
+
+    def fake_run_app_sequence(commands, timeout=90):
+        if os.path.exists(tasks_json_path):
+            with open(tasks_json_path) as f:
+                pre_call_leftover_content.append(f.read())
+        else:
+            pre_call_leftover_content.append(None)
+        with open(tasks_json_path, "w") as f:
+            f.write(f"attempt-{state.attempt_number}")
+        return {"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"}
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        side_effect=fake_run_app_sequence,
+    ):
+        await run_attempt(state, ctx)
+        await run_attempt(state, ctx)
+
+    assert pre_call_leftover_content == [None, None], (
+        f"attempt 2 should never see attempt 1's leftover tasks.json, got {pre_call_leftover_content}"
+    )
+    assert not os.path.exists(tasks_json_path)
+    # The generated source file itself must never be treated as a runtime
+    # artifact and swept up by the non-git fallback's cleanup.
+    assert os.path.exists(os.path.join(str(tmp_path), "app.py"))
+
+
+@pytest.mark.asyncio
 async def test_run_attempt_static_check_scopes_likely_files_not_every_written_file(tmp_path):
     """Regression test for a real bug found live (2026-08-13,
     ignite_qpid_protocol): a static_rule_violation's likely_files was

@@ -153,15 +153,56 @@ def create_git_worktree(repo_path: str) -> str:
     return worktree_path
 
 
+_SNAPSHOT_FALLBACK_IGNORED_DIRS = {
+    ".git", ".kriya", "__pycache__", "node_modules", "target", ".venv", "venv",
+}
+
+
+def _snapshot_all_files_without_git(worktree_path: str) -> Optional[set]:
+    """Plain filesystem-walk fallback for snapshot_untracked_files() when
+    worktree_path isn't a git repository at all (git status itself fails) -
+    exactly the case create_git_worktree() already falls back to operating
+    directly on the real workspace for (see its own "Falling back to default
+    workspace" warning). Without this, snapshot_untracked_files() returned
+    None and clean_untracked_files_since() silently no-op'd, so the runtime-
+    state-leak bug that pair of functions exists to close (see
+    clean_untracked_files_since's own docstring) reproduced identically in a
+    non-git workspace - confirmed live, 2026-08-21 (milestone_task_cli): task
+    IDs climbed 1->5 across retry attempts with the exact same signature as
+    the original python_task_tracker incident this mechanism was built for.
+
+    There is no tracked/untracked distinction without git, so this returns
+    every file currently on disk under worktree_path - correct for this
+    caller's purpose regardless: clean_untracked_files_since() only ever acts
+    on paths present in a LATER snapshot but absent from this one, i.e. files
+    a run just created, never anything that already existed. Ignores the same
+    directories _list_workspace_files() in kriya/workflow/milestones.py
+    already treats as noise/build-cache, so compile artifacts aren't misread
+    as runtime state and wiped between attempts."""
+    try:
+        files = set()
+        for root, dirs, filenames in os.walk(worktree_path):
+            dirs[:] = [d for d in dirs if d not in _SNAPSHOT_FALLBACK_IGNORED_DIRS]
+            for fn in filenames:
+                files.add(os.path.relpath(os.path.join(root, fn), worktree_path))
+        return files
+    except OSError as e:
+        logger.debug(f"Failed to snapshot files without git in '{worktree_path}' (non-fatal): {e}")
+        return None
+
+
 def snapshot_untracked_files(worktree_path: str) -> Optional[set]:
     """Returns the set of currently-untracked file paths (relative to
     worktree_path) - the same `git status --porcelain --untracked-files=all`
     source _sync_uncommitted_changes_into_worktree already uses, so a
     directory that's entirely untracked is enumerated file-by-file rather
-    than collapsed into one `?? dir/` line. Returns None (not an empty set)
-    on any git failure, so a caller can distinguish "definitely no untracked
-    files" from "couldn't tell" and skip cleanup rather than risk deleting
-    something real off an unreliable read.
+    than collapsed into one `?? dir/` line. Falls back to
+    _snapshot_all_files_without_git() (see its own docstring) when git itself
+    isn't usable in this worktree, rather than returning None and leaving the
+    caller unable to clean up at all. Still returns None (not an empty set)
+    if even that fallback fails, so a caller can distinguish "definitely no
+    untracked files" from "couldn't tell" and skip cleanup rather than risk
+    deleting something real off an unreliable read.
 
     Paired with clean_untracked_files_since() below - see that function's own
     docstring for the real incident this closes (Runtime Verification's
@@ -173,10 +214,10 @@ def snapshot_untracked_files(worktree_path: str) -> Optional[set]:
             cwd=worktree_path, capture_output=True, text=True,
         )
         if res.returncode != 0:
-            return None
+            return _snapshot_all_files_without_git(worktree_path)
     except Exception as e:
-        logger.debug(f"Failed to snapshot untracked files in '{worktree_path}' (non-fatal): {e}")
-        return None
+        logger.debug(f"Failed to snapshot untracked files in '{worktree_path}' via git (non-fatal): {e}")
+        return _snapshot_all_files_without_git(worktree_path)
     files = set()
     for line in res.stdout.splitlines():
         if line.startswith("??"):
