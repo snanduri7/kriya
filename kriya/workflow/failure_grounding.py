@@ -583,6 +583,33 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
         basename_named = bool(basename and re.search(
             rf"(?<![\w.-]){re.escape(basename)}(?![\w-])", scan_text,
         ))
-        if path_named or basename_named:
+        # A bare stem match (the filename with its extension stripped) catches
+        # prose that names the TYPE, not the FILE - found live, 2026-08-21
+        # (protocol_encoder_java): the Developer's own FIX ANALYSIS said "the
+        # Protocol class ... does not have the expected methods and
+        # constructor" and never once spelled "Protocol.java", so the
+        # extension-anchored basename check above missed it entirely and the
+        # self-diagnosis redirect this feeds (extract_self_diagnosed_files)
+        # silently failed to fire, leaving a targeted retry stuck re-editing
+        # the wrong file (ProtocolDemo.java, where the compiler error
+        # surfaced) instead of the file that actually needed the fix.
+        # Deliberately narrow, not a blanket "match any bare word": gated on
+        # the stem being TitleCase (stem[0].isupper()) and at least 3 chars.
+        # TitleCase-stem-equals-type-name is a real, load-bearing convention
+        # in Java/C#/C++/Kotlin (Protocol.java <-> class Protocol) but not in
+        # Python/Ruby/JS, where the module filename and the type name are
+        # different tokens by convention (protocol.py's class is still
+        # `Protocol`, but the FILE's own stem is lowercase `protocol`) - so
+        # this fallback naturally self-limits to the languages/conventions
+        # where it's actually reliable signal, rather than special-casing by
+        # language. The length/case guard also keeps a short or lowercase
+        # word ("the protocol used here", "the db connection") from being
+        # misread as naming a specific file.
+        stem = os.path.splitext(basename)[0]
+        stem_named = bool(
+            stem and len(stem) >= 3 and stem[0].isupper()
+            and re.search(rf"(?<![\w.-]){re.escape(stem)}(?![\w-])", scan_text)
+        )
+        if path_named or basename_named or stem_named:
             implicated.append(filepath)
     return implicated

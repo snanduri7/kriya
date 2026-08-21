@@ -27,6 +27,7 @@ from kriya.workflow.edit_safety import (
     StagedFileWrite,
     commit_revision_grounded_batch,
     content_revision,
+    find_cross_file_type_conflict,
 )
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.state import GenerationState
@@ -3245,6 +3246,99 @@ async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(
     assert "app.py" in state.all_files_written
     assert state.gate_outcomes[-1]["type"] == "compile"
     assert state.gate_outcomes[-1]["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_a_new_file_that_redeclares_an_existing_class(tmp_path):
+    """Regression test for a real live bug, 2026-08-21 (protocol_encoder_java):
+    three separate, incompatible `Protocol.java` files ended up coexisting in
+    one workspace, in three different packages, because nothing noticed a
+    "new" file was actually redeclaring an existing type under a different
+    path. Uses an ISOLATED paths.memory (tmp_path-based, not this repo's own
+    real ./memory/dependency_graph.db - _minimal_attempt_ctx's default
+    AppConfig() points at a relative path that happens to resolve to this
+    actual repo's real, populated DB when tests run from the repo root,
+    which would make this test both non-hermetic and pollute this test's
+    intent with unrelated real symbols)."""
+    from kriya.analyzer.graph import DependencyGraph
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    memory_dir = tmp_path / "isolated_memory"
+    memory_dir.mkdir()
+    graph = DependencyGraph(str(memory_dir / "dependency_graph.db"))
+    graph.index_file("src/main/java/Protocol.java", "public class Protocol {}\n", 1.0)
+    graph.close()
+
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "src/main/java/protocol/Protocol.java",
+        "content": "package protocol;\npublic class Protocol {\n    public Protocol() {}\n}\n",
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        kernel=Kernel(config=AppConfig(paths={"memory": str(memory_dir)})),
+        architect_files=["src/main/java/protocol/Protocol.java"],
+        expected_files_upfront=["src/main/java/protocol/Protocol.java"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        side_effect=AssertionError("must never reach the compile gate - rejected earlier"),
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "duplicate_type_across_files"
+    assert "Protocol" in exc_info.value.failure.message
+    assert "src/main/java/Protocol.java" in exc_info.value.failure.likely_files
+    assert "src/main/java/protocol/Protocol.java" in exc_info.value.failure.likely_files
+    assert not (tmp_path / "src/main/java/protocol/Protocol.java").exists()
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_allows_a_repair_that_reuses_its_own_existing_class_name(tmp_path):
+    """A REPAIR of a file that already legitimately owns its own path must
+    never be rejected for "redeclaring" its own class - only a genuinely NEW
+    file at a DIFFERENT path is a conflict."""
+    from kriya.analyzer.graph import DependencyGraph
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    memory_dir = tmp_path / "isolated_memory"
+    memory_dir.mkdir()
+    graph = DependencyGraph(str(memory_dir / "dependency_graph.db"))
+    graph.index_file("app.py", "class App:\n    pass\n", 1.0)
+    graph.close()
+    (tmp_path / "app.py").write_text("class App:\n    pass\n")
+
+    state = GenerationState()
+    state.all_files_written = {"app.py"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "class App:\n    def run(self):\n        pass\n"}
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        kernel=Kernel(config=AppConfig(paths={"memory": str(memory_dir)})),
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        # Should NOT raise duplicate_type_across_files - may still raise/return
+        # based on other gates, but never that one for a same-path repair.
+        try:
+            await run_attempt(state, ctx)
+        except QualityGateFailure as exc:
+            assert exc.failure.type != "duplicate_type_across_files"
 
 
 @pytest.mark.asyncio
@@ -8292,6 +8386,43 @@ def test_extract_implicated_files_still_matches_pom_xml_error_line_even_with_inf
     known = ["src/App.java", "pom.xml"]
     assert extract_implicated_files(error, known) == ["pom.xml"]
 
+def test_extract_implicated_files_matches_bare_titlecase_class_name():
+    """Regression test for a real live bug, 2026-08-21 (protocol_encoder_java):
+    the Developer's own FIX ANALYSIS said "the Protocol class in the project
+    does not have the expected methods and constructor ... missing an encode()
+    method, a default constructor, and a decode(byte[]) method" - a correct
+    diagnosis that named the actual broken file's TYPE without ever spelling
+    "Protocol.java". The old extension-anchored basename check missed this
+    entirely, so extract_self_diagnosed_files() (which reuses this function)
+    silently failed to redirect the retry, leaving it stuck re-editing
+    ProtocolDemo.java (where the compiler error surfaced, not where the fix
+    belonged) attempt after attempt."""
+    analysis = (
+        "The error occurs because the Protocol class in the project does not "
+        "have the expected methods and constructor that are being called in "
+        "ProtocolDemo.java. Specifically, the Protocol class is missing an "
+        "encode() method, a default constructor (no-argument), and a "
+        "decode(byte[]) method."
+    )
+    known = ["src/main/java/Protocol.java", "src/main/java/ProtocolDemo.java", "pom.xml"]
+    result = extract_implicated_files(analysis, known)
+    assert "src/main/java/Protocol.java" in result
+    assert "src/main/java/ProtocolDemo.java" in result
+
+def test_extract_implicated_files_bare_class_name_ignores_lowercase_prose():
+    # "protocol" here is ordinary lowercase English, not a TitleCase class
+    # mention - must not be misread as naming Protocol.java.
+    error = "This uses the standard protocol buffer wire format for serialization."
+    known = ["src/main/java/Protocol.java"]
+    assert extract_implicated_files(error, known) == []
+
+def test_extract_implicated_files_bare_class_name_requires_minimum_length():
+    # A 2-character stem is too short/common a word to trust as class-name
+    # evidence even when it's TitleCase.
+    error = "Fix the DB connection leak."
+    known = ["src/main/java/DB.java"]
+    assert extract_implicated_files(error, known) == []
+
 def test_build_targeted_retry_prompt_frames_target_and_reference_files(tmp_path):
     (tmp_path / "App.java").write_text("class App { /* broken */ }")
     (tmp_path / "Helper.java").write_text("class Helper { /* fine */ }")
@@ -10552,6 +10683,48 @@ def test_find_structural_corruption_does_not_flag_a_legitimately_named_nested_cl
         "}\n"
     )
     assert find_structural_corruption("Outer.java", valid) is None
+
+
+def test_find_cross_file_type_conflict_finds_a_hit():
+    """Regression test for a real live bug, 2026-08-21 (protocol_encoder_java):
+    three separate, incompatible `Protocol.java` files ended up coexisting in
+    one workspace, in three different packages, because nothing noticed a
+    "new" file was actually redeclaring an existing type under a different
+    path. See find_cross_file_type_conflict's own docstring for the full
+    incident."""
+    type_index = {".java:Protocol": ["src/main/java/Protocol.java"]}
+    conflict = find_cross_file_type_conflict(
+        "src/main/java/protocol/Protocol.java", [".java:Protocol"], type_index,
+    )
+    assert conflict == (".java:Protocol", ["src/main/java/Protocol.java"])
+
+
+def test_find_cross_file_type_conflict_no_hit_for_unrelated_name():
+    type_index = {".java:Protocol": ["src/main/java/Protocol.java"]}
+    assert find_cross_file_type_conflict(
+        "src/main/java/Other.java", [".java:Other"], type_index,
+    ) is None
+
+
+def test_find_cross_file_type_conflict_excludes_own_path():
+    # A file redeclaring its OWN class at its OWN already-existing path is
+    # never a conflict - the caller is responsible for only ever reaching
+    # this for a genuinely NEW file in the first place, but this function
+    # defends against a self-match regardless.
+    type_index = {".java:Protocol": ["src/main/java/Protocol.java"]}
+    assert find_cross_file_type_conflict(
+        "src/main/java/Protocol.java", [".java:Protocol"], type_index,
+    ) is None
+
+
+def test_find_cross_file_type_conflict_checks_every_candidate_name():
+    # A file declaring MULTIPLE top-level types - the first name has no
+    # conflict, the second one does - must still be caught.
+    type_index = {".java:Helper": ["src/main/java/Helper.java"]}
+    conflict = find_cross_file_type_conflict(
+        "src/main/java/New.java", [".java:New", ".java:Helper"], type_index,
+    )
+    assert conflict == (".java:Helper", ["src/main/java/Helper.java"])
 
 def test_atomic_write_file_writes_correct_content(tmp_path):
     target = tmp_path / "App.java"

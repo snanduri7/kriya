@@ -212,6 +212,74 @@ def test_get_symbols_for_file_returns_empty_list_for_unknown_file(tmp_path):
     assert graph.get_symbols_for_file("nope.py") == []
 
 
+def test_get_class_symbol_locations_collapses_package_qualified_java_names(tmp_path):
+    """Regression test for a real live bug, 2026-08-21 (protocol_encoder_java):
+    three separate, incompatible `Protocol.java` files ended up coexisting in
+    one workspace, in three different packages - _parse_java() stores the
+    FULLY QUALIFIED name (package_prefix + class_name), so a qualified-name
+    lookup would never see these three as related. get_class_symbol_locations()
+    must collapse them onto the same simple-name key so the duplicate is
+    actually visible."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    graph.index_file("src/main/java/Protocol.java", "public class Protocol {}\n", 1.0)
+    graph.index_file(
+        "src/main/java/protocol/Protocol.java",
+        "package protocol;\npublic class Protocol {}\n", 1.0,
+    )
+    graph.index_file(
+        "src/main/java/com/example/protocol/Protocol.java",
+        "package com.example.protocol;\npublic class Protocol {}\n", 1.0,
+    )
+
+    index = graph.get_class_symbol_locations()
+
+    assert set(index[".java:Protocol"]) == {
+        "src/main/java/Protocol.java",
+        "src/main/java/protocol/Protocol.java",
+        "src/main/java/com/example/protocol/Protocol.java",
+    }
+
+
+def test_get_class_symbol_locations_scopes_by_extension_not_just_simple_name(tmp_path):
+    """A Java `Protocol` and an unrelated Python `Protocol` in the same
+    polyglot repo are typically different concepts, not a duplicate - the
+    index key must be extension-scoped so they never collide."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    graph.index_file("src/main/java/Protocol.java", "public class Protocol {}\n", 1.0)
+    graph.index_file("protocol.py", "class Protocol:\n    pass\n", 1.0)
+
+    index = graph.get_class_symbol_locations()
+
+    assert index[".java:Protocol"] == ["src/main/java/Protocol.java"]
+    assert index[".py:Protocol"] == ["protocol.py"]
+
+
+def test_extract_class_names_covers_python_java_ruby(tmp_path):
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    assert graph.extract_class_names("a.py", "class Foo:\n    pass\n") == [".py:Foo"]
+    assert graph.extract_class_names("A.java", "public class A {}\n") == [".java:A"]
+    assert graph.extract_class_names("a.rb", "class Foo\nend\n") == [".rb:Foo"]
+    # Package-qualified Java content still collapses to the simple name.
+    assert graph.extract_class_names(
+        "src/main/java/protocol/Protocol.java",
+        "package protocol;\npublic class Protocol {}\n",
+    ) == [".java:Protocol"]
+
+
+def test_extract_class_names_degrades_gracefully_for_unsupported_or_invalid_content(tmp_path):
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+
+    # Not yet a parsed language - must return [] , never raise.
+    assert graph.extract_class_names("main.go", "type Protocol struct {}\n") == []
+    # Invalid syntax for a parsed language must also degrade to [], not raise.
+    assert graph.extract_class_names("broken.py", "class (((not valid") == []
+
+
 def test_get_neighborhood_scores_direct_import_above_deeper_annotation_hit(tmp_path):
     """A hop-1 'imports' hit should outscore a hop-2 'annotated_with' hit -
     the whole point of scoring get_neighborhood()'s output is to let callers

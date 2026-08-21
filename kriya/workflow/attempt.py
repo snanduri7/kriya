@@ -25,6 +25,7 @@ from kriya.workflow.edit_safety import (
     apply_anchored_edits,
     commit_revision_grounded_batch,
     content_revision,
+    find_cross_file_type_conflict,
     find_structural_corruption,
     read_file_revision,
 )
@@ -482,6 +483,74 @@ def _diagnosis_mismatch_bypass_reason(
         if not still_violates:
             return "the static check that originally flagged this file no longer flags the proposed content"
     return None
+
+
+def _dependency_graph_db_path(ctx: "AttemptContext") -> str:
+    return os.path.join(ctx.kernel.config.paths.memory, "dependency_graph.db")
+
+
+def _extract_class_names_best_effort(db_path: str, filepath: str, content: str) -> List[str]:
+    """Short-lived DependencyGraph open/query/close for one file - cheap
+    (existing WAL-mode SQLite file, a handful of milliseconds) and avoids
+    threading a long-lived connection through the entire per-file write loop
+    below just to reuse extract_class_names(), which is an instance method,
+    not static. Best-effort: any error (including a missing db_path, checked
+    by the caller) degrades to no names extracted, never a false rejection."""
+    try:
+        from kriya.analyzer.graph import DependencyGraph
+        graph = DependencyGraph(db_path)
+        try:
+            return graph.extract_class_names(filepath, content)
+        finally:
+            graph.close()
+    except Exception as e:
+        logger.debug(f"Skipping duplicate-type check for {filepath}: {e}")
+        return []
+
+
+def _build_workspace_type_index(state: GenerationState, ctx: "AttemptContext") -> Dict[str, List[str]]:
+    """Workspace-wide simple-class-name -> [filepaths] index for the
+    duplicate-type-across-files pre-flight check below (see
+    find_cross_file_type_conflict's own docstring for the live incident this
+    exists to prevent). Two layers:
+
+    1. DependencyGraph.get_class_symbol_locations() - the persisted baseline,
+       covering pre-existing repo content and every earlier-completed
+       milestone's already-applied output. Best-effort by construction: no
+       dependency_graph.db yet (a brand-new workspace), or any DB error,
+       degrades to an empty index - this check simply doesn't fire for this
+       attempt rather than failing the whole generation, same posture as
+       every other pre-flight check in this module.
+    2. state.all_files_written, read from the worktree and parsed via
+       DependencyGraph.extract_class_names() (no DB write) - covers files
+       written earlier in THIS SAME still-in-progress retry loop, which the
+       persisted graph can't see yet since RepositoryAnalyzer only re-indexes
+       once, at the very top of run_generation_workflow(), before this loop
+       ever starts."""
+    db_path = _dependency_graph_db_path(ctx)
+    if not os.path.exists(db_path):
+        return {}
+    try:
+        from kriya.analyzer.graph import DependencyGraph
+        graph = DependencyGraph(db_path)
+        try:
+            index = graph.get_class_symbol_locations()
+        finally:
+            graph.close()
+        for written_path in state.all_files_written:
+            full_path = os.path.join(ctx.worktree_path, written_path)
+            if not os.path.exists(full_path):
+                continue
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                written_content = fh.read()
+            for name in _extract_class_names_best_effort(db_path, written_path, written_content):
+                paths = index.setdefault(name, [])
+                if written_path not in paths:
+                    paths.append(written_path)
+        return index
+    except Exception as e:
+        logger.debug(f"_build_workspace_type_index: skipping duplicate-type check for this attempt: {e}")
+        return {}
 
 
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
@@ -1121,6 +1190,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # Write files to worktree sandbox
     state.files_written = []
     staged_writes: List[StagedFileWrite] = []
+    # Built once per attempt, not once per file - see _build_workspace_type_index's
+    # own docstring. Updated in place below as each new file is accepted, so two
+    # files in the SAME batch that collide with each other are caught too.
+    workspace_type_index = _build_workspace_type_index(state, ctx)
     for file_obj in files:
         filepath = file_obj.get("filepath", "")
         content = file_obj.get("content", "")
@@ -1420,6 +1493,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 workspace_file_path = os.path.join(ctx.workspace_path, filepath)
                 if os.path.exists(workspace_file_path):
                     current_file_path = workspace_file_path
+            file_is_new = not os.path.exists(current_file_path)
             prior_content = ""
             if os.path.exists(current_file_path):
                 with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
@@ -1438,6 +1512,56 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
+
+            # Cross-file duplicate-type pre-flight check - only for a
+            # genuinely NEW file (a REPAIR of a file that already legitimately
+            # owns `filepath` is never a conflict, even if it re-declares its
+            # own class). See find_cross_file_type_conflict's own docstring
+            # for the live incident this prevents.
+            candidate_type_names: List[str] = []
+            if file_is_new and workspace_type_index:
+                candidate_type_names = _extract_class_names_best_effort(
+                    _dependency_graph_db_path(ctx), filepath, content,
+                )
+            if candidate_type_names:
+                conflict = find_cross_file_type_conflict(filepath, candidate_type_names, workspace_type_index)
+                if conflict:
+                    # conflict[0] is an "ext:name" key (see extract_class_names'
+                    # own docstring for why the extension is folded in) - strip
+                    # it back to a plain class name for the human-facing message.
+                    type_name = conflict[0].split(":", 1)[-1]
+                    other_paths = conflict[1]
+                    conflict_content: Dict[str, str] = {filepath: content}
+                    for other_path in other_paths:
+                        for base in (ctx.worktree_path, ctx.workspace_path):
+                            other_full = os.path.join(base, other_path)
+                            if os.path.exists(other_full):
+                                with open(other_full, "r", encoding="utf-8", errors="replace") as fh:
+                                    conflict_content[other_path] = fh.read()
+                                break
+                    failure = Failure(
+                        type="duplicate_type_across_files",
+                        message=(
+                            f"DUPLICATE TYPE in {filepath}: '{type_name}' is already declared in "
+                            f"{', '.join(other_paths)} (shown below). This is almost always a sign "
+                            f"the existing file was never found or edited - target "
+                            f"{other_paths[0]} directly instead of creating a new file. Only if "
+                            f"'{type_name}' in {filepath} is genuinely a different, deliberately "
+                            f"separate concept (rare) should you instead rename it to something "
+                            f"unambiguous."
+                        ),
+                        raw_output=f"'{type_name}' declared in both {filepath} and {', '.join(other_paths)}",
+                        file_locations=[FileLocation(filepath=filepath)] + [FileLocation(filepath=p) for p in other_paths],
+                        likely_files=[filepath] + other_paths,
+                        failed_content=conflict_content,
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                for name in candidate_type_names:
+                    paths = workspace_type_index.setdefault(name, [])
+                    if filepath not in paths:
+                        paths.append(filepath)
 
             # Layer 2 pre-flight check - same rationale as the anchored-edit branch
             # above, applied to a full-file regeneration instead. Only reads the

@@ -236,6 +236,88 @@ class DependencyGraph:
         cursor.execute("SELECT name FROM symbols WHERE filepath = ?", (filepath,))
         return [r[0] for r in cursor.fetchall()]
 
+    def get_class_symbol_locations(self) -> Dict[str, List[str]]:
+        """Workspace-wide index of "ext:simple_name" (extension-scoped,
+        unqualified class name) -> the distinct files that declare it, for
+        kriya/workflow/attempt.py's duplicate-type-across-files Quality Gate -
+        found live, 2026-08-21 (protocol_encoder_java): three separate,
+        incompatible `Protocol.java` files ended up coexisting in one
+        workspace (default package, `protocol`, `com.example.protocol`),
+        each missing different pieces of the intended API, because nothing
+        ever noticed a "new" file was actually redeclaring an existing type
+        under a different path.
+
+        Deliberately collapses on the SIMPLE name, not the qualified one
+        _parse_java() stores (`package_prefix + class_name`, e.g.
+        "com.example.protocol.Protocol") - a qualified-name lookup would
+        never have caught the incident above, since all three files produce
+        different qualified strings. The simple-name collision IS the
+        signal this exists to expose, not noise to filter out (contrast
+        get_symbols_for_file()'s own docstring, which wants qualified
+        precision for a different purpose - seeding Graph RAG traversal).
+
+        The key is prefixed with the declaring file's own extension
+        deliberately - found live while writing this method's own test: an
+        unscoped simple-name index treats Java's `Protocol` and an unrelated
+        Python `Protocol` (or a JS/TS/Go one, once those languages get
+        indexed) as the SAME collision, which is almost certainly wrong in
+        any polyglot repo (a frontend `User` and a backend `User` are
+        typically different concepts, not a duplicate). extract_class_names()
+        below produces keys in this same "ext:name" format so the two never
+        drift apart."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT DISTINCT name, filepath FROM symbols WHERE type = 'class'")
+        index: Dict[str, List[str]] = {}
+        for name, filepath in cursor.fetchall():
+            if not name:
+                continue
+            simple = name.rsplit(".", 1)[-1]
+            if not simple:
+                continue
+            ext = os.path.splitext(filepath)[1].lower()
+            key = f"{ext}:{simple}"
+            paths = index.setdefault(key, [])
+            if filepath not in paths:
+                paths.append(filepath)
+        return {key: sorted(paths) for key, paths in index.items()}
+
+    def extract_class_names(self, filepath: str, content: str) -> List[str]:
+        """Public, non-persisting wrapper around this class's own per-language
+        symbol parsers (the exact same dispatch index_file() uses), for a
+        candidate file's content BEFORE it's ever written to disk or indexed -
+        needed because RepositoryAnalyzer's re-index runs once, at the top of
+        each run_generation_workflow() call, so a file written earlier in the
+        SAME still-in-progress retry loop is invisible to
+        get_class_symbol_locations()'s persisted baseline until a future run
+        re-indexes it. Returns "ext:simple_name" keys, same extension-scoped
+        convention as get_class_symbol_locations() (see that method's own
+        docstring for why the extension prefix matters). Never raises - `[]`
+        for any extension index_file() doesn't parse a class out of (.xml has
+        no "class" concept; anything else isn't parsed at all yet) or on any
+        parse error (e.g. a Python file with invalid syntax) - a failed
+        extraction here must degrade to "nothing to check", never a false
+        rejection of an otherwise-fine write."""
+        _, ext = os.path.splitext(filepath)
+        ext = ext.lower()
+        try:
+            if ext == ".py":
+                symbols, _relations = self._parse_python(filepath, content)
+            elif ext == ".java":
+                symbols, _relations = self._parse_java(filepath, content)
+            elif ext == ".rb":
+                symbols, _relations = self._parse_ruby(filepath, content)
+            else:
+                return []
+        except Exception as e:
+            logger.debug(f"extract_class_names: could not parse {filepath}: {e}")
+            return []
+        names = {
+            sym["name"].rsplit(".", 1)[-1]
+            for sym in symbols
+            if sym.get("type") == "class" and sym.get("name")
+        }
+        return sorted(f"{ext}:{n}" for n in names if n)
+
     def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2, max_results: int = 30) -> List[Dict[str, Any]]:
         """Perform bounded BFS traversal on the symbol relationship graph.
 

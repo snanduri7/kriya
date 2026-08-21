@@ -6,7 +6,7 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -420,4 +420,42 @@ def find_structural_corruption(filepath: str, content: str) -> Optional[str]:
             ET.fromstring(content)
         except ET.ParseError as ex:
             return f"malformed XML: {ex}"
+    return None
+
+
+def find_cross_file_type_conflict(
+    filepath: str,
+    candidate_type_names: List[str],
+    type_index: Dict[str, List[str]],
+) -> Optional[Tuple[str, List[str]]]:
+    """The cross-file sibling of _find_duplicate_top_level_type above - that
+    one catches two declarations of the same type WITHIN one file; this one
+    catches a new file about to be written whose declared type already
+    exists somewhere ELSE in the workspace, found live 2026-08-21
+    (protocol_encoder_java): three separate, incompatible `Protocol.java`
+    files ended up coexisting in different packages, each missing different
+    pieces of the intended API, because nothing noticed a "new" file was
+    actually redeclaring an existing type under a different path.
+
+    Deliberately pure data in/out (no DependencyGraph/DB coupling) so it's
+    trivially unit-testable with hand-built inputs, matching
+    find_whole_response_no_op(edits)'s own style - the caller
+    (kriya/workflow/attempt.py) is responsible for building `type_index`
+    (kriya/analyzer/graph.py::DependencyGraph.get_class_symbol_locations(),
+    layered with anything written earlier in the same still-in-progress
+    attempt) and extracting `candidate_type_names`
+    (DependencyGraph.extract_class_names()) before calling this.
+
+    Scoped to genuinely NEW files by the caller, never a REPAIR of a file
+    that already legitimately owns `filepath` - `filepath` itself is
+    excluded from the conflict set here defensively (a file redeclaring its
+    OWN class is never a conflict), but the caller should not even reach
+    this for an existing-path write in the first place.
+
+    Returns (type_name, [other_paths]) for the FIRST candidate name also
+    declared elsewhere, or None if none conflict."""
+    for name in candidate_type_names:
+        others = [p for p in type_index.get(name, []) if p != filepath]
+        if others:
+            return name, others
     return None
