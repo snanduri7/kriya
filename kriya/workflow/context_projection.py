@@ -1,7 +1,7 @@
 """Auditable, local-only projections from canonical source evidence."""
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from kriya.workflow.edit_safety import content_revision
 
@@ -40,8 +40,16 @@ class FileProjection:
 
 def project_implementation_source(
     content: str, path: str, max_chars: int, *, reason: str,
+    known_revision: Optional[str] = None,
 ) -> FileProjection:
-    """Keep bounded implementation evidence with explicit head/tail omission."""
+    """Keep bounded implementation evidence with explicit head/tail omission.
+
+    known_revision lets a caller that already computed this exact content's
+    SHA-256 moments earlier (e.g. the Quality Gates loop's own post-compile
+    state.validated_file_revisions snapshot) pass it straight through instead
+    of this function re-hashing the full content a second time - safe only
+    when the caller can guarantee content hasn't changed on disk since that
+    revision was computed, which callers must verify themselves."""
     marker = "\n... [middle omitted from working context; canonical source remains local] ...\n"
     if len(content) <= max_chars:
         projected = content
@@ -60,7 +68,7 @@ def project_implementation_source(
         level = ProjectionLevel.IMPLEMENTATION_EXCERPT
     return FileProjection(
         path=path,
-        revision=content_revision(content),
+        revision=known_revision if known_revision is not None else content_revision(content),
         level=level,
         reason=reason,
         content=projected,

@@ -1334,6 +1334,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 # convention rather than introducing new milestone-specific
                 # flags.
                 knowledge_risk_confirmed=yes or knowledge_policy == 'permissive',
+                resume=resume,
+                resume_id=resume_id,
             )
             await kernel.stop()
             return result

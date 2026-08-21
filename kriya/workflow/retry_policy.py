@@ -50,20 +50,30 @@ def decide_retry_action(
             RetryAction.STOP_EXHAUSTED,
             "global attempt bound reached across all failure families",
         )
-    if (
+    # fallback_targeted_requested only ever disqualifies TARGETED below (an
+    # authoritative locator outranks another attempt by the SAME, already-
+    # rejecting model) - it does NOT jump the queue ahead of MISSING_FILES.
+    # Both are real, independently-grounded repair opportunities, and
+    # "required files are missing" is resolved the same way regardless of
+    # whether a fallback-targeted request also happens to be pending; that
+    # request still gets its one bounded attempt via the ordinary
+    # FALLBACK_TARGETED check below once MISSING_FILES's own budget is
+    # exhausted or doesn't apply.
+    prefer_fallback_targeted = (
         fallback_targeted_requested and has_implicated_files
         and has_fallback_model and not fallback_targeted_attempted
-    ):
-        return RetryDecision(
-            RetryAction.FALLBACK_TARGETED,
-            "authoritative target retained after primary model rejected it",
-        )
-    if has_implicated_files and targeted_retry_count < targeted_max_retries:
+    )
+    if not prefer_fallback_targeted and has_implicated_files and targeted_retry_count < targeted_max_retries:
         return RetryDecision(RetryAction.TARGETED, "grounded implicated files remain")
     if has_missing_files and targeted_retry_count < targeted_max_retries:
         return RetryDecision(RetryAction.MISSING_FILES, "required files are missing")
     if has_implicated_files and has_fallback_model and not fallback_targeted_attempted:
-        return RetryDecision(RetryAction.FALLBACK_TARGETED, "one bounded fallback-model repair remains")
+        reason = (
+            "authoritative target retained after primary model rejected it"
+            if prefer_fallback_targeted
+            else "one bounded fallback-model repair remains"
+        )
+        return RetryDecision(RetryAction.FALLBACK_TARGETED, reason)
     if retry_count < max_retries:
         return RetryDecision(RetryAction.FULL_SET, "full-set retry budget remains")
     return RetryDecision(RetryAction.STOP_EXHAUSTED, "all applicable retry budgets are exhausted")

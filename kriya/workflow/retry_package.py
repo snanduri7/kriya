@@ -81,6 +81,7 @@ def build_retry_package(
     max_chars: int,
     max_error_chars: int = 6000,
     advisory_context: str = "",
+    known_revisions: Optional[Dict[str, str]] = None,
 ) -> RetryPackage:
     """Build a deterministic package without sending or resolving data remotely.
 
@@ -88,6 +89,13 @@ def build_retry_package(
     Reference files share the remainder.  Every included projection carries the
     SHA-256 revision of its complete canonical source, even when its middle is
     omitted from the model-facing excerpt.
+
+    known_revisions (path -> already-computed SHA-256) lets a caller skip
+    re-hashing content it already validated moments earlier in the same
+    attempt (e.g. state.validated_file_revisions, captured right after the
+    Quality Gates compile check succeeded) - this function still always reads
+    the file itself, since the actual content is needed for the projection,
+    not just its hash.
     """
     ordered_files = sorted(set(all_files))
     requested_targets = tuple(dict.fromkeys(target_files or failure.likely_files))
@@ -126,6 +134,7 @@ def build_retry_package(
                 path,
                 min(per_file, remaining),
                 reason=reason,
+                known_revision=(known_revisions or {}).get(path),
             )
             destination.append(projection)
             consumed += len(projection.content)

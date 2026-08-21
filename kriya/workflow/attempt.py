@@ -42,6 +42,7 @@ from kriya.workflow.context_budget import (
 )
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
+from kriya.workflow.retry_policy import RetryAction, decide_retry_action
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import GenerationState
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -155,6 +156,12 @@ def _retry_package_for_attempt(
         target_files=target_files,
         source_context=state.last_error_source_context,
         max_chars=max_chars,
+        # A file's entry here is only trustworthy while unchanged since the
+        # post-compile snapshot that produced it - true here, since nothing
+        # between that snapshot and a later gate's failure writes to the
+        # worktree. Files outside that snapshot (e.g. genuinely still-missing
+        # ones) simply fall back to a fresh hash inside project_implementation_source.
+        known_revisions=state.validated_file_revisions,
         advisory_context=(
             state.error_context[
                 state.error_context.index("=== Reference material found"):
@@ -294,9 +301,12 @@ class AttemptContext:
     run_verifier: Any
     skill_engine: Any
     kernel: Kernel
-    # The next three fields are only read by handle_attempt_failure(), not
-    # run_attempt() itself - kept on the same context object anyway (see the
-    # class docstring) rather than a second, mostly-overlapping dataclass.
+    # web_lookup_query_callback/approve_web_lookup are only read by
+    # handle_attempt_failure(), not run_attempt() itself; max_retries is read
+    # by both (run_attempt()'s own decide_retry_action() mode-selection call,
+    # and handle_attempt_failure()'s decide_for_state() continue/stop check) -
+    # kept on the same context object anyway (see the class docstring) rather
+    # than a second, mostly-overlapping dataclass.
     max_retries: int
     web_lookup_query_callback: Optional[Callable[[List[str], str], Any]]
     # A bound method (WorkflowEngine._approve_web_lookup), not a free
@@ -480,38 +490,51 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
     state.attempt_number += 1
-    prefer_fallback_targeted = (
-        state.budgets.fallback_targeted_requested
-        and bool(state.last_implicated_files)
-        and bool(ctx.chain)
-        and not state.budgets.fallback_targeted_attempted
-    )
-    use_targeted = (
-        not prefer_fallback_targeted
-        and bool(state.last_implicated_files)
-        and state.budgets.targeted_retry_count < ctx.targeted_max_retries
-    )
-    use_missing_files = (
-        not use_targeted and bool(state.last_missing_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
-    )
-    # One-shot fallback-model targeted fix (see fallback_targeted_attempted's
-    # own docstring above) - normally eligible once the primary-model targeted
-    # budget is exhausted. It may also be requested early when an advisory
-    # no-op rejects a still-authoritative locator; in that case it deliberately
-    # outranks another attempt by the same model. Requires a real implicated
-    # file set and a configured fallback model in both cases.
-    use_fallback_targeted = (
-        not use_targeted and not use_missing_files
-        and bool(state.last_implicated_files) and bool(ctx.chain) and not state.budgets.fallback_targeted_attempted
+    # Mode selection delegates to retry_policy.decide_retry_action() - the
+    # same pure decision function the outer while loop (workflow.py) and the
+    # post-failure budget bookkeeping (retry_strategy.py) already call to
+    # decide whether to continue at all, so "targeted beats missing_files
+    # beats fallback_targeted beats full_set" is encoded in exactly one
+    # place instead of being independently hand-rolled here too (found by
+    # code review as unintentional duplication - the two copies happened to
+    # agree, but nothing enforced that). environment_failure/attempt_number
+    # are deliberately left at their None defaults: this call is scoped to
+    # MODE selection only - the STOP_ENVIRONMENT/STOP_EXHAUSTED stop
+    # conditions those two params drive are already handled one level up, by
+    # the while loop's own decide_for_state() check before run_attempt() is
+    # ever invoked for this iteration, so they must not fire a second time
+    # here with a since-incremented attempt_number.
+    retry_decision = decide_retry_action(
+        retry_count=state.budgets.retry_count,
+        max_retries=ctx.max_retries,
+        targeted_retry_count=state.budgets.targeted_retry_count,
+        targeted_max_retries=ctx.targeted_max_retries,
+        has_implicated_files=bool(state.last_implicated_files),
+        has_missing_files=bool(state.last_missing_files),
+        has_fallback_model=bool(ctx.chain),
+        fallback_targeted_attempted=state.budgets.fallback_targeted_attempted,
+        environment_failure=None,
+        fallback_targeted_requested=state.budgets.fallback_targeted_requested,
     )
     # Recorded now, not derived by the caller afterward - see the field's own
     # docstring in kriya/workflow/state.py for why that would be unsafe.
+    # RetryAction.STOP_EXHAUSTED can't actually occur here (see the None
+    # defaults above), but falls back to "full_set" rather than raising, to
+    # stay inert if that ever changes.
     state.last_attempt_mode = (
-        "targeted" if use_targeted
-        else "fallback_targeted" if use_fallback_targeted
-        else "missing_files" if use_missing_files
+        retry_decision.action.value
+        if retry_decision.action in (
+            RetryAction.TARGETED, RetryAction.MISSING_FILES, RetryAction.FALLBACK_TARGETED,
+        )
         else "full_set"
     )
+    # Downstream branches below key off these booleans (not the mode string
+    # directly) since that predates this function's decide_retry_action()
+    # consolidation - derived from the single state.last_attempt_mode value
+    # above rather than re-testing the same conditions a second time.
+    use_targeted = state.last_attempt_mode == "targeted"
+    use_missing_files = state.last_attempt_mode == "missing_files"
+    use_fallback_targeted = state.last_attempt_mode == "fallback_targeted"
     attempt_operation = operation_for_attempt(
         state.last_attempt_mode, has_prior_failure=bool(state.error_context),
     )

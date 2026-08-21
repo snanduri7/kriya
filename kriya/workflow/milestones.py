@@ -309,6 +309,8 @@ async def run_milestones(
     web_lookup_query_callback: Optional[Callable[[List[str], str], Any]] = None,
     milestone_failure_callback: Optional[Callable[[int, int, Milestone, Dict[str, Any]], str]] = None,
     knowledge_risk_confirmed: bool = False,
+    resume: bool = False,
+    resume_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Executes a (possibly hand-edited) milestone plan: calls the EXISTING,
     unmodified we.run_generation_workflow() once per milestone against the
@@ -339,7 +341,21 @@ async def run_milestones(
     one directly contradicts the vertical-slice premise). "retry" simply
     calls run_generation_workflow() again for the same milestone goal - a
     fresh call already gets fresh retry budgets by construction, no new
-    retry infrastructure needed."""
+    retry infrastructure needed.
+
+    resume/resume_id: passed through unchanged to EVERY run_generation_workflow()
+    call below (each milestone and the integration pass alike), so a sequence
+    interrupted mid a single milestone's own Plan/Design/Developer stage (a
+    separate, finer-grained checkpoint than this module's own
+    completed_milestone_indices sidecar - see run_generation_workflow()'s own
+    resume docstring) can pick back up inside that milestone instead of
+    restarting it from scratch. This is safe to pass unconditionally to every
+    call, not just the one milestone actually in flight when the interruption
+    happened: run_generation_workflow() only actually resumes a checkpoint
+    whose goal/config/workspace fingerprints still match current state, and
+    refuses (falling back to a fresh run, with a warning) on any drift -
+    since each milestone's goal text differs, at most one call in the
+    sequence can ever match a given saved checkpoint."""
     total = len(run_state.milestones)
 
     for idx, milestone in enumerate(run_state.milestones, start=1):
@@ -366,6 +382,8 @@ async def run_milestones(
                 milestone_index=idx,
                 milestone_total=total,
                 knowledge_risk_confirmed=knowledge_risk_confirmed,
+                resume=resume,
+                resume_id=resume_id,
             )
 
             if result.get("quality_gates_passed"):
@@ -465,6 +483,8 @@ async def run_milestones(
         milestone_index=total + 1,
         milestone_total=total + 1,
         knowledge_risk_confirmed=knowledge_risk_confirmed,
+        resume=resume,
+        resume_id=resume_id,
     )
 
     return {

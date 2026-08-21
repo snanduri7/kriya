@@ -75,22 +75,26 @@ _JVM_STARTUP_FAILURE_MARKERS = (
 )
 
 
-# Qpid Broker-J's own internal logging (AbstractMessageLogger.getLogActor())
-# unconditionally calls the JDK's Subject.getSubject() - an API tied to the
-# Security Manager, which JEP 486 permanently removed in JDK 24+. Confirmed
-# live, 2026-08-07 (ignite_qpid_person, immediately after the
-# _strip_jdk_incompatible_jvm_flags fix started correctly removing the now-
-# forbidden -Djava.security.manager=allow flag on a resolved JDK 26 target):
-# the broker then crashes on this instead, regardless of whether that flag is
-# present or absent - a genuine Qpid-Broker-J-version-vs-JDK-24+
-# incompatibility, not a code defect either way, and distinct enough from a
-# plain VM-startup-flag crash (_JVM_STARTUP_FAILURE_MARKERS above) to warrant
-# its own, more specific message rather than the generic "JVM flag
-# unsupported" one. Without this, the retry loop burned two full attempts
-# trying to code-fix it - both correctly concluding (per skill rule) that the
-# flag shouldn't be re-added, both still hitting the identical crash anyway -
-# before ever escalating past it.
-_QPID_JDK24_SECURITY_MANAGER_API_MARKER = "getSubject is not supported"
+# "getSubject is not supported" is the JDK's OWN UnsupportedOperationException
+# message from javax.security.auth.Subject.getSubject() - an API tied to the
+# Security Manager, which JEP 486 permanently removed in JDK 24+ - not a
+# message any particular library formats itself, so this marker fires for ANY
+# dependency that still calls that now-forbidden API, not just the one that
+# first surfaced it. First confirmed live, 2026-08-07 (ignite_qpid_person,
+# immediately after the _strip_jdk_incompatible_jvm_flags fix started
+# correctly removing the now-forbidden -Djava.security.manager=allow flag on a
+# resolved JDK 26 target): Qpid Broker-J's own internal logging
+# (AbstractMessageLogger.getLogActor()) called Subject.getSubject() and
+# crashed on this instead, regardless of whether that flag was present or
+# absent - a genuine library-version-vs-JDK-24+ incompatibility, not a code
+# defect either way, and distinct enough from a plain VM-startup-flag crash
+# (_JVM_STARTUP_FAILURE_MARKERS above) to warrant its own, more specific
+# message rather than the generic "JVM flag unsupported" one. Without this,
+# the retry loop burned two full attempts trying to code-fix it - both
+# correctly concluding (per skill rule) that the flag shouldn't be re-added,
+# both still hitting the identical crash anyway - before ever escalating past
+# it.
+_JDK24_SECURITY_MANAGER_API_MARKER = "getSubject is not supported"
 
 
 # Only matches the specific "Failed to invoke/execute ...: [Errno 2] No such
@@ -124,15 +128,15 @@ def classify_environment_failure(error_text: str) -> Optional[str]:
                 "defect, most likely a JVM flag unsupported by the actually-"
                 "resolved Java version (see `kriya doctor`)."
             )
-    if _QPID_JDK24_SECURITY_MANAGER_API_MARKER in error_text:
+    if _JDK24_SECURITY_MANAGER_API_MARKER in error_text:
         return (
-            "Qpid Broker-J's own internal logging calls a JDK Security-Manager-era "
-            "API (Subject.getSubject()) that throws UnsupportedOperationException "
-            "once the Security Manager is permanently removed (JEP 486, JDK 24+) - "
-            "not a code defect, and not fixable by adding or omitting "
+            "A dependency on the classpath calls a JDK Security-Manager-era API "
+            "(Subject.getSubject()) that throws UnsupportedOperationException once "
+            "the Security Manager is permanently removed (JEP 486, JDK 24+) - not "
+            "a code defect, and not fixable by adding or omitting "
             "-Djava.security.manager=allow either way (that flag is itself "
-            "forbidden on this JDK range). A genuine Qpid Broker-J version vs. "
-            "JDK 24+ incompatibility - resolve with a newer Qpid Broker-J release "
+            "forbidden on this JDK range). A genuine library-version vs. JDK 24+ "
+            "incompatibility - resolve with a newer release of that dependency "
             "known to support JDK 24+, or by targeting an older JDK."
         )
     m = _MISSING_EXECUTABLE_PATTERN.search(error_text)

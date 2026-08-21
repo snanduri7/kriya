@@ -109,7 +109,7 @@ from kriya.workflow.failure_grounding import (
     _ERROR_UNRESOLVED_IMPORT_PATTERN,
     _JVM_STARTUP_FAILURE_MARKERS,
     _MISSING_EXECUTABLE_PATTERN,
-    _QPID_JDK24_SECURITY_MANAGER_API_MARKER,
+    _JDK24_SECURITY_MANAGER_API_MARKER,
     _build_error_source_context,
     _build_quality_gate_failure,
     _capture_failed_content,

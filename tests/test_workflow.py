@@ -7173,7 +7173,14 @@ def test_classify_environment_failure_detects_qpid_jdk24_security_manager_api_cr
     calls Subject.getSubject(), an API tied to the Security Manager JEP 486
     permanently removed in JDK 24+. Without this classification, the retry
     loop burned two full attempts trying to code-fix a genuine library/JDK
-    incompatibility no code regeneration could ever resolve."""
+    incompatibility no code regeneration could ever resolve.
+
+    The marker itself ("getSubject is not supported") is the JDK's own
+    UnsupportedOperationException message, not something Qpid formats -
+    the classification message is deliberately library-agnostic (any
+    dependency calling this now-forbidden API hits the identical string),
+    so this only asserts on the JDK-level facts, not "Qpid Broker-J" by
+    name."""
     error = (
         "Exception in thread \"main\" java.lang.UnsupportedOperationException: getSubject is not supported\n"
         "\tat java.base/javax.security.auth.Subject.getSubject(Subject.java:277)\n"
@@ -7182,7 +7189,7 @@ def test_classify_environment_failure_detects_qpid_jdk24_security_manager_api_cr
     )
     result = classify_environment_failure(error)
     assert result is not None
-    assert "Qpid Broker-J" in result
+    assert "Subject.getSubject()" in result
     assert "JDK 24+" in result
 
 def test_classify_environment_failure_detects_missing_executable():
