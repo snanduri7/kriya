@@ -653,6 +653,50 @@ _ANALYSIS_QUOTED_SPAN_RE = re.compile(r"`([^`]+)`")
 # look like a bare path (accepted tradeoff, see the same comment).
 _BARE_FILE_PATH_RE = re.compile(r"^[\w.\-]+(?:/[\w.\-]+)+\.[a-zA-Z0-9]+$")
 
+# The SAME self-identification pattern as _BARE_FILE_PATH_RE above, but for a
+# bare, single-segment filename with no `/` at all (e.g. "ProtocolParser.java",
+# not "src/main/.../ProtocolParser.java") - _BARE_FILE_PATH_RE's own `/`-segment
+# requirement structurally can't match this shape. Found live, 2026-08-21
+# (ignite_qpid_protocol): a diagnosis for a one-character missing-paren fix
+# backtick-quoted the file's own bare name ("the `decode` method of
+# `ProtocolParser.java`") purely for self-identification - not as a claimed
+# code fragment - but got treated as unmet evidence anyway, contributing to a
+# genuinely correct edit being rejected 1 retry, which then cascaded into a
+# misattributed retry at a completely different file (see
+# find_edits_ignoring_own_diagnosis()'s own inline comment for the full
+# incident). Scoped to a closed set of real source/config extensions (not a
+# bare "any single dotted word" pattern) specifically so a legitimate
+# property-access-shaped code quote (e.g. `config.timeout`) is never swept up
+# by accident - unlike a bare relative path, a single dotted word is genuinely
+# ambiguous between "a filename" and "a field/property access" without an
+# extension check.
+_BARE_FILENAME_RE = re.compile(
+    r"^[\w\-]+\.(?:java|py|rb|xml|ya?ml|json|go|cs|cpp|cc|c|h|hpp|kt|rs|"
+    r"jsx?|tsx?|html?|css|sql|sh|md|txt|properties|toml|gradle)$",
+    re.IGNORECASE,
+)
+
+# A bare identifier/keyword with NO punctuation, brackets, or whitespace at all
+# (e.g. "decode", "return", "Protocol") - a purely REFERENTIAL quote (naming
+# an existing method/keyword/class to talk about, not a claimed code
+# fragment). Same incident as _BARE_FILENAME_RE above, same "safe degrade"
+# tradeoff already accepted for _BARE_FILE_PATH_RE/_BARE_FILENAME_RE, but
+# checked at a DIFFERENT point in find_edits_ignoring_own_diagnosis() - see
+# that function's own inline comment for why this can't be filtered out of
+# `quoted` up front like the other two (the FOURTH signal specifically needs
+# a bare type-name quote like "Person"/"Protocol" to survive into the main
+# loop). Applied only as a last-resort check, AFTER every quote has already
+# had its chance to satisfy a real signal: if every quote still standing at
+# that point is bare-identifier-shaped, there's nothing specific enough left
+# to justify a hard mismatch. Grounded directly in this function's own corpus
+# of real documented true-positive quotes (IgniteCache<Integer, Protocol>,
+# buffer.putInt(dataLength), (Person) cache.get(1), [VERIFICATION] PASS,
+# body;/body);) - every one of them contains at least one character beyond
+# letters/digits/underscore (an operator, bracket, dot-call, or semicolon); a
+# bare identifier with none of that has never itself been the actual evidence
+# in any incident this function was tuned against.
+_BARE_IDENTIFIER_RE = re.compile(r"^\w+$")
+
 # A print/output-call opening, used by find_edits_ignoring_own_diagnosis()'s
 # fifth signal (a bare line wrapped into a print call) - see that signal's own
 # inline comment for the full incident. Deliberately a small closed set
@@ -873,7 +917,11 @@ def find_edits_ignoring_own_diagnosis(
     # could be excluded too, but that's a safe degrade (one fewer piece of
     # evidence, not a wrong rejection), matching every other false-positive/
     # negative tradeoff already accepted in this function.
-    quoted = [q for q in quoted if not _BARE_FILE_PATH_RE.match(q.strip())]
+    quoted = [
+        q for q in quoted
+        if not _BARE_FILE_PATH_RE.match(q.strip())
+        and not _BARE_FILENAME_RE.match(q.strip())
+    ]
     if not quoted:
         return None
 
@@ -1004,6 +1052,34 @@ def find_edits_ignoring_own_diagnosis(
             for search, replace in pairs
         ):
             return None
+
+    # SIXTH signal-suppression (2026-08-21, ignite_qpid_protocol): none of the
+    # signals above matched, but if EVERY surviving quote is BOTH (a) a bare
+    # identifier/keyword with no code-shaped punctuation at all (see
+    # _BARE_IDENTIFIER_RE's own docstring) AND (b) already present in the
+    # ORIGINAL file - that's weak, purely REFERENTIAL evidence, naming an
+    # EXISTING method/class/keyword to talk about ("the `decode` method",
+    # "the `Protocol` constructor"), not a claim that new code was needed -
+    # and has never itself been the actual evidence in any incident this
+    # function was tuned against. Condition (b) is essential, not optional:
+    # a bare identifier that is genuinely ABSENT from the original file (e.g.
+    # "should use `StringBuilder` instead of string concatenation" naming a
+    # type that doesn't exist yet anywhere in the old code) is exactly the
+    # legitimate "add this new thing" signal_a already looks for elsewhere in
+    # this function and must NOT be suppressed just because it happens to be
+    # a single bare word - confirmed directly against
+    # test_find_edits_ignoring_own_diagnosis_handles_full_content_shape's own
+    # existing true-negative case, which requires that exact quote to still
+    # flag a genuine no-op.
+    #
+    # Deliberately checked HERE, after the main loop, not by stripping bare
+    # identifiers out of `quoted` up front: the FOURTH signal above
+    # specifically needs a bare TYPE-NAME quote (e.g. "Person"/"Protocol") to
+    # survive into the loop so its `f"({q})" in replace` cast-insertion check
+    # can fire - pre-filtering would have silently broken that signal instead
+    # of fixing this one.
+    if all(_BARE_IDENTIFIER_RE.match(q.strip()) and q in orig_text for q in quoted):
+        return None
 
     quoted_desc = ", ".join(f"`{q}`" for q in quoted)
     return (

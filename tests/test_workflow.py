@@ -9794,6 +9794,82 @@ def test_find_edits_ignoring_own_diagnosis_file_path_exclusion_still_flags_a_tru
     ) is not None
 
 
+def test_find_edits_ignoring_own_diagnosis_excludes_purely_referential_bare_identifiers():
+    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
+    milestone 4/5): a genuinely correct, one-character fix (adding a missing
+    `)` to a Protocol constructor call) was rejected because its FIX ANALYSIS
+    backtick-quoted plain identifier names purely for self-identification -
+    "the `decode` method of `ProtocolParser.java`... the `return` statement...
+    the `Protocol` constructor call" - not as literal before/after code. Every
+    one of those quotes (decode/return/Protocol) already existed in the
+    original file, so none satisfied the "must be new" evidence requirement,
+    even though the actual edit correctly implemented the fix. This false
+    positive then cascaded: the rejection message echoed `Protocol` back,
+    which the bare-TitleCase-stem attribution matching (added earlier the
+    same session) picked up and misdirected the next retry to the WRONG file
+    entirely (Protocol.java, not ProtocolParser.java) - burning the rest of
+    the targeted-retry budget before a later fallback model, whose analysis
+    happened to quote actual before/after code instead of bare identifiers,
+    finally landed the identical fix. Real analysis text and content from the
+    incident, reproduced verbatim."""
+    orig_text = (
+        "public class ProtocolParser {\n"
+        "    public static Protocol decode(byte[] data) {\n"
+        "        int protocolVersion = 1;\n"
+        "        return new Protocol(protocolVersion, softwareVersion, dataLength, time, body;\n"
+        "    }\n"
+        "}\n"
+    )
+    analysis = (
+        "The error is in the `decode` method of `ProtocolParser.java` where there's a "
+        "syntax error - the `return` statement is missing a closing parenthesis for the "
+        "`Protocol` constructor call. This is a simple compilation error that prevents "
+        "the code from building correctly. The fix requires adding the missing closing "
+        "parenthesis to make the constructor call syntactically correct."
+    )
+    edits = [{
+        "search": "        return new Protocol(protocolVersion, softwareVersion, dataLength, time, body;\n    }",
+        "replace": "        return new Protocol(protocolVersion, softwareVersion, dataLength, time, body);\n    }",
+    }]
+    assert find_edits_ignoring_own_diagnosis(analysis, edits, None, orig_text) is None
+
+
+def test_find_edits_ignoring_own_diagnosis_bare_identifier_exclusion_still_flags_a_code_shaped_quote():
+    # Companion negative case - a purely referential bare-identifier quote
+    # ("`Protocol`") in the same analysis must not blanket-exempt a DIFFERENT,
+    # genuinely code-shaped quote ("`IgniteCache<Integer, Protocol>`") that
+    # never actually appears anywhere new - the real fix from this session's
+    # own earlier incident must still be caught.
+    analysis = (
+        "The `Protocol` cache lookup fails because it requires explicitly declaring the "
+        "cache with proper generic type parameters `IgniteCache<Integer, Protocol>` "
+        "instead of using `var`."
+    )
+    edits = [{
+        "search": "var cache = ignite.getOrCreateCache(\"protocolCache\");",
+        "replace": "var cache = ignite.getOrCreateCache(\"protocolCache\");",
+    }]
+    result = find_edits_ignoring_own_diagnosis(
+        analysis, edits, None, "var cache = ignite.getOrCreateCache(\"protocolCache\");"
+    )
+    assert result is not None
+    assert "IgniteCache<Integer, Protocol>" in result
+
+
+def test_find_edits_ignoring_own_diagnosis_excludes_a_bare_single_segment_filename():
+    """Sibling to test_find_edits_ignoring_own_diagnosis_excludes_self_referential_file_path
+    above, but for a bare filename with no `/` at all (e.g. "pom.xml", not
+    "path/to/pom.xml") - _BARE_FILE_PATH_RE's own `/`-segment requirement
+    structurally can't match this shape, so it needed its own exclusion."""
+    analysis = "The bug is in `pom.xml` - a dependency is declared twice."
+    content = "<project><dependencies><dependency>A</dependency></dependencies></project>"
+    orig_text = (
+        "<project><dependencies><dependency>A</dependency>"
+        "<dependency>A</dependency></dependencies></project>"
+    )
+    assert find_edits_ignoring_own_diagnosis(analysis, None, content, orig_text) is None
+
+
 def test_find_edits_ignoring_own_diagnosis_recognizes_a_bare_line_print_wrap_within_a_larger_block():
     """Regression test for a fifth, distinct false-positive bug found live,
     2026-08-17 (ignite_qpid_person, run b-10m). Signal (b) (the existing wrap
