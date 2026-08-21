@@ -193,6 +193,30 @@ async def test_run_verifier_judge_includes_pom_content_when_given():
     assert "Actual pom.xml content" in sent_prompt
 
 
+def test_run_verifier_judge_system_prompt_requires_file_content_evidence():
+    """Regression test for a real live gap found 2026-08-21
+    (milestone_task_cli): judge() picked a command sequence (add, list) that
+    only ever prints to stdout, for a goal whose success criterion explicitly
+    required proving a FILE's on-disk JSON content. grade() (which re-checks
+    the full original goal text, not just judge()'s own summarized
+    success_criteria) correctly found no evidence of that specific claim on
+    every attempt - an unwinnable failure no code regeneration could ever
+    fix, since the SAME insufficient command sequence re-ran unchanged every
+    retry. 7 attempts (including two slow fallback-model escalations) were
+    burned chasing a phantom code defect before the run gave up.
+
+    This only asserts the corrective instruction is present in the system
+    prompt judge() actually sends - it cannot verify a given local model
+    reliably follows it (that requires live validation), but it locks in
+    that the instruction isn't accidentally removed by a future edit."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    verifier = RunVerifierAgent("run_verifier", llm)
+    prompt = verifier.system_prompt
+    assert "ON-DISK CONTENT" in prompt
+    assert "cat" in prompt.lower()
+
+
 @pytest.mark.asyncio
 async def test_run_verifier_judge_omits_pom_section_when_not_given():
     cfg = AppConfig()
