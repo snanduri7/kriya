@@ -1530,6 +1530,15 @@ class WorkflowEngine:
                 # callback - a signature change would risk breaking all of them for a
                 # fix scoped to just this one gate.
                 if need_human_approval and approval_callback:
+                    # The REAL Reviewer work for an escalated run happens HERE, not at
+                    # the later "5. Reviewer" section below (which, for this exact
+                    # path, only reuses state.pre_approval_review and does no new
+                    # work - see its own comment). Banner placed at the LATER section
+                    # unconditionally was found live to fire only after the human had
+                    # already been shown the review and approved it, misleadingly
+                    # announcing "Review" as just starting when it had already
+                    # finished minutes earlier.
+                    _log_phase_banner("REVIEW")
                     try:
                         review_batches, _ = build_review_batches(
                             [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
@@ -1881,18 +1890,22 @@ class WorkflowEngine:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
 
         # 5. Reviewer
-        _log_phase_banner("REVIEW")
         if state.pre_approval_review is not None:
             # Stage 6 SME review, Finding 1: already ran at the
             # Pre-Apply Human Approval Gate, against the exact same final content - a
             # second call here would be a redundant LLM round-trip for an identical
             # answer. step_callback still fires below so anything consuming the "Review"
-            # step in pipeline order sees it at the position it expects.
+            # step in pipeline order sees it at the position it expects. No banner here
+            # - it already fired at the pre-approval gate above, where the real work
+            # happened; repeating it here would misleadingly announce "Review" as just
+            # starting when it in fact finished (and was already shown to the human)
+            # earlier in this same run.
             logger.info(
                 "Reusing pre-approval Reviewer report; no second Reviewer call required."
             )
             review = state.pre_approval_review
         else:
+            _log_phase_banner("REVIEW")
             logger.info("Reviewer Agent evaluating results...")
             if state.final_attempt_contents:
                 goal_header = (

@@ -1174,7 +1174,13 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         nonlocal current_step
         if current_step != step_name:
             current_step = step_name
-            click.secho(f"\n>>> Step: {step_name} <<<", bold=True, fg="green")
+            # No separate ">>> Step: X <<<" announcement here anymore - it
+            # duplicated the solid-line phase banner run_generation_workflow()
+            # itself now logs (kriya/workflow/workflow.py::_log_phase_banner,
+            # visible on this same console via the root logger's stderr
+            # handler) for the exact same transition, confirmed live to print
+            # seconds apart for the identical phase. This callback still owns
+            # the one thing the banner doesn't: streaming the raw token output.
             if step_name == "Review":
                 click.echo("Preparing reviewer report...")
         # The complete Reviewer artifact has one terminal owner: the approval
