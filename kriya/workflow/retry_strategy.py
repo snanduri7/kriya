@@ -22,6 +22,7 @@ import logging
 import os
 
 from kriya.workflow.attribution import _detect_missing_build_manifest, attribute_failure, read_worktree_file
+from kriya.workflow.banners import log_quality_gate_banner
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
@@ -65,10 +66,12 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # "full_set" -> "full-set" to match this log line's original
     # wording exactly; the other three modes were already hyphen-free.
     attempt_mode = "full-set" if state.last_attempt_mode in (None, "full_set") else state.last_attempt_mode
-    logger.warning(
-        f"Quality Gates FAILED (Attempt {state.attempt_number}, "
-        f"{attempt_mode}, full-set {state.budgets.retry_count}/{ctx.max_retries} + "
-        f"targeted {state.budgets.targeted_retry_count}/{ctx.targeted_max_retries}): {e}"
+    log_quality_gate_banner(
+        "FAILED", state.attempt_number, ctx.max_retries,
+        detail=(
+            f"{attempt_mode}, full-set {state.budgets.retry_count}/{ctx.max_retries} + "
+            f"targeted {state.budgets.targeted_retry_count}/{ctx.targeted_max_retries}: {e}"
+        ),
     )
 
     # Every failure source now raises with a real Failure object attached

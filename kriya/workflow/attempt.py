@@ -55,6 +55,7 @@ from kriya.workflow.operations import (
 )
 from kriya.workflow.static_checks import run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
+from kriya.workflow.banners import log_quality_gate_banner
 from kriya.workflow.acceptance import (
     goal_explicitly_requires_tests,
     output_confirms_nonzero_test_execution,
@@ -2146,4 +2147,4 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
 
     # If we made it here, Quality Gates passed successfully!
-    logger.info("Quality Gates check PASSED.")
+    log_quality_gate_banner("PASSED", state.attempt_number, ctx.max_retries)

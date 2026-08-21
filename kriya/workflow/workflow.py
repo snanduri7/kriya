@@ -2002,8 +2002,10 @@ class WorkflowEngine:
             delete_checkpoint(workspace_path, run_id)
         else:
             logger.info(
-                f"Quality Gates never passed after {state.budgets.retry_count} attempt(s) - checkpoint '{run_id}' "
-                "left on disk in case a later `--resume-id` run wants to skip Plan/Design and retry Developer."
+                f"Quality Gates never passed after {state.attempt_number} attempt(s) "
+                f"(full-set {state.budgets.retry_count}, targeted {state.budgets.targeted_retry_count}) - "
+                f"checkpoint '{run_id}' left on disk in case a later `--resume-id` run wants to skip "
+                "Plan/Design and retry Developer."
             )
 
         if state.jdtls_client is not None:
