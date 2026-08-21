@@ -13,6 +13,7 @@ from kriya.workflow.milestones import (
     load_milestone_run_state,
     load_or_resume_milestone_run_state,
     plan_milestones,
+    render_established_file_context,
     replay_prior_milestone_verifications,
     run_milestones,
     save_milestone_run_state,
@@ -195,6 +196,31 @@ def test_build_integration_goal_text_synthesizes_from_success_criteria():
 
 
 # ============================================================
+# render_established_file_context - goes to supplementary_context, NOT
+# build_milestone_goal_text's own goal text (see run_generation_workflow's
+# docstring: Architect only ever sees Planner's `plan` output again, never
+# the raw goal, so grounding folded into goal text alone would silently be
+# lost the moment Planner doesn't transcribe it into its own plan).
+# ============================================================
+
+def test_render_established_file_context_empty_is_blank():
+    assert render_established_file_context({}) == ""
+
+
+def test_render_established_file_context_includes_real_content_sorted():
+    text = render_established_file_context({
+        "src/main/java/Protocol.java": "public Protocol(byte f1, short f2) { ... }",
+        "src/main/java/AnotherFile.java": "class AnotherFile {}",
+    })
+    assert "src/main/java/Protocol.java" in text
+    assert "public Protocol(byte f1, short f2)" in text
+    assert "src/main/java/AnotherFile.java" in text
+    assert "already built by an earlier milestone" in text
+    # Deterministic ordering, not dict insertion order.
+    assert text.index("AnotherFile.java") < text.index("Protocol.java")
+
+
+# ============================================================
 # MilestoneRunState persistence
 # ============================================================
 
@@ -204,6 +230,7 @@ def test_milestone_run_state_round_trips_through_sidecar_file():
         group_id="grp-1", original_goal="orig", milestones=milestones,
         completed_milestone_indices=[1], established_dependencies=["dep:a"],
         verification_commands={1: [["mvn", "exec:exec"]]},
+        established_file_context={"src/Foo.java": "class Foo { void bar(); }"},
     )
     with tempfile.TemporaryDirectory() as tmp:
         save_milestone_run_state(tmp, state)
@@ -213,6 +240,7 @@ def test_milestone_run_state_round_trips_through_sidecar_file():
         assert loaded.completed_milestone_indices == [1]
         assert loaded.established_dependencies == ["dep:a"]
         assert loaded.verification_commands == {1: [["mvn", "exec:exec"]]}
+        assert loaded.established_file_context == {"src/Foo.java": "class Foo { void bar(); }"}
 
 
 def test_load_milestone_run_state_returns_none_when_missing():
@@ -236,6 +264,7 @@ def test_load_or_resume_prefers_fresh_plan_milestones_but_resumes_progress():
             group_id="grp", original_goal="orig", milestones=original_milestones,
             completed_milestone_indices=[1], established_dependencies=["dep:a"],
             verification_commands={1: [["echo", "ok"]]},
+            established_file_context={"src/Foo.java": "class Foo {}"},
         )
         save_milestone_run_state(tmp, sidecar_state)
 
@@ -253,6 +282,7 @@ def test_load_or_resume_prefers_fresh_plan_milestones_but_resumes_progress():
     assert merged.completed_milestone_indices == [1]  # progress preserved
     assert merged.established_dependencies == ["dep:a"]
     assert merged.verification_commands == {1: [["echo", "ok"]]}
+    assert merged.established_file_context == {"src/Foo.java": "class Foo {}"}
 
 
 def test_load_or_resume_with_no_existing_sidecar_starts_fresh():
@@ -346,6 +376,55 @@ async def test_run_milestones_success_path_through_all_milestones_and_integratio
     assert result["status"] == "success"
     assert we.run_generation_workflow.await_count == 3  # 2 milestones + integration
     assert state.completed_milestone_indices == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_run_milestones_grounds_later_milestones_on_earlier_ones_real_files():
+    """Regression guard for a real, live-validation-confirmed finding
+    (2026-08-21, protocol-encoder milestone run): milestone N's Architect
+    invented a fictional API ("I'll assume there's an existing protocol
+    class that has encode/decode methods") for a class an EARLIER milestone
+    had already built with a different, real signature, because nothing
+    grounded it on the real file - Graph RAG's own relevance scoring didn't
+    surface it. Milestone 1 writes a real file to the workspace; milestone
+    2's run_generation_workflow() call must receive that file's real content
+    via supplementary_context, and run_state.established_file_context must
+    be populated from it."""
+    milestones = [
+        Milestone(goal="Build Protocol class", success_criterion="c1", depends_on_previous=False),
+        Milestone(goal="Write a main class using Protocol", success_criterion="c2"),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+        we = MagicMock()
+
+        real_signature = "public Protocol(byte f1, short f2, int f3, long f4, byte[] p) { ... }"
+        os.makedirs(os.path.join(tmp, "src"), exist_ok=True)
+        with open(os.path.join(tmp, "src", "Protocol.java"), "w", encoding="utf-8") as fh:
+            fh.write(real_signature)
+
+        we.run_generation_workflow = AsyncMock(
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["src/Protocol.java"]}
+        )
+        we.run_verifier = MagicMock()
+        we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+
+        await run_milestones(we, state, tmp)
+
+    assert state.established_file_context["src/Protocol.java"] == real_signature
+
+    # Milestone 1's own call had nothing established yet.
+    first_call_kwargs = we.run_generation_workflow.await_args_list[0].kwargs
+    assert first_call_kwargs["supplementary_context"] == ""
+
+    # Milestone 2's call must carry milestone 1's real file content forward.
+    second_call_kwargs = we.run_generation_workflow.await_args_list[1].kwargs
+    assert real_signature in second_call_kwargs["supplementary_context"]
+    assert "src/Protocol.java" in second_call_kwargs["supplementary_context"]
+
+    # The integration pass gets it too.
+    integration_call_kwargs = we.run_generation_workflow.await_args_list[2].kwargs
+    assert real_signature in integration_call_kwargs["supplementary_context"]
 
 
 @pytest.mark.asyncio

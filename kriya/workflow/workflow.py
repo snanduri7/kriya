@@ -256,8 +256,27 @@ class WorkflowEngine:
         milestone_group_id: Optional[str] = None,
         milestone_index: Optional[int] = None,
         milestone_total: Optional[int] = None,
+        supplementary_context: str = "",
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
+
+        supplementary_context: raw text folded into convention_prompt BEFORE
+        skills/RAG content is appended (see the `convention_prompt = ""` init
+        below), so it reaches Planner (plan_prompt), Architect (design_prompt),
+        AND Developer's initial full-set generation (ctx.skills_prompt) alike -
+        the one accumulator all three actually share. Appending only to `goal`
+        does NOT achieve this: Architect only ever sees Planner's own `plan`
+        output, never the raw goal again (design_prompt = f"Plan:\n{plan}\n\n..."),
+        so anything Planner doesn't choose to transcribe into its own plan text
+        is invisible to Architect - confirmed live as the actual mechanism
+        behind a milestone-decomposition failure where Architect explicitly
+        wrote "I'll assume there's an existing protocol class that has
+        encode/decode methods" instead of using the real, already-built one.
+        Exists for kriya/workflow/milestones.py's run_milestones(), which needs
+        to ground a later milestone on files earlier milestones already built,
+        regardless of whether Graph RAG's own relevance scoring surfaces them.
+        Empty string (the default) preserves today's exact behavior for every
+        other caller.
 
         milestone_group_id/milestone_index/milestone_total: pure passthrough to
         every trace_logger.log_run() call below, no other effect on this
@@ -456,6 +475,8 @@ class WorkflowEngine:
         se.discover_and_load()
         
         convention_prompt = ""
+        if supplementary_context:
+            convention_prompt += supplementary_context
         java_toolchain_fact = _java_toolchain_fact(goal, workspace_path)
         if java_toolchain_fact:
             convention_prompt += f"\n\n=== Environment Fact ===\n{java_toolchain_fact}\n"

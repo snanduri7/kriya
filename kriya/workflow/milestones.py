@@ -27,11 +27,29 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone
+from kriya.workflow.context_projection import project_implementation_source
 from kriya.workflow.file_resolution import _resolve_run_command
 from kriya.workflow.verification_contract import extract_contract_verdict
 from kriya.workflow.workflow import _log_phase_banner
 
 logger = logging.getLogger(__name__)
+
+# Deliberately language-agnostic (project_implementation_source just bounds
+# raw text by character count - no per-language parsing), not the signature-
+# tier skeletonizer in context_budget.py: that one only has real extraction
+# logic for Python and brace-languages (.java/.cpp/.c/.h/.cs) - anything else
+# (Ruby, JS/TS, Go, HTML, ...) falls through to an unstructured "first 15
+# lines" placeholder there, which for a class definition is often just
+# imports, giving a later milestone's Architect/Developer nothing useful to
+# ground on. A bounded head+tail of the REAL file, in whatever language it's
+# actually written in, degrades gracefully for every stack Kriya supports
+# (see PolymorphicValidator's own multi-language detection) instead of
+# silently degrading to noise for all but two of them. Generous relative to
+# retry_package.py's per-file budgets (which split a much smaller total
+# across potentially many files): here each earlier-milestone file gets its
+# own allowance, and milestone-decomposition's own premise (small vertical
+# slices) keeps the file count and size low in practice.
+_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE = 4000
 
 
 
@@ -56,6 +74,14 @@ class MilestoneRunState:
     # milestone's real verification without re-asking the model to re-infer
     # it, and so --resume can pick up mid-sequence.
     verification_commands: Dict[int, List[List[str]]] = field(default_factory=dict)
+    # filepath -> bounded real content (project_implementation_source, head+
+    # tail if it doesn't fit) of every file an EARLIER, already-completed
+    # milestone wrote - grows monotonically as milestones complete (see
+    # run_milestones()'s post-success capture step) and is folded into every
+    # later milestone's run_generation_workflow() call via
+    # supplementary_context, so Planner/Architect/Developer are grounded on
+    # the REAL API of already-built dependencies instead of guessing one.
+    established_file_context: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -65,6 +91,7 @@ class MilestoneRunState:
             "completed_milestone_indices": self.completed_milestone_indices,
             "established_dependencies": self.established_dependencies,
             "verification_commands": {str(k): v for k, v in self.verification_commands.items()},
+            "established_file_context": self.established_file_context,
         }
 
     @classmethod
@@ -78,6 +105,7 @@ class MilestoneRunState:
             verification_commands={
                 int(k): v for k, v in data.get("verification_commands", {}).items()
             },
+            established_file_context=dict(data.get("established_file_context", {})),
         )
 
 
@@ -108,15 +136,17 @@ def load_or_resume_milestone_run_state(workspace_path: str, plan_data: Dict[str,
     an edit made to the plan file after a first partial run must take effect,
     not be silently discarded in favor of whatever was baked into the
     sidecar the first time. Progress fields (completed_milestone_indices/
-    established_dependencies/verification_commands) DO come from an existing
-    same-group_id sidecar when one exists, so re-running the same command
-    still resumes rather than restarting the whole sequence from scratch."""
+    established_dependencies/verification_commands/established_file_context)
+    DO come from an existing same-group_id sidecar when one exists, so
+    re-running the same command still resumes rather than restarting the
+    whole sequence from scratch."""
     fresh_state = MilestoneRunState.from_dict(plan_data)
     sidecar_state = load_milestone_run_state(workspace_path, plan_data["group_id"])
     if sidecar_state is not None:
         fresh_state.completed_milestone_indices = sidecar_state.completed_milestone_indices
         fresh_state.established_dependencies = sidecar_state.established_dependencies
         fresh_state.verification_commands = sidecar_state.verification_commands
+        fresh_state.established_file_context = sidecar_state.established_file_context
     return fresh_state
 
 
@@ -206,6 +236,23 @@ def build_milestone_goal_text(
         )
     criterion = f"\n\nVerification: {milestone.success_criterion}"
     return header + milestone.goal + criterion + footer
+
+
+def render_established_file_context(established_file_context: Dict[str, str]) -> str:
+    """Renders established_file_context into run_generation_workflow()'s
+    `supplementary_context` - see that parameter's own docstring for why this
+    goes there rather than into the goal text passed to
+    build_milestone_goal_text() above: goal text only reliably reaches
+    Planner, not Architect or Developer's initial generation."""
+    if not established_file_context:
+        return ""
+    blocks = [
+        f"=== {path} (already built by an earlier milestone in this sequence "
+        "- this is its REAL current content, not a guess. Match its actual "
+        f"constructor/method signatures exactly.) ===\n{content}"
+        for path, content in sorted(established_file_context.items())
+    ]
+    return "\n\n" + "\n\n".join(blocks)
 
 
 def build_integration_goal_text(original_goal: str, milestones: List[Milestone]) -> str:
@@ -384,6 +431,7 @@ async def run_milestones(
                 knowledge_risk_confirmed=knowledge_risk_confirmed,
                 resume=resume,
                 resume_id=resume_id,
+                supplementary_context=render_established_file_context(run_state.established_file_context),
             )
 
             if result.get("quality_gates_passed"):
@@ -431,6 +479,19 @@ async def run_milestones(
                 )
         except Exception as e:
             logger.warning(f"Could not refresh established dependencies after milestone {idx}: {e}")
+
+        for path in result.get("files", []):
+            try:
+                with open(os.path.join(workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
+                    content = fh.read()
+            except OSError as e:
+                logger.warning(f"Could not capture established content for '{path}' after milestone {idx}: {e}")
+                continue
+            projection = project_implementation_source(
+                content, path, _ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+                reason="established_by_earlier_milestone",
+            )
+            run_state.established_file_context[path] = projection.content
 
         try:
             # Read the CURRENT real pom.xml (post-apply, same convention as
@@ -485,6 +546,7 @@ async def run_milestones(
         knowledge_risk_confirmed=knowledge_risk_confirmed,
         resume=resume,
         resume_id=resume_id,
+        supplementary_context=render_established_file_context(run_state.established_file_context),
     )
 
     return {
