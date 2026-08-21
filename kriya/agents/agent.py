@@ -130,18 +130,38 @@ _BUFFER_CAPACITY_RE = re.compile(r"java\.nio\.Buffer(Overflow|Underflow)Exceptio
 # announcement line, never embedded mid-sentence with real content before it
 # on the same line.
 #
-# `[ \t]*$` at the end is required, not decorative - found live, 2026-08-11
-# (kriya-oneshot-protocol-ignite-qpid audit): without it, this also matched
-# perfectly ordinary generated code that happens to mention the phrase inline,
-# e.g. `logger.info("Loaded file content: {} bytes", data.length());` - the
-# colon in that log message satisfied "file content" + up to 60 chars + ":"
-# just as well as a real marker line does, and truncated everything after it,
-# silently deleting the rest of the file with no error raised. Every real
-# marker occurrence (the literal form and the prose-phrased form both) has
-# nothing but the colon (and the line's own trailing whitespace) after it -
-# requiring that closes the false-positive without narrowing the prose-phrased
-# match this regex was broadened for in the first place.
-_TRAILING_FILE_CONTENT_RE = re.compile(r"^[^\n]*?file content[^\n:]{0,60}:[ \t]*$", re.IGNORECASE | re.MULTILINE)
+# The `^[A-Za-z ]{0,30}` PREFIX restriction (not a `[ \t]*$` SUFFIX one - see
+# below for why that changed) is the false-positive guard, found live,
+# 2026-08-11 (kriya-oneshot-protocol-ignite-qpid audit): without some guard,
+# this also matched perfectly ordinary generated code that happens to mention
+# the phrase inline, e.g. `logger.info("Loaded file content: {} bytes",
+# data.length());` - the colon in that log message satisfied "file content" +
+# up to 60 chars + ":" just as well as a real marker line does, and truncated
+# everything after it, silently deleting the rest of the file with no error
+# raised. A real marker's own text immediately before "file content" (if any)
+# is always plain lead-in words ("Corrected ", "The corrected ") - never code
+# punctuation like the `.`, `(`, `"` a real source/log statement has before
+# reaching that phrase - so restricting the prefix to letters/spaces excludes
+# exactly the code-statement case while still matching every real marker
+# variant, independent of whatever follows the colon.
+#
+# That prefix restriction REPLACED an earlier `[ \t]*$` suffix requirement
+# (nothing but trailing whitespace after the colon) that closed the same
+# 2026-08-11 false-positive a different way, but had its own real, live gap:
+# it silently assumed a marker always puts its content on the NEXT line, so a
+# model that wrote "FILE CONTENT: <content starts here>" on the SAME line -
+# mirroring the exact same-line-marker habit already handled for SEARCH:/
+# REPLACE: via _strip_marker_separator - was never recognized as a marker at
+# all here. Confirmed live, 2026-08-21 (milestone_task_cli): a targeted-retry
+# response's REPLACE block was followed by exactly that unrecognized
+# same-line "FILE CONTENT: #!/usr/bin/env python3" over-delivery: with no
+# marker detected, the whole redundant full-file dump - literal marker text
+# included - got folded verbatim into the REPLACE block's own replacement
+# text and written to disk, corrupting the file with duplicate function
+# definitions that then took the rest of that run's retry budget trying
+# (and failing) to unwind. The prefix-based guard above closes the original
+# false-positive without depending on where the model puts the content.
+_TRAILING_FILE_CONTENT_RE = re.compile(r"^[A-Za-z ]{0,30}file content[^\n:]{0,60}:", re.IGNORECASE | re.MULTILINE)
 _SEARCH_MARKER_RE = re.compile(r"^[ \t]*SEARCH:", re.IGNORECASE | re.MULTILINE)
 _REPLACE_MARKER_RE = re.compile(r"^[ \t]*REPLACE:", re.IGNORECASE | re.MULTILINE)
 

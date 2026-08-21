@@ -937,6 +937,34 @@ def test_split_fix_analysis_edit_same_line_marker_separator_does_not_corrupt_ind
     assert edits[0]["search"] == "    old();"
     assert edits[0]["replace"] == "    new();"
 
+def test_split_fix_analysis_edit_truncates_same_line_trailing_file_content():
+    """Regression test for a real bug found live, 2026-08-21
+    (milestone_task_cli): a targeted-retry response's REPLACE block was
+    followed by a redundant, unasked-for "FILE CONTENT: #!/usr/bin/env
+    python3\\n<rest of file>" over-delivery, with content starting on the
+    SAME line as the marker (mirroring the exact same-line-marker habit
+    test_split_fix_analysis_edit_strips_same_line_marker_separator already
+    covers for SEARCH:/REPLACE:). The old _TRAILING_FILE_CONTENT_RE required
+    nothing but trailing whitespace after the marker's colon, so it never
+    recognized this same-line variant as a marker at all - the entire
+    redundant dump, literal "FILE CONTENT:" text included, got folded
+    verbatim into the REPLACE block's own replacement text and written to
+    disk, corrupting the file with duplicate function definitions that then
+    consumed the rest of that run's retry budget failing to unwind it."""
+    text = (
+        "FIX ANALYSIS: fix add_task\n"
+        "SEARCH:\ndef add_task(title):\n    pass\n"
+        "REPLACE:\ndef add_task(title):\n    real_impl()\n"
+        "FILE CONTENT: #!/usr/bin/env python3\n"
+        "import json\ndef add_task(title):\n    pass\n"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert content is None
+    assert len(edits) == 1
+    assert edits[0]["replace"] == "def add_task(title):\n    real_impl()"
+    assert "FILE CONTENT" not in edits[0]["replace"]
+    assert "#!/usr/bin/env" not in edits[0]["replace"]
+
 def test_split_fix_analysis_edit_parses_multiple_search_replace_pairs():
     """Regression test for a real bug found live, 2026-08-07
     (ignite_qpid_person): despite the prompt saying "include only the lines
