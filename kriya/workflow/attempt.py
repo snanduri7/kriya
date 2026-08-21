@@ -2147,4 +2147,4 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
 
     # If we made it here, Quality Gates passed successfully!
-    log_quality_gate_banner("PASSED", state.attempt_number, ctx.max_retries)
+    log_quality_gate_banner("PASSED", state.attempt_number)

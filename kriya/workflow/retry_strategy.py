@@ -67,7 +67,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # wording exactly; the other three modes were already hyphen-free.
     attempt_mode = "full-set" if state.last_attempt_mode in (None, "full_set") else state.last_attempt_mode
     log_quality_gate_banner(
-        "FAILED", state.attempt_number, ctx.max_retries,
+        "FAILED", state.attempt_number,
         detail=(
             f"{attempt_mode}, full-set {state.budgets.retry_count}/{ctx.max_retries} + "
             f"targeted {state.budgets.targeted_retry_count}/{ctx.targeted_max_retries}: {e}"
