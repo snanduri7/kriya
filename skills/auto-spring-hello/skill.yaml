@@ -8,7 +8,3 @@ name: auto-spring-hello
 tags:
 - spring-hello
 - auto-generated
-verification_gap_acknowledged: false
-verified: true
-verified_at: '2026-08-21'
-verified_context: version unspecified
