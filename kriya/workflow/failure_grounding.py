@@ -685,6 +685,28 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
         located = [f for f in known_files if os.path.basename(f) in located_basenames]
         if located:
             return located
+        # A precise file:line locator exists but names NO known file at all -
+        # found live, 2026-08-22 (ignite_qpid_protocol, workspace reused
+        # across two unrelated runs without clearing prior output): a fresh
+        # milestone 1 wrote only Protocol.java/Main.java, but the compile
+        # error's real locators pointed at App.java/ProtocolTest.java - stale
+        # leftovers from an EARLIER run's different package layout, sitting
+        # in the workspace root, swept into this attempt's Maven compile scope
+        # by the worktree sync, but never part of state.all_files_written or
+        # ctx.established_files. Falling through to the substring/stem scan
+        # below in this situation is actively dangerous: the error text
+        # necessarily repeats the missing symbol's bare name ("cannot find
+        # symbol: class Protocol") many times, which the bare-TitleCase-stem
+        # fallback then misreads as evidence implicating Protocol.java - a
+        # known, unrelated file that already correctly defines that class -
+        # burning the whole retry budget re-editing it while the real,
+        # unrecognized files causing the error are never even considered.
+        # Stronger, more specific evidence (a real locator) must never be
+        # overridden by a weaker heuristic just because it names files
+        # outside this run's own scope - return the honest "nothing known
+        # implicated" answer instead, so the caller falls back to a full-set
+        # retry rather than confidently targeting the wrong file.
+        return []
 
     scan_text = _strip_build_tool_info_noise(error_text)
     implicated = []
@@ -734,3 +756,23 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
         if path_named or basename_named or stem_named:
             implicated.append(filepath)
     return implicated
+
+
+def find_locator_files_outside_known_scope(error_text: str, known_files: Iterable[str]) -> List[str]:
+    """Companion to extract_implicated_files() above - returns the basenames a
+    real file:line locator named that matched NO known file, or [] when every
+    located file is recognized (or there was no locator at all). Used to turn
+    the same live incident that function's own docstring describes into a
+    clear, actionable message instead of a silent full-set fallback: stale
+    content left over in a workspace from an earlier, unrelated run (a
+    different package layout, a differently-named entrypoint) can get swept
+    into a fresh attempt's compile scope by the worktree sync while never
+    being part of state.all_files_written or ctx.established_files - the
+    compiler's own precise locator already says exactly which file(s), this
+    just surfaces that instead of discarding it once extract_implicated_files()
+    has already decided not to trust it for targeting."""
+    basenames = {basename for basename, _line in extract_error_source_locations(error_text)}
+    if not basenames:
+        return []
+    known_basenames = {os.path.basename(f) for f in known_files}
+    return sorted(basenames - known_basenames)

@@ -1714,9 +1714,29 @@ class WorkflowEngine:
                         shutil.copy2(worktree_file, actual_file)
                         logger.info(f"Successfully applied sandbox change to actual workspace file: {filepath}")
 
-                # Clean up worktree sandbox
-                if worktree_path != workspace_path:
-                    remove_git_worktree(workspace_path, worktree_path)
+                # Worktree cleanup deliberately does NOT happen here anymore - see the
+                # real live incident this fix closes, 2026-08-22 (ignite_qpid_protocol
+                # milestone 2/3): compile+run-verification passing is not the same as
+                # "done" - the regression test suite below still has to pass too, and
+                # a regression failure sends the loop back for another Developer/
+                # Quality-Gates retry that needs a working worktree. Resetting the
+                # worktree here (git checkout -f HEAD + git clean -fd) wiped every
+                # established-but-never-committed file (pom.xml, and milestone 1's own
+                # Protocol.java/ProtocolParser.java/ProtocolTest.java) the instant a
+                # regression failure occurred, with no re-sync step before the next
+                # attempt - only files a subsequent retry happened to rewrite (e.g.
+                # App.java) ever reappeared. A file nobody touched again (pom.xml
+                # itself, once a targeted retry answered "NO CHANGE NEEDED" for it)
+                # stayed missing, so `run_compile_check()`'s `os.path.exists(pom.xml)`
+                # silently went False and fell through to the raw-javac fallback,
+                # which then failed with a confusing "file not found: Protocol.java" -
+                # a build-lifecycle bug that looked exactly like a code/context defect.
+                # Moved to fire only once the regression suite has ALSO passed, right
+                # before quality_gates_succeeded is actually set - the worktree now
+                # stays alive for as long as any retry can still need it, matching how
+                # every other retry in this loop already treats worktree lifetime
+                # (kept until final success or final budget exhaustion via
+                # retry_strategy.py's own remove_git_worktree call).
 
                 # Phase 3: Auto-generate skill templates for solved dependencies. A
                 # coordinate merely appearing in a resolver.py suggestion during some
@@ -1886,9 +1906,10 @@ class WorkflowEngine:
 
                 full_test_res = validator.run_tests()
                 if not full_test_res["success"]:
-                    # Real workspace, not the worktree - the worktree was already reset by
-                    # this point, so failed_content/file_locations must be captured from
-                    # workspace_path or they'd read stale pre-change content.
+                    # Real workspace, not the worktree - this check runs against
+                    # workspace_path (see the validator constructed above), so
+                    # failed_content/file_locations must be captured from there to
+                    # match what was actually validated.
                     failure = _build_quality_gate_failure(
                         "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}",
                         full_test_res.get("output", ""), workspace_path, state.all_files_written, state.attempt_number,
@@ -1901,6 +1922,12 @@ class WorkflowEngine:
                     "success": True,
                     "output": full_test_res.get("output", "")
                 })
+
+                # Clean up worktree sandbox - only now, once the regression suite has
+                # ALSO passed (see the long comment above the file-copy loop for why
+                # this moved here instead of running right after the copy).
+                if worktree_path != workspace_path:
+                    remove_git_worktree(workspace_path, worktree_path)
 
                 state.quality_gates_succeeded = True
                 break

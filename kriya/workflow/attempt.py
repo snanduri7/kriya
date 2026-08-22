@@ -35,7 +35,7 @@ from kriya.workflow.dependency_invalidation import (
     invalidate_validated_revisions,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch
+from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -1922,7 +1922,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     logger.info(
                         "pom.xml doesn't cover the actual location of known .java files under "
                         "Maven's default sourceDirectory - deterministically widening it to the "
-                        "workspace root (excluding the skills directory)."
+                        "workspace root (excluding the skills and .kriya directories)."
                     )
                     with open(pom_path, "w", encoding="utf-8") as fh:
                         fh.write(corrected_pom)
@@ -2023,8 +2023,30 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             ),
                             attempt=state.attempt_number,
                         )
+                compile_message = f"COMPILATION FAILURE:\n{compile_res['output']}"
+                if not cross_package_failure:
+                    # See find_locator_files_outside_known_scope()'s own docstring
+                    # for the real live incident this closes, 2026-08-22
+                    # (ignite_qpid_protocol): a workspace reused across two
+                    # unrelated runs left stale files on disk that the compiler's
+                    # own precise locator named but this run's tracking never
+                    # heard of - surfacing that plainly here, rather than letting
+                    # it silently degrade to "no known file implicated," turns 8
+                    # wasted retries into one clear, actionable diagnostic.
+                    unrecognized = find_locator_files_outside_known_scope(
+                        compile_res.get("output", ""), compile_known_files,
+                    )
+                    if unrecognized:
+                        compile_message += (
+                            "\n\nNOTE: this error also references file(s) not tracked by this "
+                            f"run at all: {', '.join(unrecognized)}. These are likely stale/"
+                            "leftover content from an earlier, unrelated run or attempt still "
+                            "sitting in the workspace - not something the current milestone's "
+                            "own files can fix. If they don't belong, they should be removed "
+                            "from the workspace rather than repeatedly retried against."
+                        )
                 failure = cross_package_failure or _build_quality_gate_failure(
-                    "compile", f"COMPILATION FAILURE:\n{compile_res['output']}",
+                    "compile", compile_message,
                     compile_res.get("output", ""), ctx.worktree_path, compile_known_files, state.attempt_number,
                 )
                 if self_correction_result is not None:

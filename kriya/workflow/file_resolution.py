@@ -236,6 +236,23 @@ def ensure_maven_covers_nonconventional_java_files(
     missing-dependency errors from files that were never meant to be part
     of the generated application).
 
+    Second real incident, same day, found via live validation of THIS fix:
+    `${project.basedir}` also recursively covers `.kriya/worktree/` -
+    Kriya's own sandbox git worktree (kriya/workflow/worktree.py), which
+    contains its own nested copy of every active skill's `examples/`
+    folder. A top-level `skills/**` exclude does not match that nested
+    `.kriya/worktree/skills/**` copy, so it slipped straight through -
+    `mvn compile` picked up `.kriya/worktree/skills/qpid/examples/*.java`
+    (real external Qpid Broker-J/JMS classes not on this project's
+    classpath) and failed a milestone that had already passed its own
+    compile+run-verification, burning the whole retry budget on files that
+    were never part of the goal. `.kriya` is unconditionally excluded below
+    for this reason, independent of whether a skills directory is even
+    configured - `.kriya/worktree` exists unconditionally the moment
+    Quality Gates has run once (create_git_worktree()), matching the same
+    "always exclude .kriya" convention worktree.py itself already applies
+    (see its own untracked-file walk and DEFAULT_EXCLUDED_DIRS).
+
     Deliberately conservative: a no-op if `<sourceDirectory>` already
     appears anywhere in the pom (a real customization already exists -
     don't guess about overriding it), if no known `.java` file actually
@@ -266,25 +283,30 @@ def ensure_maven_covers_nonconventional_java_files(
     else:
         return None
 
+    exclude_names = [".kriya"]
     if skills_relpath:
         normalized_skills = skills_relpath.replace("\\", "/").strip("/")
         if normalized_skills and not normalized_skills.startswith(".."):
-            plugin_span = _find_plugin_configuration_span(new_content, "maven-compiler-plugin")
-            if plugin_span:
-                block_start, block_end, has_configuration = plugin_span
-                exclude_block = f"<excludes><exclude>{normalized_skills}/**</exclude></excludes>"
-                if has_configuration:
-                    config_idx = new_content.index("<configuration>", block_start, block_end)
-                    insert_at = config_idx + len("<configuration>")
-                    new_content = new_content[:insert_at] + f"\n{exclude_block}" + new_content[insert_at:]
-                else:
-                    artifact_marker = "<artifactId>maven-compiler-plugin</artifactId>"
-                    insert_at = new_content.index(artifact_marker, block_start, block_end) + len(artifact_marker)
-                    new_content = (
-                        new_content[:insert_at]
-                        + f"\n<configuration>{exclude_block}</configuration>"
-                        + new_content[insert_at:]
-                    )
+            exclude_names.append(normalized_skills)
+
+    plugin_span = _find_plugin_configuration_span(new_content, "maven-compiler-plugin")
+    if plugin_span:
+        block_start, block_end, has_configuration = plugin_span
+        exclude_block = "<excludes>" + "".join(
+            f"<exclude>{name}/**</exclude>" for name in exclude_names
+        ) + "</excludes>"
+        if has_configuration:
+            config_idx = new_content.index("<configuration>", block_start, block_end)
+            insert_at = config_idx + len("<configuration>")
+            new_content = new_content[:insert_at] + f"\n{exclude_block}" + new_content[insert_at:]
+        else:
+            artifact_marker = "<artifactId>maven-compiler-plugin</artifactId>"
+            insert_at = new_content.index(artifact_marker, block_start, block_end) + len(artifact_marker)
+            new_content = (
+                new_content[:insert_at]
+                + f"\n<configuration>{exclude_block}</configuration>"
+                + new_content[insert_at:]
+            )
     return new_content
 
 

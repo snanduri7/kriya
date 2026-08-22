@@ -16,7 +16,7 @@ from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch
+from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
 from kriya.workflow.file_resolution import (
     ensure_maven_covers_nonconventional_java_files,
     extract_target_test,
@@ -668,6 +668,7 @@ def test_ensure_maven_covers_nonconventional_java_files_widens_source_directory(
     assert corrected is not None
     assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected
     assert "<exclude>skills/**</exclude>" in corrected
+    assert "<exclude>.kriya/**</exclude>" in corrected
     ET.fromstring(corrected)  # still well-formed XML
 
 def test_ensure_maven_covers_nonconventional_java_files_is_a_noop_for_conventional_layout():
@@ -704,7 +705,7 @@ def test_ensure_maven_covers_nonconventional_java_files_handles_compiler_plugin_
 </project>"""
     corrected = ensure_maven_covers_nonconventional_java_files(pom, ["App.java"], "skills")
     assert corrected is not None
-    assert "<excludes><exclude>skills/**</exclude></excludes>" in corrected
+    assert "<excludes><exclude>.kriya/**</exclude><exclude>skills/**</exclude></excludes>" in corrected
     ET.fromstring(corrected)
 
 def test_ensure_maven_covers_nonconventional_java_files_never_excludes_a_different_plugin():
@@ -731,11 +732,15 @@ def test_ensure_maven_covers_nonconventional_java_files_no_op_without_relevant_f
     assert ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, [], "skills") is None
     assert ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, ["notes.txt"], "skills") is None
 
-def test_ensure_maven_covers_nonconventional_java_files_skips_excludes_without_skills_relpath():
+def test_ensure_maven_covers_nonconventional_java_files_always_excludes_dot_kriya_even_without_skills_relpath():
+    """`.kriya/worktree` exists unconditionally the moment Quality Gates has
+    run once, independent of whether a skills directory is even configured -
+    so its exclusion must not depend on skills_relpath being set."""
     corrected = ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, ["App.java"], None)
     assert corrected is not None
     assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected
-    assert "excludes" not in corrected
+    assert "<excludes><exclude>.kriya/**</exclude></excludes>" in corrected
+    assert "skills/**" not in corrected
 
 def test_resolve_run_command_appends_dexec_mainclass_for_exec_java(tmp_path):
     """The actual fix: exec:java's mainClass is corrected using ground truth
@@ -6017,11 +6022,13 @@ async def test_workflow_run_verification_declined_still_passes_on_compile_alone(
 
 @pytest.mark.asyncio
 async def test_workflow_full_regression_check_tests_the_applied_change_not_stale_worktree(tmp_path):
-    """The full regression check runs after the worktree sandbox has already been
-    git-clean'd back to its pre-change HEAD state (once files are copied out to the
-    real workspace). It must test the real workspace - which has the just-applied
-    change - not the now-reverted worktree, or it silently reports a false pass based
-    on stale, pre-change content.
+    """The full regression check must test the real workspace - which has the
+    just-applied change copied into it - not the worktree sandbox, or it could
+    silently report a false pass based on stale, pre-change content. (Worktree
+    cleanup itself now runs only after this check passes too - see the real
+    live incident this reordering fixed, 2026-08-22, ignite_qpid_protocol
+    milestone 2/3 - but that's a separate concern from what THIS test checks:
+    which content source the regression check reads from.)
 
     Reproduces this with a real git repo: the committed (pre-change) calc.py has a
     deliberately WRONG add() implementation that test_calc.py's existing, untouched
@@ -9308,6 +9315,47 @@ def test_extract_implicated_files_bare_class_name_requires_minimum_length():
     error = "Fix the DB connection leak."
     known = ["src/main/java/DB.java"]
     assert extract_implicated_files(error, known) == []
+
+def test_extract_implicated_files_does_not_misattribute_when_locator_names_unknown_files():
+    """Regression test for a real live incident, 2026-08-22 (ignite_qpid_protocol):
+    a live-validation workspace was reused across two unrelated runs without
+    clearing the earlier run's already-applied output. A fresh milestone 1
+    wrote only Protocol.java/Main.java, but stale App.java/ProtocolTest.java
+    from the PRIOR run (a different package layout) were still on disk, got
+    swept into this attempt's Maven compile scope by the worktree sync, and
+    the compiler's own precise locators pointed at THOSE files - not at
+    Protocol.java, which was already correct. Because the error text
+    necessarily repeats the missing symbol's bare name ("cannot find symbol:
+    class Protocol") many times, the old fallthrough let the bare-TitleCase-
+    stem fallback misattribute the failure to Protocol.java (a known, unrelated
+    file) instead of returning the honest "nothing known implicated" answer -
+    burning 4 retries re-editing a file that never needed to change."""
+    error = (
+        "/worktree/ProtocolTest.java:[7,9] cannot find symbol\n"
+        "  symbol:   class Protocol\n"
+        "  location: class ProtocolTest\n"
+        "/worktree/src/main/java/App.java:[12,34] cannot find symbol\n"
+        "  symbol:   class Protocol\n"
+        "  location: class App\n"
+    )
+    known = ["src/main/java/com/example/Protocol.java", "src/main/java/com/example/Main.java"]
+    assert extract_implicated_files(error, known) == []
+
+def test_find_locator_files_outside_known_scope_surfaces_the_unrecognized_files():
+    error = (
+        "/worktree/ProtocolTest.java:[7,9] cannot find symbol\n"
+        "/worktree/src/main/java/App.java:[12,34] cannot find symbol\n"
+    )
+    known = ["src/main/java/com/example/Protocol.java", "src/main/java/com/example/Main.java"]
+    assert set(find_locator_files_outside_known_scope(error, known)) == {"ProtocolTest.java", "App.java"}
+
+def test_find_locator_files_outside_known_scope_empty_when_locator_matches_a_known_file():
+    error = "src/main/java/com/example/Protocol.java:[1,1] cannot find symbol"
+    known = ["src/main/java/com/example/Protocol.java"]
+    assert find_locator_files_outside_known_scope(error, known) == []
+
+def test_find_locator_files_outside_known_scope_empty_when_no_locator_at_all():
+    assert find_locator_files_outside_known_scope("Process exited with code 1.", ["App.java"]) == []
 
 def test_build_targeted_retry_prompt_frames_target_and_reference_files(tmp_path):
     (tmp_path / "App.java").write_text("class App { /* broken */ }")
