@@ -1507,9 +1507,15 @@ async def test_workflow_self_correction_loop_resolves_compile_failure(tmp_path):
     cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
+    cfg.paths.skills = str(tmp_path / "skills")
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
         "Design: Write app.py",
+        # A resolved self-correction outcome is its own independent lesson-
+        # extraction trigger (workflow.py, added 2026-08-22 alongside the
+        # self-correction feature itself) - this test's own fake_result below
+        # sets exactly that condition, so extraction fires before Review.
+        '[{"category": "Rules", "value": "Always verify the compiled output before declaring success.", "quote": "SyntaxError: unexpected EOF"}]',
         "Review: Approved",
     ])
 
