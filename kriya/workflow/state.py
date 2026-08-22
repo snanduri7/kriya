@@ -148,6 +148,7 @@ class GenerationState:
     last_model_override: Optional[str] = None
     last_base_url_override: Optional[str] = None
     last_api_key_override: Optional[str] = None
+    last_extra_body_override: Optional[Dict[str, Any]] = None
     # The file(s) extract_implicated_files() found in the MOST RECENT failure -
     # re-evaluated after every failure, not fixed at the first one, so a
     # targeted attempt against a different file (a new error surfaced by fixing

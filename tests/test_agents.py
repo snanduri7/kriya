@@ -72,7 +72,28 @@ async def test_call_with_escalation_passes_full_candidate_config():
         "sys", "prompt", stream_callback=None, json_mode=True,
         model_override="devstral-small-2:24b", base_url_override="http://localhost:11434/v1",
         api_key_override="k", temperature_override=0.5, max_tokens_override=2048, reasoning_override=True,
+        extra_body_override={},
     )
+
+@pytest.mark.asyncio
+async def test_call_with_escalation_passes_a_candidates_own_extra_body_not_the_primarys():
+    """Regression test for a real gap, 2026-08-22: every escalation call site
+    unconditionally used the PRIMARY model's own extra_body regardless of
+    which model was actually being called - a fallback model needing
+    different request shape (e.g. qwen3.8:27b's reasoning_effort, distinct
+    from the `reasoning` bool which only gates this client's own <think>-
+    stripping/token-floor logic) had no way to get it, and the primary's own
+    tuning (e.g. reasoning_effort meant for a completely different model)
+    would silently leak onto the fallback call instead."""
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}  # primary's own tuning
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="ok")
+    candidate = FallbackModelConfig(model="qwen3.8:27b", extra_body={"reasoning_effort": "none"})
+
+    await call_with_escalation(llm, "sys", "prompt", [candidate])
+
+    assert llm.complete.call_args.kwargs["extra_body_override"] == {"reasoning_effort": "none"}
 
 @pytest.mark.asyncio
 async def test_call_with_escalation_escalates_on_exception():

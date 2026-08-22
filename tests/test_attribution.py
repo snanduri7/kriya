@@ -312,6 +312,23 @@ async def test_triage_rides_the_same_escalation_ladder_as_generation():
 
 
 @pytest.mark.asyncio
+async def test_triage_uses_the_fallback_models_own_extra_body():
+    """Regression test for a real gap, 2026-08-22: triage used to unconditionally
+    inherit the PRIMARY model's own extra_body regardless of which model was
+    actually resolved for this retry - see resolve_fallback_model()'s own
+    escalation-ladder contract this mirrors."""
+    fallback = FallbackModelConfig(model="qwen3.8:27b", extra_body={"reasoning_effort": "none"})
+    failure = Failure(type="run_verification", message="fail", raw_output="no locator here", likely_files=[])
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value='{"files": ["A.java"], "confidence": "medium", "reasoning": "x"}')
+
+    await attribute_failure(failure, ["A.java", "B.java"], 2, [fallback], llm, lambda fp: "content")
+
+    _, kwargs = llm.complete.call_args
+    assert kwargs["extra_body_override"] == {"reasoning_effort": "none"}
+
+
+@pytest.mark.asyncio
 async def test_triage_falls_back_to_full_set_on_malformed_response():
     failure = Failure(type="run_verification", message="fail", raw_output="no locator here", likely_files=[])
     llm = MagicMock()

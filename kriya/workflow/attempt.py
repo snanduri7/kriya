@@ -769,6 +769,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         model_override = None
         base_url_override = None
         api_key_override = None
+        extra_body_override = None
     elif use_targeted:
         # Targeted retry: always the primary model, never escalated
         # (see the budget comment above) - so the context budget is
@@ -779,6 +780,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         model_override = None
         base_url_override = None
         api_key_override = None
+        extra_body_override = None
 
         current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
         base_code_context = ctx.skills_prompt
@@ -817,6 +819,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
             known_target_files=state.last_implicated_files,
             prior_error_context=retry_error_context or None,
             implicated_files=state.last_implicated_files,
@@ -848,6 +851,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         model_override = fallback.model
         base_url_override = fallback.base_url
         api_key_override = fallback.api_key
+        extra_body_override = fallback.extra_body
         logger.info(
             f"Trying ONE targeted fix on fallback model {model_override} before "
             "falling back to full-set regeneration."
@@ -890,6 +894,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
             known_target_files=state.last_implicated_files,
             prior_error_context=retry_error_context or None,
             implicated_files=state.last_implicated_files,
@@ -915,6 +920,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         model_override = None
         base_url_override = None
         api_key_override = None
+        extra_body_override = None
 
         current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
         base_code_context = ctx.skills_prompt
@@ -959,6 +965,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
             known_target_files=resolved_missing_files,
             sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
             operation_by_file=_operation_map(
@@ -974,6 +981,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         model_override = None
         base_url_override = None
         api_key_override = None
+        extra_body_override = None
 
         active_context_window = ctx.kernel.config.llm.context_window
         fallback = resolve_fallback_model(state.budgets.retry_count, ctx.chain)
@@ -981,6 +989,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             model_override = fallback.model
             base_url_override = fallback.base_url
             api_key_override = fallback.api_key
+            extra_body_override = fallback.extra_body
             active_context_window = fallback.context_window
             current_limit = _reserve_graph_context_budget(
                 fallback.context_window, ctx.skills_prompt, ctx.learned_rag_context
@@ -1119,6 +1128,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 model_override=model_override,
                 base_url_override=base_url_override,
                 api_key_override=api_key_override,
+                extra_body_override=extra_body_override,
                 known_target_files=known_target_files,
                 prior_error_context=retry_error_context or None,
                 implicated_files=state.last_implicated_files,
@@ -1136,10 +1146,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
 
     # Recorded now, not derived by the caller afterward - see the fields'
     # own docstring in kriya/workflow/state.py. Every branch above sets all
-    # three of these (to None for the primary model, or a fallback's values).
+    # four of these (to None for the primary model, or a fallback's values).
     state.last_model_override = model_override
     state.last_base_url_override = base_url_override
     state.last_api_key_override = api_key_override
+    state.last_extra_body_override = extra_body_override
 
     # Normalize filepaths before anything downstream uses them - the
     # Developer Agent occasionally returns an absolute path instead of a

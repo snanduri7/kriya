@@ -26,6 +26,7 @@ class LiveFailureContext(NamedTuple):
     model_override: Optional[str] = None
     base_url_override: Optional[str] = None
     api_key_override: Optional[str] = None
+    extra_body_override: Optional[Dict[str, Any]] = None
     # Self-correction's own tool-call transcript (kriya/workflow/self_correction.py's
     # SelfCorrectionResult.transcript - list of {"turn", "tool", "arguments", "result"}),
     # when this resolution came from that loop rather than a fallback-model
@@ -121,6 +122,7 @@ class LiveFailureChannel(KnowledgeChannel):
                 model_override=context.model_override,
                 base_url_override=context.base_url_override,
                 api_key_override=context.api_key_override,
+                extra_body_override=context.extra_body_override,
             )
         except Exception as e:
             logger.warning(f"Live-failure knowledge extraction LLM call failed (non-fatal): {e}")

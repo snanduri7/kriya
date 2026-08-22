@@ -324,6 +324,7 @@ async def _tier_triage(
     model_override = fallback.model if fallback else None
     base_url_override = fallback.base_url if fallback else None
     api_key_override = fallback.api_key if fallback else None
+    extra_body_override = fallback.extra_body if fallback else None
 
     per_file_budget = min(
         _TRIAGE_MAX_SOURCE_CHARS_PER_FILE,
@@ -355,6 +356,7 @@ async def _tier_triage(
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
             max_tokens_override=_TRIAGE_MAX_TOKENS,
         )
         parsed = json.loads(response)

@@ -4013,6 +4013,43 @@ async def test_run_attempt_deterministically_corrects_exec_main_class_end_to_end
 
 
 @pytest.mark.asyncio
+async def test_run_attempt_full_set_escalation_passes_fallback_extra_body_to_developer(tmp_path):
+    """Regression test for a real gap, 2026-08-22: a full-set retry escalated
+    to a fallback model used to unconditionally pass the PRIMARY model's own
+    extra_body to the Developer completion call regardless of which model was
+    actually being used - a fallback needing different request shape (e.g.
+    qwen3.8:27b's reasoning_effort) had no way to get it. Confirms the whole
+    chain (resolve_fallback_model -> extra_body_override local var -> the
+    Developer call -> state.last_extra_body_override) works end-to-end
+    through run_attempt() itself, not just the individual pieces in
+    isolation."""
+    from kriya.config import FallbackModelConfig
+
+    state = GenerationState()
+    state.budgets.retry_count = 1  # makes resolve_fallback_model actually resolve chain[0]
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "def add(a, b): return a + b\n"}
+    ])
+    fallback = FallbackModelConfig(model="qwen3.8:27b", extra_body={"reasoning_effort": "none"})
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer, chain=[fallback])
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    kwargs = developer.run_generation.call_args.kwargs
+    assert kwargs["model_override"] == "qwen3.8:27b"
+    assert kwargs["extra_body_override"] == {"reasoning_effort": "none"}
+    assert state.last_extra_body_override == {"reasoning_effort": "none"}
+
+
+@pytest.mark.asyncio
 async def test_run_attempt_raises_cross_package_mismatch_end_to_end(tmp_path):
     """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol,
     milestone 3/4): a fresh milestone's Architect chose a Maven-conventional

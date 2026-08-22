@@ -1861,6 +1861,7 @@ class WorkflowEngine:
                             model_override=state.last_model_override,
                             base_url_override=state.last_base_url_override,
                             api_key_override=state.last_api_key_override,
+                            extra_body_override=state.last_extra_body_override,
                             transcript=(
                                 self_corrected_outcome.get("self_correction_transcript")
                                 if self_corrected_outcome is not None else None

@@ -99,14 +99,22 @@ class LLMClient:
         temperature_override: Optional[float] = None,
         max_tokens_override: Optional[int] = None,
         reasoning_override: Optional[bool] = None,
+        extra_body_override: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Call the local LLM server and return the text completion (supporting streaming and JSON mode).
 
-        temperature_override/max_tokens_override/reasoning_override let a caller fully
-        specify an alternate model's real config (not just model/base_url/api_key) -
-        without them, is_reasoning falls back to scanning the top-level llm_chain for a
-        matching model name (kept for backward compatibility with the existing
-        Developer escalation call sites, which only ever pass the first three)."""
+        temperature_override/max_tokens_override/reasoning_override/extra_body_override let
+        a caller fully specify an alternate model's real config (not just model/base_url/
+        api_key) - without them, is_reasoning falls back to scanning the top-level llm_chain
+        for a matching model name (kept for backward compatibility with the existing
+        Developer escalation call sites, which only ever pass the first three), and
+        extra_body falls back to the PRIMARY model's own extra_body (kriya/config/config.py's
+        LLMConfig) - which is only correct when no fallback model is actually in play. A
+        caller escalating to a FallbackModelConfig entry should pass its own
+        extra_body_override (even an empty dict, to mean "no extra_body for this model"),
+        the same way it already passes that entry's model/base_url/api_key/temperature -
+        otherwise the primary's own extra_body (e.g. a reasoning_effort tuned for a
+        completely different model) silently applies to the fallback call instead."""
         # Validate egress policy
         if self.config.autonomy.egress_policy == "local_only":
             url_to_check = base_url_override or self.config.llm.base_url
@@ -137,7 +145,10 @@ class LLMClient:
         temperature = temperature_override if temperature_override is not None else self.temperature
         base_max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
         max_tokens = max(base_max_tokens, 12288) if is_reasoning else base_max_tokens
-        extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
+        if extra_body_override is not None:
+            extra_body = extra_body_override or None
+        else:
+            extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
         # Reasoning models are NOT excluded from response_format here - Ollama (at
         # least) keeps a reasoning model's <think>-equivalent output in a separate
         # "reasoning" field and json_object-constrains only the "content" field, so
@@ -296,6 +307,7 @@ class LLMClient:
         api_key_override: Optional[str] = None,
         temperature_override: Optional[float] = None,
         max_tokens_override: Optional[int] = None,
+        extra_body_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Single-turn native tool-calling completion. Unlike complete()'s fixed
         system/user string pair, a tool-calling loop needs to append tool_calls and
@@ -339,7 +351,10 @@ class LLMClient:
 
         temperature = temperature_override if temperature_override is not None else self.temperature
         max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
-        extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
+        if extra_body_override is not None:
+            extra_body = extra_body_override or None
+        else:
+            extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
 
         response = await client.chat.completions.create(
             model=model,

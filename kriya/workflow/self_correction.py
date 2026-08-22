@@ -500,6 +500,7 @@ async def run_self_correction_loop(
     model_override: Optional[str] = None,
     base_url_override: Optional[str] = None,
     api_key_override: Optional[str] = None,
+    extra_body_override: Optional[Dict[str, Any]] = None,
     failure_type: str = "compile",
     target_test: Optional[str] = None,
 ) -> SelfCorrectionResult:
@@ -585,6 +586,7 @@ async def run_self_correction_loop(
                 model_override=model_override,
                 base_url_override=base_url_override,
                 api_key_override=api_key_override,
+                extra_body_override=extra_body_override,
             )
         except Exception as exc:
             # Found live, 2026-08-17 (ignite_qpid_person, run b-10l): this call

@@ -241,6 +241,7 @@ async def call_with_escalation(
                     temperature_override=cand.temperature,
                     max_tokens_override=cand.max_tokens,
                     reasoning_override=cand.reasoning,
+                    extra_body_override=cand.extra_body,
                 )
         except Exception as ex:
             last_exc = ex
@@ -1103,6 +1104,7 @@ class DeveloperAgent(BaseAgent):
         model_override: Optional[str],
         base_url_override: Optional[str],
         api_key_override: Optional[str],
+        extra_body_override: Optional[Dict[str, Any]] = None,
         prior_error_context: Optional[str] = None,
         implicated_files: Optional[List[str]] = None,
         error_source_context: Optional[Dict[str, str]] = None,
@@ -1598,6 +1600,7 @@ class DeveloperAgent(BaseAgent):
                 model_override=model_override,
                 base_url_override=base_url_override,
                 api_key_override=api_key_override,
+                extra_body_override=extra_body_override,
                 temperature_override=retry_temperature if apply_fix_analysis else None,
             )
 
@@ -1680,6 +1683,7 @@ class DeveloperAgent(BaseAgent):
         model_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
+        extra_body_override: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Optional[List[Dict[str, Any]]], str]:
         """Runs run_generation()'s Step 1 - "which files do I need" - as its own
         method, both for run_generation() itself and for anything (e.g. a
@@ -1717,6 +1721,7 @@ class DeveloperAgent(BaseAgent):
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
         )
 
         files, err = parse_file_list(response_str)
@@ -1748,6 +1753,7 @@ class DeveloperAgent(BaseAgent):
         model_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
+        extra_body_override: Optional[Dict[str, Any]] = None,
         known_target_files: Optional[List[str]] = None,
         prior_error_context: Optional[str] = None,
         implicated_files: Optional[List[str]] = None,
@@ -1813,6 +1819,7 @@ class DeveloperAgent(BaseAgent):
             return await self._fill_missing_content(
                 file_entries, task_description, design_context, existing_code_context,
                 stream_callback, model_override, base_url_override, api_key_override,
+                extra_body_override,
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
                 extra_fix_instruction, files_with_current_content, sibling_content_budget,
                 operation_by_file, default_operation, generation_protocol,
@@ -1821,11 +1828,13 @@ class DeveloperAgent(BaseAgent):
         try:
             file_entries, _source = await self._resolve_step1_file_list(
                 task_description, design_context, model_override, base_url_override, api_key_override,
+                extra_body_override,
             )
             if file_entries:
                 return await self._fill_missing_content(
                     file_entries, task_description, design_context, existing_code_context,
                     stream_callback, model_override, base_url_override, api_key_override,
+                    extra_body_override,
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
                     extra_fix_instruction, files_with_current_content, sibling_content_budget,
                     operation_by_file, default_operation, generation_protocol,
@@ -1881,6 +1890,7 @@ class DeveloperAgent(BaseAgent):
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
             temperature_override=retry_temperature,
         )
         

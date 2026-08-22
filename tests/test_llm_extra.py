@@ -63,6 +63,73 @@ def _mock_response(content):
 
 
 @pytest.mark.asyncio
+async def test_complete_uses_fallback_extra_body_not_the_primarys():
+    """Regression test for a real gap, 2026-08-22: every call site that
+    escalates to a fallback model unconditionally used the PRIMARY model's
+    own extra_body (config.llm.extra_body) regardless of which model was
+    actually being called - a fallback needing different request shape
+    (e.g. qwen3.8:27b's reasoning_effort) had no way to get it, and the
+    primary's own tuning would silently leak onto the fallback call."""
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response("ok"))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        await llm.complete("system", "user", model_override="qwen3.8:27b", extra_body_override={"reasoning_effort": "none"})
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
+
+
+@pytest.mark.asyncio
+async def test_complete_falls_back_to_primary_extra_body_when_no_override_given():
+    """Unchanged behavior for every existing caller that doesn't pass
+    extra_body_override at all (None, the default)."""
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response("ok"))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        await llm.complete("system", "user")
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "xhigh"}
+
+
+@pytest.mark.asyncio
+async def test_complete_empty_dict_extra_body_override_means_no_extra_body():
+    """A fallback with no extra_body of its own (the common case - defaults to
+    {}) must send NO extra_body, not silently inherit the primary's."""
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response("ok"))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        await llm.complete("system", "user", model_override="some-other-model", extra_body_override={})
+        assert mock_create.call_args[1].get("extra_body") is None
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_uses_fallback_extra_body_not_the_primarys():
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    llm = LLMClient(cfg)
+
+    mock_message = MagicMock()
+    mock_message.tool_calls = []
+    mock_message.content = "done"
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = None
+    mock_create = AsyncMock(return_value=mock_response)
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        await llm.complete_with_tools(
+            [{"role": "user", "content": "hi"}], [],
+            model_override="qwen3.8:27b", extra_body_override={"reasoning_effort": "none"},
+        )
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
+
+
+@pytest.mark.asyncio
 async def test_json_mode_sets_response_format_for_reasoning_model():
     """A reasoning model must not be excluded from response_format - without it, it
     has nothing forcing it to ever commit to JSON at all (a real observed failure:

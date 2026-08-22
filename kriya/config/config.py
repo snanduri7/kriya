@@ -197,6 +197,17 @@ class FallbackModelConfig(BaseModel):
     max_tokens: int = Field(default=4096)
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     reasoning: bool = Field(default=False)
+    # Mirrors LLMConfig.extra_body (below) - a fallback model can need request
+    # shape the primary model doesn't (e.g. qwen3.8:27b's reasoning_effort
+    # string, distinct from the `reasoning` bool above, which only gates this
+    # client's own <think>-stripping/token-floor logic). Before this field
+    # existed, every call site that escalates to a fallback model (call_with_
+    # escalation, attribution's triage tier, self_correction's tool loop, the
+    # Developer retry loop's targeted/fallback-targeted/full-set paths, lesson
+    # extraction) still unconditionally used the PRIMARY model's own extra_body
+    # regardless of which model was actually being called - harmless when the
+    # fallback ignores unknown fields, but silently wrong whenever it doesn't.
+    extra_body: Dict[str, Any] = Field(default_factory=dict)
     context_window: int = Field(default=32768)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
