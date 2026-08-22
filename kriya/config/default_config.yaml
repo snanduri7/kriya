@@ -101,3 +101,17 @@ autonomy:
   generation_time_budget_seconds: null
   generation_gate_reserve_seconds: 120
   generation_seconds_per_file_estimate: 90
+  # SpecComplianceAgent (kriya/agents/agent.py): checks whether the goal's
+  # LITERALLY named requirements (an exact field/method/class name, exact
+  # type, exact constant) actually appear in the generated code - closes a
+  # real gap compile/test/run-verification structurally can't (syntactically
+  # valid, semantically non-compliant code passes every other gate).
+  # Defaults False at the pydantic-model level (kriya/config/config.py's own
+  # comment there explains why - test-suite blast radius, not a trust
+  # concern) but ON here for real usage: validated live, 2026-08-22, against
+  # the actual incident that motivated building it (ignite_qpid_protocol
+  # milestone 1 - a goal naming 5 exact fields, generated code with a
+  # different, incompatible set, every other gate passed anyway) - correctly
+  # caught all 4 missing fields when given the real goal and the real wrong
+  # code. Set to false to opt out.
+  spec_compliance_enabled: true
