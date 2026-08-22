@@ -23,6 +23,7 @@ from kriya.workflow.file_resolution import (
     find_runnable_test_files,
     ground_java_entrypoint_in_no_build_file_projects,
     is_runnable_test_file,
+    strip_package_declaration_matching_source_root,
 )
 from kriya.workflow.edit_safety import (
     FileRevisionConflict,
@@ -3853,6 +3854,79 @@ async def test_run_attempt_disables_run_verification_end_to_end_when_no_real_ent
         await run_attempt(state, ctx)
 
     mock_run_app_sequence.assert_not_called()
+
+
+def test_strip_package_declaration_matching_source_root_removes_the_bogus_package():
+    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol
+    milestone 3/4): `package src.main.java;` is the Maven source-root path,
+    dotted, mistaken for a package name - unconditionally invalid for a file
+    with zero subdirectory nesting below src/main/java/."""
+    content = "package src.main.java;\n\nimport java.util.Arrays;\n\npublic class Protocol {\n}\n"
+    result = strip_package_declaration_matching_source_root("src/main/java/Protocol.java", content)
+    assert result is not None
+    assert "package" not in result
+    assert "import java.util.Arrays;" in result
+
+
+def test_strip_package_declaration_matching_source_root_leaves_real_nested_packages_alone():
+    """A file WITH real subdirectory nesting below src/main/java/ may
+    legitimately need a real package - this function has no way to derive
+    what it should be and must never touch it."""
+    content = "package com.example;\npublic class Foo {}\n"
+    assert strip_package_declaration_matching_source_root("src/main/java/com/example/Foo.java", content) is None
+
+
+def test_strip_package_declaration_matching_source_root_is_a_noop_outside_the_source_root():
+    content = "package src.main.java;\npublic class Protocol {}\n"
+    assert strip_package_declaration_matching_source_root("Protocol.java", content) is None
+
+
+def test_strip_package_declaration_matching_source_root_is_a_noop_without_a_package_declaration():
+    assert strip_package_declaration_matching_source_root("src/main/java/Bar.java", "public class Bar {}\n") is None
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_deterministically_strips_directory_path_masquerading_as_package_end_to_end(tmp_path):
+    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol,
+    milestone 3/4): the Developer wrote Protocol.java directly under
+    src/main/java/ (no subdirectory nesting) with `package src.main.java;` -
+    literally the Maven source-root path, dotted, mistaken for a package
+    name. javac's resulting "duplicate class"/"cannot access Protocol"
+    errors read exactly like a real code defect. The model correctly
+    diagnosed the fix on its first retry but then burned 7 of 8 Quality Gate
+    attempts (plus a fallback-model escalation) failing to mechanically
+    apply a single-line deletion - confirms run_attempt() strips the bogus
+    package declaration BEFORE compile even runs, so the model never gets a
+    chance to botch re-deriving it."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {
+            "filepath": "src/main/java/Protocol.java",
+            "content": "package src.main.java;\n\npublic class Protocol {\n    private int version;\n}\n",
+        },
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        architect_files=["src/main/java/Protocol.java"],
+        expected_files_upfront=["src/main/java/Protocol.java"],
+        architect_basename_to_path={"Protocol.java": "src/main/java/Protocol.java"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    with open(os.path.join(str(tmp_path), "src/main/java/Protocol.java"), "r", encoding="utf-8") as f:
+        final_content = f.read()
+    assert "package" not in final_content
+    assert "public class Protocol {" in final_content
 
 
 @pytest.mark.asyncio

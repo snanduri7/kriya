@@ -36,7 +36,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -1926,6 +1926,32 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     )
                     with open(pom_path, "w", encoding="utf-8") as fh:
                         fh.write(corrected_pom)
+
+        # Deterministic package-declaration correction - found live,
+        # 2026-08-22 (ignite_qpid_protocol milestone 3/4): see
+        # strip_package_declaration_matching_source_root()'s own docstring
+        # (kriya/workflow/file_resolution.py) for the full incident. Runs
+        # every attempt, unconditionally, over every known .java file - cheap
+        # to no-op for the (overwhelmingly common) case where a file either
+        # isn't directly under src/main/java/ or already has no package.
+        for java_relpath in (f for f in compile_known_files if f.endswith(".java")):
+            java_abs_path = os.path.join(ctx.worktree_path, java_relpath)
+            if not os.path.exists(java_abs_path):
+                continue
+            try:
+                with open(java_abs_path, "r", encoding="utf-8", errors="replace") as fh:
+                    java_content = fh.read()
+            except OSError:
+                continue
+            corrected_java = strip_package_declaration_matching_source_root(java_relpath, java_content)
+            if corrected_java is not None:
+                logger.info(
+                    f"{java_relpath} sits directly under src/main/java/ with no subdirectory "
+                    "nesting, so its package declaration is unconditionally invalid per Java's "
+                    "own rules - deterministically stripping it to the default package."
+                )
+                with open(java_abs_path, "w", encoding="utf-8") as fh:
+                    fh.write(corrected_java)
 
         compile_res = validator.run_compile_check(compile_known_files)
         if not compile_res["success"]:

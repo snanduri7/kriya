@@ -328,6 +328,58 @@ def ensure_maven_covers_nonconventional_java_files(
     return new_content
 
 
+_JAVA_PACKAGE_DECL_LINE_RE = re.compile(r"^[ \t]*package\s+[\w.]+\s*;[ \t]*\n?", re.MULTILINE)
+
+
+def strip_package_declaration_matching_source_root(filepath: str, content: str) -> Optional[str]:
+    """Deterministically strips a Java file's package declaration when that
+    file sits DIRECTLY under src/main/java/ with no subdirectory nesting
+    below it - the one case where Java's own rules make ANY package
+    declaration unconditionally invalid, not merely unverified: a package
+    must correspond to real subdirectory structure BELOW the recognized
+    source root, and there is none here by construction.
+
+    Found live, 2026-08-22 (ignite_qpid_protocol milestone 3/4): the
+    Developer wrote BOTH Protocol.java and ProtocolParser.java (established
+    files from milestones 1-2) with `package src.main.java;` - literally the
+    Maven source-root PATH, dotted, mistaken for a package NAME. javac's
+    resulting error ("duplicate class: src.main.java.Protocol" / "cannot
+    access Protocol") reads exactly like a real code defect, not a
+    boilerplate-vs-package-name confusion. The model correctly diagnosed the
+    root cause on its VERY FIRST retry ("package declaration is incorrect...
+    should be default/unnamed package") but then repeatedly failed to
+    mechanically apply it - a byte-identical SEARCH/REPLACE no-op, an
+    "identifier expected" syntax corruption from a botched edit, an anchor
+    mismatch, a misdirected edit landing in the sibling file instead -
+    burning 7 of 8 Quality Gate attempts (plus a fallback-model escalation)
+    on a single-line deletion whose correctness was never actually in doubt
+    after the first diagnosis. This is exactly the kind of mechanically-
+    derivable fact ensure_maven_covers_nonconventional_java_files() and
+    ground_java_entrypoint_in_no_build_file_projects() already exist to stop
+    an LLM from having to reliably self-execute: apply the known-correct fix
+    directly, every attempt, rather than trust the model to keep re-deriving
+    (and re-botching) it.
+
+    Deliberately narrow and safe: only fires for a file with ZERO
+    subdirectory nesting below src/main/java/ (files WITH real nesting, e.g.
+    src/main/java/com/example/Foo.java, may legitimately need a real
+    package and are left untouched - this function has no way to derive
+    what that package should be, and doesn't try to). Returns None (no-op)
+    when the file isn't under that recognized source root, has real
+    subdirectory nesting, or already has no package declaration to strip."""
+    norm_path = filepath.replace("\\", "/")
+    prefix = "src/main/java/"
+    if not norm_path.startswith(prefix):
+        return None
+    rel = norm_path[len(prefix):]
+    if "/" in rel:
+        return None
+    match = _JAVA_PACKAGE_DECL_LINE_RE.search(content)
+    if not match:
+        return None
+    return content[:match.start()] + content[match.end():]
+
+
 def downgrade_ungrounded_goal_explicit_commands(judgment: Dict[str, Any], goal: str) -> Dict[str, Any]:
     """Independent brutal review finding #2 (2026-08-15): RunVerifierAgent.judge()
     self-reports command_source ("goal_explicit" vs "inferred") in the same
