@@ -8,5 +8,5 @@ tags:
 - ignite-cache
 verification_gap_acknowledged: false
 verified: true
-verified_at: '2026-08-22'
-verified_context: org.apache.ignite:ignite-core unspecified
+verified_at: '2026-08-20'
+verified_context: org.apache.ignite:ignite-core 2.18.0
