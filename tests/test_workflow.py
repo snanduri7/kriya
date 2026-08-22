@@ -18,6 +18,7 @@ from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch
 from kriya.workflow.file_resolution import (
+    ensure_maven_covers_nonconventional_java_files,
     extract_target_test,
     find_runnable_test_files,
     is_runnable_test_file,
@@ -632,6 +633,109 @@ def test_resolve_maven_main_class_returns_none_with_no_candidates(tmp_path):
 
 def test_resolve_maven_main_class_returns_none_without_src_main_java(tmp_path):
     assert _resolve_maven_main_class(str(tmp_path)) is None
+
+# --- ensure_maven_covers_nonconventional_java_files(): the real live incident
+# this session, 2026-08-22 (ignite_qpid_protocol milestone 3/4) - a pom.xml
+# introduced for the first time while established .java files live at the
+# workspace root, not under Maven's default src/main/java sourceDirectory. ---
+
+_LIVE_INCIDENT_POM = """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>ignite-server</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>17</source>
+                    <target>17</target>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>"""
+
+def test_ensure_maven_covers_nonconventional_java_files_widens_source_directory():
+    import xml.etree.ElementTree as ET
+    corrected = ensure_maven_covers_nonconventional_java_files(
+        _LIVE_INCIDENT_POM, ["App.java", "Protocol.java", "ProtocolParser.java"], "skills",
+    )
+    assert corrected is not None
+    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected
+    assert "<exclude>skills/**</exclude>" in corrected
+    ET.fromstring(corrected)  # still well-formed XML
+
+def test_ensure_maven_covers_nonconventional_java_files_is_a_noop_for_conventional_layout():
+    assert ensure_maven_covers_nonconventional_java_files(
+        _LIVE_INCIDENT_POM, ["src/main/java/com/example/App.java"], "skills",
+    ) is None
+
+def test_ensure_maven_covers_nonconventional_java_files_never_overrides_a_real_customization():
+    already_custom = _LIVE_INCIDENT_POM.replace(
+        "<build>", "<build><sourceDirectory>custom/src</sourceDirectory>",
+    )
+    assert ensure_maven_covers_nonconventional_java_files(
+        already_custom, ["App.java"], "skills",
+    ) is None
+
+def test_ensure_maven_covers_nonconventional_java_files_handles_no_build_section():
+    import xml.etree.ElementTree as ET
+    bare_pom = """<?xml version="1.0"?>
+<project><modelVersion>4.0.0</modelVersion>
+<groupId>g</groupId><artifactId>a</artifactId><version>1.0</version>
+</project>"""
+    corrected = ensure_maven_covers_nonconventional_java_files(bare_pom, ["App.java"], "skills")
+    assert corrected is not None
+    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected
+    ET.fromstring(corrected)
+
+def test_ensure_maven_covers_nonconventional_java_files_handles_compiler_plugin_without_configuration():
+    import xml.etree.ElementTree as ET
+    pom = """<?xml version="1.0"?>
+<project><modelVersion>4.0.0</modelVersion>
+<build><plugins><plugin>
+<groupId>g</groupId><artifactId>maven-compiler-plugin</artifactId><version>1</version>
+</plugin></plugins></build>
+</project>"""
+    corrected = ensure_maven_covers_nonconventional_java_files(pom, ["App.java"], "skills")
+    assert corrected is not None
+    assert "<excludes><exclude>skills/**</exclude></excludes>" in corrected
+    ET.fromstring(corrected)
+
+def test_ensure_maven_covers_nonconventional_java_files_never_excludes_a_different_plugin():
+    """The exclude injection must be bounded to maven-compiler-plugin's own
+    <plugin> block - never land inside a different plugin's (e.g.
+    exec-maven-plugin's) configuration just because the compiler plugin
+    itself happens to have none."""
+    pom = """<?xml version="1.0"?>
+<project><modelVersion>4.0.0</modelVersion>
+<build><plugins>
+<plugin><groupId>g</groupId><artifactId>maven-compiler-plugin</artifactId><version>1</version></plugin>
+<plugin><groupId>g</groupId><artifactId>exec-maven-plugin</artifactId><version>1</version>
+<configuration><executable>java</executable></configuration></plugin>
+</plugins></build>
+</project>"""
+    corrected = ensure_maven_covers_nonconventional_java_files(pom, ["App.java"], "skills")
+    assert corrected is not None
+    exec_config_start = corrected.index("<executable>java</executable>")
+    assert "skills/**" not in corrected[:exec_config_start] or corrected.index("skills/**") < exec_config_start
+    # The exec-maven-plugin's own <executable> block must be untouched.
+    assert "<configuration><executable>java</executable></configuration>" in corrected
+
+def test_ensure_maven_covers_nonconventional_java_files_no_op_without_relevant_files():
+    assert ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, [], "skills") is None
+    assert ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, ["notes.txt"], "skills") is None
+
+def test_ensure_maven_covers_nonconventional_java_files_skips_excludes_without_skills_relpath():
+    corrected = ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, ["App.java"], None)
+    assert corrected is not None
+    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected
+    assert "excludes" not in corrected
 
 def test_resolve_run_command_appends_dexec_mainclass_for_exec_java(tmp_path):
     """The actual fix: exec:java's mainClass is corrected using ground truth
@@ -3810,6 +3914,47 @@ async def test_run_attempt_misdirected_edit_can_target_an_established_file(tmp_p
 
     assert exc_info.value.failure.type == "misdirected_edit"
     assert set(exc_info.value.failure.likely_files) == {"App.java", "Helper.java"}
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_widens_maven_source_directory_for_root_level_java_files(tmp_path):
+    """End-to-end regression test for the real live incident, 2026-08-22
+    (ignite_qpid_protocol milestone 3/4): a pom.xml introduced for the first
+    time while an established .java file (Protocol.java, from an earlier
+    no-build-file milestone) lives at the workspace root, not under Maven's
+    default src/main/java sourceDirectory. Confirms run_attempt() corrects
+    the worktree's own pom.xml content deterministically, before the
+    compile check runs, rather than letting a false-positive "success" (see
+    the sibling test in test_polymorphic_validation.py) reach Runtime
+    Verification undetected."""
+    (tmp_path / "Protocol.java").write_text("public class Protocol {}\n")
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "pom.xml", "content": "<project><build><plugins></plugins></build></project>"},
+        {"filepath": "App.java", "content": "public class App { public static void main(String[] a) { new Protocol(); } }"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["pom.xml", "App.java"], expected_files_upfront=["pom.xml", "App.java"],
+        architect_basename_to_path={"pom.xml": "pom.xml", "App.java": "App.java"},
+        established_files=["Protocol.java"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_pom_validate",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": "1 passed"},
+    ):
+        await run_attempt(state, ctx)
+
+    corrected_pom = (tmp_path / "pom.xml").read_text()
+    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected_pom
 
 
 @pytest.mark.asyncio

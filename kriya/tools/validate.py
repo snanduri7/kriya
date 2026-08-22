@@ -384,6 +384,38 @@ class PolymorphicValidator:
                         cwd=self.workspace_path,
                     )
                     if res["returncode"] == 0:
+                        # Found live, 2026-08-22 (ignite_qpid_protocol): a
+                        # returncode of 0 here is a false positive whenever
+                        # Maven's default sourceDirectory (src/main/java)
+                        # doesn't cover where the project's real .java files
+                        # live - "nothing to compile" isn't a build error, so
+                        # this branch reported success while target/classes
+                        # stayed completely empty. The actual failure only
+                        # surfaced downstream, at RUNTIME, as a confusing
+                        # "Could not find or load main class" - a build-layout
+                        # gap this gate should have caught immediately instead
+                        # of ever claiming compilation "succeeded".
+                        if any(f.endswith(".java") for f in files):
+                            classes_dir = os.path.join(self.workspace_path, "target", "classes")
+                            compiled_anything = False
+                            if os.path.isdir(classes_dir):
+                                for _dirpath, _dirnames, filenames in os.walk(classes_dir):
+                                    if any(fn.endswith(".class") for fn in filenames):
+                                        compiled_anything = True
+                                        break
+                            if not compiled_anything:
+                                return {
+                                    "success": False,
+                                    "output": (
+                                        "Maven reported compilation success, but zero .class files "
+                                        "were actually produced under target/classes. Maven's default "
+                                        "sourceDirectory (src/main/java) most likely doesn't cover "
+                                        "where this project's .java files actually live - add an "
+                                        "explicit <sourceDirectory> to pom.xml's <build> section "
+                                        "pointing at their real location, rather than assuming the "
+                                        "conventional src/main/java layout."
+                                    ),
+                                }
                         return {"success": True, "output": "Maven compilation succeeded."}
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
                     try:

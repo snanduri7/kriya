@@ -565,7 +565,10 @@ def test_java_ruby_compile_invocation(tmp_path):
     
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
-    
+
+    (tmp_path / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "target" / "classes" / "UserService.class").write_bytes(b"")
+
     with patch("subprocess.Popen") as mock_popen:
         mock_process = MagicMock()
         mock_process.returncode = 0
@@ -735,6 +738,8 @@ def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
     same root cause precisely, for free, once these flags are on."""
     (tmp_path / "pom.xml").write_text("<project></project>")
     (tmp_path / "App.java").write_text("class App {}")
+    (tmp_path / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "target" / "classes" / "App.class").write_bytes(b"")
 
     validator = PolymorphicValidator(str(tmp_path))
 
@@ -747,6 +752,49 @@ def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
     invoked_cmd = mock_popen.call_args.args[0]
     assert "-Dmaven.compiler.showWarnings=true" in invoked_cmd
     assert "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked" in invoked_cmd
+
+def test_java_compile_check_catches_maven_false_positive_when_nothing_actually_compiled(tmp_path):
+    """Regression test for a real live incident, 2026-08-22
+    (ignite_qpid_protocol milestone 3/4): Maven's default sourceDirectory
+    (src/main/java) covered none of this project's actual .java files (they
+    lived at the workspace root), so `mvn clean compile` found zero source
+    files and reported success anyway - "nothing to compile" isn't a build
+    error to Maven. target/classes stayed empty, and the real failure only
+    surfaced downstream, at RUNTIME, as a confusing "Could not find or load
+    main class". Confirms run_compile_check no longer trusts returncode 0
+    unconditionally when it knows about real .java files but finds no
+    compiled output for any of them."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "App.java").write_text("class App {}")
+    # Deliberately no target/classes directory at all - the real incident's
+    # exact condition (Maven never actually compiled anything).
+
+    validator = PolymorphicValidator(str(tmp_path))
+    mock_process = MagicMock(returncode=0)
+    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
+    with patch("subprocess.Popen", return_value=mock_process):
+        res = validator.run_compile_check(["App.java"])
+
+    assert res["success"] is False
+    assert "zero .class files" in res["output"]
+    assert "sourceDirectory" in res["output"]
+
+def test_java_compile_check_trusts_maven_success_when_something_really_compiled(tmp_path):
+    """Sibling of the false-positive regression above: a real compile that
+    actually produced .class output must still be trusted as success -
+    this check should only catch the "nothing was ever compiled" case."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "App.java").write_text("class App {}")
+    (tmp_path / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "target" / "classes" / "App.class").write_bytes(b"")
+
+    validator = PolymorphicValidator(str(tmp_path))
+    mock_process = MagicMock(returncode=0)
+    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
+    with patch("subprocess.Popen", return_value=mock_process):
+        res = validator.run_compile_check(["App.java"])
+
+    assert res["success"] is True
 
 def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path):
     # Regression test: previously a missing 'mvn' binary was silently logged at

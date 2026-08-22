@@ -179,6 +179,115 @@ def _resolve_maven_main_class(worktree_path: str) -> Optional[str]:
     return None
 
 
+def _find_plugin_configuration_span(pom_content: str, artifact_id: str) -> Optional[Tuple[int, int, bool]]:
+    """Locates the <plugin>...</plugin> block for a given artifactId and
+    whether it already has its own <configuration> element. Returns
+    (block_start, block_end, has_configuration), or None if the plugin isn't
+    present at all. Bounded to this ONE plugin's own block (not just the
+    next "<configuration>" anywhere in the file) so a compiler-plugin
+    correction can never accidentally land inside a DIFFERENT plugin's
+    configuration (e.g. exec-maven-plugin's) when the compiler plugin
+    itself happens to have none of its own."""
+    marker = f"<artifactId>{artifact_id}</artifactId>"
+    marker_idx = pom_content.find(marker)
+    if marker_idx == -1:
+        return None
+    block_start = pom_content.rfind("<plugin>", 0, marker_idx)
+    if block_start == -1:
+        return None
+    block_end = pom_content.find("</plugin>", marker_idx)
+    if block_end == -1:
+        return None
+    block_end += len("</plugin>")
+    has_configuration = "<configuration>" in pom_content[block_start:block_end]
+    return block_start, block_end, has_configuration
+
+
+def ensure_maven_covers_nonconventional_java_files(
+    pom_content: str, java_files: Iterable[str], skills_relpath: Optional[str],
+) -> Optional[str]:
+    """Deterministic pom.xml correction for a real live incident, 2026-08-22
+    (ignite_qpid_protocol milestone 3/4): milestones 1-2 ran with NO build
+    file at all, writing Protocol.java/ProtocolParser.java directly at the
+    workspace root (Java's default package needs no directory nesting) -
+    exactly what the deterministic no-build-file entrypoint path above
+    expects. Milestone 3 then introduced a pom.xml for the first time, and
+    its own App.java was ALSO written at the workspace root, matching the
+    established files' convention - but Maven's default `sourceDirectory`
+    is `src/main/java`, which covers none of them. `mvn clean compile`
+    found zero source files, reported success anyway (finding nothing to
+    compile isn't itself a build error), and `target/classes` ended up
+    empty - so `mvn exec:exec` then failed at RUNTIME with "Could not find
+    or load main class App", a failure that looks like a code/classpath
+    bug but is actually a build-layout gap the compile gate never caught (a
+    genuine false positive: PolymorphicValidator's Maven branch treats
+    returncode 0 as success unconditionally, without ever checking that
+    anything was actually compiled). 5 straight retries chased phantom
+    import/package theories because nothing in the Developer's own context
+    said "Maven isn't looking where your established files actually live."
+
+    Fix: widen the POM's own sourceDirectory to cover the workspace root
+    whenever a known .java file (established OR just written this attempt)
+    lives outside `src/main/java` - `${project.basedir}` is recursively
+    scanned, EXCLUDING the skills directory (real .java example files ship
+    inside active skills' own `examples/` folders - see e.g.
+    skills/qpid/examples/BrokerServer.java - and would otherwise get swept
+    into the same compile, risking duplicate/conflicting classes or
+    missing-dependency errors from files that were never meant to be part
+    of the generated application).
+
+    Deliberately conservative: a no-op if `<sourceDirectory>` already
+    appears anywhere in the pom (a real customization already exists -
+    don't guess about overriding it), if no known `.java` file actually
+    needs it (the ordinary Maven-convention case, left untouched), or if
+    the content has no `<build>`/`</project>` anchor to insert against at
+    all. Textual insertion (matching this module's existing pom.xml-
+    adjacent corrections just above - exec:java/exec:exec and mainClass
+    handling - rather than full XML-tree reconstruction: round-tripping
+    this file's default Maven namespace through ElementTree risks mangling
+    attributes/formatting well beyond the two small, targeted insertions
+    actually needed here."""
+    relevant = [
+        f for f in java_files
+        if f.endswith(".java") and not f.replace("\\", "/").startswith("src/main/java/")
+    ]
+    if not relevant:
+        return None
+    if "<sourceDirectory>" in pom_content:
+        return None
+
+    source_dir_block = "<sourceDirectory>${project.basedir}</sourceDirectory>"
+    if "<build>" in pom_content:
+        new_content = pom_content.replace("<build>", f"<build>\n{source_dir_block}", 1)
+    elif "</project>" in pom_content:
+        new_content = pom_content.replace(
+            "</project>", f"<build>\n{source_dir_block}\n</build>\n</project>", 1,
+        )
+    else:
+        return None
+
+    if skills_relpath:
+        normalized_skills = skills_relpath.replace("\\", "/").strip("/")
+        if normalized_skills and not normalized_skills.startswith(".."):
+            plugin_span = _find_plugin_configuration_span(new_content, "maven-compiler-plugin")
+            if plugin_span:
+                block_start, block_end, has_configuration = plugin_span
+                exclude_block = f"<excludes><exclude>{normalized_skills}/**</exclude></excludes>"
+                if has_configuration:
+                    config_idx = new_content.index("<configuration>", block_start, block_end)
+                    insert_at = config_idx + len("<configuration>")
+                    new_content = new_content[:insert_at] + f"\n{exclude_block}" + new_content[insert_at:]
+                else:
+                    artifact_marker = "<artifactId>maven-compiler-plugin</artifactId>"
+                    insert_at = new_content.index(artifact_marker, block_start, block_end) + len(artifact_marker)
+                    new_content = (
+                        new_content[:insert_at]
+                        + f"\n<configuration>{exclude_block}</configuration>"
+                        + new_content[insert_at:]
+                    )
+    return new_content
+
+
 def downgrade_ungrounded_goal_explicit_commands(judgment: Dict[str, Any], goal: str) -> Dict[str, Any]:
     """Independent brutal review finding #2 (2026-08-15): RunVerifierAgent.judge()
     self-reports command_source ("goal_explicit" vs "inferred") in the same

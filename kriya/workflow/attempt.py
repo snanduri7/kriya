@@ -36,7 +36,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -1897,6 +1897,36 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # package path relative to the workspace root - exactly the layout
         # mismatch this session's live incident already proved can happen.
         compile_known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+
+        # Deterministic pom.xml sourceDirectory correction - found live,
+        # 2026-08-22 (ignite_qpid_protocol milestone 3/4): see
+        # ensure_maven_covers_nonconventional_java_files()'s own docstring
+        # (kriya/workflow/file_resolution.py) for the full incident. Runs
+        # every attempt, unconditionally, whenever a pom.xml exists in the
+        # worktree - cheap to detect "already customized" and no-op, and
+        # correctly re-applies if a retry rewrites pom.xml back to a plain
+        # Maven-convention shape.
+        pom_path = os.path.join(ctx.worktree_path, "pom.xml")
+        if os.path.exists(pom_path):
+            try:
+                with open(pom_path, "r", encoding="utf-8", errors="replace") as fh:
+                    pom_content = fh.read()
+            except OSError:
+                pom_content = None
+            if pom_content is not None:
+                skills_relpath = os.path.relpath(ctx.kernel.config.paths.skills, ctx.workspace_path)
+                corrected_pom = ensure_maven_covers_nonconventional_java_files(
+                    pom_content, compile_known_files, skills_relpath,
+                )
+                if corrected_pom is not None:
+                    logger.info(
+                        "pom.xml doesn't cover the actual location of known .java files under "
+                        "Maven's default sourceDirectory - deterministically widening it to the "
+                        "workspace root (excluding the skills directory)."
+                    )
+                    with open(pom_path, "w", encoding="utf-8") as fh:
+                        fh.write(corrected_pom)
+
         compile_res = validator.run_compile_check(compile_known_files)
         if not compile_res["success"]:
             self_correction_result = None
