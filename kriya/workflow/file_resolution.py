@@ -273,7 +273,25 @@ def ensure_maven_covers_nonconventional_java_files(
     if "<sourceDirectory>" in pom_content:
         return None
 
-    source_dir_block = "<sourceDirectory>${project.basedir}</sourceDirectory>"
+    # Real live incident, same day this widening itself first shipped: when
+    # worktree isolation is unavailable (e.g. create_git_worktree() fell back
+    # to the real, unisolated workspace), this insertion lands directly in
+    # the persistent, often-untracked pom.xml - which then gets synced into a
+    # LATER milestone's fresh worktree as ordinary "existing content" the
+    # Developer is told to preserve, with nothing explaining what it is or
+    # that Quality Gates reapplies it automatically every attempt regardless.
+    # A later milestone's Developer, confused by an unexplained non-standard
+    # element, tried to imitate/extend it and produced malformed XML,
+    # burning that milestone's entire retry budget on a self-inflicted
+    # structural-corruption failure. The comment markers make this
+    # self-explanatory wherever the file's raw content is later shown,
+    # without needing every context-building call site to know about it.
+    source_dir_block = (
+        "<!-- Kriya: auto-managed by Quality Gates, reapplied automatically "
+        "on every attempt when needed - do not duplicate, edit, or remove "
+        "this element. -->\n"
+        "<sourceDirectory>${project.basedir}</sourceDirectory>"
+    )
     if "<build>" in pom_content:
         new_content = pom_content.replace("<build>", f"<build>\n{source_dir_block}", 1)
     elif "</project>" in pom_content:

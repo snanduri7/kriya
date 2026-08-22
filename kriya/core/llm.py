@@ -183,6 +183,29 @@ class LLMClient:
 
             if is_reasoning:
                 content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            elif json_mode and not content.strip() and max_tokens < 12288:
+                # Some models emit hidden <think>...</think> reasoning before ever
+                # committing to JSON regardless of Kriya's own is_reasoning
+                # classification for them (a static per-model config guess, not a
+                # live observation) - when that happens, the reasoning-only 12288-
+                # token floor above never applies, so a tight max_tokens can get
+                # entirely consumed by hidden reasoning with literally nothing ever
+                # written to `content`. Retry once with the same floor reasoning
+                # models get, rather than hand-tuning max_tokens_override per
+                # affected model as each is found one at a time - confirmed live
+                # for two different models this way already (gpt-oss:20b, then
+                # qwen3.6:35b-a3b), neither ever classified reasoning=True in this
+                # project's own llm_chain config.
+                logger.warning(
+                    f"JSON-mode completion from '{model}' returned empty content at "
+                    f"max_tokens={max_tokens} (likely silent reasoning) - retrying once "
+                    "with a 12288-token floor."
+                )
+                content, prompt_tokens, completion_tokens = await self._request_once(
+                    client, model, system_prompt, user_prompt, temperature, 12288,
+                    extra_body, response_format, stream_callback
+                )
+                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
             elapsed_time = time.time() - start_time
             if prompt_tokens == 0:

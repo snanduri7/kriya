@@ -108,9 +108,33 @@ def create_git_worktree(repo_path: str) -> str:
     except Exception as e:
         raise ValueError(f"Directory is not a git repository: {e}") from e
 
+    # 1b. `git worktree add --detach` needs a commit-ish to detach at - a repo
+    # with zero commits has no HEAD and this fails with exit 128, silently
+    # falling back to the unisolated real workspace (see the "Falling back to
+    # default workspace" warning at this function's only caller) for every
+    # milestone until something else happens to create a first commit.
+    # Confirmed live, 2026-08-22 (ignite_qpid_protocol): a fresh repo lost
+    # worktree isolation on milestones 1 AND 2 this way - isolation only
+    # started working on milestone 3, once an unrelated skill-verification
+    # auto-commit had incidentally created the repo's first commit. An empty
+    # initial commit is enough to give worktree creation something to detach
+    # at, and is safe: it adds no files, so it can't collide with or hide any
+    # real content the target repo already has.
+    if _resolve_repo_head(repo_path) is None:
+        try:
+            subprocess.run(
+                ["git", "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation"],
+                cwd=repo_path, check=True, capture_output=True,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Repo at '{repo_path}' has no commits yet and creating an initial empty commit "
+                f"failed ({e}) - worktree creation will likely fail and fall back to the unisolated workspace."
+            )
+
     worktree_path = os.path.join(repo_path, ".kriya", "worktree")
     os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
-    
+
     # 2. Prune any stale/orphaned worktree records in git administrative data
     try:
         subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)

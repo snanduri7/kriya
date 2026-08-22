@@ -285,7 +285,12 @@ _TRIAGE_SYSTEM_PROMPT = (
 # times against gpt-oss:20b classified reasoning=False; 2000 was clean 3/3
 # (no empty response) in the same reproduction - the actual JSON answer here
 # is only a few dozen tokens, this budget exists to give room for whatever
-# reasoning happens first, not for the answer itself.
+# reasoning happens first, not for the answer itself. Recurred live 2026-08-22
+# for a second, different model (qwen3.6:35b-a3b) even at 2000 - rather than
+# keep hand-tuning this number per model as each is found, LLMClient.complete()
+# now detects an empty json_mode response directly and retries once with a
+# 12288-token floor regardless of is_reasoning classification (kriya/core/
+# llm.py) - this constant is a reasonable default, not the actual guarantee.
 _TRIAGE_MAX_TOKENS = 2000
 _TRIAGE_TOTAL_SOURCE_CHARS = 30_000
 _TRIAGE_MAX_SOURCE_CHARS_PER_FILE = 6_000

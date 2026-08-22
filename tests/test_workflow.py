@@ -742,6 +742,23 @@ def test_ensure_maven_covers_nonconventional_java_files_always_excludes_dot_kriy
     assert "<excludes><exclude>.kriya/**</exclude></excludes>" in corrected
     assert "skills/**" not in corrected
 
+
+def test_ensure_maven_covers_nonconventional_java_files_marks_the_insertion_as_auto_managed():
+    """Regression test for a real bug caught live, 2026-08-22 (ignite_qpid_protocol
+    milestone 3): when worktree isolation was unavailable for an earlier milestone,
+    this insertion landed directly in the persistent, often-untracked pom.xml -
+    which then got synced into a LATER milestone's fresh worktree as ordinary
+    "existing content" the Developer was told to preserve, with nothing explaining
+    what the unusual element was or that Quality Gates reapplies it automatically
+    every attempt regardless. The Developer, confused by it, tried to imitate/
+    extend it and produced malformed XML, burning that milestone's entire retry
+    budget. The inserted block must be self-explanatory wherever it's later shown,
+    without requiring every context-building call site to know about it."""
+    corrected = ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, ["App.java"], "skills")
+    assert corrected is not None
+    assert "auto-managed" in corrected
+    assert "do not duplicate, edit, or remove" in corrected
+
 def test_resolve_run_command_appends_dexec_mainclass_for_exec_java(tmp_path):
     """The actual fix: exec:java's mainClass is corrected using ground truth
     from the real generated source tree, via -Dexec.mainClass= (which takes
@@ -12258,6 +12275,35 @@ def test_create_git_worktree_reset_advances_to_new_commits_on_reuse(tmp_path):
     assert worktree_path_again == worktree_path
     pom = open(os.path.join(worktree_path, "pom.xml")).read()
     assert pom == "<project>committed after worktree creation</project>\n"
+
+
+def test_create_git_worktree_handles_a_repo_with_zero_commits(tmp_path):
+    """Regression test for a real bug caught live, 2026-08-22 (ignite_qpid_protocol):
+    `git worktree add --detach` needs a commit-ish to detach at, so it fails with
+    exit 128 on a freshly `git init`-ed repo that has no commits yet - the only
+    caller (kriya/workflow/workflow.py) catches this broadly and silently falls
+    back to running directly in the real, unisolated workspace. Confirmed live:
+    milestones 1 AND 2 of a fresh-repo run both lost worktree isolation this way;
+    isolation only started working on milestone 3, once an unrelated skill-
+    verification auto-commit had incidentally created the repo's first commit.
+    create_git_worktree() must now create an empty initial commit itself when the
+    repo has none, rather than depending on something else to do it first."""
+    from kriya.workflow.workflow import create_git_worktree
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "Protocol.java").write_text("public class Protocol {}\n")
+    # Deliberately no `git add`/`git commit` - this is the zero-commit state.
+
+    worktree_path = create_git_worktree(str(tmp_path))
+
+    assert worktree_path != str(tmp_path)
+    assert os.path.isdir(worktree_path)
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    assert len(log.stdout.strip().splitlines()) == 1
 
 
 def test_remove_git_worktree_resets_to_current_commit_not_creation_time_commit(tmp_path):

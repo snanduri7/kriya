@@ -91,6 +91,61 @@ async def test_json_mode_sets_response_format_for_non_reasoning_model():
 
 
 @pytest.mark.asyncio
+async def test_json_mode_retries_once_with_a_token_floor_on_empty_response():
+    """Regression test for a real bug caught live, 2026-08-22: some models emit
+    hidden <think>...</think> reasoning before ever committing to JSON regardless
+    of Kriya's own is_reasoning classification for them (a static per-model
+    config guess, not a live observation) - a tight max_tokens_override then gets
+    entirely consumed by hidden reasoning with nothing ever written to `content`,
+    and json.loads("") raises "Expecting value: line 1 column 1". Confirmed live
+    for two different models classified reasoning=False in this project's own
+    llm_chain config (gpt-oss:20b, then qwen3.6:35b-a3b) - complete() must detect
+    this directly and retry once with the same 12288-token floor reasoning
+    models get, rather than requiring another hand-tuned max_tokens_override per
+    affected model."""
+    cfg = AppConfig()
+    cfg.llm.reasoning = False
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(side_effect=[_mock_response(""), _mock_response('{"files": []}')])
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete("system", "user", json_mode=True, max_tokens_override=2000)
+        assert res == '{"files": []}'
+        assert mock_create.call_count == 2
+        assert mock_create.call_args_list[0][1].get("max_tokens") == 2000
+        assert mock_create.call_args_list[1][1].get("max_tokens") == 12288
+
+
+@pytest.mark.asyncio
+async def test_json_mode_does_not_retry_when_response_is_non_empty():
+    cfg = AppConfig()
+    cfg.llm.reasoning = False
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response('{"files": ["a.py"]}'))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete("system", "user", json_mode=True, max_tokens_override=2000)
+        assert res == '{"files": ["a.py"]}'
+        assert mock_create.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_json_mode_does_not_retry_when_already_at_or_above_the_floor():
+    """An empty response at/above the 12288 floor is a genuine failure, not a
+    truncated-reasoning symptom the floor can fix - retrying with the same
+    budget again would just burn another call for the same empty result."""
+    cfg = AppConfig()
+    cfg.llm.reasoning = False
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response(""))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete("system", "user", json_mode=True, max_tokens_override=12288)
+        assert res == ""
+        assert mock_create.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_non_json_mode_never_sets_response_format():
     cfg = AppConfig()
     cfg.llm.reasoning = True
