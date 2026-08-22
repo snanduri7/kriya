@@ -18,6 +18,7 @@ from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
 from kriya.workflow.file_resolution import (
+    correct_exec_main_class_property,
     ensure_maven_covers_nonconventional_java_files,
     extract_target_test,
     find_runnable_test_files,
@@ -3927,6 +3928,88 @@ async def test_run_attempt_deterministically_strips_directory_path_masquerading_
         final_content = f.read()
     assert "package" not in final_content
     assert "public class Protocol {" in final_content
+
+
+def test_correct_exec_main_class_property_fixes_a_copied_example_placeholder():
+    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol):
+    every active skill's own example pom.xml (skills/ignite-java17/examples/
+    pom.xml and siblings) sets a plausible-looking but arbitrary default for
+    this property - `<exec.mainClass>com.example.App</exec.mainClass>` - with
+    nothing marking it as a placeholder. Every class Kriya generated that day
+    lived in the default package (no com.example wrapper), so a Developer
+    that copied the example's value verbatim produced a pom.xml where
+    ${exec.mainClass} correctly resolves to a class that was never written -
+    compile succeeds (this property has no bearing on what compiles), but
+    `mvn exec:exec` fails at RUNTIME with "Could not find or load main class
+    App", reproducing this exact live incident's final failure."""
+    pom = "<properties>\n    <exec.mainClass>com.example.App</exec.mainClass>\n</properties>"
+    result = correct_exec_main_class_property(pom, {"App.java": "App"})
+    assert result is not None
+    assert "<exec.mainClass>App</exec.mainClass>" in result
+
+
+def test_correct_exec_main_class_property_is_a_noop_when_already_correct():
+    pom = "<exec.mainClass>App</exec.mainClass>"
+    assert correct_exec_main_class_property(pom, {"App.java": "App"}) is None
+
+
+def test_correct_exec_main_class_property_is_a_noop_without_the_property():
+    assert correct_exec_main_class_property("<properties></properties>", {"App.java": "App"}) is None
+
+
+def test_correct_exec_main_class_property_never_guesses_when_ambiguous_or_absent():
+    """Matches ground_java_entrypoint_in_no_build_file_projects()'s own safe-
+    degrade posture: zero real entrypoints (nothing to correct against) or
+    more than one (genuinely ambiguous) must never guess."""
+    pom = "<exec.mainClass>com.example.App</exec.mainClass>"
+    assert correct_exec_main_class_property(pom, {}) is None
+    assert correct_exec_main_class_property(pom, {"App.java": "App", "Other.java": "Other"}) is None
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_deterministically_corrects_exec_main_class_end_to_end(tmp_path):
+    """Confirms the correction fires end-to-end through run_attempt() itself
+    (not just the pure correct_exec_main_class_property() unit): a pom.xml
+    copied from a skill's example with the placeholder exec.mainClass value
+    must be corrected to the real generated class before Quality Gates
+    considers the attempt done."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {
+            "filepath": "App.java",
+            "content": "public class App {\n    public static void main(String[] args) {}\n}\n",
+        },
+        {
+            "filepath": "pom.xml",
+            "content": (
+                "<project><modelVersion>4.0.0</modelVersion>"
+                "<groupId>com.example</groupId><artifactId>app</artifactId><version>1.0-SNAPSHOT</version>"
+                "<properties><exec.mainClass>com.example.App</exec.mainClass></properties></project>"
+            ),
+        },
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        architect_files=["App.java", "pom.xml"],
+        expected_files_upfront=["App.java", "pom.xml"],
+        architect_basename_to_path={"App.java": "App.java", "pom.xml": "pom.xml"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    with open(os.path.join(str(tmp_path), "pom.xml"), "r", encoding="utf-8") as f:
+        final_pom = f.read()
+    assert "<exec.mainClass>App</exec.mainClass>" in final_pom
+    assert "com.example.App" not in final_pom
 
 
 @pytest.mark.asyncio

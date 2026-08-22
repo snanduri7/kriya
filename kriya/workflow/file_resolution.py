@@ -328,6 +328,66 @@ def ensure_maven_covers_nonconventional_java_files(
     return new_content
 
 
+_EXEC_MAIN_CLASS_PROPERTY_RE = re.compile(r"(<exec\.mainClass>)([^<]*)(</exec\.mainClass>)")
+
+
+def correct_exec_main_class_property(pom_content: str, java_main_classes: Dict[str, str]) -> Optional[str]:
+    """Deterministically corrects pom.xml's <exec.mainClass> property when it
+    doesn't match the real class Kriya actually generated.
+
+    Found live, 2026-08-22 (ignite_qpid_protocol): every active skill's own
+    example pom.xml (skills/ignite-java17/examples/pom.xml,
+    skills/qpid/examples/pom.xml, skills/activemq-artemis/examples/pom.xml)
+    sets a concrete, plausible-looking default for this property -
+    `<exec.mainClass>com.example.App</exec.mainClass>` and siblings - meant as
+    illustration, but with nothing marking it as a placeholder rather than a
+    real value. The skill's own rule text correctly warns against a
+    HARDCODED ARGUMENT ("never a hardcoded literal class name - use
+    ${exec.mainClass}"), and the Developer follows that rule faithfully - the
+    exec:exec <argument> element genuinely is ${exec.mainClass}, not a
+    literal. But the PROPERTY'S OWN DEFAULT VALUE is a separate, unguarded
+    copy risk the rule text never addresses: every class Kriya has generated
+    all day lives in the DEFAULT package (no `com.example` wrapper, matching
+    Protocol.java/ProtocolParser.java/App.java's own established layout), so
+    a Developer that copies the example's `com.example.App` value verbatim
+    produces a pom.xml where ${exec.mainClass} correctly resolves to
+    "com.example.App" - a class that was never written. `mvn exec:exec` then
+    fails at RUNTIME (compile succeeds - this property has no bearing on
+    what compiles) with "Could not find or load main class App" /
+    ClassNotFoundException, reproducing this exact live incident's final
+    failure byte-for-byte.
+
+    This is the same "don't trust an LLM's guess at a concrete generated-
+    artifact reference when Kriya can already compute ground truth for it
+    deterministically" principle as ground_java_entrypoint_in_no_build_file_
+    projects() (which already does this for the NO-pom.xml case) - extended
+    to the case that function explicitly declines to touch (a real pom.xml
+    already exists). java_main_classes is the same {filepath: class_name}
+    map that function's own caller already builds via
+    kriya.analyzer.graph.DependencyGraph.find_java_main_class().
+
+    Deliberately conservative, matching this whole session's established
+    safe-degrade posture: no-op if pom_content has no <exec.mainClass>
+    property at all (this mechanism isn't in play), or if
+    len(java_main_classes) != 1 (zero real entrypoints, or a genuinely
+    ambiguous multi-entrypoint project - this function has no evidence to
+    guess which one confidently, same as its sibling function's own
+    len != 1 case)."""
+    match = _EXEC_MAIN_CLASS_PROPERTY_RE.search(pom_content)
+    if not match:
+        return None
+    if len(java_main_classes) != 1:
+        return None
+    real_class = next(iter(java_main_classes.values()))
+    if match.group(2).strip() == real_class:
+        return None
+    return (
+        pom_content[:match.start()]
+        + match.group(1) + real_class + match.group(3)
+        + pom_content[match.end():]
+    )
+
+
 _JAVA_PACKAGE_DECL_LINE_RE = re.compile(r"^[ \t]*package\s+[\w.]+\s*;[ \t]*\n?", re.MULTILINE)
 
 

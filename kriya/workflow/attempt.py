@@ -36,7 +36,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -1924,8 +1924,34 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         "Maven's default sourceDirectory - deterministically widening it to the "
                         "workspace root (excluding the skills and .kriya directories)."
                     )
+                    pom_content = corrected_pom
                     with open(pom_path, "w", encoding="utf-8") as fh:
                         fh.write(corrected_pom)
+
+                # Deterministic exec.mainClass property correction - found live,
+                # 2026-08-22 (ignite_qpid_protocol): see
+                # correct_exec_main_class_property()'s own docstring
+                # (kriya/workflow/file_resolution.py) for the full incident -
+                # every active skill's own example pom.xml sets a plausible-
+                # looking but arbitrary default (com.example.App and siblings)
+                # for this property, which the Developer can copy verbatim
+                # even though the real class it generated lives in the
+                # default package. compile succeeds either way (this property
+                # has no bearing on what compiles) - `mvn exec:exec` only
+                # fails at RUNTIME with "Could not find or load main class
+                # App", the exact failure this closes.
+                compile_java_files = [f for f in compile_known_files if f.endswith(".java")]
+                corrected_exec_main_class = correct_exec_main_class_property(
+                    pom_content, _build_java_main_class_map(compile_java_files, ctx),
+                )
+                if corrected_exec_main_class is not None:
+                    logger.info(
+                        "pom.xml's <exec.mainClass> property doesn't match the real class Kriya "
+                        "actually generated (likely copied verbatim from a skill's example) - "
+                        "deterministically correcting it."
+                    )
+                    with open(pom_path, "w", encoding="utf-8") as fh:
+                        fh.write(corrected_exec_main_class)
 
         # Deterministic package-declaration correction - found live,
         # 2026-08-22 (ignite_qpid_protocol milestone 3/4): see
