@@ -249,7 +249,14 @@ def render_established_file_context(established_file_context: Dict[str, str]) ->
     blocks = [
         f"=== {path} (already built by an earlier milestone in this sequence "
         "- this is its REAL current content, not a guess. Match its actual "
-        f"constructor/method signatures exactly.) ===\n{content}"
+        "constructor/method signatures exactly, AND match its build layout: "
+        "the exact package it declares (or, if it declares none, the default/"
+        "unnamed package) and its directory location relative to the "
+        "workspace root. A class in one named package can never reference a "
+        "class in a different or default package, in any language version - "
+        "if new code must interoperate with this file, adapt the NEW file's "
+        "package/directory to match this established one, never the "
+        f"reverse.) ===\n{content}"
         for path, content in sorted(established_file_context.items())
     ]
     return "\n\n" + "\n\n".join(blocks)

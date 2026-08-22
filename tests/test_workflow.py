@@ -16,7 +16,7 @@ from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import build_failure_signature
+from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch
 from kriya.workflow.file_resolution import (
     extract_target_test,
     find_runnable_test_files,
@@ -3481,6 +3481,335 @@ async def test_run_attempt_skips_spec_compliance_gate_when_disabled(tmp_path):
         await run_attempt(state, ctx)
 
     spec_compliance.check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_deterministically_corrects_java_entrypoint_end_to_end(tmp_path):
+    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
+    milestone 3/4): a Java project with no pom.xml/build.gradle has zero
+    deterministic compile/run grounding, so RunVerifierAgent.judge() guessed
+    a bare `java App` (or a Maven-based command) with nothing ever compiled -
+    three consecutive prompt-level patches each fixed exactly what they
+    targeted and surfaced the next gap underneath. Confirms the deterministic
+    fix end-to-end through run_attempt() itself (not just the pure
+    ground_java_entrypoint_in_no_build_file_projects() unit): the ACTUAL
+    command handed to PolymorphicValidator.run_app_sequence() is the
+    corrected javac+java sequence, including a JVM module flag pulled from
+    the active skill's own rules text (skills/ignite-java17/rules.txt's real
+    "--add-opens" requirement) - never asked of the LLM."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "App.java", "content": "public class App {\n    public static void main(String[] args) {}\n}\n"},
+        {"filepath": "Protocol.java", "content": "public class Protocol {\n    int version;\n}\n"},
+        {"filepath": "ProtocolParser.java", "content": "public class ProtocolParser {\n    static Protocol decode() { return null; }\n}\n"},
+    ])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["java", "-cp", "target/classes:$(mvn dependency:build-classpath -q)", "App"]],
+        "command_source": "inferred",
+        "success_criteria": "Prints the result",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "ok"})
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        run_verifier=run_verifier,
+        architect_files=["App.java", "Protocol.java", "ProtocolParser.java"],
+        expected_files_upfront=["App.java", "Protocol.java", "ProtocolParser.java"],
+        architect_basename_to_path={
+            "App.java": "App.java", "Protocol.java": "Protocol.java", "ProtocolParser.java": "ProtocolParser.java",
+        },
+        skills_prompt="Always add the mandatory --add-opens flags: --add-opens=java.base/java.lang=ALL-UNNAMED",
+    )
+
+    captured_commands = {}
+
+    def fake_run_app_sequence(self, commands, timeout=90):
+        captured_commands["commands"] = commands
+        return {"success": True, "timed_out": False, "returncode": 0, "output": "ok"}
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        new=fake_run_app_sequence,
+    ):
+        await run_attempt(state, ctx)
+
+    assert captured_commands["commands"] == [
+        ["javac", "App.java", "Protocol.java", "ProtocolParser.java"],
+        ["java", "--add-opens=java.base/java.lang=ALL-UNNAMED", "App"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_raises_cross_package_mismatch_end_to_end(tmp_path):
+    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol,
+    milestone 3/4): a fresh milestone's Architect chose a Maven-conventional
+    package (`com.example`) for its own new App.java, but Protocol.java -
+    established by an earlier milestone - lives in the default package. The
+    resulting compile error recurred BYTE-FOR-BYTE IDENTICAL across 3+
+    retries - a genuine Java language incompatibility, not a missing import,
+    that no amount of prose-level retrying could ever resolve on its own.
+    Confirms the deterministic check fires end-to-end through run_attempt()
+    itself (not just the pure find_cross_package_symbol_mismatch() unit):
+    a real compile failure with this exact shape raises
+    type="cross_package_symbol_mismatch" instead of the generic "compile"
+    failure, with a message that actually breaks the instruction deadlock."""
+    from kriya.analyzer.graph import DependencyGraph
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    memory_dir = tmp_path / "isolated_memory"
+    memory_dir.mkdir()
+    graph = DependencyGraph(str(memory_dir / "dependency_graph.db"))
+    graph.index_file("Protocol.java", "public class Protocol {\n    int version;\n}\n", 1.0)
+    graph.close()
+    (tmp_path / "Protocol.java").write_text("public class Protocol {\n    int version;\n}\n")
+
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "src/main/java/com/example/App.java",
+        "content": (
+            "package com.example;\n"
+            "public class App {\n"
+            "    public static void main(String[] args) {\n"
+            "        Protocol p = new Protocol();\n"
+            "    }\n"
+            "}\n"
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        kernel=Kernel(config=AppConfig(paths={"memory": str(memory_dir)})),
+        architect_files=["src/main/java/com/example/App.java"],
+        expected_files_upfront=["src/main/java/com/example/App.java"],
+        architect_basename_to_path={"App.java": "src/main/java/com/example/App.java"},
+        established_files=["Protocol.java"],
+    )
+    compile_error = (
+        "[ERROR] .../src/main/java/com/example/App.java:[4,9] cannot find symbol\n"
+        "  symbol:   class Protocol\n"
+        "  location: class com.example.App\n"
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": False, "output": compile_error},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "cross_package_symbol_mismatch"
+    assert "REQUIRED" in exc_info.value.failure.message
+    assert "not a forbidden restructuring" in exc_info.value.failure.message
+    assert "src/main/java/com/example/App.java" in exc_info.value.failure.likely_files
+    assert "Protocol.java" in exc_info.value.failure.likely_files
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_cross_package_mismatch_fires_without_any_dependency_graph_indexing(tmp_path):
+    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol):
+    the cross-package-mismatch check above only ever fired in testing because
+    the test pre-indexed Protocol.java into a real DependencyGraph DB via
+    graph.index_file() - but a real milestone-decomposition project has NO
+    dependency_graph.db rows at all unless `kriya analyze` was explicitly run
+    against it (index_repository(), the only code path that ever writes real
+    symbol rows, is called exclusively from that CLI command, never from
+    run_generation_workflow() itself). Confirmed live: dependency_graph.db
+    had a `files` table with ZERO rows and a `symbols` table with ZERO rows
+    across this entire multi-day validation effort, despite two milestones
+    having already completed - _build_workspace_type_index()'s persisted
+    baseline (layer 1) was silently empty the whole time, and its in-memory
+    layer (layer 2) only ever covered state.all_files_written, never
+    ctx.established_files - so an earlier milestone's file was invisible to
+    the cross-package check (and the duplicate-type-across-files gate) for
+    every single milestone-decomposition run this whole session, silently.
+    This test uses NO DependencyGraph pre-indexing at all - Protocol.java is
+    known ONLY via ctx.established_files plus its real on-disk content,
+    exactly the real-world condition - to confirm the fix actually closes
+    the gap rather than merely working in a test that happened to also
+    index things a real run never does."""
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    # Deliberately NOT pre-indexed into any DependencyGraph - only physically
+    # on disk, exactly like a real established milestone file with no
+    # `kriya analyze` ever run against the project.
+    (tmp_path / "Protocol.java").write_text("public class Protocol {\n    int version;\n}\n")
+
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "src/main/java/com/example/App.java",
+        "content": (
+            "package com.example;\n"
+            "public class App {\n"
+            "    public static void main(String[] args) {\n"
+            "        Protocol p = new Protocol();\n"
+            "    }\n"
+            "}\n"
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        kernel=Kernel(config=AppConfig(paths={"memory": str(tmp_path / "isolated_memory_empty")})),
+        architect_files=["src/main/java/com/example/App.java"],
+        expected_files_upfront=["src/main/java/com/example/App.java"],
+        architect_basename_to_path={"App.java": "src/main/java/com/example/App.java"},
+        established_files=["Protocol.java"],
+    )
+    compile_error = (
+        "[ERROR] .../src/main/java/com/example/App.java:[4,9] cannot find symbol\n"
+        "  symbol:   class Protocol\n"
+        "  location: class com.example.App\n"
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": False, "output": compile_error},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "cross_package_symbol_mismatch"
+    assert "Protocol.java" in exc_info.value.failure.likely_files
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_includes_established_files_in_compile_check(tmp_path):
+    """Established-files audit (2026-08-22): the raw javac fallback
+    (kriya/tools/validate.py) extends its `files` argument DIRECTLY into the
+    compile command line, so an established file not explicitly passed is
+    only found via javac's fragile implicit sourcepath auto-discovery, which
+    silently breaks whenever the file's real location doesn't mirror its
+    package path relative to the workspace root - exactly the mismatch the
+    live cross-package incident already proved can happen. Confirms
+    run_compile_check is now called with ctx.established_files unioned in."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "x = 1\n"}])
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer, established_files=["lib.py"])
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ) as mock_compile, patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": "1 passed"},
+    ):
+        await run_attempt(state, ctx)
+
+    called_files = mock_compile.call_args[0][0]
+    assert "lib.py" in called_files
+    assert "app.py" in called_files
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_includes_established_files_in_self_correction_scope(tmp_path):
+    """Established-files audit (2026-08-22): the self-correction micro-loop's
+    own files_in_scope previously only ever covered state.all_files_written -
+    the same blind spot already fixed at several sibling call sites this
+    session (self-diagnosis attribution, judge()'s files_written,
+    _build_workspace_type_index's two layers)."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "App.java", "content": "class App {}\n"}])
+    cfg = AppConfig(paths={"memory": str(tmp_path / "isolated_memory")})
+    cfg.autonomy.self_correction_loop_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        kernel=Kernel(config=cfg),
+        architect_files=["App.java"], expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+        established_files=["Helper.java"],
+    )
+    mock_result = MagicMock(resolved=False, turns_used=1, transcript=[], final_compile_output="still failing")
+    mock_result.incidents = []
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": False, "output": "compile error"},
+    ), patch(
+        "kriya.workflow.self_correction.run_self_correction_loop",
+        AsyncMock(return_value=mock_result),
+    ) as mock_loop:
+        with pytest.raises(QualityGateFailure):
+            await run_attempt(state, ctx)
+
+    called_files = mock_loop.call_args.kwargs["files_in_scope"]
+    assert "Helper.java" in called_files
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_static_violation_can_attribute_to_an_established_file(tmp_path):
+    """Established-files audit (2026-08-22): a static rule violation (here,
+    mixing Ignite's two startup mechanisms) can legitimately span an
+    established file plus one this attempt just wrote - confirms likely_files
+    now includes the established file instead of only ever being scoped to
+    state.all_files_written."""
+    (tmp_path / "context.xml").write_text(
+        '<beans><bean class="org.apache.ignite.IgniteSpringBean"/></beans>'
+    )
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "App.java",
+        "content": "class App { void m() { Ignition.start(\"context.xml\"); } }\n",
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["App.java"], expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+        established_files=["context.xml"],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        side_effect=AssertionError("must not reach compilation - static check should fire first"),
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "static_rule_violation"
+    assert "context.xml" in exc_info.value.failure.likely_files
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_misdirected_edit_can_target_an_established_file(tmp_path):
+    """Established-files audit (2026-08-22): find_misdirected_edit_target()'s
+    own `other_files` candidate set previously only ever scanned
+    state.all_files_written - an anchored edit whose search block actually
+    belongs to an ESTABLISHED file (not one this attempt itself wrote) could
+    never be redirected there. Confirms it now can."""
+    (tmp_path / "Helper.java").write_text("class Helper {\n  static final int Y = 5;\n}\n")
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "App.java", "edits": [
+        {"search": "static final int Y = 5;", "replace": "static final int Y = 6;"}
+    ]}])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["App.java"], expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+        established_files=["Helper.java"],
+    )
+    (tmp_path / "App.java").write_text("class App {\n  Object x;\n}\n")
+
+    with pytest.raises(QualityGateFailure) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "misdirected_edit"
+    assert set(exc_info.value.failure.likely_files) == {"App.java", "Helper.java"}
 
 
 @pytest.mark.asyncio
@@ -7518,6 +7847,114 @@ def test_normalize_error_for_repeat_detection_preserves_differing_errors():
     error_a = "Exception in thread \"main\" java.lang.UnsupportedOperationException: getSubject is not supported"
     error_b = "Exception in thread \"main\" java.lang.NullPointerException: Cannot invoke foo()"
     assert _normalize_error_for_repeat_detection(error_a) != _normalize_error_for_repeat_detection(error_b)
+
+def test_find_cross_package_symbol_mismatch_resolves_the_live_incident():
+    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol,
+    milestone 3/4): a fresh milestone's Architect chose a Maven-conventional
+    package (`com.example`) for its own new App.java, but Protocol.java -
+    established by an earlier milestone - lives in the default package. The
+    resulting `cannot find symbol: class Protocol, location: class
+    com.example.App` error recurred BYTE-FOR-BYTE IDENTICAL across 3+
+    retries - a genuine Java language incompatibility (a class in one named
+    package can never reference a class in a different/default package
+    under any circumstances), not a missing import, so no amount of
+    prose-level retrying could ever resolve it. Real Maven output,
+    reproduced verbatim including the repeated symbol/location pair."""
+    maven_output = (
+        "[ERROR] .../src/main/java/com/example/App.java:[16,33] cannot find symbol\n"
+        "  symbol:   class Protocol\n"
+        "  location: class com.example.App\n"
+        "[ERROR] .../src/main/java/com/example/App.java:[20,13] cannot find symbol\n"
+        "  symbol:   class Protocol\n"
+        "  location: class com.example.App\n"
+    )
+    type_index = {
+        ".java:Protocol": ["Protocol.java"],
+        ".java:App": ["src/main/java/com/example/App.java"],
+    }
+    java_packages = {"Protocol.java": None, "src/main/java/com/example/App.java": "com.example"}
+
+    result = find_cross_package_symbol_mismatch(maven_output, type_index, java_packages)
+
+    assert result == ("Protocol", "src/main/java/com/example/App.java", "Protocol.java")
+
+
+def test_find_cross_package_symbol_mismatch_handles_plain_javac_shape():
+    # Plain javac (no Maven wrapper) qualifies the referencing class with
+    # its bare simple name when there's no package at all - "location: class
+    # App", not "location: class com.example.App".
+    type_index = {".java:Protocol": ["Protocol.java"], ".java:App": ["App.java"]}
+    java_packages = {"Protocol.java": "com.example", "App.java": None}
+    output = "App.java:16: error: cannot find symbol\n  symbol:   class Protocol\n  location: class App\n"
+
+    result = find_cross_package_symbol_mismatch(output, type_index, java_packages)
+
+    assert result == ("Protocol", "App.java", "Protocol.java")
+
+
+def test_find_cross_package_symbol_mismatch_ignores_a_genuinely_missing_class():
+    # The symbol isn't in type_index at all - a real missing/typo'd class,
+    # not a package mismatch. Must fall through to the generic compile
+    # failure path, never fabricate evidence.
+    type_index = {".java:App": ["App.java"]}
+    output = "symbol:   class Bogus\n  location: class App\n"
+
+    assert find_cross_package_symbol_mismatch(output, type_index, {"App.java": None}) is None
+
+
+def test_find_cross_package_symbol_mismatch_degrades_on_ambiguous_candidates():
+    # Two files declare the same simple class name - a flat lookup can't
+    # safely pick between them, so this must not guess.
+    type_index = {
+        ".java:Protocol": ["Protocol.java", "other/Protocol.java"],
+        ".java:App": ["App.java"],
+    }
+    output = "symbol:   class Protocol\n  location: class App\n"
+
+    assert find_cross_package_symbol_mismatch(output, type_index, {"App.java": None}) is None
+
+
+def test_find_cross_package_symbol_mismatch_ignores_when_packages_already_match():
+    # Not actually a package mismatch - some other compile error entirely
+    # (a genuinely missing method/field, a typo elsewhere) must not be
+    # misreported as a package problem.
+    type_index = {".java:Protocol": ["Protocol.java"], ".java:App": ["App.java"]}
+    java_packages = {"Protocol.java": "com.example", "App.java": "com.example"}
+    output = "symbol:   class Protocol\n  location: class com.example.App\n"
+
+    assert find_cross_package_symbol_mismatch(output, type_index, java_packages) is None
+
+
+def test_find_cross_package_symbol_mismatch_ignores_a_candidate_with_unknown_package():
+    """A candidate whose package was never actually read (outside the
+    caller's known-files scope) must NOT be silently treated as "confirmed
+    default package" - that could fabricate a mismatch (or hide a real one)
+    from an absence of data, not real evidence."""
+    type_index = {".java:Protocol": ["Protocol.java"], ".java:App": ["App.java"]}
+    java_packages = {"App.java": "com.example"}  # Protocol.java's package unknown
+
+    output = "symbol:   class Protocol\n  location: class com.example.App\n"
+
+    assert find_cross_package_symbol_mismatch(output, type_index, java_packages) is None
+
+
+def test_build_cross_package_mismatch_message_breaks_the_instruction_deadlock():
+    """The message must explicitly resolve the exact deadlock observed live:
+    the Developer's own reasoning correctly diagnosed a package mismatch
+    THREE times and never fixed it, caught between "only touch the targeted
+    file" and "don't restructure what already works". The message must say
+    plainly this is a required fix, not a forbidden restructuring, and must
+    default to recommending the NEW (referencing) file change, never the
+    established (candidate) one."""
+    message = build_cross_package_mismatch_message(
+        "Protocol", "src/main/java/com/example/App.java", "com.example", "Protocol.java", None,
+    )
+
+    assert "REQUIRED" in message
+    assert "not a forbidden restructuring" in message
+    assert "Protocol.java" in message and "should NOT be moved or modified" in message
+    assert "src/main/java/com/example/App.java" in message
+
 
 def test_classify_environment_failure_detects_jvm_startup_error():
     # Real, byte-for-byte text captured during golden-use-case validation: a JVM
@@ -11879,6 +12316,50 @@ async def test_workflow_self_diagnosis_redirects_to_an_established_file_this_run
     assert we.developer.run_generation.call_count == 3
     third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
     assert third_call_kwargs["known_target_files"] == ["B.java"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_verifier_judge_sees_established_files_too(tmp_path):
+    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
+    milestone 3/4): RunVerifierAgent.judge() was only ever shown
+    state.all_files_written (this attempt's own writes: applicationContext.xml,
+    App.java), never ctx.established_files (Protocol.java/ProtocolParser.java,
+    built by EARLIER milestones) - so judge() had no way to know App.java
+    depended on files that exist elsewhere in the workspace, and inferred a
+    bare `java -cp . App` assuming pre-compiled classes (this project has no
+    pom.xml either, so a Maven-classpath guess was equally wrong) instead of
+    a real `javac App.java Protocol.java ProtocolParser.java && java App` -
+    6 attempts straight rewrote perfectly correct application code chasing a
+    ClassNotFoundException that was never a code bug, until the run's time
+    budget was exhausted. Confirms judge() now sees the union of both, same
+    fix shape as established_files' own self-diagnosis-attribution fix above,
+    just at judge()'s call site instead."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "App.java", "content": "class App {}\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "",
+    })
+
+    res = await we.run_generation_workflow(
+        goal="Add an App entrypoint", workspace_path=str(tmp_path),
+        established_files=["Protocol.java", "ProtocolParser.java"],
+    )
+
+    assert res["quality_gates_passed"] is True
+    judge_kwargs = we.run_verifier.judge.call_args.kwargs
+    assert set(judge_kwargs["files_written"]) == {"App.java", "Protocol.java", "ProtocolParser.java"}
 
 
 @pytest.mark.asyncio

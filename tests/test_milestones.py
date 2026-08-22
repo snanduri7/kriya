@@ -220,6 +220,20 @@ def test_render_established_file_context_includes_real_content_sorted():
     assert text.index("AnotherFile.java") < text.index("Protocol.java")
 
 
+def test_render_established_file_context_calls_out_build_layout_not_just_signatures():
+    """Regression test for the established-files audit (2026-08-22): tracing
+    why the Architect still picked a Maven-conventional package for a new
+    file while an established file sat in the default package - despite the
+    established file's real content already being in front of it via this
+    exact function - found that the directive text only ever told the model
+    to match signatures, never package/directory layout. Confirms the fix:
+    the block now says so explicitly, not just "match signatures"."""
+    text = render_established_file_context({"Protocol.java": "public class Protocol {}"})
+    assert "package" in text
+    assert "default" in text or "unnamed package" in text
+    assert "constructor/method signatures" in text
+
+
 # ============================================================
 # MilestoneRunState persistence
 # ============================================================

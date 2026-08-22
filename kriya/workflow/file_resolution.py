@@ -247,6 +247,142 @@ def downgrade_ungrounded_goal_explicit_commands(judgment: Dict[str, Any], goal: 
     return judgment
 
 
+# JPMS module-system flags a skill's own rules.txt may document as mandatory
+# for a specific library's JVM startup (e.g. skills/ignite-java17/rules.txt:
+# "Always add the mandatory --add-opens flags..."). Deliberately a closed set
+# of the SAME flag families judge()'s own system prompt already treats as
+# load-bearing for the Maven exec:exec-vs-exec:java distinction - not a
+# general "extract any CLI-flag-shaped token" scanner.
+_JVM_MODULE_FLAG_RE = re.compile(r"--(?:add-opens|add-exports|illegal-access)=\S+")
+
+
+def extract_jvm_module_flags(skills_prompt: str) -> List[str]:
+    """Deterministically pulls real, already-verified JVM module-system flags
+    (--add-opens/--add-exports/--illegal-access) out of the active skills'
+    OWN rules text, in the order they appear, deduplicated. Built for the same
+    gap ground_java_entrypoint_in_no_build_file_projects() (below) closes: a
+    bare (non-Maven) `java` invocation for a no-pom.xml project has no
+    mechanism today for picking up flags a skill documents as mandatory
+    (skills/ignite-java17/rules.txt: "Always add the mandatory --add-opens
+    flags..." - written with Maven's exec:exec <argument> list in mind, since
+    that was the only invocation shape ever exercised before this fix, but
+    the underlying JVM-startup requirement is identical for a bare `java`
+    call). Reuses the SAME trusted rules text already fed to the Developer
+    agent when generating code - not a new trust boundary, just reading it
+    for a different purpose. Never asks an LLM to reproduce these from
+    memory: skills/ignite-java17/rules.txt alone lists over 25 individual
+    flags verbatim - free-text reproduction of a list that size is exactly
+    the class of positive, multi-part instruction this session's own
+    findings already showed local models don't reliably get right, even when
+    told to."""
+    if not skills_prompt:
+        return []
+    seen: Dict[str, None] = {}
+    for match in _JVM_MODULE_FLAG_RE.finditer(skills_prompt):
+        seen.setdefault(match.group(0), None)
+    return list(seen.keys())
+
+
+def ground_java_entrypoint_in_no_build_file_projects(
+    run_commands: Optional[List[List[str]]],
+    command_source: str,
+    files_written: List[str],
+    java_main_classes: Dict[str, str],
+    jvm_module_flags: List[str],
+    build_file_content: Optional[str],
+) -> Optional[List[List[str]]]:
+    """Deterministically replaces RunVerifierAgent.judge()'s command-
+    construction guess with a real compile+run sequence for a Java project
+    with NO pom.xml/build.gradle - the shape that has zero deterministic
+    compile/test grounding today (PolymorphicValidator's stack detection is
+    Maven/Gradle-marker-only). Found live, 2026-08-21 (ignite_qpid_protocol
+    milestone 3/4): three consecutive same-day prompt-level patches to
+    judge() (established_files visibility, an explicit "no Maven" statement,
+    a javac-prepend backstop) each fixed exactly what they targeted and
+    surfaced the next gap underneath, because the underlying task - "which
+    files to compile, what the entrypoint class is" - is mechanically
+    answerable and should never have been a free-form LLM guess in the first
+    place. This removes the guess entirely for the unambiguous case.
+
+    java_main_classes is the caller's own precomputed {filepath: class_name}
+    map (via kriya.analyzer.graph.DependencyGraph.find_java_main_class()),
+    scoped to exactly the files Kriya has tracked as written this run
+    (files_written - already the established_files-inclusive union, so a
+    file compiled by an earlier milestone is covered automatically with no
+    extra plumbing here). Deliberately takes the map as input rather than
+    file contents directly, keeping this function pure/trivially testable
+    and the DependencyGraph/file-I/O coupling in the caller (attempt.py),
+    matching this module's own existing separation (this function is a
+    sibling to _resolve_run_command()/downgrade_ungrounded_goal_explicit_
+    commands() above - "correct judge()'s raw guess against real evidence" -
+    not a file-reading utility).
+
+    Returns run_commands UNCHANGED (a pure no-op) for every case this can't
+    confidently resolve, matching this whole session's established safe-
+    degrade posture - never a wrong override:
+    - build_file_content given (a real pom.xml exists - Maven already has
+      full deterministic grounding via PolymorphicValidator + this module's
+      own exec:exec/exec:java/mainClass corrections; untouched).
+    - command_source == "goal_explicit" - a goal-stated command is
+      authoritative and must never be silently replaced.
+    - len(java_main_classes) != 1 - zero real entrypoints found (nothing to
+      run, or none of files_written has one) or more than one (a genuinely
+      ambiguous case, e.g. a later milestone adds a second entrypoint -
+      picking one would be a guess this function has no evidence to make
+      confidently; falls back to judge()'s own existing (already-hardened
+      with the "no Maven" prompt instruction and javac-prepend backstop)
+      reasoning instead).
+
+    When it DOES activate: compiles every .java file in files_written
+    together (not just the entrypoint - a multi-file program needs its real
+    dependencies compiled in the SAME javac invocation), preserves any CLI
+    ARGUMENTS judge()'s own guess already appended after its (possibly
+    wrong) class name in a ["java", ...]-shaped command - real semantic
+    reasoning about what a goal's CLI needs (e.g. "add"/"list" sequences)
+    that this function has no way to derive on its own and shouldn't
+    discard - and applies jvm_module_flags (extract_jvm_module_flags() above)
+    between "java" and the class name on every invocation, since a flag a
+    library's skill documents as mandatory is required regardless of which
+    arguments follow it."""
+    if build_file_content or command_source == "goal_explicit":
+        return run_commands
+    if len(java_main_classes) != 1:
+        return run_commands
+    entrypoint_class = next(iter(java_main_classes.values()))
+    compile_files = sorted(f for f in files_written if f.endswith(".java"))
+    if not compile_files:
+        return run_commands
+
+    # Whatever the model's own guess appended AFTER its class name (real
+    # semantic reasoning about CLI arguments this function has no way to
+    # derive on its own) is preserved - located by finding wherever the
+    # REAL entrypoint class name (fully-qualified or simple) appears as its
+    # own token in the model's guessed command, not by a fixed position.
+    # A fixed "args start at index 2" assumption would misfire on exactly
+    # the observed live shape ["java", "-cp", "target/classes:$(mvn ...)",
+    # "App"] - the class name sits at index 3 there, not 1, and everything
+    # before it (a garbage classpath guess for a project with no build
+    # system to resolve one) must be discarded, not preserved as if it were
+    # a program argument.
+    simple_name = entrypoint_class.rsplit(".", 1)[-1]
+    invocations: List[List[str]] = []
+    for cmd in (run_commands or []):
+        if cmd and cmd[0] == "java":
+            extra_args: List[str] = []
+            for i, tok in enumerate(cmd[1:], start=1):
+                if tok in (entrypoint_class, simple_name):
+                    extra_args = list(cmd[i + 1:])
+                    break
+            invocations.append(extra_args)
+    if not invocations:
+        invocations = [[]]
+
+    return [["javac"] + compile_files] + [
+        ["java"] + jvm_module_flags + [entrypoint_class] + extra_args
+        for extra_args in invocations
+    ]
+
+
 def _resolve_run_command(command: List[str], workspace_path: Optional[str] = None) -> List[str]:
     """Substitutes Kriya's own interpreter for a bare 'python' the Runtime
     Verification judge inferred, if 'python' isn't actually resolvable on PATH - a

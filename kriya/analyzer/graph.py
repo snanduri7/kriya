@@ -28,6 +28,15 @@ _RELATION_WEIGHTS: Dict[str, float] = {
 }
 _DEFAULT_RELATION_WEIGHT = 0.5
 
+# Used by find_java_main_class() below - covers both the classic array
+# parameter and the varargs shorthand ("String... args"), which is equally
+# valid for a real entrypoint.
+_JAVA_MAIN_METHOD_RE = re.compile(r"public\s+static\s+void\s+main\s*\(\s*(?:final\s+)?String")
+# Deliberately the SAME granularity _parse_java()'s own class_regex already
+# uses elsewhere in this file (a flat, non-nesting-aware scan) - not
+# requiring `public` (see find_java_main_class()'s own docstring for why).
+_JAVA_TOP_LEVEL_CLASS_RE = re.compile(r"(?:public|final|abstract|\s)*\bclass\s+(\w+)")
+
 
 class DependencyGraph:
     """SQLite-backed AST dependency knowledge graph compiler for multi-language repositories."""
@@ -317,6 +326,70 @@ class DependencyGraph:
             if sym.get("type") == "class" and sym.get("name")
         }
         return sorted(f"{ext}:{n}" for n in names if n)
+
+    def find_java_main_class(self, filepath: str, content: str) -> Optional[str]:
+        """Deterministically detects a Java file's runnable entrypoint class -
+        one with a real `public static void main(String[]...)`/`String...
+        args` method - for constructing a `javac`/`java` invocation without
+        ever asking an LLM to guess it. Built for the exact gap found live,
+        2026-08-21 (ignite_qpid_protocol milestone 3/4): a Java project with
+        no pom.xml/build.gradle has zero deterministic compile/run capability
+        today (PolymorphicValidator's stack detection is Maven/Gradle-marker-
+        only), so "which files to compile, what the entrypoint is" was 100%
+        delegated to RunVerifierAgent.judge()'s free-form guess - three
+        consecutive same-day prompt patches (established_files visibility, an
+        explicit "no Maven" statement, a javac-prepend backstop) each fixed
+        exactly what they targeted and surfaced the next gap underneath. This
+        is the deterministic capability that removes the guess entirely for
+        the common, unambiguous case.
+
+        Deliberately conservative, matching extract_class_names()'s own
+        degrade-gracefully precedent - returns None (never a wrong guess) for
+        anything not confidently resolvable:
+        - No `.java` extension, no real main-method signature found, or any
+          parse error.
+        - MORE THAN ONE top-level `class` declaration in the file - a
+          multi-class file needs real scoping (which class does main()
+          actually belong to) that a flat regex scan can't safely resolve;
+          rather than risk attributing main() to the wrong class, this
+          degrades to "no confident answer" and the caller falls back to
+          today's existing (already-hardened) LLM-guess path.
+
+        The class's own visibility is NOT required to be `public` - Java only
+        requires a single top-level type per file to be public (and even
+        then, only for cross-package access), never for running it via
+        `java ClassName`; a package-private top-level class with a real
+        main() is exactly as runnable as a public one, so requiring `public`
+        here would silently miss legitimate entrypoints."""
+        if not filepath.endswith(".java"):
+            return None
+        try:
+            # Line-by-line with comment-skipping, deliberately mirroring
+            # _parse_java()'s own approach above rather than a raw whole-
+            # content regex scan - a bare `.search()`/`.findall()` over the
+            # full text would false-positive on a comment merely DESCRIBING
+            # a main method or class ("// public static void main(String[]
+            # args) is required here", "// see the Foo class below") as if
+            # it were real code.
+            has_main = False
+            class_names = []
+            for line in content.splitlines():
+                line_strip = line.strip()
+                if line_strip.startswith("//") or line_strip.startswith("/*") or line_strip.startswith("*"):
+                    continue
+                if not has_main and _JAVA_MAIN_METHOD_RE.search(line_strip):
+                    has_main = True
+                class_match = _JAVA_TOP_LEVEL_CLASS_RE.match(line_strip)
+                if class_match:
+                    class_names.append(class_match.group(1))
+            if not has_main or len(class_names) != 1:
+                return None
+            pkg_match = re.search(r"package\s+([\w.]+);", content)
+            package_prefix = pkg_match.group(1) + "." if pkg_match else ""
+            return package_prefix + class_names[0]
+        except Exception as e:
+            logger.debug(f"find_java_main_class: could not parse {filepath}: {e}")
+            return None
 
     def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2, max_results: int = 30) -> List[Dict[str, Any]]:
         """Perform bounded BFS traversal on the symbol relationship graph.

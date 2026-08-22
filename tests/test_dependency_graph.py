@@ -280,6 +280,62 @@ def test_extract_class_names_degrades_gracefully_for_unsupported_or_invalid_cont
     assert graph.extract_class_names("broken.py", "class (((not valid") == []
 
 
+def test_find_java_main_class_detects_array_and_varargs_shapes(tmp_path):
+    graph = DependencyGraph(str(tmp_path / "dep_graph.db"))
+
+    assert graph.find_java_main_class(
+        "App.java", "public class App {\n    public static void main(String[] args) {}\n}\n"
+    ) == "App"
+    assert graph.find_java_main_class(
+        "App.java", "class App {\n    public static void main(String... args) {}\n}\n"
+    ) == "App"
+
+
+def test_find_java_main_class_applies_package_prefix(tmp_path):
+    graph = DependencyGraph(str(tmp_path / "dep_graph.db"))
+
+    content = "package com.example;\npublic class App {\n    public static void main(String[] args) {}\n}\n"
+    assert graph.find_java_main_class("com/example/App.java", content) == "com.example.App"
+
+
+def test_find_java_main_class_returns_none_without_a_real_main_method(tmp_path):
+    graph = DependencyGraph(str(tmp_path / "dep_graph.db"))
+
+    assert graph.find_java_main_class("Protocol.java", "public class Protocol {\n    int x;\n}\n") is None
+    assert graph.find_java_main_class("App.py", "public static void main(String[] args) {}") is None
+
+
+def test_find_java_main_class_ignores_a_main_method_only_mentioned_in_a_comment(tmp_path):
+    """A raw whole-content regex scan would false-positive on a comment
+    merely DESCRIBING a main method as if it were real code - this must
+    behave the same as _parse_java()'s own established comment-skipping
+    convention (line-by-line, skip lines starting with //, /*, *)."""
+    graph = DependencyGraph(str(tmp_path / "dep_graph.db"))
+    content = (
+        "public class Helper {\n"
+        "    // A real entrypoint needs public static void main(String[] args)\n"
+        "    void doWork() {}\n"
+        "}\n"
+    )
+    assert graph.find_java_main_class("Helper.java", content) is None
+
+
+def test_find_java_main_class_degrades_to_none_for_ambiguous_multi_class_file(tmp_path):
+    """More than one top-level class in the same file is a shape a flat
+    regex scan can't safely scope main() to - must degrade to None (no
+    confident answer) rather than guess which class actually owns it."""
+    graph = DependencyGraph(str(tmp_path / "dep_graph.db"))
+    content = (
+        "public class App {\n"
+        "    public static void main(String[] args) {}\n"
+        "}\n"
+        "class Helper {\n"
+        "    public static void main(String[] args) {}\n"
+        "}\n"
+    )
+    assert graph.find_java_main_class("App.java", content) is None
+
+
 def test_get_neighborhood_scores_direct_import_above_deeper_annotation_hit(tmp_path):
     """A hop-1 'imports' hit should outscore a hop-2 'annotated_with' hit -
     the whole point of scoring get_neighborhood()'s output is to let callers

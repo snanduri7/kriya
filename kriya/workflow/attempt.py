@@ -13,6 +13,7 @@ stays in workflow.py - out of scope for this slice.
 import asyncio
 import logging
 import os
+import re
 import statistics
 import time
 from dataclasses import dataclass, field
@@ -34,8 +35,8 @@ from kriya.workflow.dependency_invalidation import (
     invalidate_validated_revisions,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import _build_quality_gate_failure
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, normalize_written_filepath
+from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -155,7 +156,10 @@ def _retry_package_for_attempt(
     return build_retry_package(
         failure=state.last_failure,
         worktree_path=ctx.worktree_path,
-        all_files=state.all_files_written,
+        # Unioned with ctx.established_files (see that field's own docstring) -
+        # a retry package's content candidates should include files earlier
+        # milestones wrote too, not just this attempt's own writes.
+        all_files=sorted(set(state.all_files_written) | set(ctx.established_files)),
         target_files=target_files,
         source_context=state.last_error_source_context,
         max_chars=max_chars,
@@ -501,8 +505,11 @@ def _diagnosis_mismatch_bypass_reason(
         return "this retry responds to a compile/POM-validation/targeted-test failure - deferring to the real gate instead of prose-matching"
     if fail_type == "static_rule_violation":
         from kriya.workflow.static_checks import run_static_checks
+        # Unioned with ctx.established_files (see that field's own docstring) -
+        # a static rule can span an established file plus the one just edited.
         still_violates = run_static_checks(
-            ctx.worktree_path, state.all_files_written, overrides={filepath: candidate_content},
+            ctx.worktree_path, sorted(set(state.all_files_written) | set(ctx.established_files)),
+            overrides={filepath: candidate_content},
         )
         if not still_violates:
             return "the static check that originally flagged this file no longer flags the proposed content"
@@ -532,28 +539,122 @@ def _extract_class_names_best_effort(db_path: str, filepath: str, content: str) 
         return []
 
 
+def _find_java_main_class_best_effort(db_path: str, filepath: str, content: str) -> Optional[str]:
+    """Same short-lived DependencyGraph open/query/close shape as
+    _extract_class_names_best_effort() above, for
+    DependencyGraph.find_java_main_class() instead - see that method's own
+    docstring for what it detects and why (deterministic Java entrypoint
+    resolution for a no-pom.xml project, ground_java_entrypoint_in_no_build_
+    file_projects()'s call site below)."""
+    try:
+        from kriya.analyzer.graph import DependencyGraph
+        graph = DependencyGraph(db_path)
+        try:
+            return graph.find_java_main_class(filepath, content)
+        finally:
+            graph.close()
+    except Exception as e:
+        logger.debug(f"Skipping Java entrypoint detection for {filepath}: {e}")
+        return None
+
+
+def _build_java_main_class_map(java_files: List[str], ctx: "AttemptContext") -> Dict[str, str]:
+    """{filepath: entrypoint_class} for every .java file (already the
+    established_files-inclusive union the caller passes in) that has a real
+    `public static void main` - see find_java_main_class()'s own docstring.
+    Reads each file's CURRENT content fresh (worktree first, workspace
+    fallback - same lookup order used throughout this module), never cached
+    across attempts unlike judge()'s own judgment: a retry can edit a file's
+    content, and this determination must reflect what's actually on disk
+    right now, not a stale snapshot from an earlier attempt."""
+    db_path = _dependency_graph_db_path(ctx)
+    result: Dict[str, str] = {}
+    for filepath in java_files:
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        if not os.path.exists(full_path):
+            full_path = os.path.join(ctx.workspace_path, filepath)
+        if not os.path.exists(full_path):
+            continue
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except Exception as e:
+            logger.debug(f"Java entrypoint detection: couldn't read {filepath}, skipping it: {e}")
+            continue
+        entrypoint_class = _find_java_main_class_best_effort(db_path, filepath, content)
+        if entrypoint_class:
+            result[filepath] = entrypoint_class
+    return result
+
+
+_JAVA_PACKAGE_DECL_RE = re.compile(r"^\s*package\s+([\w.]+)\s*;", re.MULTILINE)
+
+
+def _build_java_package_map(java_files: List[str], ctx: "AttemptContext") -> Dict[str, Optional[str]]:
+    """{filepath: package_or_None} for every .java file given, read fresh
+    (worktree first, workspace fallback, same lookup order as
+    _build_java_main_class_map() above) - the I/O half of
+    find_cross_package_symbol_mismatch()'s own deliberately pure/testable
+    design (kriya/workflow/failure_grounding.py). None means the file has no
+    package declaration (Java's default/unnamed package), which is a real,
+    meaningful value here, not "unknown" - a file that can't be read at all
+    is simply omitted from the returned dict rather than guessed at."""
+    result: Dict[str, Optional[str]] = {}
+    for filepath in java_files:
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        if not os.path.exists(full_path):
+            full_path = os.path.join(ctx.workspace_path, filepath)
+        if not os.path.exists(full_path):
+            continue
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except Exception as e:
+            logger.debug(f"Java package detection: couldn't read {filepath}, skipping it: {e}")
+            continue
+        pkg_match = _JAVA_PACKAGE_DECL_RE.search(content)
+        result[filepath] = pkg_match.group(1) if pkg_match else None
+    return result
+
+
 def _build_workspace_type_index(state: GenerationState, ctx: "AttemptContext") -> Dict[str, List[str]]:
     """Workspace-wide simple-class-name -> [filepaths] index for the
-    duplicate-type-across-files pre-flight check below (see
-    find_cross_file_type_conflict's own docstring for the live incident this
-    exists to prevent). Two layers:
+    duplicate-type-across-files pre-flight check below and
+    find_cross_package_symbol_mismatch() (see their own docstrings for the
+    live incidents this exists to prevent). Two layers:
 
     1. DependencyGraph.get_class_symbol_locations() - the persisted baseline,
        covering pre-existing repo content and every earlier-completed
-       milestone's already-applied output. Best-effort by construction: no
-       dependency_graph.db yet (a brand-new workspace), or any DB error,
-       degrades to an empty index - this check simply doesn't fire for this
-       attempt rather than failing the whole generation, same posture as
-       every other pre-flight check in this module.
-    2. state.all_files_written, read from the worktree and parsed via
-       DependencyGraph.extract_class_names() (no DB write) - covers files
-       written earlier in THIS SAME still-in-progress retry loop, which the
-       persisted graph can't see yet since RepositoryAnalyzer only re-indexes
-       once, at the very top of run_generation_workflow(), before this loop
-       ever starts."""
+       milestone's already-applied output, PROVIDED `kriya analyze` has ever
+       actually been run against this workspace. Found live, 2026-08-22
+       (ignite_qpid_protocol): this baseline is NOT populated automatically
+       by run_generation_workflow() at all - index_repository() (the only
+       thing that ever writes real rows into dependency_graph.db's symbols
+       table) is called exclusively from the explicit `kriya analyze`/
+       `kriya analyze --vectors` CLI path (kriya/cli.py) - a milestone-
+       decomposition project that never had that command run against it has
+       a genuinely EMPTY persisted baseline for its entire lifetime, however
+       many milestones have completed. Best-effort by construction regardless
+       (no dependency_graph.db yet, or any DB error, degrades to an empty
+       baseline for this layer) - this is exactly why layer 2 below is not
+       optional supplementary coverage, it is THE primary coverage for any
+       project that has never been explicitly `kriya analyze`-d.
+    2. Every file in state.all_files_written UNION ctx.established_files,
+       read fresh (worktree first, workspace fallback - same lookup order
+       used throughout this module) and parsed via
+       DependencyGraph.extract_class_names() (no DB write). Found live,
+       2026-08-22, the SAME "established_files blind spot" class of bug
+       already fixed three times this session at other call sites
+       (RunVerifierAgent.judge()'s files_written, self-diagnosis
+       attribution): this layer previously covered ONLY state.
+       all_files_written (files THIS attempt itself wrote), so an earlier,
+       already-completed milestone's file was invisible to both the
+       duplicate-type gate and find_cross_package_symbol_mismatch() unless
+       `kriya analyze` happened to have indexed it into layer 1 - for a
+       project that never had that command run, EVERY earlier milestone's
+       file was invisible to this whole index, silently, for this session's
+       entire live-validation effort."""
     db_path = _dependency_graph_db_path(ctx)
-    if not os.path.exists(db_path):
-        return {}
     try:
         from kriya.analyzer.graph import DependencyGraph
         graph = DependencyGraph(db_path)
@@ -561,8 +662,10 @@ def _build_workspace_type_index(state: GenerationState, ctx: "AttemptContext") -
             index = graph.get_class_symbol_locations()
         finally:
             graph.close()
-        for written_path in state.all_files_written:
+        for written_path in sorted(set(state.all_files_written) | set(ctx.established_files)):
             full_path = os.path.join(ctx.worktree_path, written_path)
+            if not os.path.exists(full_path):
+                full_path = os.path.join(ctx.workspace_path, written_path)
             if not os.path.exists(full_path):
                 continue
             with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
@@ -1294,7 +1397,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # already-written file straight from the worktree (nothing keeps
                 # their content in memory this late in the per-file write loop).
                 other_files: Dict[str, str] = {}
-                for other_filepath in state.all_files_written:
+                # Unioned with ctx.established_files (see that field's own
+                # docstring) - a misdirected edit could legitimately belong to
+                # an established file from an earlier milestone, not just
+                # another file this attempt itself wrote.
+                for other_filepath in set(state.all_files_written) | set(ctx.established_files):
                     if other_filepath == filepath:
                         continue
                     other_full_path = os.path.join(ctx.worktree_path, other_filepath)
@@ -1720,7 +1827,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # documented in active skill rules (e.g. mixing Ignite's two startup mechanisms,
         # an unclosed Ignition.start()) - catches a mistake the model already had the
         # rule for, before the expensive compile+run cycle rather than after it.
-        static_violation = run_static_checks(ctx.worktree_path, state.all_files_written)
+        # Unioned with ctx.established_files (see that field's own docstring) -
+        # a static rule violation (e.g. mixing Ignite's two startup mechanisms)
+        # can span an established file plus one this attempt just wrote.
+        static_check_known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+        static_violation = run_static_checks(ctx.worktree_path, static_check_known_files)
         if static_violation:
             # _build_quality_gate_failure() (not a bare Failure(...)), matching the
             # SAME construction every other Quality Gate type already uses (compile/
@@ -1746,7 +1857,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 message=f"STATIC RULE VIOLATION: {static_violation}",
                 raw_output=static_violation,
                 worktree_path=ctx.worktree_path,
-                known_files=state.all_files_written,
+                known_files=static_check_known_files,
                 attempt=state.attempt_number,
             )
             state.gate_outcomes.append(failure.to_gate_outcome())
@@ -1777,7 +1888,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # just computed.
         validator.java_home_override = state.java_home_override
 
-        compile_res = validator.run_compile_check(list(state.all_files_written))
+        # Unioned with ctx.established_files (see that field's own docstring) -
+        # for a no-build-file Java project, this list is extended DIRECTLY into
+        # the raw javac fallback's command line (kriya/tools/validate.py); an
+        # established file not passed explicitly is only found via javac's
+        # fragile implicit sourcepath auto-discovery, which silently breaks
+        # whenever the established file's real location doesn't mirror its
+        # package path relative to the workspace root - exactly the layout
+        # mismatch this session's live incident already proved can happen.
+        compile_known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+        compile_res = validator.run_compile_check(compile_known_files)
         if not compile_res["success"]:
             self_correction_result = None
             if ctx.kernel.config.autonomy.self_correction_loop_enabled:
@@ -1790,7 +1910,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     llm=ctx.developer.llm,
                     worktree_path=ctx.worktree_path,
                     validator=validator,
-                    files_in_scope=list(state.all_files_written),
+                    files_in_scope=compile_known_files,
                     compile_error_output=compile_res["output"],
                     active_code_context=active_code_context,
                     max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
@@ -1821,9 +1941,61 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "self_correction_transcript": self_correction_result.transcript,
                 })
             else:
-                failure = _build_quality_gate_failure(
+                # Deterministic cross-milestone Java package-mismatch check -
+                # found live, 2026-08-22 (ignite_qpid_protocol milestone
+                # 3/4): a fresh milestone's Architect chose a Maven-
+                # conventional package for its own new file while an earlier
+                # milestone's established file stayed in the default
+                # package - a `cannot find symbol` error that recurred
+                # BYTE-FOR-BYTE IDENTICAL across 3+ retries, because a class
+                # in one named package can never reference a class in a
+                # different (or default) package under any circumstances -
+                # not a missing import, a genuine language-level
+                # incompatibility no amount of prose-level retrying can
+                # resolve. See find_cross_package_symbol_mismatch()'s own
+                # docstring (kriya/workflow/failure_grounding.py) for the
+                # full incident, including how the Developer's own reasoning
+                # actually diagnosed this correctly, more than once, then
+                # talked itself out of fixing it every time. Checked only
+                # after self-correction's own micro-loop (if enabled)
+                # already had its chance and didn't resolve it, so this
+                # never competes with or short-circuits that separate
+                # recovery path.
+                cross_package_failure = None
+                java_files_for_mismatch = sorted(
+                    f for f in set(state.all_files_written) | set(ctx.established_files)
+                    if f.endswith(".java")
+                )
+                if java_files_for_mismatch:
+                    mismatch = find_cross_package_symbol_mismatch(
+                        compile_res.get("output", ""),
+                        _build_workspace_type_index(state, ctx),
+                        _build_java_package_map(java_files_for_mismatch, ctx),
+                    )
+                    if mismatch:
+                        missing_symbol, referencing_path, candidate_path = mismatch
+                        java_packages_for_message = _build_java_package_map(
+                            [referencing_path, candidate_path], ctx
+                        )
+                        message = build_cross_package_mismatch_message(
+                            missing_symbol, referencing_path,
+                            java_packages_for_message.get(referencing_path),
+                            candidate_path, java_packages_for_message.get(candidate_path),
+                        )
+                        cross_package_failure = Failure(
+                            type="cross_package_symbol_mismatch",
+                            message=message,
+                            raw_output=compile_res.get("output", ""),
+                            file_locations=[FileLocation(filepath=referencing_path), FileLocation(filepath=candidate_path)],
+                            likely_files=[referencing_path, candidate_path],
+                            failed_content=_capture_failed_content(
+                                ctx.worktree_path, [referencing_path, candidate_path]
+                            ),
+                            attempt=state.attempt_number,
+                        )
+                failure = cross_package_failure or _build_quality_gate_failure(
                     "compile", f"COMPILATION FAILURE:\n{compile_res['output']}",
-                    compile_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                    compile_res.get("output", ""), ctx.worktree_path, compile_known_files, state.attempt_number,
                 )
                 if self_correction_result is not None:
                     # The loop ran but didn't resolve it within budget - persist
@@ -2027,7 +2199,26 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 raw_judgment = await ctx.run_verifier.judge(
                     goal=ctx.goal,
                     design=ctx.design,
-                    files_written=list(state.all_files_written),
+                    # Merge in ctx.established_files (see its own docstring) -
+                    # same "known_files should span the whole workspace, not
+                    # just this attempt's own writes" gap as the self-
+                    # diagnosis attribution fix above, just at a different
+                    # call site. Found live, 2026-08-21 (ignite_qpid_protocol
+                    # milestone 3/4): App.java (this milestone's own file)
+                    # imports Protocol and needs ProtocolParser, both written
+                    # by EARLIER milestones - judge() only ever saw
+                    # state.all_files_written (this milestone's own writes:
+                    # applicationContext.xml, App.java), so it had no way to
+                    # know those two files existed at all, and inferred a
+                    # bare `java -cp . App` assuming pre-compiled classes
+                    # (or, on a pom.xml-less project, a Maven-classpath
+                    # command that also doesn't apply) instead of a real
+                    # `javac App.java Protocol.java ProtocolParser.java &&
+                    # java App` - 6 attempts straight rewrote perfectly
+                    # correct application code chasing a ClassNotFoundException
+                    # that was never a code bug, until the run's time budget
+                    # was exhausted.
+                    files_written=sorted(set(state.all_files_written) | set(ctx.established_files)),
                     build_file_content=pom_content_for_judge,
                 )
                 # Independent brutal review finding #2 (2026-08-15): don't trust
@@ -2044,6 +2235,49 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             else:
                 logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
             judgment = state.cached_run_verification_judgment
+            # Deterministic Java entrypoint resolution - applied fresh every
+            # attempt (never cached alongside judge()'s own should_run/
+            # success_criteria decision above, unlike everything else on
+            # this dict): a retry can edit file content between attempts, so
+            # which file has the real entrypoint must be re-checked against
+            # what's actually on disk right now, not a stale snapshot. See
+            # ground_java_entrypoint_in_no_build_file_projects()'s own
+            # docstring (kriya/workflow/file_resolution.py) for the full
+            # incident and design - this replaces a free-form LLM guess with
+            # a real javac+java sequence for a Java project with no pom.xml/
+            # build.gradle, the one shape PolymorphicValidator's stack
+            # detection has zero deterministic compile capability for today.
+            # Applied here, BEFORE the human-in-the-loop approval display
+            # below builds commands_desc from judgment["run_commands"] -
+            # never correct AFTER a human already approved a different,
+            # uncorrected command than what would actually execute.
+            if judgment["should_run"] and judgment.get("run_commands"):
+                pom_content_for_correction = None
+                try:
+                    with open(os.path.join(ctx.worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+                        pom_content_for_correction = f.read()
+                except Exception:
+                    pass
+                entrypoint_known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+                java_files = [f for f in entrypoint_known_files if f.endswith(".java")]
+                if java_files and not pom_content_for_correction:
+                    corrected_commands = ground_java_entrypoint_in_no_build_file_projects(
+                        judgment["run_commands"],
+                        judgment["command_source"],
+                        entrypoint_known_files,
+                        _build_java_main_class_map(java_files, ctx),
+                        extract_jvm_module_flags(ctx.skills_prompt),
+                        pom_content_for_correction,
+                    )
+                    if corrected_commands != judgment["run_commands"]:
+                        logger.info(
+                            "Deterministic Java entrypoint resolution: no pom.xml/build.gradle "
+                            "found and exactly one real entrypoint was detected - overriding the "
+                            f"inferred run command(s) with {corrected_commands} instead of "
+                            "trusting the model's own guess."
+                        )
+                        judgment = dict(judgment)
+                        judgment["run_commands"] = corrected_commands
             if judgment["should_run"]:
                 proceed_with_run = True
                 if judgment["command_source"] == "inferred" and not state.run_verification_confirmed:

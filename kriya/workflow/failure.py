@@ -81,7 +81,14 @@ class Failure:
     - an exact field/method/class name, an exact type, an exact constant - that
     the generated code doesn't actually satisfy; a gap none of the other gates
     can structurally catch, since the code is otherwise valid; see
-    SpecComplianceAgent in kriya/agents/agent.py), or "general_error" (fallback
+    SpecComplianceAgent in kriya/agents/agent.py), "cross_package_symbol_mismatch"
+    (a Java compile failure - `cannot find symbol: class X, location: class Y` -
+    caused by a genuine cross-package incompatibility, not a missing/typo'd
+    class: X already exists elsewhere in the tracked files, just under a
+    different package than Y expects. A Java language-level fact, not a
+    missing import - no amount of retrying the SAME package layout can ever
+    resolve it; see find_cross_package_symbol_mismatch() in
+    kriya/workflow/failure_grounding.py), or "general_error" (fallback
     for a bare, non-QualityGateFailure Exception).
     """
     type: str

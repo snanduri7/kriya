@@ -27,6 +27,19 @@ _ERROR_UNRESOLVED_IMPORT_PATTERN = re.compile(
     r"symbol:\s*class\s+(\w+)[\s\S]{0,80}?location:\s*package\s+([\w.]+)"
 )
 
+# The "location: class Y" sibling of the pattern above - this comment
+# previously called it "not an import-path mistake, nothing to usefully
+# search for", which undersold it: found live, 2026-08-22 (ignite_qpid_
+# protocol milestone 3/4), this exact shape (symbol: class Protocol,
+# location: class com.example.App) is precisely what a CROSS-PACKAGE
+# reference to an already-existing class looks like from javac's own
+# perspective. See find_cross_package_symbol_mismatch() below for how it's
+# used - a use-site error with a real, findable candidate elsewhere under a
+# different package is a definitive signal, not a guess.
+_ERROR_USE_SITE_MISSING_SYMBOL_PATTERN = re.compile(
+    r"symbol:\s*class\s+(\w+)[\s\S]{0,80}?location:\s*class\s+([\w.]+)"
+)
+
 
 # Maven prints these two lines at the end of EVERY build, success or failure,
 # and their values (build duration, wall-clock timestamp) differ on every
@@ -447,6 +460,114 @@ def _capture_failed_content(worktree_path: str, files: Iterable[str]) -> Dict[st
         except Exception as ex:
             logger.debug(f"Failed to capture failed content for {filepath}: {ex}")
     return content
+
+
+def find_cross_package_symbol_mismatch(
+    compile_output: str,
+    type_index: Dict[str, List[str]],
+    java_packages: Dict[str, Optional[str]],
+) -> Optional[Tuple[str, str, str]]:
+    """Detects a Java compile failure caused by a cross-milestone PACKAGE
+    mismatch, not a genuinely missing/typo'd class - found live, 2026-08-22
+    (ignite_qpid_protocol milestone 3/4): a fresh milestone's Architect chose
+    a Maven-conventional package (`com.example`) for its own new file, but an
+    EARLIER milestone's already-established file lives in the default
+    package (no package declaration at all) - a `cannot find symbol: class
+    Protocol, location: class com.example.App` error that recurred BYTE-FOR-
+    BYTE IDENTICAL across 3+ retries, because a class in one named package
+    can never reference a class in a different (or the default) package,
+    under any circumstances - not a missing import, a genuine language-level
+    incompatibility no amount of prose-level retrying can resolve. The
+    Developer's own reasoning actually diagnosed this correctly, more than
+    once, then talked itself out of fixing it every time - caught between
+    "only touch the targeted file" and "don't restructure what already
+    works". This function exists to hand the retry loop a diagnosis precise
+    enough that there's nothing left to talk itself out of.
+
+    type_index is the SAME Dict[str, List[str]] (".java:SimpleName" ->
+    [paths], extension-scoped) _build_workspace_type_index() already builds
+    for the duplicate-type-across-files gate - full reuse, no new indexing.
+    java_packages is {filepath: package_or_None} for every currently-tracked
+    .java file (the caller's own responsibility - see
+    _build_java_package_map() in attempt.py - keeping this function pure and
+    trivially testable, matching ground_java_entrypoint_in_no_build_file_
+    projects()'s own established separation of I/O from decision logic).
+
+    Returns (missing_symbol, referencing_path, candidate_path) - the file
+    that's MISSING the symbol (referencing_path) and the file that ALREADY
+    HAS it under a different package (candidate_path) - or None whenever
+    this can't be resolved with confidence: the symbol isn't in type_index
+    at all (a genuinely missing/typo'd class - let the existing generic
+    compile-failure path handle it), the symbol resolves to more than one
+    file (an ambiguity a flat lookup can't safely break), the candidate's
+    package already matches the referencing class's own package (not
+    actually a mismatch - some other compile error), or the referencing
+    file's own path can't be uniquely resolved the same way."""
+    for missing_symbol, referencing_qualified in dict.fromkeys(
+        _ERROR_USE_SITE_MISSING_SYMBOL_PATTERN.findall(compile_output)
+    ):
+        candidates = type_index.get(f".java:{missing_symbol}", [])
+        if len(candidates) != 1:
+            continue
+        candidate_path = candidates[0]
+        # Membership check, not .get()'s silent default: a candidate whose
+        # package was never actually read (out of the caller's known-files
+        # scope) must never be treated as "confirmed no package" - that
+        # would collide with a genuine default-package file and could
+        # fabricate a mismatch (or miss a real one) from pure absence of
+        # data, not evidence.
+        if candidate_path not in java_packages:
+            continue
+        candidate_pkg = java_packages[candidate_path]
+        referencing_pkg = (
+            referencing_qualified.rsplit(".", 1)[0] if "." in referencing_qualified else None
+        )
+        if candidate_pkg == referencing_pkg:
+            continue
+        referencing_simple = referencing_qualified.rsplit(".", 1)[-1]
+        referencing_matches = [
+            p for p in type_index.get(f".java:{referencing_simple}", [])
+            if p != candidate_path and java_packages.get(p, object()) == referencing_pkg
+        ]
+        if len(referencing_matches) != 1:
+            continue
+        return missing_symbol, referencing_matches[0], candidate_path
+    return None
+
+
+def build_cross_package_mismatch_message(
+    missing_symbol: str,
+    referencing_path: str,
+    referencing_pkg: Optional[str],
+    candidate_path: str,
+    candidate_pkg: Optional[str],
+) -> str:
+    """The part that actually breaks the retry deadlock, not just detects it -
+    see find_cross_package_symbol_mismatch()'s own docstring for the live
+    incident where the Developer correctly diagnosed a package mismatch
+    THREE TIMES and never fixed it, stuck between "only touch the targeted
+    file" and "don't restructure what already works". States plainly that
+    changing the referencing (new, current-milestone) file's package is a
+    REQUIRED compatibility fix, not a forbidden restructuring - and defaults
+    to recommending exactly that direction (adapt the new file to the
+    established one, never the reverse) so this stays consistent with, not
+    in tension with, the "don't touch already-established, working files"
+    instruction milestone goals already carry."""
+    referencing_desc = f"package `{referencing_pkg}`" if referencing_pkg else "the default (unnamed) package"
+    candidate_desc = f"package `{candidate_pkg}`" if candidate_pkg else "the default (unnamed) package"
+    return (
+        f"PACKAGE MISMATCH: {referencing_path} (in {referencing_desc}) references `{missing_symbol}`, "
+        f"which already exists at {candidate_path} - but that file is declared in {candidate_desc}, "
+        "a DIFFERENT package. This is a Java language rule, not a missing import: a class in one "
+        "named package can NEVER reference a class in a different (or the default) package under "
+        "any circumstances, no matter how the import statement is written. "
+        f"REQUIRED FIX: change {referencing_path} to use {candidate_desc} (matching "
+        f"{candidate_path}, which already works and should NOT be moved or modified). "
+        "This is a REQUIRED compatibility fix, not a forbidden restructuring of already-working "
+        f"code - {candidate_path} stays exactly as it is; only {referencing_path}'s own package "
+        "changes, since it is the new file being added to an existing, already-established "
+        "package layout."
+    )
 
 
 def _build_quality_gate_failure(

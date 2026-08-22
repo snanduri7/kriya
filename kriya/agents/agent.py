@@ -1975,7 +1975,20 @@ class RunVerifierAgent(BaseAgent):
             "libraries that typically need --add-opens (embedded brokers, in-memory data grids, "
             "and similar reflection-heavy JVM 17+ libraries) is far more likely to have (or need) "
             "the exec:exec shape than the simpler exec:java one. A Python file with a __main__ "
-            "guard implies [\"python\", \"that_file.py\"]. If there is no runnable, self-terminating "
+            "guard implies [\"python\", \"that_file.py\"].\n"
+            "If the prompt explicitly tells you NO pom.xml/build.gradle was found in this "
+            "workspace, NEVER invent an \"mvn\"/\"gradle\" command anyway - real-world Ignite/"
+            "Spring/similar-framework projects commonly DO use Maven, but that general "
+            "association is not evidence THIS specific project does; only an actual pom.xml/"
+            "build.gradle actually shown to you is. Instead compile the Java files directly: "
+            "the first command must be [\"javac\", ...] listing EVERY \".java\" file under "
+            "\"Files Generated\" that the entrypoint actually depends on (not just the "
+            "entrypoint file alone - a multi-file program needs every file it references "
+            "compiled together in the SAME javac invocation, or compilation fails to find "
+            "them), then a second command [\"java\", \"<MainClassName>\"] naming the class that "
+            "has the public static void main method (the bare class name only, no path or "
+            ".java/.class extension).\n"
+            "If there is no runnable, self-terminating "
             "entrypoint at all (a library, a config file, a long-running service, or the goal doesn't "
             "describe observable behavior), set should_run to false, run_commands to null, and "
             "success_criteria to an empty string."
@@ -2004,6 +2017,22 @@ class RunVerifierAgent(BaseAgent):
         # --add-opens JVM flags) was still judged as exec:java both times.
         if build_file_content:
             prompt += f"=== Actual pom.xml content (ground truth for how to invoke this app) ===\n{build_file_content}\n\n"
+        elif any(f.endswith(".java") for f in files_written):
+            # Found live, 2026-08-21 (ignite_qpid_protocol milestone 3/4): with no
+            # pom.xml section shown at all, the model didn't treat its ABSENCE as
+            # meaningful evidence - it just filled the gap from its own training-
+            # data prior that Ignite/Spring projects use Maven, guessing an
+            # `mvn dependency:build-classpath`-based command for a project that has
+            # no pom.xml anywhere, 3 attempts running, even after this exact call
+            # was given full visibility into every relevant file (the
+            # established_files fix just above). Making the absence an EXPLICIT
+            # statement - not an implicit missing section the model has to
+            # correctly interpret - is what the system prompt's own new guidance
+            # for this case is written to key off.
+            prompt += (
+                "=== Build System ===\nNo pom.xml or build.gradle was found in this workspace - "
+                "do not assume Maven or Gradle are involved in running this project.\n\n"
+            )
         prompt += (
             f"=== Goal ===\n{goal}\n\n"
             "Decide whether this goal warrants runtime verification, per the rules above."
@@ -2056,6 +2085,35 @@ class RunVerifierAgent(BaseAgent):
             ]
             if len(candidate) == len(raw_commands):
                 run_commands = candidate
+
+        # Deterministic backstop, not a third round of prompt engineering.
+        # Confirmed live, 2026-08-21 (ignite_qpid_protocol milestone 3/4):
+        # even with the system prompt's explicit "the first command must be
+        # [\"javac\", ...]" instruction above (added the same day for exactly
+        # this no-pom.xml case), a local model correctly avoided inventing an
+        # mvn command but STILL skipped the compile step entirely, returning
+        # a single bare [["java", "App"]] with nothing ever compiled -
+        # reliable instruction-following for a positive, multi-part
+        # requirement ("start with javac, listing every dependency") is a
+        # different, harder ask than a simple negative constraint ("don't
+        # use mvn"), even within the same response. Rather than chase this
+        # with more prose, fill the gap deterministically: if this is a
+        # no-pom.xml Java project (the same condition the "no Maven" prompt
+        # section above already detects) and NONE of the judged commands
+        # already invoke javac, silently prepend one covering every .java
+        # file in files_written - correct regardless of whether the model's
+        # own reasoning included it, and a pure no-op for every other case
+        # (a real pom.xml project, a non-Java goal, or a judgment that
+        # already included its own compile step are all left untouched).
+        if (
+            run_commands is not None
+            and not build_file_content
+            and any(f.endswith(".java") for f in files_written)
+            and not any(cmd and cmd[0].lower() == "javac" for cmd in run_commands)
+        ):
+            java_files = sorted(f for f in files_written if f.endswith(".java"))
+            if java_files:
+                run_commands = [["javac"] + java_files] + run_commands
 
         return {
             "should_run": _coerce_bool_field(parsed.get("should_run"), "should_run", "Run Verifier judge()") and run_commands is not None,

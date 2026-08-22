@@ -233,6 +233,156 @@ async def test_run_verifier_judge_omits_pom_section_when_not_given():
     sent_prompt = llm.complete.await_args.args[1]
     assert "Actual pom.xml content" not in sent_prompt
 
+
+def test_run_verifier_judge_system_prompt_forbids_inventing_maven_without_evidence():
+    """Regression test for a real live gap found 2026-08-21
+    (ignite_qpid_protocol milestone 3/4): with no pom.xml section shown at
+    all (this project has none), judge() still guessed an mvn-based command
+    (`java -cp target/classes:$(mvn dependency:build-classpath ...) App`),
+    3 attempts running even after being given full visibility into every
+    relevant file - it filled the gap from its own training-data prior that
+    Ignite/Spring projects use Maven, not from the actual evidence in front
+    of it. Locks in the corrective instruction; see
+    test_run_verifier_judge_states_no_build_file_explicitly_for_java_project
+    below for the companion prompt-building half of this fix."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    verifier = RunVerifierAgent("run_verifier", llm)
+    prompt = verifier.system_prompt
+    assert "NEVER invent an \"mvn\"/\"gradle\" command" in prompt
+    assert "javac" in prompt
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_states_no_build_file_explicitly_for_java_project():
+    """Companion to the system-prompt test above: an implicitly MISSING
+    pom.xml section wasn't enough signal for the model to actually treat it
+    as evidence of "no Maven here" - stating it explicitly is what the new
+    system-prompt instruction is written to key off."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["javac", "App.java"], ["java", "App"]],
+        "command_source": "inferred", "success_criteria": "Prints the result",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.judge(goal="Goal", design="", files_written=["App.java", "Protocol.java"])
+
+    sent_prompt = llm.complete.await_args.args[1]
+    assert "No pom.xml or build.gradle was found" in sent_prompt
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_omits_no_build_file_statement_for_non_java_project():
+    # No noise for a Python/Ruby goal, which was never at risk of an
+    # invented Maven command in the first place.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": False, "run_commands": None,
+        "command_source": "inferred", "success_criteria": "",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+
+    sent_prompt = llm.complete.await_args.args[1]
+    assert "No pom.xml or build.gradle was found" not in sent_prompt
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_omits_no_build_file_statement_when_pom_given():
+    # A real pom.xml already answers the "what build system" question - the
+    # explicit no-build-file statement is only for the ABSENCE case.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["mvn", "exec:java"]],
+        "command_source": "inferred", "success_criteria": "Prints the result",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.judge(
+        goal="Goal", design="", files_written=["App.java", "pom.xml"],
+        build_file_content="<project><build><plugins></plugins></build></project>",
+    )
+
+    sent_prompt = llm.complete.await_args.args[1]
+    assert "No pom.xml or build.gradle was found" not in sent_prompt
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_deterministically_prepends_javac_when_model_skips_it():
+    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
+    milestone 3/4): even with the system prompt's explicit "first command
+    must be javac" instruction (the fix immediately above), the local model
+    correctly avoided inventing an mvn command but still returned a single
+    bare [["java", "App"]] - nothing ever compiled. Reliable instruction-
+    following for a positive, multi-part requirement is a harder ask than a
+    simple negative constraint, even in the same response - so this is
+    backstopped deterministically rather than with a third prompt-engineering
+    attempt: judge() itself must prepend a javac step covering every .java
+    file in files_written (established_files included, since files_written
+    is already their union) when none of the judged commands already invoke
+    javac."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["java", "App"]],
+        "command_source": "inferred", "success_criteria": "Prints the result",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(
+        goal="Goal", design="",
+        files_written=["App.java", "Protocol.java", "ProtocolParser.java", "applicationContext.xml"],
+    )
+
+    assert judgment["run_commands"] == [
+        ["javac", "App.java", "Protocol.java", "ProtocolParser.java"],
+        ["java", "App"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_does_not_duplicate_an_existing_javac_step():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "run_commands": [["javac", "ProtocolParser.java"], ["java", "ProtocolParser"]],
+        "command_source": "inferred", "success_criteria": "Prints the result",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["ProtocolParser.java"])
+
+    assert judgment["run_commands"] == [
+        ["javac", "ProtocolParser.java"], ["java", "ProtocolParser"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_does_not_prepend_javac_when_pom_given():
+    # A real pom.xml means the model's own mvn-based command is authoritative -
+    # the deterministic backstop is only for the no-build-file case.
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["mvn", "exec:java"]],
+        "command_source": "inferred", "success_criteria": "Prints the result",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(
+        goal="Goal", design="", files_written=["App.java", "pom.xml"],
+        build_file_content="<project><build><plugins></plugins></build></project>",
+    )
+
+    assert judgment["run_commands"] == [["mvn", "exec:java"]]
+
+
 @pytest.mark.asyncio
 async def test_developer_agent_json_parsing():
     cfg = AppConfig()
