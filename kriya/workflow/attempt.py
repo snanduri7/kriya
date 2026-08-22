@@ -2321,7 +2321,27 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         extract_jvm_module_flags(ctx.skills_prompt),
                         pom_content_for_correction,
                     )
-                    if corrected_commands != judgment["run_commands"]:
+                    if corrected_commands is None:
+                        # ground_java_entrypoint_in_no_build_file_projects() returns None
+                        # (distinct from "unchanged") only when it's already checked and
+                        # confirmed zero of files_written has a real main() method, yet the
+                        # judged command still tries to `java <SomeClass>` anyway - that
+                        # class name is provably fabricated, not merely unverified, so
+                        # trusting it would just repeat the exact live incident (a
+                        # hallucinated "ProtocolParserTest" class) that motivated this
+                        # fix. Force should_run False rather than execute a command known
+                        # in advance to fail - matches judge()'s own system-prompt rule
+                        # for a pure-library milestone with no runnable entrypoint at all.
+                        logger.info(
+                            "Deterministic Java entrypoint resolution: no pom.xml/build.gradle "
+                            "found and no known .java file has a main() method - overriding "
+                            "should_run to False instead of executing a command that targets "
+                            "a nonexistent entrypoint class."
+                        )
+                        judgment = dict(judgment)
+                        judgment["should_run"] = False
+                        judgment["run_commands"] = None
+                    elif corrected_commands != judgment["run_commands"]:
                         logger.info(
                             "Deterministic Java entrypoint resolution: no pom.xml/build.gradle "
                             "found and exactly one real entrypoint was detected - overriding the "

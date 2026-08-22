@@ -21,6 +21,7 @@ from kriya.workflow.file_resolution import (
     ensure_maven_covers_nonconventional_java_files,
     extract_target_test,
     find_runnable_test_files,
+    ground_java_entrypoint_in_no_build_file_projects,
     is_runnable_test_file,
 )
 from kriya.workflow.edit_safety import (
@@ -3764,6 +3765,88 @@ async def test_run_attempt_deterministically_corrects_java_entrypoint_end_to_end
         ["javac", "App.java", "Protocol.java", "ProtocolParser.java"],
         ["java", "--add-opens=java.base/java.lang=ALL-UNNAMED", "App"],
     ]
+
+
+def test_ground_java_entrypoint_returns_none_when_no_real_entrypoint_exists():
+    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol
+    milestone 2/5): a pure library milestone (Protocol.java/ProtocolParser.java,
+    neither has a main() method) with no pom.xml - judge() decided should_run=True
+    anyway and hallucinated `java ProtocolParserTest`, a JUnit-style test class
+    name that was never generated. Zero real entrypoints among files_written means
+    ANY class name in a `java <SomeClass>` guess is provably fabricated, not
+    merely unverified - this must return None (a distinct signal from
+    "unchanged") so the caller can force should_run False instead of executing a
+    command known in advance to fail."""
+    result = ground_java_entrypoint_in_no_build_file_projects(
+        run_commands=[["javac", "Protocol.java", "ProtocolParser.java"], ["java", "ProtocolParserTest"]],
+        command_source="inferred",
+        files_written=["Protocol.java", "ProtocolParser.java"],
+        java_main_classes={},
+        jvm_module_flags=[],
+        build_file_content=None,
+    )
+    assert result is None
+
+
+def test_ground_java_entrypoint_leaves_non_run_commands_unchanged_when_no_real_entrypoint_exists():
+    """The None override only applies when the guessed commands actually try to
+    invoke `java <SomeClass>` - if judge() correctly proposed nothing runnable
+    (or only a compile check), there's no fabricated entrypoint to guard against."""
+    result = ground_java_entrypoint_in_no_build_file_projects(
+        run_commands=[["javac", "Protocol.java", "ProtocolParser.java"]],
+        command_source="inferred",
+        files_written=["Protocol.java", "ProtocolParser.java"],
+        java_main_classes={},
+        jvm_module_flags=[],
+        build_file_content=None,
+    )
+    assert result == [["javac", "Protocol.java", "ProtocolParser.java"]]
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_disables_run_verification_end_to_end_when_no_real_entrypoint_exists(tmp_path):
+    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol
+    milestone 2/5): confirms the None-override fires end-to-end through
+    run_attempt() itself (not just the pure ground_java_entrypoint_in_no_build_
+    file_projects() unit) - a milestone generating only library classes with no
+    main() method must never actually execute judge()'s hallucinated `java
+    ProtocolParserTest` command. Without this fix, the run loop burned 5 retry
+    attempts re-editing a file the Developer itself repeatedly said needed no
+    change, before finally corrupting it on attempt 8."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "Protocol.java", "content": "public class Protocol {\n    int version;\n}\n"},
+        {"filepath": "ProtocolParser.java", "content": "public class ProtocolParser {\n    static Protocol decode() { return null; }\n}\n"},
+    ])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["javac", "Protocol.java", "ProtocolParser.java"], ["java", "ProtocolParserTest"]],
+        "command_source": "inferred",
+        "success_criteria": "encode()/decode() round-trip correctly",
+    })
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        run_verifier=run_verifier,
+        architect_files=["Protocol.java", "ProtocolParser.java"],
+        expected_files_upfront=["Protocol.java", "ProtocolParser.java"],
+        architect_basename_to_path={"Protocol.java": "Protocol.java", "ProtocolParser.java": "ProtocolParser.java"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+    ) as mock_run_app_sequence:
+        await run_attempt(state, ctx)
+
+    mock_run_app_sequence.assert_not_called()
 
 
 @pytest.mark.asyncio

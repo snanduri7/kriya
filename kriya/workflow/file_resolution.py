@@ -474,13 +474,37 @@ def ground_java_entrypoint_in_no_build_file_projects(
       own exec:exec/exec:java/mainClass corrections; untouched).
     - command_source == "goal_explicit" - a goal-stated command is
       authoritative and must never be silently replaced.
-    - len(java_main_classes) != 1 - zero real entrypoints found (nothing to
-      run, or none of files_written has one) or more than one (a genuinely
-      ambiguous case, e.g. a later milestone adds a second entrypoint -
-      picking one would be a guess this function has no evidence to make
-      confidently; falls back to judge()'s own existing (already-hardened
-      with the "no Maven" prompt instruction and javac-prepend backstop)
-      reasoning instead).
+    - len(java_main_classes) > 1 - a genuinely ambiguous case, e.g. a later
+      milestone adds a second entrypoint - picking one would be a guess this
+      function has no evidence to make confidently; falls back to judge()'s
+      own existing (already-hardened with the "no Maven" prompt instruction
+      and javac-prepend backstop) reasoning instead.
+
+    Returns None - a distinct signal from "unchanged", meaning the caller
+    should force should_run to False rather than execute anything - when
+    len(java_main_classes) == 0 AND the guessed commands actually try to
+    invoke a `java <SomeClass>`: zero of files_written has a real main()
+    method, so ANY class name in that position is provably fabricated, not
+    merely unverified. Found live, 2026-08-22 (ignite_qpid_protocol
+    milestone 2/5, a pure Protocol/ProtocolParser library milestone with no
+    entrypoint at all): judge() decided should_run=True anyway and
+    hallucinated `java ProtocolParserTest` - a JUnit-style test class name
+    that was never generated (the goal never asked for a test file). The
+    existing "invalidate the cached judgment and re-infer" self-correction
+    (kriya/workflow/attempt.py, run_command_targets_missing_entrypoint) only
+    fires AFTER a failed execution, and even then re-guessed the identical
+    wrong class name on the next attempt - the model doesn't have new
+    evidence to guess differently with, so nothing forces it to converge.
+    Meanwhile the retry loop burned 5 attempts re-editing ProtocolParser.java
+    chasing this phantom failure (the Developer's own fix-analysis correctly
+    said each time "this file needs no change, the problem is the missing
+    test class" - but the loop kept retrying anyway), corrupting the file by
+    attempt 8. This is the SAME "don't trust an LLM's guess at a concrete
+    generated-artifact reference when Kriya can already compute ground truth
+    for it deterministically" principle the len==1 substitution below already
+    applies - extended to the symmetric zero-match case: substitute when
+    unambiguous, refuse-to-run when provably nonexistent, only ever fall back
+    to the model's own guess in the genuinely ambiguous middle (len > 1).
 
     When it DOES activate: compiles every .java file in files_written
     together (not just the entrypoint - a multi-file program needs its real
@@ -494,6 +518,10 @@ def ground_java_entrypoint_in_no_build_file_projects(
     library's skill documents as mandatory is required regardless of which
     arguments follow it."""
     if build_file_content or command_source == "goal_explicit":
+        return run_commands
+    if len(java_main_classes) == 0:
+        if any(cmd and cmd[0] == "java" for cmd in (run_commands or [])):
+            return None
         return run_commands
     if len(java_main_classes) != 1:
         return run_commands
