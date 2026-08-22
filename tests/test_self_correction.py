@@ -1,5 +1,5 @@
 import os
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -283,4 +283,240 @@ async def test_self_correction_read_file_and_list_files_scoped(tmp_path):
 
     list_result = result.transcript[1]["result"]
     assert "secret.env" not in list_result
-    assert "a.py" in list_result
+
+
+# --- The 4 "ground truth" tools added 2026-08-22 - close the gap where a fix
+# needs grounding in something that isn't any one file's content: an
+# external dependency's real API shape, or a real build-layout question. ---
+
+@pytest.mark.asyncio
+async def test_self_correction_list_dependencies_returns_real_declared_coordinates(tmp_path):
+    worktree_path = str(tmp_path)
+    _write(worktree_path, "pom.xml", (
+        "<project><dependencies>"
+        "<dependency><groupId>org.apache.ignite</groupId><artifactId>ignite-core</artifactId>"
+        "<version>2.18.0</version></dependency>"
+        "</dependencies></project>"
+    ))
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{"id": "1", "name": "list_dependencies", "arguments": {}}]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=["App.java"],
+        compile_error_output="err", active_code_context="",
+    )
+
+    assert "org.apache.ignite:ignite-core" in result.transcript[0]["result"]
+
+
+@pytest.mark.asyncio
+async def test_self_correction_inspect_class_resolves_a_workspace_class_by_simple_name(tmp_path):
+    worktree_path = str(tmp_path)
+    _write(worktree_path, "Protocol.java", "public class Protocol {\n  public Protocol() {}\n}\n")
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{
+            "id": "1", "name": "inspect_class", "arguments": {"fully_qualified_name": "com.example.Protocol"},
+        }]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=["Protocol.java"],
+        compile_error_output="err", active_code_context="",
+    )
+
+    assert "public Protocol()" in result.transcript[0]["result"]
+
+
+@pytest.mark.asyncio
+async def test_self_correction_inspect_class_resolves_an_external_dependency_via_javap(tmp_path):
+    """The actual gap this widening exists for: an external library's real
+    API is invisible to every workspace-file-based check in this codebase -
+    inspect_class is the one thing that can ground a fix against it."""
+    worktree_path = str(tmp_path)
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{
+            "id": "1", "name": "inspect_class", "arguments": {"fully_qualified_name": "org.apache.ignite.Ignition"},
+        }]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+    validator.inspect_external_class = MagicMock(
+        return_value="public class Ignition {\n  public static Ignite start(String);\n}"
+    )
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=["App.java"],
+        compile_error_output="err", active_code_context="",
+    )
+
+    assert "public static Ignite start" in result.transcript[0]["result"]
+    validator.inspect_external_class.assert_called_once_with("org.apache.ignite.Ignition")
+
+
+@pytest.mark.asyncio
+async def test_self_correction_inspect_class_reports_honest_not_found(tmp_path):
+    worktree_path = str(tmp_path)
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{
+            "id": "1", "name": "inspect_class", "arguments": {"fully_qualified_name": "com.nonexistent.Thing"},
+        }]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+    validator.inspect_external_class = MagicMock(return_value=None)
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=[],
+        compile_error_output="err", active_code_context="",
+    )
+
+    assert "could not be resolved" in result.transcript[0]["result"].lower()
+
+
+@pytest.mark.asyncio
+async def test_self_correction_inspect_class_lists_multiple_workspace_matches_instead_of_guessing(tmp_path):
+    worktree_path = str(tmp_path)
+    _write(worktree_path, "a/Protocol.java", "class Protocol {}")
+    _write(worktree_path, "b/Protocol.java", "class Protocol {}")
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{
+            "id": "1", "name": "inspect_class", "arguments": {"fully_qualified_name": "x.Protocol"},
+        }]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator,
+        files_in_scope=["a/Protocol.java", "b/Protocol.java"],
+        compile_error_output="err", active_code_context="",
+    )
+
+    text = result.transcript[0]["result"]
+    assert "a/Protocol.java" in text and "b/Protocol.java" in text
+    assert "multiple files" in text
+
+
+@pytest.mark.asyncio
+async def test_self_correction_resolve_missing_dependency_looks_up_a_real_coordinate(tmp_path):
+    worktree_path = str(tmp_path)
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{
+            "id": "1", "name": "resolve_missing_dependency",
+            "arguments": {"symbol": "org.apache.qpid.jms.JmsConnectionFactory"},
+        }]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+
+    with patch(
+        "kriya.workflow.self_correction.resolve_maven_class",
+        return_value={"groupId": "org.apache.qpid", "artifactId": "qpid-jms-client", "version": "1.9.0"},
+    ) as mock_resolve:
+        result = await run_self_correction_loop(
+            llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=[],
+            compile_error_output="err", active_code_context="",
+        )
+
+    assert "qpid-jms-client" in result.transcript[0]["result"]
+    mock_resolve.assert_called_with("org.apache.qpid.jms.JmsConnectionFactory", "fc")
+
+
+@pytest.mark.asyncio
+async def test_self_correction_resolve_missing_dependency_rejects_a_bare_simple_name(tmp_path):
+    """resolver.py's own docstring documents WHY a bare simple name is
+    actively harmful, not just unhelpful (two real live false-positive
+    incidents) - this tool must not let the model bypass that safeguard."""
+    worktree_path = str(tmp_path)
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{
+            "id": "1", "name": "resolve_missing_dependency", "arguments": {"symbol": "IgniteCache"},
+        }]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=[],
+        compile_error_output="err", active_code_context="",
+    )
+
+    assert "ERROR" in result.transcript[0]["result"]
+
+
+@pytest.mark.asyncio
+async def test_self_correction_list_compiled_output_reports_empty_build_honestly(tmp_path):
+    worktree_path = str(tmp_path)
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{"id": "1", "name": "list_compiled_output", "arguments": {}}]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=[],
+        compile_error_output="err", active_code_context="",
+    )
+
+    assert "nothing was actually compiled" in result.transcript[0]["result"]
+
+
+@pytest.mark.asyncio
+async def test_self_correction_list_compiled_output_lists_real_class_files(tmp_path):
+    worktree_path = str(tmp_path)
+    os.makedirs(os.path.join(worktree_path, "target", "classes"))
+    with open(os.path.join(worktree_path, "target", "classes", "App.class"), "wb") as fh:
+        fh.write(b"")
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{"id": "1", "name": "list_compiled_output", "arguments": {}}]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=[],
+        compile_error_output="err", active_code_context="",
+    )
+
+    assert "App.class" in result.transcript[0]["result"]
+
+
+@pytest.mark.asyncio
+async def test_self_correction_run_verification_failure_type_uses_recompile_not_a_full_rerun(tmp_path):
+    """failure_type="run_verification" (2026-08-22) fixes the INFRASTRUCTURE-
+    shaped cause of a runtime failure (wrong classpath, empty build output),
+    validated via the same recompile tool - it deliberately does NOT attempt
+    to re-run the generated application itself; actual behavior correctness
+    stays owned by attempt.py's own run-verification cycle on the next
+    attempt."""
+    worktree_path = str(tmp_path)
+    _write(worktree_path, "pom.xml", "<project></project>")
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{"id": "1", "name": "recompile", "arguments": {}}]},
+    ])
+    validator = MagicMock()
+    validator.run_compile_check = MagicMock(return_value={"success": True, "output": "compiled OK"})
+
+    result = await run_self_correction_loop(
+        llm=llm, worktree_path=worktree_path, validator=validator, files_in_scope=["App.java"],
+        compile_error_output="Could not find or load main class App", active_code_context="",
+        failure_type="run_verification",
+    )
+
+    assert result.resolved is True
+    validator.run_compile_check.assert_called_once_with(["App.java"])

@@ -136,14 +136,18 @@ class AutonomyConfig(BaseModel):
     web_lookup_auto_approve: bool = Field(default=False)
     # Off by default for the same reason as web_lookup_enabled above: this activates
     # a genuinely new capability (the Developer's own model gets a bounded native
-    # tool-calling loop against the sandbox worktree on a compile failure, before
-    # falling back to today's full-regeneration retry) rather than tuning an existing
-    # one. Native tool-calling is confirmed reliable only for SMALL tool-call
-    # arguments on local models (spikes/tool_call_developer/README.md) - the loop's
-    # toolset (kriya/workflow/self_correction.py) is deliberately restricted to
-    # small-argument-only actions on files already in the sandbox, never full file
-    # content and never a new file, so this stays a narrow, additive recovery path,
-    # not a parallel generation architecture.
+    # tool-calling loop against the sandbox worktree on a compile OR run-verification
+    # failure, before falling back to today's full-regeneration retry) rather than
+    # tuning an existing one. Native tool-calling is confirmed reliable only for
+    # SMALL tool-call arguments on local models (spikes/tool_call_developer/README.md)
+    # - the loop's toolset (kriya/workflow/self_correction.py) is deliberately
+    # restricted to small-argument-only actions (including, since 2026-08-22, 4
+    # read-only "ground truth" lookups - a project's real declared dependencies, an
+    # external dependency's real public API via javap against the resolved
+    # classpath, a Maven Central coordinate lookup, and a real compiled-output
+    # listing - closing the gap where a fix needs grounding in something that isn't
+    # any one file's content), never full file content and never a new file, so this
+    # stays a narrow, additive recovery path, not a parallel generation architecture.
     self_correction_loop_enabled: bool = Field(default=False)
     self_correction_loop_max_turns: int = Field(default=4)
     # Default 1 = today's exact behavior (a single first attempt, unchanged). A value

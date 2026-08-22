@@ -2390,6 +2390,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         )
                         state.cached_run_verification_judgment = None
                     gate_type = "run_verification"
+                    # Set unconditionally (only ever reassigned in the "plain
+                    # nonzero exit, no hang" branch below - see its own
+                    # comment for why the other two branches are deliberately
+                    # NOT self-corrected) so the shared failure-raising block
+                    # further down can attach it to the Failure regardless of
+                    # which branch actually ran, mirroring the compile gate's
+                    # own self_correction_attempt pattern above.
+                    self_correction_result = None
                     if run_res["timed_out"]:
                         # _run_cmd_with_timeout still reaps and captures whatever
                         # stdout/stderr the process produced before being killed (see
@@ -2493,6 +2501,95 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 returncode=run_res["returncode"],
                                 files_written=list(state.all_files_written),
                             )
+
+                        # Bounded self-correction, widened 2026-08-22 from
+                        # compile-only to also cover THIS specific run-
+                        # verification shape - found live (ignite_qpid_protocol):
+                        # a plain nonzero exit with no hang ("Could not find or
+                        # load main class App") is very often an
+                        # infrastructure/classpath/build-layout problem, not
+                        # application logic - exactly the class of thing
+                        # inspect_class/list_dependencies/list_compiled_output
+                        # (kriya/workflow/self_correction.py) exist to ground a
+                        # fix in, instead of the Developer chasing phantom
+                        # import/package theories across several full-set
+                        # retries (5+ attempts, observed live). Deliberately
+                        # NOT applied to the timed-out branch (a hang is a
+                        # resource-lifecycle bug in application logic, not
+                        # something inspect_class/list_dependencies can help
+                        # diagnose) or the clean-run branch (exit 0 but wrong
+                        # output is almost always an application-logic defect
+                        # too) - see run_self_correction_loop()'s own
+                        # docstring for the same scoping rationale.
+                        if not grade["passed"] and ctx.kernel.config.autonomy.self_correction_loop_enabled:
+                            from kriya.workflow.self_correction import run_self_correction_loop
+                            logger.info(
+                                "Runtime verification failed with a plain nonzero exit (no hang) - "
+                                "attempting bounded self-correction micro-loop before raising "
+                                "QualityGateFailure."
+                            )
+                            run_verification_known_files = sorted(
+                                set(state.all_files_written) | set(ctx.established_files)
+                            )
+                            self_correction_result = await run_self_correction_loop(
+                                llm=ctx.developer.llm,
+                                worktree_path=ctx.worktree_path,
+                                validator=validator,
+                                files_in_scope=run_verification_known_files,
+                                compile_error_output=(
+                                    f"RUNTIME VERIFICATION FAILURE (plain nonzero exit): {grade['reasoning']}"
+                                    f"\n\nCaptured output:\n{run_res['output']}"
+                                ),
+                                active_code_context=active_code_context,
+                                max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                                failure_type="run_verification",
+                            )
+                            for incident in getattr(self_correction_result, "incidents", []):
+                                state.record_event(RunEvent(
+                                    kind="auxiliary.failed",
+                                    attempt=state.attempt_number,
+                                    source=incident["source"],
+                                    authority=EventAuthority.AUXILIARY,
+                                    message=incident["message"],
+                                    failure_type=incident["type"],
+                                    operation="repair_run_verification",
+                                ))
+                            if self_correction_result.resolved:
+                                # Self-correction only ever validates via
+                                # recompile (did the INFRASTRUCTURE issue get
+                                # fixed) - it never re-runs the generated
+                                # application itself (see the module's own
+                                # docstring). Re-run the real run-verification
+                                # sequence exactly once here to confirm actual
+                                # behavior, reassigning run_res/grade/
+                                # contract_verdict so the SHARED pass/fail
+                                # handling below (and the success bookkeeping
+                                # further down, reached only when grade
+                                # ["passed"] is True) needs no duplication.
+                                logger.info(
+                                    "Self-correction micro-loop resolved the run-verification "
+                                    f"infrastructure issue in {self_correction_result.turns_used} "
+                                    "turn(s) - re-running the actual application to confirm."
+                                )
+                                pre_run_untracked_after_repair = snapshot_untracked_files(ctx.worktree_path)
+                                run_res = validator.run_app_sequence(
+                                    resolved_run_commands,
+                                    timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                                )
+                                clean_untracked_files_since(ctx.worktree_path, pre_run_untracked_after_repair)
+                                contract_verdict = _extract_grounded_contract_verdict(
+                                    run_res["output"], ctx.worktree_path, list(state.all_files_written),
+                                )
+                                if contract_verdict is not None:
+                                    grade = contract_verdict
+                                else:
+                                    grade = await ctx.run_verifier.grade(
+                                        goal=ctx.goal,
+                                        success_criteria=judgment["success_criteria"],
+                                        output=run_res["output"],
+                                        returncode=run_res["returncode"],
+                                        files_written=list(state.all_files_written),
+                                    )
                     else:
                         contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
                         if contract_verdict is not None:
@@ -2544,22 +2641,51 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             ctx.worktree_path, state.all_files_written, state.attempt_number,
                             extra_likely_files=grade.get("likely_files") or [],
                         )
+                        if self_correction_result is not None:
+                            # The loop ran (only ever possible from the plain-
+                            # nonzero-exit branch above) but didn't leave the
+                            # gate passing - either it never resolved, or it
+                            # resolved the infrastructure issue but the
+                            # re-run still failed for a genuine application-
+                            # logic reason. Persist what it tried either way,
+                            # same forensics reasoning as the compile gate's
+                            # identical pattern above.
+                            failure.self_correction_attempt = {
+                                "turns_used": self_correction_result.turns_used,
+                                "transcript": self_correction_result.transcript,
+                                "final_compile_output": self_correction_result.final_compile_output,
+                            }
                         state.gate_outcomes.append(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
-                    state.gate_outcomes.append({
+                    run_verification_outcome = {
                         "attempt": state.attempt_number,
                         "type": "run_verification",
                         "success": True,
                         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
-                        # Only reachable via the clean-run branch above (the timed-out
-                        # branch always forces grade["passed"] = False, so it can never
-                        # reach here) - contract_verdict is guaranteed in scope. Makes
-                        # deterministic-contract-vs-LLM-grader compliance queryable
-                        # directly from traces.db instead of grepping raw stdout logs by
-                        # hand, which is what diagnosing the underlying reliability gap
-                        # required this session, repeatedly.
+                        # Reachable via the clean-run branch above, or (since
+                        # 2026-08-22) the plain-nonzero-exit branch's own
+                        # self-correction re-verification - the timed-out
+                        # branch always forces grade["passed"] = False, so it
+                        # can never reach here - contract_verdict is
+                        # guaranteed in scope either way. Makes deterministic-
+                        # contract-vs-LLM-grader compliance queryable directly
+                        # from traces.db instead of grepping raw stdout logs
+                        # by hand, which is what diagnosing the underlying
+                        # reliability gap required this session, repeatedly.
                         "graded_by": "contract" if contract_verdict is not None else "llm",
-                    })
+                    }
+                    if self_correction_result is not None and self_correction_result.resolved:
+                        # Same markers the compile gate's own self-correction
+                        # success path already records - lets Pillar 3's
+                        # lesson-extraction trigger (kriya/workflow/workflow.py)
+                        # find this outcome and feed the real transcript
+                        # (diagnosis + before/after + verification) into
+                        # LiveFailureChannel.extract() as richer evidence than
+                        # bare error_context/file_contents.
+                        run_verification_outcome["self_corrected"] = True
+                        run_verification_outcome["self_correction_turns"] = self_correction_result.turns_used
+                        run_verification_outcome["self_correction_transcript"] = self_correction_result.transcript
+                    state.gate_outcomes.append(run_verification_outcome)
                     logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
                     # A passing real-world run is exactly the proof the
                     # skill-verification gap check is looking for - mark every

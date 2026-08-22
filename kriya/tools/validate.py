@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -323,6 +324,76 @@ class PolymorphicValidator:
         except Exception as e:
             logger.warning(f"Failed to invoke mvn validate: {e}")
             return {"success": True, "output": f"mvn validate could not be run ({e}) - skipped, not confirmed valid."}
+
+    def resolve_maven_classpath(self) -> Optional[str]:
+        """Resolves the REAL, full Maven classpath (including transitive
+        dependencies - pom.xml's own <dependency> entries only ever list
+        DIRECT ones, which is not enough to reliably locate a class that
+        arrives transitively, e.g. through ignite-core's own dependency
+        graph) via `mvn dependency:build-classpath`, writing the result to a
+        temp file rather than parsing stdout - build-classpath's own stdout
+        is full of noisy [INFO] lines around the actual classpath string,
+        while `-Dmdep.outputFile=...` is the standard, parse-free way this
+        goal is meant to be consumed programmatically. Ground truth for
+        inspect_external_class() below - deliberately a separate method
+        (not folded into it) since a future caller may want the raw
+        classpath string for something other than a single javap lookup.
+        Returns None on any failure (no pom.xml, mvn not on PATH,
+        unresolvable dependencies, timeout) - never raises, since this is
+        used from an optional recovery tool call, not a Quality Gate."""
+        if self.stack != "java" or not os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
+            return None
+        fd, cp_file = tempfile.mkstemp(suffix=".kriya-classpath.txt")
+        os.close(fd)
+        try:
+            res = self._run_cmd_with_timeout(
+                ["mvn", "-q", "dependency:build-classpath", f"-Dmdep.outputFile={cp_file}"],
+                cwd=self.workspace_path, timeout=120,
+            )
+            if res["returncode"] != 0:
+                return None
+            with open(cp_file, "r", encoding="utf-8", errors="replace") as fh:
+                classpath = fh.read().strip()
+            return classpath or None
+        except Exception as e:
+            logger.debug(f"Failed to resolve Maven classpath: {e}")
+            return None
+        finally:
+            try:
+                os.unlink(cp_file)
+            except OSError:
+                pass
+
+    def inspect_external_class(self, fully_qualified_class_name: str) -> Optional[str]:
+        """Deterministic ground truth for an external dependency's REAL
+        public API surface, instead of trusting the model's own (possibly
+        hallucinated) memory of a third-party library's method/constructor
+        signatures - the gap that let a package-mismatch/build-layout guess
+        go uncorrected earlier this same investigation, just one level up
+        the stack: an external class is invisible to DependencyGraph/
+        RepositoryAnalyzer entirely (they only ever index files physically
+        inside the workspace), so no amount of workspace-local static
+        analysis can ever reach it. `javap -public` against the real,
+        resolved classpath returns only the public method/constructor
+        signatures (small, structured output) - not a full decompile, same
+        "small-argument-out" property read_file already has for workspace
+        source. Returns None if the classpath can't be resolved or the
+        class genuinely isn't found on it - the caller reports an honest
+        "not found" to the model, never fabricates a shape."""
+        classpath = self.resolve_maven_classpath()
+        if not classpath:
+            return None
+        try:
+            res = self._run_cmd_with_timeout(
+                ["javap", "-public", "-classpath", classpath, fully_qualified_class_name],
+                cwd=self.workspace_path, timeout=30,
+            )
+            if res["returncode"] != 0:
+                return None
+            return res["stdout"].strip() or None
+        except Exception as e:
+            logger.debug(f"Failed to inspect external class '{fully_qualified_class_name}': {e}")
+            return None
 
     def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
         """Runs language-specific compilation check on changed files."""

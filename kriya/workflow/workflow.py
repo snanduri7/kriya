@@ -1800,10 +1800,25 @@ class WorkflowEngine:
                 # bar for two DISCARDED independent candidates, not just two full-set
                 # retries within one candidate - equally real signal, just reset out of
                 # retry_count between candidates (see kriya/workflow/best_of_n.py).
+                # A resolved self-correction micro-loop (kriya/workflow/self_correction.py)
+                # is added 2026-08-22 as its own, independent trigger, alongside the
+                # existing fallback-model-escalation/multi-retry ones above - it happens
+                # within a single attempt (touches neither last_model_override nor
+                # retry_count), so without this it was completely invisible to lesson
+                # extraction despite producing the richest evidence this pipeline
+                # generates all day (explicit tool-grounded diagnosis, a real before/
+                # after edit, a real verification call). This is the actual mechanism
+                # meant to close the gap between "an incident got tool-corrected" and
+                # "a future generation is warned about it" without a human needing to
+                # notice the pattern recurring and hand-write a deterministic check.
+                self_corrected_outcome = next(
+                    (o for o in state.gate_outcomes if o.get("self_corrected")), None,
+                )
                 if (
                     state.last_model_override
                     or state.budgets.retry_count >= 2
                     or state.budgets.best_of_n_candidates_tried >= 2
+                    or self_corrected_outcome is not None
                 ):
                     try:
                         logger.info("A hard-won fix resolved the issue - extracting structured knowledge facts...")
@@ -1826,6 +1841,10 @@ class WorkflowEngine:
                             model_override=state.last_model_override,
                             base_url_override=state.last_base_url_override,
                             api_key_override=state.last_api_key_override,
+                            transcript=(
+                                self_corrected_outcome.get("self_correction_transcript")
+                                if self_corrected_outcome is not None else None
+                            ),
                         ))
                         if facts:
                             skills_dir = self.kernel.config.paths.skills

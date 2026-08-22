@@ -1,8 +1,9 @@
-"""Bounded, tool-using recovery loop for a compile-gate failure - the one
-place in the Developer + Quality Gates cycle (kriya/workflow/attempt.py)
-where the model gets a chance to diagnose and fix its own mistake using live
-tool feedback (a real compile error, real file content) before the attempt
-gives up and falls back to a full regeneration on the next attempt.
+"""Bounded, tool-using recovery loop for a compile-gate (or, since
+2026-08-22, run-verification) failure - the one place in the Developer +
+Quality Gates cycle (kriya/workflow/attempt.py) where the model gets a
+chance to diagnose and fix its own mistake using live tool feedback (a real
+compile error, real file content, real dependency/classpath ground truth)
+before the attempt gives up and falls back to a full regeneration.
 
 Deliberately narrow, built on a specific, live-tested boundary (see
 spikes/tool_call_developer/README.md): native tool-calling on local models
@@ -13,8 +14,20 @@ materialization stays exactly where it already lived: apply_anchored_edits()
 (kriya/workflow/edit_safety.py), reused here unmodified, the same mechanical
 step attempt.py's own normal edit path already goes through.
 
+Widened 2026-08-22 from 4 source-editing tools to 8: the original 4
+(read_file/list_files/apply_patch/recompile) can only ever ground a fix in
+files physically inside the workspace - structurally unable to help with a
+mismatch against an EXTERNAL dependency's real API shape, or a build-layout
+question that isn't really about any one file's content at all. Rather than
+hand-writing another one-off deterministic Python function per newly
+discovered ground-truth gap (unbounded - the whole reason this widening
+exists), the new tools (list_dependencies, inspect_class,
+resolve_missing_dependency, list_compiled_output) give the model a way to
+check ANY such gap against reality itself, generalizing rather than
+enumerating.
+
 Opt-in via autonomy.self_correction_loop_enabled (default False) - this
-module is only ever imported when the flag is on (see the call site in
+module is only ever imported when the flag is on (see the call sites in
 attempt.py), so it costs nothing when disabled."""
 import logging
 import os
@@ -22,7 +35,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from kriya.core.llm import LLMClient
-from kriya.tools.validate import PolymorphicValidator
+from kriya.tools.resolver import resolve_maven_class
+from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies
 from kriya.workflow.edit_safety import (
     FileRevisionConflict, apply_anchored_edits, commit_revision_grounded_file,
     content_revision,
@@ -41,6 +55,10 @@ def _repair_system_prompt(failure_label: str, validation_tool_name: str) -> str:
     "enough surrounding text in 'search' to match exactly once.\n"
     "- You can only read/patch files already listed as being in the sandbox - "
     "you cannot create new files here.\n"
+    "- Never guess a class's package, constructor, or method signature, and "
+    "never invent a dependency coordinate from memory - use inspect_class, "
+    "list_dependencies, and resolve_missing_dependency to check the REAL "
+    "ground truth first.\n"
     f"- After applying a patch, call {validation_tool_name} to check whether it actually "
     f"fixed the failure. Do not assume a patch worked without {validation_tool_name}.\n"
     f"- If {validation_tool_name} succeeds, stop calling tools and reply with a short plain-"
@@ -137,6 +155,86 @@ RECOMPILE_TOOL = {
             "Re-run the project's compile check against the current sandbox "
             "state. Call this after applying a patch to see if the fix worked. "
             "Takes no arguments."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+LIST_DEPENDENCIES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_dependencies",
+        "description": (
+            "List this project's directly declared dependencies (from pom.xml), "
+            "as 'groupId:artifactId' pairs. Use this to check whether something "
+            "is already a declared dependency before assuming it needs to be "
+            "added, or before guessing at an external class's real package."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+INSPECT_CLASS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "inspect_class",
+        "description": (
+            "Look up the REAL, ground-truth shape of a class by its fully-"
+            "qualified name (e.g. 'com.example.Protocol' or "
+            "'org.apache.ignite.Ignition') - not a guess from memory. If it's "
+            "a class already written in this sandbox, returns its real "
+            "source. If it's an external dependency, returns its real public "
+            "method/constructor signatures (via the actually-resolved Maven "
+            "classpath). Use this BEFORE assuming a class's package, "
+            "constructor signature, or method names."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fully_qualified_name": {
+                    "type": "string",
+                    "description": "e.g. 'com.example.Protocol' or 'org.apache.ignite.Ignition'.",
+                }
+            },
+            "required": ["fully_qualified_name"],
+        },
+    },
+}
+
+RESOLVE_MISSING_DEPENDENCY_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "resolve_missing_dependency",
+        "description": (
+            "Search Maven Central for the real groupId/artifactId/version "
+            "coordinate of a fully-qualified class or package that appears to "
+            "be genuinely missing (not already declared - check "
+            "list_dependencies first - and not found by inspect_class). Use "
+            "this before inventing a coordinate from memory."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "A fully-qualified class or package name, e.g. 'org.apache.qpid.jms.JmsConnectionFactory'.",
+                }
+            },
+            "required": ["symbol"],
+        },
+    },
+}
+
+LIST_COMPILED_OUTPUT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_compiled_output",
+        "description": (
+            "List the real .class files actually produced by the last "
+            "compile, under target/classes. An empty result after a "
+            "'successful' compile means nothing was actually compiled - "
+            "usually a build-layout problem (e.g. source files outside the "
+            "configured sourceDirectory), not a code defect."
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
@@ -242,6 +340,71 @@ def _dispatch_tool_call(
         matches = sorted(f for f in known_files if substring in f)
         return "\n".join(matches) if matches else "(no files match)"
 
+    if name == "list_dependencies":
+        deps = get_pom_dependencies(os.path.join(worktree_path, "pom.xml"))
+        return "\n".join(deps) if deps else "(no pom.xml, or no dependencies declared)"
+
+    if name == "inspect_class":
+        fqcn = args.get("fully_qualified_name")
+        if not fqcn:
+            return "ERROR: inspect_class requires 'fully_qualified_name'."
+        simple_name = fqcn.rsplit(".", 1)[-1]
+        workspace_matches = sorted(
+            f for f in known_files
+            if f.endswith(".java") and f.rsplit("/", 1)[-1] == f"{simple_name}.java"
+        )
+        if len(workspace_matches) == 1:
+            return _dispatch_tool_call(
+                {"name": "read_file", "arguments": {"filepath": workspace_matches[0]}},
+                worktree_path, validator, files_in_scope, active_code_context,
+                modified_files, read_files, observed_revisions, validation_tool_name, target_test,
+            )
+        if len(workspace_matches) > 1:
+            return (
+                f"'{simple_name}' matches multiple files already in this sandbox: "
+                f"{', '.join(workspace_matches)} - use read_file with the exact path you mean."
+            )
+        external_api = validator.inspect_external_class(fqcn)
+        if external_api:
+            return external_api
+        return (
+            f"'{fqcn}' is not a file in this sandbox, and its real shape could not be resolved "
+            "from the project's dependencies (is it declared and does the project's classpath "
+            "actually resolve? try list_dependencies or resolve_missing_dependency)."
+        )
+
+    if name == "resolve_missing_dependency":
+        symbol = args.get("symbol")
+        if not symbol or "." not in symbol:
+            return (
+                "ERROR: resolve_missing_dependency requires a fully-qualified class or package "
+                "name (containing a '.'), not a bare simple name - a bare name matches too many "
+                "unrelated libraries to be useful."
+            )
+        last_segment = symbol.rsplit(".", 1)[-1]
+        query_type = "fc" if last_segment[:1].isupper() else "g"
+        coord = resolve_maven_class(symbol, query_type)
+        if not coord and query_type == "fc":
+            coord = resolve_maven_class(symbol, "g")
+        if not coord:
+            return f"No Maven Central match found for '{symbol}'."
+        return (
+            f"'{symbol}' -> {coord['groupId']}:{coord['artifactId']}:{coord['version']}\n"
+            f"<dependency>\n    <groupId>{coord['groupId']}</groupId>\n"
+            f"    <artifactId>{coord['artifactId']}</artifactId>\n"
+            f"    <version>{coord['version']}</version>\n</dependency>"
+        )
+
+    if name == "list_compiled_output":
+        classes_dir = os.path.join(worktree_path, "target", "classes")
+        compiled = []
+        if os.path.isdir(classes_dir):
+            for dirpath, _dirnames, filenames in os.walk(classes_dir):
+                for fn in filenames:
+                    if fn.endswith(".class"):
+                        compiled.append(os.path.relpath(os.path.join(dirpath, fn), classes_dir))
+        return "\n".join(sorted(compiled)) if compiled else "(target/classes is empty or doesn't exist - nothing was actually compiled)"
+
     if name == "apply_patch":
         filepath = args.get("filepath")
         edits = args.get("edits")
@@ -341,17 +504,45 @@ async def run_self_correction_loop(
     target_test: Optional[str] = None,
 ) -> SelfCorrectionResult:
     """Runs up to max_turns of native tool-calling against the given llm,
-    trying to fix a real compile failure using the 4 small-argument tools
-    above. Returns resolved=True the moment a recompile() call reports
-    SUCCESS; returns resolved=False if the budget runs out or the model stops
-    calling tools without ever getting a passing recompile - either way, the
-    caller (kriya/workflow/attempt.py) treats this exactly the same as if the
-    loop had never run, falling through to the existing QualityGateFailure
-    path."""
+    trying to fix a real failure using small-argument tools: the original 4
+    (read_file/list_files/apply_patch/recompile-or-retest) plus, since
+    2026-08-22, 4 read-only "ground truth" tools (list_dependencies,
+    inspect_class, resolve_missing_dependency, list_compiled_output) that
+    close a structural gap none of the original 4 could reach: an external
+    dependency's real API shape, or a real build-layout question (did
+    anything actually get compiled, and where) - see each tool's own
+    description for why. Returns resolved=True the moment a
+    recompile()/retest() call reports SUCCESS; returns resolved=False if the
+    budget runs out or the model stops calling tools without ever getting a
+    passing check - either way, the caller (kriya/workflow/attempt.py) treats
+    this exactly the same as if the loop had never run, falling through to
+    the existing QualityGateFailure path.
+
+    failure_type widens what "the failure" means beyond a plain compile
+    error: "run_verification" is for the class of bug found live 2026-08-22
+    (ignite_qpid_protocol) - a compile gate that reported success while
+    build-layout was actually broken (Maven's sourceDirectory not covering
+    real source files), only surfacing downstream as a confusing runtime
+    "Could not find or load main class". For this failure_type, the
+    validation tool is still `recompile` (unchanged - PolymorphicValidator's
+    own false-positive safety net, added the same day, means a real compile
+    now honestly reflects whether anything actually got built), NOT a full
+    re-run of the generated application - actual runtime BEHAVIOR
+    correctness stays owned by attempt.py's own run-verification cycle on
+    the next attempt, this loop only fixes the INFRASTRUCTURE-shaped cause
+    (wrong classpath, missing class, wrong sourceDirectory) that made the
+    run fail for a reason that was never really about application logic."""
     validation_tool_name = "retest" if target_test else "recompile"
-    failure_label = "targeted test failure" if target_test else "compile failure"
+    if target_test:
+        failure_label = "targeted test failure"
+    elif failure_type == "run_verification":
+        failure_label = "runtime verification failure (likely a build-layout or classpath problem, not application logic)"
+    else:
+        failure_label = "compile failure"
     tools = [
         READ_FILE_TOOL, LIST_FILES_TOOL, APPLY_PATCH_TOOL,
+        LIST_DEPENDENCIES_TOOL, INSPECT_CLASS_TOOL, RESOLVE_MISSING_DEPENDENCY_TOOL,
+        LIST_COMPILED_OUTPUT_TOOL,
         _validation_tool(
             validation_tool_name,
             "Re-run only the failing targeted test after a patch."

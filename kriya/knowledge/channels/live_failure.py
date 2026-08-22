@@ -11,7 +11,7 @@ once the caller has already decided a genuinely hard-won lesson is worth extract
 """
 import json
 import logging
-from typing import Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from kriya.core.llm import LLMClient
 from kriya.knowledge.channels.base import KnowledgeChannel
@@ -26,6 +26,16 @@ class LiveFailureContext(NamedTuple):
     model_override: Optional[str] = None
     base_url_override: Optional[str] = None
     api_key_override: Optional[str] = None
+    # Self-correction's own tool-call transcript (kriya/workflow/self_correction.py's
+    # SelfCorrectionResult.transcript - list of {"turn", "tool", "arguments", "result"}),
+    # when this resolution came from that loop rather than a fallback-model
+    # escalation or multi-retry convergence. Added 2026-08-22: a resolved
+    # self-correction is the richest evidence this pipeline produces all
+    # day - explicit tool-grounded diagnosis, a real before/after edit, a
+    # real verification call - strictly more informative than reconstructing
+    # a lesson from bare error_context/file_contents alone. None (the
+    # default) keeps every existing caller's behavior unchanged.
+    transcript: Optional[List[Dict[str, Any]]] = None
 
 
 def _strip_fences(text: str) -> str:
@@ -76,6 +86,14 @@ class LiveFailureChannel(KnowledgeChannel):
             else "compilation/test"
         )
         prompt = f"A {error_kind} error occurred:\n{context.error_context}\n\n"
+        if context.transcript:
+            prompt += (
+                "It was resolved by a tool-assisted diagnosis loop - here is exactly what it "
+                "checked and did, in order (this is real, grounded evidence, not a guess):\n"
+            )
+            for step in context.transcript:
+                prompt += f"- called {step.get('tool')}({step.get('arguments')}) -> {step.get('result')}\n"
+            prompt += "\n"
         prompt += "The files were successfully fixed with this final content:\n"
         for filepath, content in context.file_contents.items():
             prompt += f"=== File: {filepath} ===\n{content}\n"

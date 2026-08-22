@@ -726,6 +726,74 @@ def test_ruby_run_tests_skips_bundle_install_without_a_gemfile(tmp_path):
     assert mock_popen.call_args_list[0].args[0][:3] == ["bundle", "exec", "rspec"]
 
 
+def test_resolve_maven_classpath_writes_and_reads_the_output_file(tmp_path):
+    """resolve_maven_classpath() must consume dependency:build-classpath via
+    -Dmdep.outputFile, not stdout (which is full of noisy [INFO] lines around
+    the actual classpath string) - simulates the real subprocess side effect
+    (writing to the output file) since subprocess.Popen itself is mocked."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    def fake_run(cmd, cwd, timeout=300):
+        output_flag = next(a for a in cmd if a.startswith("-Dmdep.outputFile="))
+        output_file = output_flag.split("=", 1)[1]
+        with open(output_file, "w") as fh:
+            fh.write("/home/user/.m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar\n")
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    with patch.object(validator, "_run_cmd_with_timeout", side_effect=fake_run):
+        classpath = validator.resolve_maven_classpath()
+
+    assert classpath == "/home/user/.m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar"
+
+
+def test_resolve_maven_classpath_returns_none_without_pom(tmp_path):
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.resolve_maven_classpath() is None
+
+
+def test_resolve_maven_classpath_returns_none_on_resolution_failure(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch.object(
+        validator, "_run_cmd_with_timeout",
+        return_value={"returncode": 1, "stdout": "", "stderr": "unresolvable dependency"},
+    ):
+        assert validator.resolve_maven_classpath() is None
+
+
+def test_inspect_external_class_returns_public_api_via_javap(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch.object(validator, "resolve_maven_classpath", return_value="/fake/ignite-core.jar"), \
+         patch.object(
+             validator, "_run_cmd_with_timeout",
+             return_value={"returncode": 0, "stdout": "public class Ignition {\n  public static Ignite start(String);\n}", "stderr": ""},
+         ) as mock_run:
+        result = validator.inspect_external_class("org.apache.ignite.Ignition")
+
+    assert result == "public class Ignition {\n  public static Ignite start(String);\n}"
+    invoked_cmd = mock_run.call_args.args[0]
+    assert invoked_cmd == ["javap", "-public", "-classpath", "/fake/ignite-core.jar", "org.apache.ignite.Ignition"]
+
+
+def test_inspect_external_class_returns_none_when_classpath_unresolvable(tmp_path):
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch.object(validator, "resolve_maven_classpath", return_value=None):
+        assert validator.inspect_external_class("org.apache.ignite.Ignition") is None
+
+
+def test_inspect_external_class_returns_none_when_class_not_on_classpath(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch.object(validator, "resolve_maven_classpath", return_value="/fake/ignite-core.jar"), \
+         patch.object(
+             validator, "_run_cmd_with_timeout",
+             return_value={"returncode": 1, "stdout": "", "stderr": "Error: class not found"},
+         ):
+        assert validator.inspect_external_class("com.nonexistent.Thing") is None
+
+
 def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
     """javac's default one-line "uses unchecked or unsafe operations" summary
     carries no file:line location at all - useless for pointing a retry at the

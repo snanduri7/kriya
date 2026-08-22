@@ -3270,6 +3270,98 @@ async def test_workflow_verification_contract_marker_used_on_plain_nonzero_exit(
     we.run_verifier.grade.assert_not_called()
     assert res["quality_gates_passed"] is False
 
+
+@pytest.mark.asyncio
+async def test_workflow_self_correction_resolves_run_verification_infrastructure_failure(tmp_path):
+    """End-to-end regression test for the real live incident, 2026-08-22
+    (ignite_qpid_protocol milestone 3/4): a Maven project's sourceDirectory
+    didn't cover its actual .java files, so `mvn clean compile` silently
+    "succeeded" on zero source files and the real failure only surfaced at
+    runtime as "Could not find or load main class App" - a plain nonzero
+    exit, no hang. Confirms the WIDENED self-correction loop (2026-08-22,
+    kriya/workflow/self_correction.py) can resolve this generic
+    infrastructure-shaped run-verification failure and that attempt.py
+    correctly re-runs the real application afterward to confirm - the
+    general mechanism this session's architecture pivot exists for,
+    independent of the specific deterministic
+    ensure_maven_covers_nonconventional_java_files() fix built the same
+    day."""
+    cfg = AppConfig()
+    cfg.autonomy.self_correction_loop_enabled = True
+    cfg.autonomy.mode = "guardrails"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write pom.xml and App.java",
+        # Pillar 3 (2026-08-22): a resolved self-correction now also triggers
+        # lesson extraction (kriya/workflow/workflow.py), which calls
+        # self.llm.complete() BEFORE the Reviewer's own call below - this
+        # slot is that extraction call, not the Reviewer's.
+        "[]",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "pom.xml", "content": "<project><build><plugins></plugins></build></project>"},
+        {"filepath": "App.java", "content": "public class App { public static void main(String[] a) {} }"},
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["mvn", "exec:exec"]],
+        "command_source": "inferred",
+        "success_criteria": "Prints a [VERIFICATION] verdict line",
+    })
+    # side_effect, not return_value: the FIRST grade() call is the original
+    # failure; the SECOND is attempt.py's own re-verification after
+    # self-correction resolves the infrastructure issue, deliberately not
+    # relying on the deterministic verification-contract marker here (that
+    # marker has its own, separate groundedness check - see
+    # pass_verdict_is_grounded() - orthogonal to what this test verifies).
+    we.run_verifier.grade = AsyncMock(side_effect=[
+        {"passed": False, "reasoning": "no evidence of success", "likely_files": []},
+        {"passed": True, "reasoning": "Ignite node started and verified the Protocol object", "likely_files": []},
+    ])
+
+    mock_self_correction_result = MagicMock(
+        resolved=True, turns_used=2, transcript=[{"tool": "apply_patch"}],
+        final_compile_output="Maven compilation succeeded.", incidents=[],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_pom_validate",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        side_effect=[
+            {"success": False, "timed_out": False, "returncode": 1,
+             "output": "Error: Could not find or load main class App"},
+            {"success": True, "timed_out": False, "returncode": 0, "output": "Ignite node started."},
+        ],
+    ), patch(
+        "kriya.workflow.self_correction.run_self_correction_loop",
+        AsyncMock(return_value=mock_self_correction_result),
+    ) as mock_self_correction:
+        res = await we.run_generation_workflow(
+            goal="Start an embedded Ignite node and verify", workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    mock_self_correction.assert_called_once()
+    assert mock_self_correction.call_args.kwargs["failure_type"] == "run_verification"
+    assert we.run_verifier.grade.call_count == 2
+    # Pillar 3: a resolved self-correction (with neither a fallback-model
+    # escalation nor 2+ full-set retries - this resolved within attempt 1)
+    # must still trigger lesson extraction on its own.
+    assert llm.complete.call_count == 4
+
+
 def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
     """Builds an AttemptContext with sensible fake/mocked defaults for testing
     run_attempt() in true isolation - no WorkflowEngine, no Planner/Architect/
