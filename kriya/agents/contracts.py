@@ -26,9 +26,12 @@ import json
 import logging
 import os
 import re
+from enum import Enum
 from typing import List, Optional, Tuple
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
+
+from kriya.workflow.triage import ChangeKind
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +212,109 @@ class MilestoneList(BaseModel):
                 "behavior) rather than genuine complexity - re-slice into fewer, "
                 "larger vertical-slice milestones"
             )
+        return v
+
+
+class MilestoneMode(str, Enum):
+    """How a milestone relates to what earlier milestones already built - see
+    kriya/workflow/milestone_validation.py (MA3.3+) for the semantics this
+    drives: EXTENSION means "evolves the same application" (the existing,
+    only mode Kriya has ever supported - `extends` names the milestone whose
+    entrypoint/build file this one grows), COMPOSITION means "consumes a
+    capability an earlier, not-necessarily-immediate-predecessor milestone
+    provides" (`consumes` names capabilities, `depends_on` names the
+    milestones that must run first). Neither mode implies a new physical
+    build artifact by itself - see Milestone.provides/consumes below and the
+    MA3 physical-topology-preservation rule this domain model exists to
+    support, not yet enforced by this module."""
+
+    EXTENSION = "extension"
+    COMPOSITION = "composition"
+
+
+class AcceptanceCriterion(BaseModel):
+    """One structured, checkable outcome for a milestone - the MA3 successor
+    to Milestone.success_criterion's single free-text string (kept below,
+    unchanged, since MilestoneV2 is additive in MA3.1: nothing yet consumes
+    this type). Deliberately minimal per the MA3 spec - no verification
+    command/test file/tool/status/evidence fields; those belong to a future
+    control-plane acceptance implementation (MA5+), not this domain model."""
+
+    id: str
+    description: str
+
+    @field_validator("id", "description")
+    @classmethod
+    def _non_blank(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("must not be blank")
+        return v
+
+
+class ProvidedCapability(BaseModel):
+    """A named thing a milestone makes available to LATER milestones -
+    `ProvidedCapability` rather than `ProvidedContract` because the formal
+    ContractRegistry/contract lifecycle doesn't exist until MA5; this is
+    planning/validation metadata a deterministic validator (MA3.3+) can check
+    reachability for, not an enforced runtime contract."""
+
+    name: str
+    description: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def _non_blank(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("must not be blank")
+        return v
+
+
+class MilestoneV2(BaseModel):
+    """MA3 milestone schema: an explicit dependency DAG (`depends_on`) and
+    extension/composition semantics (`mode`/`extends`/`provides`/`consumes`)
+    in place of the v1 `Milestone` class's single `depends_on_previous: bool`
+    linear-chain assumption above. Deliberately introduced ADDITIVELY in
+    MA3.1: nothing constructs, parses, or consumes this type yet (that's
+    MA3.2's legacy-normalization loader and MA3.6's planner-output wiring) -
+    v1 `Milestone` remains the type every existing code path
+    (MilestonePlannerAgent, milestones.py's orchestrator, `kriya
+    plan-milestones`/`generate --from-milestones`) actually uses until then,
+    unchanged, so this class alone carries zero runtime risk.
+
+    `kind` defaults to ChangeKind.MILESTONE and is deliberately NOT wired to
+    drive process depth here or anywhere else - see kriya/workflow/triage.py
+    and kriya/workflow/process_profile.py's own guardrail (ProcessProfile is
+    resolved from ExecutionWeight only, never from `kind`); an individual
+    milestone's own work can still be an enhancement/refactor/task in shape
+    without that changing how deep MA3 or MA2 must process it.
+
+    `id` is planner-suggested but NOT trusted as authoritative identity by
+    itself - MA3.2's normalization/canonicalization step is what guarantees
+    uniqueness for anything downstream that indexes by id (list position is
+    never identity, per the MA3 invariant)."""
+
+    id: str
+    name: Optional[str] = None
+    kind: ChangeKind = ChangeKind.MILESTONE
+
+    goal: str
+    depends_on: List[str] = Field(default_factory=list)
+
+    mode: Optional[MilestoneMode] = None
+    provides: List[ProvidedCapability] = Field(default_factory=list)
+    consumes: List[str] = Field(default_factory=list)
+
+    extends: Optional[str] = None
+    entrypoint: Optional[str] = None
+    adds_dependencies: List[str] = Field(default_factory=list)
+
+    acceptance: List[AcceptanceCriterion] = Field(default_factory=list)
+
+    @field_validator("id", "goal")
+    @classmethod
+    def _non_blank(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("must not be blank")
         return v
 
 
