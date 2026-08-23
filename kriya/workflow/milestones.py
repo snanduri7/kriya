@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from kriya.agents.contracts import Milestone
 from kriya.workflow.context_projection import project_implementation_source
 from kriya.workflow.file_resolution import _resolve_run_command
+from kriya.workflow.repository_topology import RepositoryTopology, detect_repository_topology
 from kriya.workflow.verification_contract import extract_contract_verdict
 from kriya.workflow.workflow import _log_phase_banner
 
@@ -169,6 +170,31 @@ def _list_workspace_files(workspace_path: str, max_files: int = 200) -> List[str
     return sorted(files)
 
 
+def render_repository_topology_summary(topology: RepositoryTopology) -> str:
+    """MA3.5 evidence block for the Milestone Planner's prompt (see
+    plan_milestones() below) - deterministic facts about the REAL, on-disk
+    build topology, given as evidence rather than asked as a question ("is
+    this a multi-module repository?") the model would otherwise have to
+    guess at. This is advisory only: the AUTHORITATIVE gate is
+    MilestonePlanValidator's own physical-topology-preservation check
+    (kriya/workflow/milestone_validation.py, wired in MA3.6) - this summary
+    exists so a well-behaved model avoids that rejection in the first place,
+    not to replace it."""
+    if topology.build_system is None and not topology.build_roots:
+        return (
+            "Repository topology: no existing build artifacts detected - this "
+            "workspace is empty or new, so this plan establishes its own structure."
+        )
+    return "\n".join([
+        "Repository topology (detected from the existing workspace, not guessed):",
+        f"- Build system: {topology.build_system or 'unknown'}",
+        f"- Build roots: {', '.join(topology.build_roots) or 'none'}",
+        f"- Child modules: {', '.join(topology.modules) or 'none'}",
+        f"- Existing entrypoints: {', '.join(topology.entrypoints) or 'none detected'}",
+        f"- Multi-module project: {'yes' if topology.is_multi_module else 'no'}",
+    ])
+
+
 async def plan_milestones(
     milestone_planner: Any,
     goal: str,
@@ -188,7 +214,8 @@ async def plan_milestones(
         if not existing_files
         else "Workspace already contains these files:\n" + "\n".join(f"- {f}" for f in existing_files)
     )
-    prompt = f"Goal: {goal}\n\n{workspace_note}"
+    topology_summary = render_repository_topology_summary(detect_repository_topology(workspace_path))
+    prompt = f"Goal: {goal}\n\n{workspace_note}\n\n{topology_summary}"
     _raw, milestones = await milestone_planner.run_with_milestone_list(prompt, stream_callback=stream_callback)
     if milestones is None:
         return None, "Milestone Planner output did not produce a valid milestone list."

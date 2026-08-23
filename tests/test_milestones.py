@@ -14,10 +14,12 @@ from kriya.workflow.milestones import (
     load_or_resume_milestone_run_state,
     plan_milestones,
     render_established_file_context,
+    render_repository_topology_summary,
     replay_prior_milestone_verifications,
     run_milestones,
     save_milestone_run_state,
 )
+from kriya.workflow.repository_topology import RepositoryTopology
 
 
 # ============================================================
@@ -125,19 +127,32 @@ async def test_milestone_planner_agent_returns_none_on_malformed_output():
     assert milestones is None
 
 
-def test_milestone_planner_agent_prompt_forbids_multiple_build_artifacts():
-    """Regression guard: this agent's prompt must explicitly forbid the same
-    multi-module anti-pattern PlannerAgent's own MINIMALISM instruction was
-    added to prevent, one level up (across milestone boundaries instead of
-    within one goal)."""
+def test_milestone_planner_agent_prompt_preserves_physical_topology_by_default():
+    """MA3.5 regression guard: this agent's prompt no longer carries the
+    absolute "DO NOT PROPOSE MULTIPLE BUILD ARTIFACTS" ban (the deterministic
+    MilestonePlanValidator physical-topology-preservation check,
+    kriya/workflow/milestone_validation.py, is the authoritative gate now -
+    see that module's own MA3.4 docstring for why the replacement had to
+    exist BEFORE this prompt was loosened), but it must still preserve the
+    same underlying principle in nuanced form: milestone boundaries are not
+    build boundaries, and the same-project default (EXTENSION) still needs
+    explicit justification (repository evidence or an explicit goal) to be
+    overridden by a genuinely new build artifact (COMPOSITION allowing one)."""
     from kriya.agents.agent import MilestonePlannerAgent
     from kriya.config import AppConfig
     from kriya.core.llm import LLMClient
 
     agent = MilestonePlannerAgent("milestone_planner", LLMClient(AppConfig()))
     prompt = agent.system_prompt
-    assert "DO NOT PROPOSE MULTIPLE BUILD ARTIFACTS" in prompt
+    assert "DO NOT PROPOSE MULTIPLE BUILD ARTIFACTS" not in prompt
+    assert "MILESTONE BOUNDARIES ARE NOT BUILD BOUNDARIES" in prompt
+    assert "EXTENSION" in prompt
+    assert "COMPOSITION" in prompt
     assert "SLICE BY BEHAVIOR, NOT BY STRUCTURE" in prompt
+    # JSON output contract is UNCHANGED in MA3.5 - MilestoneList/
+    # parse_milestone_list still only parse v1 fields; MA3.6 migrates the
+    # actual schema the planner is asked to emit.
+    assert '"depends_on_previous"' in prompt
 
 
 # ============================================================
@@ -364,6 +379,59 @@ async def test_plan_milestones_failure_on_invalid_output():
         state, err = await plan_milestones(planner, "goal", tmp)
     assert state is None
     assert err is not None
+
+
+@pytest.mark.asyncio
+async def test_plan_milestones_prompt_includes_real_repository_topology():
+    """MA3.5: the planner prompt now carries deterministic, real repo
+    evidence (not just the raw file listing) so the model doesn't have to
+    guess whether it's planning against a single-module or multi-module
+    project."""
+    planner = MagicMock()
+    captured = {}
+
+    async def fake_run(prompt, stream_callback=None):
+        captured["prompt"] = prompt
+        return "raw", [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+
+    planner.run_with_milestone_list = fake_run
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "pom.xml"), "w") as f:
+            f.write("<project><groupId>x</groupId></project>")
+        await plan_milestones(planner, "big goal", tmp)
+    assert "Repository topology" in captured["prompt"]
+    assert "Build system: maven" in captured["prompt"]
+
+
+# ============================================================
+# render_repository_topology_summary
+# ============================================================
+
+def test_render_repository_topology_summary_empty_workspace():
+    empty = RepositoryTopology(build_system=None, build_roots=(), modules=(), entrypoints=(), is_multi_module=False)
+    text = render_repository_topology_summary(empty)
+    assert "empty or new" in text
+
+
+def test_render_repository_topology_summary_single_module():
+    single = RepositoryTopology(
+        build_system="maven", build_roots=(".",), modules=(),
+        entrypoints=("com.example.Application",), is_multi_module=False,
+    )
+    text = render_repository_topology_summary(single)
+    assert "Build system: maven" in text
+    assert "Multi-module project: no" in text
+    assert "com.example.Application" in text
+
+
+def test_render_repository_topology_summary_multi_module():
+    multi = RepositoryTopology(
+        build_system="maven", build_roots=(".", "client", "server"), modules=("client", "server"),
+        entrypoints=("A", "B"), is_multi_module=True,
+    )
+    text = render_repository_topology_summary(multi)
+    assert "Multi-module project: yes" in text
+    assert "client, server" in text
 
 
 # ============================================================
