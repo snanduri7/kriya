@@ -128,6 +128,52 @@ class EngineeringRoute:
     router_used: bool = False
     router_confidence: Optional[float] = None
 
+    def with_recomputed_risk(
+        self,
+        risk: "RiskClass",
+        impact: "ImpactVector",
+        reason_codes: List[str],
+    ) -> "EngineeringRoute":
+        """MA2.2 - the one place the monotonic max_observed_risk_class
+        invariant is enforced when a FRESH ImpactVector is available (not
+        just a bare risk value) - MA2.4's post-Architect recomputation is
+        the first real caller: Architect's real touched-file list produces
+        a genuinely new ImpactVector, not just a new risk number, and that
+        new impact is worth keeping (e.g. for telemetry's `impact_final`)
+        rather than discarded once risk is derived from it.
+
+        Returns a NEW EngineeringRoute (this object is frozen) with:
+          - impact REPLACED by the new, more complete ImpactVector
+          - current_risk_class set to `risk`
+          - max_observed_risk_class = max(previous max, risk) - can only
+            move up, exactly like escalate_risk's own invariant (this
+            method is now that invariant's one real implementation -
+            escalate_risk below delegates here)
+          - execution_weight recomputed from (kind, the NEW max) - never
+            from current_risk_class alone, so a later, narrower
+            recomputation can never quietly undo an earlier escalation's
+            process weight
+          - reason_codes EXTENDED (never replaced), so the full audit
+            trail across every recomputation survives, not just the latest
+            one
+
+        kind, initial_risk_class, deterministic_signals, router_used, and
+        router_confidence are carried over unchanged - only the fields
+        listed above ever move after first classification."""
+        new_max = max(self.max_observed_risk_class, risk)
+        return EngineeringRoute(
+            kind=self.kind,
+            impact=impact,
+            initial_risk_class=self.initial_risk_class,
+            current_risk_class=risk,
+            max_observed_risk_class=new_max,
+            execution_weight=determine_execution_weight(self.kind, new_max),
+            deterministic_signals=self.deterministic_signals,
+            reason_codes=[*self.reason_codes, *reason_codes],
+            router_used=self.router_used,
+            router_confidence=self.router_confidence,
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         """Content-free operational telemetry shape (MA1.4) - matches
         GenerationState.generation_metrics()'s own "safe to persist in local
@@ -266,20 +312,16 @@ def escalate_risk(
 
     new_reason_codes (optional) is appended to route.reason_codes so the
     audit trail shows WHY this particular escalation (or non-escalation)
-    happened, not just the before/after risk values."""
-    new_max = max(route.max_observed_risk_class, new_risk)
-    return EngineeringRoute(
-        kind=route.kind,
-        impact=route.impact,
-        initial_risk_class=route.initial_risk_class,
-        current_risk_class=new_risk,
-        max_observed_risk_class=new_max,
-        execution_weight=determine_execution_weight(route.kind, new_max),
-        deterministic_signals=route.deterministic_signals,
-        reason_codes=[*route.reason_codes, *(new_reason_codes or [])],
-        router_used=route.router_used,
-        router_confidence=route.router_confidence,
-    )
+    happened, not just the before/after risk values.
+
+    MA2.2: this is now a thin convenience wrapper over
+    EngineeringRoute.with_recomputed_risk for the common case where only
+    the risk value changed, not the impact vector itself - route.impact is
+    passed through unchanged. with_recomputed_risk is the one real
+    implementation of the monotonic invariant; kept here, unchanged in
+    signature/behavior, since MA1.1 callers already depend on this exact
+    shape."""
+    return route.with_recomputed_risk(new_risk, route.impact, new_reason_codes or [])
 
 
 # ============================================================================
