@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from abc import ABC
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -622,9 +623,66 @@ class DeveloperAgent(BaseAgent):
         return _XML_COMMENT_RE.sub(_fix_one, text)
 
     @staticmethod
-    def sanitize_generated_content(text: Optional[str]) -> Optional[str]:
+    def _unwrap_file_content_envelope(text: str, filepath: str) -> Optional[str]:
+        """Recovers real file content when a model wraps a single-file
+        CREATE_FULL_FILE/REPAIR response in the multi-file batch JSON envelope
+        shape ({"files": [{"path"/"filepath": ..., "content": ...}, ...]}, or a
+        bare single-file {"path"/"filepath": ..., "content": ...} object)
+        instead of returning raw content as instructed. Found live, 2026-08-22
+        (ignite_qpid_protocol integration phase, two separate runs): qwen3.8:27b
+        did exactly this for pom.xml despite the file_sys_prompt's explicit "no
+        markdown wrapper" instruction - sanitize_generated_content() had no
+        defense against it, so the literal '{\\n  "files": [...' JSON text got
+        written to disk as pom.xml, failing STRUCTURAL CORRUPTION with
+        "malformed XML ... line 1, column 0" (a '{' is never valid XML) and
+        burning the run's retry budget before either run could recover.
+        Reuses _normalize_file_entries - the exact same shape-detection already
+        trusted for the batch file-list completion - so this isn't a second,
+        divergent parser for the same envelope shape.
+
+        Only unwraps when the target filepath can be identified unambiguously:
+        an exact filepath match, a basename match, or (mirroring the len==1
+        deterministic-substitution precedent already used elsewhere, e.g.
+        ground_java_entrypoint_in_no_build_file_projects) the single entry
+        present when there's genuinely only one candidate. Returns None (leave
+        the original text untouched) on anything else - a real file whose own
+        legitimate content happens to be JSON (e.g. package.json) essentially
+        never matches this specific "files"/"path"/"content" shape, but an
+        ambiguous or unmatched envelope is left for the existing STRUCTURAL
+        CORRUPTION gate to catch and retry, not guessed at here."""
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        entries = DeveloperAgent._normalize_file_entries(parsed)
+        if not entries and isinstance(parsed, dict):
+            single_path = parsed.get("filepath") or parsed.get("path")
+            if single_path and isinstance(parsed.get("content"), str):
+                entries = [{"filepath": single_path, "content": parsed["content"]}]
+
+        if not entries:
+            return None
+
+        with_content = [e for e in entries if isinstance(e.get("content"), str) and e["content"]]
+        if not with_content:
+            return None
+
+        for entry in with_content:
+            if entry["filepath"] == filepath:
+                return entry["content"]
+        target_basename = os.path.basename(filepath)
+        for entry in with_content:
+            if os.path.basename(entry["filepath"]) == target_basename:
+                return entry["content"]
+        if len(with_content) == 1:
+            return with_content[0]["content"]
+        return None
+
+    @staticmethod
+    def sanitize_generated_content(text: Optional[str], filepath: Optional[str] = None) -> Optional[str]:
         """Single, uniform sanitization step for ANY text a model returns as file
-        content or an anchored edit's search/replace block. Four real model habits
+        content or an anchored edit's search/replace block. Five real model habits
         - each found live, each originally patched only in the one path where it was
         first noticed (_split_fix_analysis_edit's SEARCH/REPLACE parsing) - are
         generalized here so every extraction point applies the same cleanup, not
@@ -640,10 +698,20 @@ class DeveloperAgent(BaseAgent):
            _fix_xml_comment_double_hyphens's own docstring) - harmless to apply
            unconditionally, regardless of file type, since <!-- --> simply never
            occurs in non-XML/HTML source, so this is a no-op for every other stack.
+        5. The whole response wrapped in the multi-file batch JSON envelope shape
+           instead of raw content - see _unwrap_file_content_envelope's own
+           docstring for the live incident this closes. Only attempted when
+           `filepath` is given (the two SEARCH/REPLACE call sites below don't pass
+           one - a patch fragment is never plausibly a whole-response JSON envelope,
+           and has no filepath of its own to disambiguate against anyway).
 
         Order matters, same as the original single-path fix: truncate before
         gutter-stripping (so a gutter line straddling the truncation point doesn't
-        leave a stray fragment behind), gutter-strip before fence-stripping.
+        leave a stray fragment behind), gutter-strip before fence-stripping, and the
+        JSON-envelope unwrap last (it needs the already-fence-stripped text to parse
+        cleanly, and its own recursive sanitize pass - filepath=None, so it can never
+        loop back into another unwrap attempt - re-applies 1-4 to whatever real
+        content it recovers).
 
         Deliberately does NOT blanket-strip whitespace beyond that: plain
         pass-through content (no marker, no fence) is returned exactly as given,
@@ -661,7 +729,12 @@ class DeveloperAgent(BaseAgent):
             text = text[:trailing_file_content.start()].rstrip("\n")
         text = _GUTTER_CONTEXT_RE.sub("", text)
         text = _GUTTER_HIGHLIGHT_RE.sub("", text)
-        return DeveloperAgent._fix_xml_comment_double_hyphens(DeveloperAgent._strip_markdown_fences(text))
+        text = DeveloperAgent._fix_xml_comment_double_hyphens(DeveloperAgent._strip_markdown_fences(text))
+        if filepath:
+            unwrapped = DeveloperAgent._unwrap_file_content_envelope(text, filepath)
+            if unwrapped is not None:
+                text = DeveloperAgent.sanitize_generated_content(unwrapped)
+        return text
 
     @staticmethod
     def _extract_json_value(text: str) -> Any:
@@ -1668,7 +1741,7 @@ class DeveloperAgent(BaseAgent):
             if edits:
                 file_entry = {"filepath": filepath, "content": None, "edits": edits}
             else:
-                file_entry = {"filepath": filepath, "content": self.sanitize_generated_content(content)}
+                file_entry = {"filepath": filepath, "content": self.sanitize_generated_content(content, filepath=filepath)}
             if analysis:
                 file_entry["analysis"] = analysis
             if protocol_error:

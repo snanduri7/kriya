@@ -1581,6 +1581,72 @@ def test_sanitize_generated_content_does_not_touch_content_with_no_xml_comment()
     java = 'public class X { String s = "no comment markers here -- just text"; }'
     assert DeveloperAgent.sanitize_generated_content(java) == java
 
+def test_sanitize_generated_content_unwraps_batch_json_envelope():
+    """Regression test for a real, live-confirmed bug, 2026-08-22
+    (ignite_qpid_protocol, integration phase, two separate runs): qwen3.8:27b
+    wrapped its single-file CREATE_FULL_FILE response for pom.xml in the
+    multi-file batch JSON envelope shape instead of returning raw content -
+    verbatim shape captured from that run's own traces.db gate_outcomes.
+    Before the fix, sanitize_generated_content had no defense against this and
+    the literal JSON text got written to disk as pom.xml, failing STRUCTURAL
+    CORRUPTION with "malformed XML ... line 1, column 0" on both runs."""
+    import xml.etree.ElementTree as ET
+
+    envelope = json.dumps({
+        "files": [
+            {
+                "path": "pom.xml",
+                "content": '<?xml version="1.0" encoding="UTF-8"?>\n<project></project>',
+            }
+        ]
+    })
+    fixed = DeveloperAgent.sanitize_generated_content(envelope, filepath="pom.xml")
+    assert fixed == '<?xml version="1.0" encoding="UTF-8"?>\n<project></project>'
+    ET.fromstring(fixed)  # must not raise
+
+def test_sanitize_generated_content_unwraps_bare_single_file_envelope():
+    # A model may drop the "files" list wrapper for a single-file response -
+    # same underlying mistake, narrower shape.
+    envelope = json.dumps({"path": "App.java", "content": "public class App {}"})
+    assert DeveloperAgent.sanitize_generated_content(envelope, filepath="App.java") == (
+        "public class App {}"
+    )
+
+def test_sanitize_generated_content_matches_envelope_entry_by_basename():
+    # The requested filepath may carry directory prefixes the envelope entry
+    # doesn't (or vice versa) - match on basename rather than refusing to
+    # unwrap an otherwise unambiguous single entry.
+    envelope = json.dumps({"files": [{"path": "src/main/pom.xml", "content": "<project/>"}]})
+    assert DeveloperAgent.sanitize_generated_content(
+        envelope, filepath="pom.xml",
+    ) == "<project/>"
+
+def test_sanitize_generated_content_envelope_unwrap_requires_filepath():
+    # The two SEARCH/REPLACE call sites never pass filepath - a patch fragment
+    # that happens to look like JSON must never be unwrapped/misinterpreted.
+    envelope = json.dumps({"files": [{"path": "App.java", "content": "public class App {}"}]})
+    assert DeveloperAgent.sanitize_generated_content(envelope) == envelope
+
+def test_sanitize_generated_content_does_not_unwrap_ambiguous_multi_file_envelope():
+    # Genuinely ambiguous (multiple files, none matching the requested path) -
+    # left untouched for the existing STRUCTURAL CORRUPTION gate to catch,
+    # rather than guessing which entry was meant.
+    envelope = json.dumps({
+        "files": [
+            {"path": "App.java", "content": "public class App {}"},
+            {"path": "Other.java", "content": "public class Other {}"},
+        ]
+    })
+    assert DeveloperAgent.sanitize_generated_content(envelope, filepath="pom.xml") == envelope
+
+def test_sanitize_generated_content_does_not_misfire_on_real_json_file_content():
+    # A genuinely-requested JSON file's real content must never be mistaken
+    # for the envelope shape - it has no "files"/"path"+"content" keys.
+    package_json = json.dumps({"name": "example", "version": "1.0.0"}, indent=2)
+    assert DeveloperAgent.sanitize_generated_content(
+        package_json, filepath="package.json",
+    ) == package_json
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_full_content_retry_strips_copied_gutter():
     """Regression test: unlike the anchored-edit SEARCH/REPLACE path (already
