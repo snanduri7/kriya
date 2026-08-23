@@ -22,6 +22,11 @@ from kriya.workflow.triage import (
 
 
 def _route(kind: ChangeKind, risk: RiskClass, impact: ImpactVector = None) -> EngineeringRoute:
+    """A freshly-classified route, matching what classify() actually
+    constructs - initial_impact/initial_execution_weight ARE set, same as
+    a real first classification (see test_to_dict_falls_back_when_initial_
+    fields_unset for the complementary "predates MA2.7" case, built via a
+    bare EngineeringRoute(...) instead of this helper)."""
     impact = impact if impact is not None else ImpactVector()
     weight = determine_execution_weight(kind, risk)
     return EngineeringRoute(
@@ -31,6 +36,8 @@ def _route(kind: ChangeKind, risk: RiskClass, impact: ImpactVector = None) -> En
         current_risk_class=risk,
         max_observed_risk_class=risk,
         execution_weight=weight,
+        initial_impact=impact,
+        initial_execution_weight=weight,
     )
 
 
@@ -226,6 +233,61 @@ async def test_recompute_from_files_preserves_public_contract_change_with_no_fre
         route=initial, workspace_path="/tmp/x", planned_files=["src/main/java/Helper.java"],
     )
     assert recomputed.impact.public_contract_change is True
+
+
+@pytest.mark.asyncio
+async def test_recompute_from_files_to_dict_shows_full_escalation_shape():
+    """MA2.7: to_dict() must show the exact initial-vs-final telemetry shape
+    the control-plane plan specifies - initial_execution_weight/
+    final_execution_weight, impact_initial/impact_final, escalated,
+    escalation_stage. A LOW-starting route escalated via recompute_from_files
+    reports escalated=True and escalation_stage="post_architect"."""
+    svc = EngineeringTriageService()
+    initial = _route(ChangeKind.TASK, RiskClass.LOW)
+    assert initial.initial_execution_weight == initial.execution_weight == ExecutionWeight.LIGHT
+
+    recomputed = await svc.recompute_from_files(
+        route=initial, workspace_path="/tmp/x", planned_files=["pom.xml"],
+    )
+    d = recomputed.to_dict()
+    assert d["initial_execution_weight"] == "light"
+    assert d["final_execution_weight"] == "heavy"
+    assert d["escalated"] is True
+    assert d["escalation_stage"] == "post_architect"
+    assert d["impact_initial"]["build_system_change"] is False
+    assert d["impact_final"]["build_system_change"] is True
+
+
+def test_to_dict_not_escalated_when_max_was_already_at_its_ceiling():
+    """A route that starts HIGH and gets recomputed to another HIGH result
+    has nothing to escalate TO - escalated must be False, not True just
+    because a recomputation happened."""
+    route = _route(ChangeKind.TASK, RiskClass.HIGH, impact=ImpactVector(security_boundary_change=True))
+    recomputed = route.with_recomputed_risk(RiskClass.HIGH, ImpactVector(build_system_change=True), ["x"])
+    assert recomputed.to_dict()["escalated"] is False
+
+
+def test_to_dict_escalation_stage_none_when_never_recomputed():
+    route = _route(ChangeKind.TASK, RiskClass.LOW)
+    assert route.to_dict()["escalation_stage"] == "none"
+    assert route.to_dict()["escalated"] is False
+
+
+def test_to_dict_falls_back_when_initial_fields_unset():
+    """A route constructed without initial_impact/initial_execution_weight
+    (predates MA2.7, or a caller that just didn't set them) must fall back
+    to the current impact/execution_weight in to_dict() - correct by
+    construction for a route that was never recomputed, since "initial"
+    and "current" are the same thing in that case."""
+    impact = ImpactVector(security_boundary_change=True)
+    bare = EngineeringRoute(
+        kind=ChangeKind.TASK, impact=impact,
+        initial_risk_class=RiskClass.HIGH, current_risk_class=RiskClass.HIGH,
+        max_observed_risk_class=RiskClass.HIGH, execution_weight=ExecutionWeight.HEAVY,
+    )
+    d = bare.to_dict()
+    assert d["initial_execution_weight"] == "heavy"
+    assert d["impact_initial"]["security_boundary_change"] is True
 
 
 @pytest.mark.asyncio

@@ -128,6 +128,19 @@ class EngineeringRoute:
     router_used: bool = False
     router_confidence: Optional[float] = None
 
+    # MA2.7 - set ONCE at first classification (classify()) and never
+    # changed thereafter, same "set once, never changes" contract as
+    # initial_risk_class above - what MA2.10's telemetry shape calls
+    # impact_initial/initial_execution_weight, kept as real fields
+    # (mirroring initial_risk_class's own precedent) rather than derived
+    # after the fact, so no caller can construct a route missing this
+    # history. Optional/defaulted only so a construction site that
+    # predates MA2.7 (an existing test fixture, say) doesn't hard-fail -
+    # to_dict() below falls back to impact/execution_weight when unset,
+    # which is exactly correct for a route that has never been recomputed.
+    initial_impact: Optional[ImpactVector] = None
+    initial_execution_weight: Optional[ExecutionWeight] = None
+
     def with_recomputed_risk(
         self,
         risk: "RiskClass",
@@ -157,9 +170,10 @@ class EngineeringRoute:
             trail across every recomputation survives, not just the latest
             one
 
-        kind, initial_risk_class, deterministic_signals, router_used, and
-        router_confidence are carried over unchanged - only the fields
-        listed above ever move after first classification."""
+        kind, initial_risk_class, initial_impact, initial_execution_weight,
+        deterministic_signals, router_used, and router_confidence are
+        carried over unchanged - only the fields listed above ever move
+        after first classification."""
         new_max = max(self.max_observed_risk_class, risk)
         return EngineeringRoute(
             kind=self.kind,
@@ -172,22 +186,49 @@ class EngineeringRoute:
             reason_codes=[*self.reason_codes, *reason_codes],
             router_used=self.router_used,
             router_confidence=self.router_confidence,
+            initial_impact=self.initial_impact,
+            initial_execution_weight=self.initial_execution_weight,
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Content-free operational telemetry shape (MA1.4) - matches
-        GenerationState.generation_metrics()'s own "safe to persist in local
-        traces" convention: only the classification and why it fired, never
-        goal text or file content. Enum members serialize to their plain
-        string/name form so this round-trips cleanly through
-        json.dumps (kriya/core/trace.py::TraceLogger.log_run)."""
+        """Content-free operational telemetry shape (MA1.4, extended MA2.7) -
+        matches GenerationState.generation_metrics()'s own "safe to persist
+        in local traces" convention: only the classification and why it
+        fired, never goal text or file content. Enum members serialize to
+        their plain string/name form so this round-trips cleanly through
+        json.dumps (kriya/core/trace.py::TraceLogger.log_run).
+
+        MA2.7 adds the initial-vs-final view that actually makes an
+        escalation legible without cross-referencing log lines:
+        initial_execution_weight/impact_initial (falling back to the
+        current values for a route that predates MA2.7 or was never
+        recomputed - identical to current for such a route anyway, so the
+        fallback is exactly correct, not a guess), `escalated` (a simple
+        risk-class comparison), and `escalation_stage` - "post_architect"
+        when the evidence is a reason code MA2.4's recompute_from_files
+        actually tagged that way, "none" when nothing escalated,
+        "unspecified" for an escalation with no traceable stage tag (e.g.
+        a bare escalate_risk() call outside the post-Architect path)."""
+        escalated = self.max_observed_risk_class > self.initial_risk_class
+        if any(c.startswith("post_architect:") for c in self.reason_codes):
+            escalation_stage = "post_architect"
+        elif escalated:
+            escalation_stage = "unspecified"
+        else:
+            escalation_stage = "none"
         return {
             "kind": self.kind.value,
             "initial_risk_class": self.initial_risk_class.name,
             "current_risk_class": self.current_risk_class.name,
             "max_observed_risk_class": self.max_observed_risk_class.name,
             "execution_weight": self.execution_weight.value,
+            "initial_execution_weight": (self.initial_execution_weight or self.execution_weight).value,
+            "final_execution_weight": self.execution_weight.value,
             "impact": asdict(self.impact),
+            "impact_initial": asdict(self.initial_impact or self.impact),
+            "impact_final": asdict(self.impact),
+            "escalated": escalated,
+            "escalation_stage": escalation_stage,
             "reason_codes": list(self.reason_codes),
             "deterministic_signals": dict(self.deterministic_signals),
             "router_used": self.router_used,
@@ -754,6 +795,8 @@ class EngineeringTriageService:
             reason_codes=reason_codes,
             router_used=False,
             router_confidence=None,
+            initial_impact=impact,
+            initial_execution_weight=weight,
         )
 
     async def recompute_from_files(
