@@ -6,19 +6,19 @@ MilestoneV2 docstring and this module's own top-of-file MA3 invariant list
 in the design doc this implements: "Planner output is untrusted until
 deterministically validated."
 
-Additive in MA3.3: nothing calls MilestonePlanValidator yet - MA3.6 wires it
-into the real MilestonePlannerAgent pipeline, after MA3.4 adds physical
-build-topology preservation checks (a repository_topology parameter on
-validate(), not yet part of this module) and MA3.5 loosens the planner
-prompt's current absolute "DO NOT PROPOSE MULTIPLE BUILD ARTIFACTS" rule -
-the deterministic replacement must exist before that prompt guardrail is
-loosened, not after."""
+Additive through MA3.4: nothing calls MilestonePlanValidator yet - MA3.6
+wires it into the real MilestonePlannerAgent pipeline, only once MA3.5 has
+loosened the planner prompt's current absolute "DO NOT PROPOSE MULTIPLE
+BUILD ARTIFACTS" rule. The deterministic replacement (this module) must
+exist before that prompt guardrail is loosened, not after."""
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
 from kriya.agents.contracts import MilestoneMode, MilestoneV2
+from kriya.workflow.repository_topology import RepositoryTopology
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +65,14 @@ class MilestoneValidationResult:
 
 
 # MA3 section 37's telemetry reason-code vocabulary - DUPLICATE_MILESTONE_ID
-# and SELF_DEPENDENCY are this module's own additions (the design doc's list
-# covers UNJUSTIFIED_BUILD_BOUNDARY/UNJUSTIFIED_ENTRYPOINT too, which belong
-# to MA3.4's physical-topology validator, not this one).
+# and SELF_DEPENDENCY are this module's own additions. UNJUSTIFIED_ENTRYPOINT
+# is MA3.4's pre-execution check below (the only physical-boundary signal
+# MilestoneV2 actually carries pre-execution: its own `entrypoint` field).
+# UNJUSTIFIED_BUILD_BOUNDARY is reserved for MA3.8's POST-execution regression
+# check (diffing two detect_repository_topology() calls, before vs after a
+# real milestone run finds/generates files) - a milestone plan alone has no
+# field naming a new build ROOT/module path, so that check can only run
+# against what was actually written to disk, not the plan.
 DUPLICATE_MILESTONE_ID = "DUPLICATE_MILESTONE_ID"
 SELF_DEPENDENCY = "SELF_DEPENDENCY"
 UNKNOWN_DEPENDENCY = "UNKNOWN_DEPENDENCY"
@@ -76,13 +81,41 @@ INVALID_EXTENSION = "INVALID_EXTENSION"
 UNKNOWN_PROVIDER = "UNKNOWN_PROVIDER"
 EMPTY_ACCEPTANCE = "EMPTY_ACCEPTANCE"
 EXTENSION_DEPENDENCY_NORMALIZED = "EXTENSION_DEPENDENCY_NORMALIZED"
+UNJUSTIFIED_ENTRYPOINT = "UNJUSTIFIED_ENTRYPOINT"
+UNJUSTIFIED_BUILD_BOUNDARY = "UNJUSTIFIED_BUILD_BOUNDARY"  # reserved, MA3.8
+
+# Deliberately small and literal (not a general goal-understanding model) -
+# same "revisit once a live run produces real data" restraint as
+# kriya/agents/contracts.py's MilestoneList size cap. Mirrors the plan's own
+# two "explicit new build boundary" examples ("reusable library", "separate
+# CLI executable"/"separate application").
+_EXPLICIT_MULTI_ARTIFACT_PHRASES = re.compile(
+    r"\b("
+    r"separate (application|executable|project|module|service|cli|library)"
+    r"|independent (application|executable|project|module|service|library)"
+    r"|reusable library"
+    r"|standalone (cli|application|executable)"
+    r"|multiple (applications|executables|modules|projects|services)"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 class MilestonePlanValidator:
     """Stateless - safe to construct once and reuse across plans/calls, same
     convention as EngineeringTriageService (kriya/workflow/triage.py)."""
 
-    def validate(self, milestones: List[MilestoneV2]) -> MilestoneValidationResult:
+    def validate(
+        self,
+        milestones: List[MilestoneV2],
+        repository_topology: Optional[RepositoryTopology] = None,
+        goal_text: str = "",
+    ) -> MilestoneValidationResult:
+        """repository_topology/goal_text are optional and default to
+        "no check" (None/"") - a caller that only wants the MA3.3 DAG/
+        capability/acceptance checks (e.g. this module's own existing tests)
+        keeps working unchanged; the MA3.4 physical-topology check below only
+        runs when a real topology is supplied."""
         errors: List[MilestoneValidationIssue] = []
         warnings: List[MilestoneValidationIssue] = []
 
@@ -159,6 +192,8 @@ class MilestonePlanValidator:
                     EMPTY_ACCEPTANCE, m.id,
                     f"milestone '{m.id}' has no acceptance criteria",
                 ))
+
+        errors.extend(self._check_physical_topology(normalized_milestones, repository_topology, goal_text))
 
         return MilestoneValidationResult(
             valid=not errors,
@@ -254,3 +289,49 @@ class MilestonePlanValidator:
             for cap in m.provides:
                 providers.setdefault(cap.name, set()).add(m.id)
         return providers
+
+    @staticmethod
+    def _check_physical_topology(
+        milestones: List[MilestoneV2],
+        repository_topology: Optional[RepositoryTopology],
+        goal_text: str,
+    ) -> List[MilestoneValidationIssue]:
+        """MA3.4's physical-topology-preservation rule: "a milestone plan may
+        not introduce a new physical build boundary unless either the user
+        goal explicitly requires one or existing repository architecture
+        provides evidence for it." The only pre-execution signal MilestoneV2
+        actually carries for this is its own `entrypoint` field - later
+        milestones naming a DIFFERENT entrypoint than the first one the plan
+        established is exactly the "competing entry-point classes" shape of
+        the real historical incident this rule exists to catch (see
+        kriya/agents/agent.py's MilestonePlannerAgent system_prompt).
+
+        Skipped entirely (no issues, ever) when no repository_topology is
+        supplied - a caller not ready to provide one (e.g. this module's own
+        MA3.3-era tests) gets the old DAG/capability/acceptance-only
+        behavior, never a surprise new failure mode."""
+        if repository_topology is None:
+            return []
+        if repository_topology.is_multi_module or len(repository_topology.entrypoints) > 1:
+            return []  # existing repo architecture already justifies more than one
+        if _EXPLICIT_MULTI_ARTIFACT_PHRASES.search(goal_text or ""):
+            return []  # user goal explicitly requires it
+
+        issues: List[MilestoneValidationIssue] = []
+        first_entrypoint: Optional[str] = None
+        for m in milestones:
+            if not m.entrypoint:
+                continue
+            if first_entrypoint is None:
+                first_entrypoint = m.entrypoint
+                continue
+            if m.entrypoint != first_entrypoint:
+                issues.append(MilestoneValidationIssue(
+                    UNJUSTIFIED_ENTRYPOINT, m.id,
+                    f"milestone '{m.id}' introduces entrypoint '{m.entrypoint}', competing "
+                    f"with the plan's own established entrypoint '{first_entrypoint}' - the "
+                    "repository is single-module/single-entrypoint and neither the goal text "
+                    "nor existing repository architecture justifies a new one; a later "
+                    "milestone must extend the existing entrypoint, not create a competing one",
+                ))
+        return issues

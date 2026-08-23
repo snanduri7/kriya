@@ -6,23 +6,39 @@ from kriya.workflow.milestone_validation import (
     INVALID_EXTENSION,
     MILESTONE_DAG_CYCLE,
     SELF_DEPENDENCY,
+    UNJUSTIFIED_ENTRYPOINT,
     UNKNOWN_DEPENDENCY,
     UNKNOWN_PROVIDER,
     MilestonePlanValidator,
 )
+from kriya.workflow.repository_topology import RepositoryTopology
 
 
-def mk(id, goal="g", depends_on=None, mode=None, extends=None, provides=None, consumes=None, acceptance=True):
+def mk(
+    id, goal="g", depends_on=None, mode=None, extends=None, entrypoint=None,
+    provides=None, consumes=None, acceptance=True,
+):
     return MilestoneV2(
         id=id,
         goal=goal,
         depends_on=depends_on or [],
         mode=mode,
         extends=extends,
+        entrypoint=entrypoint,
         provides=[ProvidedCapability(name=p) for p in (provides or [])],
         consumes=consumes or [],
         acceptance=[AcceptanceCriterion(id=f"{id}-A1", description="ok")] if acceptance else [],
     )
+
+
+SINGLE_MODULE_TOPOLOGY = RepositoryTopology(
+    build_system="maven", build_roots=(".",), modules=(),
+    entrypoints=("com.example.Application",), is_multi_module=False,
+)
+MULTI_MODULE_TOPOLOGY = RepositoryTopology(
+    build_system="maven", build_roots=(".", "client", "server"), modules=("client", "server"),
+    entrypoints=("com.example.client.Client", "com.example.server.Server"), is_multi_module=True,
+)
 
 
 def test_linear_chain_is_valid():
@@ -147,3 +163,67 @@ def test_validator_is_stateless_across_calls():
     r1 = validator.validate([mk("M1")])
     r2 = validator.validate([mk("M1"), mk("M2", depends_on=["M1"])])
     assert r1.valid and r2.valid
+
+
+def test_no_topology_supplied_skips_physical_boundary_check():
+    plan = [
+        mk("M1", entrypoint="A.java"),
+        mk("M2", depends_on=["M1"], entrypoint="B.java"),
+    ]
+    assert MilestonePlanValidator().validate(plan).valid
+
+
+def test_historical_incident_competing_entrypoints_rejected():
+    """The real 2026-08-15 failure shape this rule exists to catch: a
+    3-part goal against a single-module repo, planner invents a distinct
+    entrypoint per milestone instead of extending one."""
+    plan = [
+        mk("M1", entrypoint="Protocol.java"),
+        mk("M2", depends_on=["M1"], entrypoint="Cache.java"),
+        mk("M3", depends_on=["M2"], entrypoint="Api.java"),
+    ]
+    r = MilestonePlanValidator().validate(
+        plan, repository_topology=SINGLE_MODULE_TOPOLOGY,
+        goal_text="Build one Maven app that reads protocol messages, caches them, exposes the result.",
+    )
+    assert not r.valid
+    unjustified = [e for e in r.errors if e.code == UNJUSTIFIED_ENTRYPOINT]
+    assert len(unjustified) == 2
+    assert {e.milestone_id for e in unjustified} == {"M2", "M3"}
+
+
+def test_single_extended_entrypoint_is_valid():
+    plan = [
+        mk("M1", entrypoint="Application.java"),
+        mk("M2", depends_on=["M1"], mode=MilestoneMode.EXTENSION, extends="M1", entrypoint="Application.java"),
+        mk("M3", depends_on=["M2"], mode=MilestoneMode.EXTENSION, extends="M2", entrypoint="Application.java"),
+    ]
+    r = MilestonePlanValidator().validate(
+        plan, repository_topology=SINGLE_MODULE_TOPOLOGY,
+        goal_text="Build one Maven app that reads protocol messages, caches them, exposes the result.",
+    )
+    assert r.valid
+
+
+def test_legitimate_existing_multi_module_repo_allows_composition():
+    plan = [
+        mk("M1", provides=["ProtocolClient"], entrypoint="client/Client.java"),
+        mk("M2", depends_on=["M1"], mode=MilestoneMode.COMPOSITION, consumes=["ProtocolClient"], entrypoint="server/Server.java"),
+    ]
+    r = MilestonePlanValidator().validate(
+        plan, repository_topology=MULTI_MODULE_TOPOLOGY,
+        goal_text="Add protocol capability to client and consume it from server.",
+    )
+    assert r.valid
+
+
+def test_explicit_goal_justifies_new_build_boundary():
+    plan = [
+        mk("M1", entrypoint="Library.java"),
+        mk("M2", depends_on=["M1"], entrypoint="Cli.java"),
+    ]
+    r = MilestonePlanValidator().validate(
+        plan, repository_topology=SINGLE_MODULE_TOPOLOGY,
+        goal_text="Create a reusable Java library and a separate CLI executable that consumes the library.",
+    )
+    assert r.valid
