@@ -33,6 +33,7 @@ from kriya.workflow.checkpoint import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.triage import EngineeringRoute, EngineeringTriageService
+from kriya.workflow.control_context import WorkflowControlContext
 
 from kriya.workflow.worktree import (
     _resolve_repo_head,
@@ -421,23 +422,30 @@ class WorkflowEngine:
         # own best-effort DependencyGraph signals. Placed BEFORE state =
         # GenerationState(...) below purely to keep this near the top of the
         # method, matching the design's own "triage runs before any of the rest
-        # of this document engages" ordering - engineering_route itself is not
-        # yet read by anything else in this method (that starts at MA2); this
-        # call exists ONLY to compute and log a classification for shadow-mode
-        # evaluation (MA1.5). A classification failure is caught and logged,
-        # never allowed to fail a real generation run over what is, in MA1,
-        # pure telemetry - not a gate.
+        # of this document engages" ordering. A classification failure is
+        # caught and logged, never allowed to fail a real generation run.
+        #
+        # MA2.3 - control (kriya/workflow/control_context.py) pairs
+        # engineering_route with its resolved ProcessProfile, kept together
+        # so they can't drift out of sync once MA2.4 starts recomputing risk
+        # after Architect. Still shadow-mode as of MA2.3: nothing below this
+        # block reads `control` for a real decision yet - that starts at
+        # MA2.5/MA2.6. control stays a local variable, not stored on state -
+        # see WorkflowControlContext's own docstring for why.
         engineering_route: Optional[EngineeringRoute] = None
+        control: Optional[WorkflowControlContext] = None
         if self.kernel.config.engineering_triage.enabled:
             try:
                 engineering_route = await self.engineering_triage.classify(
                     goal, workspace_path, known_files=established_files,
                 )
+                control = WorkflowControlContext.for_route(engineering_route)
                 logger.info(
                     "[Engineering Triage] "
                     f"kind={engineering_route.kind.value} "
                     f"risk={engineering_route.max_observed_risk_class.name} "
                     f"weight={engineering_route.execution_weight.value} "
+                    f"verification_tier={control.process_profile.verification_tier.value} "
                     f"shadow_mode={self.kernel.config.engineering_triage.shadow_mode} "
                     f"reasons={engineering_route.reason_codes}"
                 )
