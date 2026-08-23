@@ -109,6 +109,20 @@ class DependencyGraph:
         
         self.conn.commit()
 
+    def has_indexed_files(self) -> bool:
+        """Cheap existence check (a single-row LIMIT 1, not a COUNT scan) - True
+        once index_repository() has recorded at least one file for this
+        workspace's dependency_graph.db, regardless of how many. Used by
+        run_generation_workflow()'s autonomy.auto_index_missing_dependency_graph
+        gate to decide whether a workspace has ever been indexed at all -
+        see that config field's own docstring (kriya/config/config.py) for
+        why this needs to be cheap: it runs on every call, including every
+        milestone in a decomposed sequence, and must stay a no-op once the
+        real one-time index has already happened."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT 1 FROM files LIMIT 1")
+        return cursor.fetchone() is not None
+
     def get_cached_mtime(self, filepath: str) -> Optional[float]:
         """Fetch cached mtime for incremental skip validation."""
         cursor = self.conn.cursor()

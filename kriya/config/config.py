@@ -171,6 +171,38 @@ class AutonomyConfig(BaseModel):
     generation_time_budget_seconds: Optional[int] = Field(default=None, ge=1)
     generation_gate_reserve_seconds: int = Field(default=120, ge=0)
     generation_seconds_per_file_estimate: int = Field(default=90, ge=1)
+    # Closes a real, confirmed-in-code gap (2026-08-23): index_repository() -
+    # the only thing that ever populates dependency_graph.db's files/symbols
+    # tables and vector_index.db's code embeddings - is called EXCLUSIVELY
+    # from the `kriya analyze` CLI command, never from run_generation_workflow()
+    # itself. A repo never explicitly `kriya analyze`-d therefore has an
+    # empty persisted graph for the entire life of every `generate`/`fix`
+    # call against it - already known to silently degrade the duplicate-type
+    # and cross-package-mismatch Quality Gates to their in-memory-only
+    # fallback (see docs/design.md §7.45's follow-up), and, for a genuinely
+    # pre-existing repo Kriya never wrote itself, there's no established_files-
+    # style fallback covering that gap at all. When True, run_generation_workflow()
+    # checks once, before state.generation_started_monotonic starts (i.e. this
+    # cost is structurally excluded from generation_time_budget_seconds, not
+    # counted against it) whether dependency_graph.db has any indexed files
+    # for this workspace; if not, it runs a real, one-time index_repository()
+    # pass (never with changed=True - that flag scopes to files `git diff`
+    # reports as modified/staged/untracked, which would silently index NOTHING
+    # for a fully-committed pre-existing repo, exactly the case this exists to
+    # cover) before proceeding. A repeat call against an already-indexed
+    # workspace (milestone 2+ in a sequence, or a second `fix` call) is a
+    # cheap no-op row check, not a re-index - the same file-level mtime cache
+    # index_repository() already has makes this safe to leave enabled across
+    # a whole milestone sequence. Any failure (embedding endpoint down, model
+    # not pulled) is caught and logged as a warning - generation proceeds
+    # exactly as it does today with an empty graph, never blocked by this.
+    # Defaults False here (same "new capability, off until proven" rollout
+    # already used for spec_compliance_enabled above - this is the first time
+    # `generate`/`fix` would trigger real, uncontrolled embedding-endpoint
+    # traffic implicitly rather than only on an explicit `kriya analyze`) -
+    # candidate to flip True in default_config.yaml once live-validated, same
+    # two-step rollout spec_compliance_enabled already went through.
+    auto_index_missing_dependency_graph: bool = Field(default=False)
 
 class SearchConfig(BaseModel):
     # Empty by default - live lookup stays fully inert unless a project explicitly

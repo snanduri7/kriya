@@ -56,6 +56,7 @@ from kriya.workflow.workflow import (
     _build_targeted_retry_prompt,
     _check_java_toolchain_mismatch,
     _detect_missing_build_manifest,
+    _ensure_repository_indexed,
     _filter_misattributed_extraction,
     _get_or_start_jdtls_client,
     _goal_or_repo_targets_java,
@@ -13229,3 +13230,96 @@ async def test_architect_prompt_no_skill_reminder_without_active_skills(tmp_path
 
     design_prompt = llm.complete.call_args_list[1][0][1]
     assert "apply the Engineering Skill Conventions above when defining this design" not in design_prompt
+
+
+@pytest.mark.asyncio
+async def test_ensure_repository_indexed_skips_when_already_indexed(tmp_path):
+    # Pre-populate the graph exactly like a real prior index_repository() call
+    # would have left it - has_indexed_files() must see this and skip real work.
+    from kriya.analyzer.graph import DependencyGraph
+
+    memory_dir = tmp_path / "memory"
+    cfg = AppConfig(paths={"memory": str(memory_dir)})
+    graph = DependencyGraph(os.path.join(str(memory_dir), "dependency_graph.db"))
+    cursor = graph.conn.cursor()
+    cursor.execute(
+        "INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)",
+        ("App.java", 1.0, "abc"),
+    )
+    graph.conn.commit()
+    graph.close()
+
+    with patch(
+        "kriya.workflow.workflow.RepositoryAnalyzer.index_repository",
+        new_callable=AsyncMock,
+    ) as mock_index:
+        await _ensure_repository_indexed(cfg, str(tmp_path))
+    mock_index.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_repository_indexed_runs_once_when_graph_empty(tmp_path):
+    memory_dir = tmp_path / "memory"
+    cfg = AppConfig(paths={"memory": str(memory_dir)})
+
+    with patch(
+        "kriya.workflow.workflow.RepositoryAnalyzer.index_repository",
+        new_callable=AsyncMock,
+    ) as mock_index:
+        await _ensure_repository_indexed(cfg, str(tmp_path))
+    mock_index.assert_called_once()
+    # Never changed=True - see _ensure_repository_indexed's own docstring for
+    # why (it would silently index nothing for a fully-committed repo).
+    call_args, call_kwargs = mock_index.call_args
+    assert call_args == (cfg,)
+    assert "changed" not in call_kwargs or call_kwargs["changed"] is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_repository_indexed_swallows_index_failure(tmp_path):
+    # An indexing failure (embedding endpoint down, model not pulled, etc.)
+    # must never propagate - generation has to proceed exactly as it does
+    # today with an empty graph, not be blocked by this.
+    memory_dir = tmp_path / "memory"
+    cfg = AppConfig(paths={"memory": str(memory_dir)})
+
+    with patch(
+        "kriya.workflow.workflow.RepositoryAnalyzer.index_repository",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("embedding endpoint unreachable"),
+    ):
+        await _ensure_repository_indexed(cfg, str(tmp_path))  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_run_generation_workflow_auto_index_disabled_by_default(tmp_path):
+    # autonomy.auto_index_missing_dependency_graph defaults False - the entire
+    # existing test suite (none of which sets this flag) must see zero calls
+    # to the auto-index path, confirming this is a true no-op by default.
+    cfg = AppConfig(paths={"memory": str(tmp_path / "memory"), "skills": str(tmp_path / "skills")})
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="OK")
+    we = WorkflowEngine(kernel, llm)
+
+    with patch(
+        "kriya.workflow.workflow._ensure_repository_indexed", new_callable=AsyncMock,
+    ) as mock_ensure:
+        await we.run_generation_workflow(goal="Print hello", workspace_path=str(tmp_path))
+    mock_ensure.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_generation_workflow_auto_index_enabled_runs_before_generation(tmp_path):
+    cfg = AppConfig(paths={"memory": str(tmp_path / "memory"), "skills": str(tmp_path / "skills")})
+    cfg.autonomy.auto_index_missing_dependency_graph = True
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="OK")
+    we = WorkflowEngine(kernel, llm)
+
+    with patch(
+        "kriya.workflow.workflow._ensure_repository_indexed", new_callable=AsyncMock,
+    ) as mock_ensure:
+        await we.run_generation_workflow(goal="Print hello", workspace_path=str(tmp_path))
+    mock_ensure.assert_called_once_with(cfg, str(tmp_path))

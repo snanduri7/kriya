@@ -446,3 +446,26 @@ def test_get_neighborhood_default_max_results_bounds_a_large_fan_out(tmp_path):
 
     assert len(results) <= 30
     assert len(results) < 50  # confirms it's actually bounded, not coincidentally equal
+
+
+def test_has_indexed_files_false_on_empty_graph(tmp_path):
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    assert graph.has_indexed_files() is False
+
+
+def test_has_indexed_files_true_once_a_file_is_recorded(tmp_path):
+    # index_file() (used elsewhere in this test module) only ever writes to
+    # symbols/relations, never to files itself - has_indexed_files() checks
+    # the files table directly (the same one index_repository() writes real
+    # mtime/hash rows into), so this inserts there directly rather than via
+    # index_file().
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    cursor = graph.conn.cursor()
+    cursor.execute(
+        "INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)",
+        ("App.java", 123.0, "abc123"),
+    )
+    graph.conn.commit()
+    assert graph.has_indexed_files() is True

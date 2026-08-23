@@ -157,6 +157,54 @@ logger = logging.getLogger(__name__)
 _PHASE_BANNER_WIDTH = 70
 
 
+async def _ensure_repository_indexed(cfg: Any, workspace_path: str) -> None:
+    """Runs a one-time index_repository() pass (dependency_graph.db's symbol
+    tables + vector_index.db's code embeddings) for `workspace_path`, but only
+    when it has never been indexed at all. Closes a real gap: index_repository()
+    is otherwise called EXCLUSIVELY from the `kriya analyze` CLI command, never
+    from run_generation_workflow() - a repo a user never explicitly analyzed has
+    an empty persisted graph for the life of every generate/fix call against it.
+    See autonomy.auto_index_missing_dependency_graph's own docstring
+    (kriya/config/config.py) for the full rationale and why this is opt-in.
+
+    Callers gate this behind that config flag AND must call it before
+    GenerationState is constructed (state.generation_started_monotonic starts
+    generation_time_budget_seconds' clock at construction) - see the call site
+    in run_generation_workflow() for why. Kept as a standalone module-level
+    function (not inlined there) specifically so it's unit-testable without
+    mocking the entire multi-agent pipeline.
+
+    Never changed=True: that flag scopes indexing to files `git diff`/`git
+    status` reports as modified/staged/untracked - on a fully-committed
+    pre-existing repo (exactly the case this exists to cover) that would
+    silently index nothing at all.
+
+    Swallows and logs any failure (embedding endpoint down, model not pulled,
+    etc.) rather than raising - generation must proceed exactly as it does
+    today with an empty graph, never be blocked by this."""
+    try:
+        from kriya.analyzer.graph import DependencyGraph
+        graph_db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
+        probe = DependencyGraph(graph_db_path)
+        try:
+            already_indexed = probe.has_indexed_files()
+        finally:
+            probe.close()
+        if already_indexed:
+            return
+        logger.info(
+            f"No indexed dependency graph found for '{workspace_path}' - running a "
+            "one-time repository index before generation starts (autonomy."
+            "auto_index_missing_dependency_graph is enabled)."
+        )
+        await RepositoryAnalyzer(workspace_path).index_repository(cfg)
+    except Exception as index_ex:
+        logger.warning(
+            f"Auto-index of '{workspace_path}' failed, continuing without a populated "
+            f"dependency graph (same as today's default behavior): {index_ex}"
+        )
+
+
 def _log_phase_banner(title: str) -> None:
     """Logs a full-width, solid-line-bordered banner announcing a new top-
     level pipeline phase (Planning/Architecture/Development/Review). A single
@@ -344,6 +392,20 @@ class WorkflowEngine:
         call actually finishes. None (the default) preserves today's exact behavior for
         every other caller - a fresh run_id every time.
         """
+        # Deliberately BEFORE state is constructed below - state.generation_
+        # started_monotonic (kriya/workflow/state.py) defaults to time.monotonic()
+        # AT CONSTRUCTION, and that's the real clock generation_time_budget_seconds
+        # is measured against (kriya/workflow/attempt.py's elapsed = time.monotonic()
+        # - state.generation_started_monotonic). Calling this here means a one-time
+        # index pass costs real wall-clock time but is structurally EXCLUDED from
+        # that budget for every caller alike, not just milestone-decomposition -
+        # moving this below the state = GenerationState(...) line would silently
+        # start eating the same budget a slow model's Planner/Architect/Developer
+        # calls already exhaust on their own. See _ensure_repository_indexed's own
+        # docstring (above) for the full gap this closes and why it's opt-in.
+        if self.kernel.config.autonomy.auto_index_missing_dependency_graph:
+            await _ensure_repository_indexed(self.kernel.config, workspace_path)
+
         # Constructed once, right at the top, so every stage of the method -
         # including the pre-loop checkpoint fingerprinting and Planner prompt
         # below, not just the retry loop - reads/writes through one consistent
