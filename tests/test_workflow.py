@@ -2443,6 +2443,97 @@ async def test_workflow_traces_human_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_heavy_process_profile_requires_approval(tmp_path):
+    """MA2.5 (control-plane implementation plan): a HEAVY process profile,
+    resolved from engineering_triage's classification once
+    process_profiles.enabled/enforce_approval are both explicitly on, is a
+    NEW, independent trigger for need_human_approval - OR'd in alongside
+    (never replacing) the three that already existed. autonomy.mode is
+    deliberately set to something other than "human-in-the-loop" here, and
+    the goal produces a small, non-sensitive-path diff, so neither of the
+    two pre-existing triggers fires - isolating that the process-profile
+    trigger alone is what forces approval."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.engineering_triage.enabled = True
+    cfg.engineering_triage.shadow_mode = False
+    cfg.process_profiles.enabled = True
+    cfg.process_profiles.enforce_approval = True
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Fix the token check",
+        "Design: Update AuthService.java",
+        '[{"filepath": "AuthService.java", "content": "class AuthService {}"}]',
+        # The pre-approval Reviewer call fires because a real approval_callback
+        # is supplied below (same gating as test_workflow_traces_human_rejected).
+        "Review: flagged for human judgment",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    captured = {}
+
+    def on_approval(files, reason):
+        captured["reason"] = reason
+        return False  # reject - keeps this test from needing to mock further gate stages
+
+    res = await we.run_generation_workflow(
+        # security_boundary_change fires on the goal TEXT alone (JWT/token
+        # language) regardless of whether the fresh tmp_path workspace looks
+        # empty (which would otherwise force kind=milestone) - risk still
+        # lands HIGH either way, which is what this test actually needs.
+        goal="Fix bug: expired JWT tokens are still being accepted, they should be rejected",
+        workspace_path=str(tmp_path),
+        approval_callback=on_approval,
+    )
+
+    assert res["quality_gates_passed"] is False
+    assert res["review"] == "Rejected by user during approval gate review."
+    assert "reason" in captured, "approval_callback was never invoked - process profile did not trigger approval"
+    assert "process profile" in captured["reason"].lower()
+    assert "heavy" in captured["reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_workflow_process_profiles_disabled_by_default_does_not_add_approval(tmp_path):
+    """Regression lock: with process_profiles left at its packaged default
+    (enabled=False), the exact same HIGH-risk goal from the test above must
+    NOT require approval on its own - confirms the new trigger is genuinely
+    opt-in, not accidentally always-on once engineering_triage is enabled."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.engineering_triage.enabled = True
+    cfg.engineering_triage.shadow_mode = False
+    # process_profiles left at its default: enabled=False, enforce_approval=False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Fix the token check",
+        "Design: Update AuthService.java",
+        '[{"filepath": "AuthService.java", "content": "class AuthService {}"}]',
+        # No approval_callback is supplied below, so this run proceeds straight
+        # through to the FINAL Reviewer stage (a different call site than the
+        # pre-approval one, which only fires when need_human_approval is True)
+        # rather than stopping at a gate - needs its own mocked response.
+        "Review: Looks good",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Fix bug: expired JWT tokens are still being accepted, they should be rejected",
+        workspace_path=str(tmp_path),
+        # No approval_callback needed - approval must not be required at all.
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["files"] == ["AuthService.java"]
+
+
+@pytest.mark.asyncio
 async def test_workflow_reviewer_verdict_reaches_human_before_approval_decision(tmp_path):
     """Stage 6 SME review, Finding 1 (2026-08-15): before this fix, the Reviewer only
     ran AFTER the human-approval gate - a human approving in human-in-the-loop mode

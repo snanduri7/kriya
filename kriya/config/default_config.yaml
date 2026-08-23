@@ -98,6 +98,21 @@ engineering_triage:
   enabled: true
   shadow_mode: true
 
+# MA2 of the control-plane implementation plan (kriya/workflow/process_profile.py) -
+# whether a resolved ProcessProfile actually changes run_generation_workflow()'s
+# behavior. Separate from engineering_triage above on purpose: shadow_mode controls
+# whether triage's OWN output can affect anything; these flags control whether MA2's
+# specific behavioral changes (approval/context/verification) are live, one at a
+# time, for safe incremental activation. All false here - not yet live-validated.
+# Set enabled + enforce_approval true to test MA2.5 (process-profile-driven human
+# approval) in isolation; enforce_context_depth/enforce_verification_depth are
+# MA2.6, not implemented yet.
+process_profiles:
+  enabled: false
+  enforce_approval: false
+  enforce_context_depth: false
+  enforce_verification_depth: false
+
 autonomy:
   mode: "human-in-the-loop"
   sensitive_paths:

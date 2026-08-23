@@ -323,6 +323,27 @@ class EngineeringTriageConfig(BaseModel):
     enabled: bool = Field(default=False)
     shadow_mode: bool = Field(default=True)
 
+class ProcessProfilesConfig(BaseModel):
+    """MA2 of the control-plane implementation plan - whether a resolved
+    ProcessProfile (kriya/workflow/process_profile.py) actually gets to
+    change run_generation_workflow()'s behavior, and which behaviors
+    specifically. Deliberately separate from EngineeringTriageConfig above:
+    `engineering_triage.enabled` controls whether classification runs and
+    is observable at all (MA1's scope, unchanged by this); `enabled` here
+    plus each per-capability `enforce_*` flag controls whether MA2's actual
+    behavioral changes are live - "safe incremental activation" per the
+    control-plane plan, so MA2.5's approval gating can be validated live
+    without MA2.6's context/verification changes also being active, and
+    vice versa. All default False - a new capability stays off until it's
+    been live-validated, same convention as spec_compliance_enabled/
+    auto_index_missing_dependency_graph (kriya/config/config.py's
+    AutonomyConfig, above)."""
+
+    enabled: bool = Field(default=False)
+    enforce_approval: bool = Field(default=False)
+    enforce_context_depth: bool = Field(default=False)
+    enforce_verification_depth: bool = Field(default=False)
+
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
@@ -338,6 +359,7 @@ class AppConfig(BaseModel):
     agent_llms: AgentRolesConfig = Field(default_factory=AgentRolesConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     engineering_triage: EngineeringTriageConfig = Field(default_factory=EngineeringTriageConfig)
+    process_profiles: ProcessProfilesConfig = Field(default_factory=ProcessProfilesConfig)
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""

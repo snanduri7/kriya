@@ -1688,17 +1688,46 @@ class WorkflowEngine:
                     if sensitive_match:
                         break
 
+                # MA2.5 - process_profile.human_review_required is OR'd in as a new,
+                # independent trigger, alongside (never replacing) the three that
+                # already existed. This is what actually makes HEAVY (and STANDARD)
+                # profiles require approval: autonomy_cfg.mode == "human-in-the-loop"
+                # is only ONE clause of this OR expression, not a gate the whole
+                # expression sits behind - a project configured for a more permissive
+                # mode still hits approval here whenever ANY clause fires, process
+                # profile included, once process_profiles.enabled/enforce_approval
+                # are both explicitly turned on (kriya/config/config.py::
+                # ProcessProfilesConfig - "safe incremental activation," off by
+                # default). `control` is also None-safe on its own (engineering_
+                # triage.enabled may be False, or MA1.3/MA2.4's classification may
+                # have failed and been caught/logged) - either gate missing means
+                # this new clause contributes nothing, same as before MA2.5 existed.
+                process_profiles_cfg = self.kernel.config.process_profiles
+                process_profile_requires_review = bool(
+                    process_profiles_cfg.enabled
+                    and process_profiles_cfg.enforce_approval
+                    and control is not None
+                    and control.process_profile.human_review_required
+                )
                 need_human_approval = (
                     autonomy_cfg.mode == "human-in-the-loop" or
                     sensitive_match or
-                    total_diff_lines > autonomy_cfg.risk_threshold_lines
+                    total_diff_lines > autonomy_cfg.risk_threshold_lines or
+                    process_profile_requires_review
                 )
-                
+
                 escalation_reason = "Human-in-the-loop review policy"
                 if sensitive_match:
                     escalation_reason = sensitive_reason
                 elif total_diff_lines > autonomy_cfg.risk_threshold_lines:
                     escalation_reason = f"Risk threshold exceeded ({total_diff_lines} lines > {autonomy_cfg.risk_threshold_lines})"
+                elif process_profile_requires_review:
+                    escalation_reason = (
+                        f"Engineering process profile requires review (execution_weight="
+                        f"{control.process_profile.execution_weight.value}, kind="
+                        f"{control.engineering_route.kind.value}, risk="
+                        f"{control.engineering_route.max_observed_risk_class.name})"
+                    )
 
                 # Stage 6 SME review, 2026-08-15, Finding 1: the Reviewer used to run
                 # AFTER this gate - by the time its verdict existed, a human had
