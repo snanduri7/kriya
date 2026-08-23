@@ -43,10 +43,12 @@ from kriya.workflow.worktree import (
 )
 from kriya.workflow.context_budget import (
     _MIN_GRAPH_CONTEXT_BUDGET,
+    RetrievalLimits,
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
     build_code_context,
     estimate_tokens,
+    retrieval_limits_for,
     skeletonize_braced_code,
     skeletonize_code,
     skeletonize_python,
@@ -978,8 +980,23 @@ class WorkflowEngine:
                 )
                 vector_store = LocalVectorStore(vector_index_path)
                 
+                # MA2.6 - retrieval_limits_for(control.process_profile.context_depth)
+                # replaces the hardcoded top_k=5/max_hops=2 below ONLY when both
+                # process_profiles.enabled and enforce_context_depth are explicitly
+                # on (same opt-in gating as MA2.5's approval clause) - otherwise
+                # NARROW's own values (kriya/workflow/context_budget.py) are
+                # IDENTICAL to what these calls have always hardcoded, so an
+                # unconfigured project sees zero behavior change either way.
+                retrieval_limits = RetrievalLimits(top_k=5, max_hops=2, max_neighborhood_results=30)
+                if (
+                    control is not None
+                    and self.kernel.config.process_profiles.enabled
+                    and self.kernel.config.process_profiles.enforce_context_depth
+                ):
+                    retrieval_limits = retrieval_limits_for(control.process_profile.context_depth)
+
                 query_emb = await embed_client.get_embedding(goal, is_query=True)
-                matches = vector_store.query_hybrid(goal, query_emb, top_k=5, model_name=self.kernel.config.embedding.model)
+                matches = vector_store.query_hybrid(goal, query_emb, top_k=retrieval_limits.top_k, model_name=self.kernel.config.embedding.model)
                 good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
                 for m in good_matches:
                     retrieved_chunks.append({
@@ -1011,7 +1028,10 @@ class WorkflowEngine:
                         for f in matched_files_list:
                             symbols = graph.get_symbols_for_file(f)
                             seed_symbols.extend(symbols or [os.path.splitext(os.path.basename(f))[0]])
-                        neighbors = graph.get_neighborhood(seed_symbols, max_hops=2)
+                        neighbors = graph.get_neighborhood(
+                            seed_symbols, max_hops=retrieval_limits.max_hops,
+                            max_results=retrieval_limits.max_neighborhood_results,
+                        )
                         for n in neighbors:
                             fp = n.get("filepath")
                             if fp and fp not in matched_files_list:

@@ -11870,6 +11870,118 @@ async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degrada
     assert "File: LowRel.txt (Tier: signatures)" in planner_prompt
 
 
+@pytest.mark.asyncio
+async def test_workflow_heavy_context_depth_widens_retrieval_top_k(tmp_path):
+    """MA2.6 (control-plane implementation plan): with process_profiles.
+    enabled/enforce_context_depth both explicitly on, a HEAVY-profile goal's
+    Graph RAG retrieval actually gets called with IMPACT_WIDE's widened
+    top_k (10), not the hardcoded default (5) - confirms the real wiring
+    inside run_generation_workflow, not just retrieval_limits_for() in
+    isolation (mirrors test_workflow_wires_hybrid_match_scores_into_graph_
+    rag_context_degradation's own fixture pattern for a real vector_index.db)."""
+    from kriya.memory.vector import LocalVectorStore
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.engineering_triage.enabled = True
+    cfg.engineering_triage.shadow_mode = False
+    cfg.process_profiles.enabled = True
+    cfg.process_profiles.enforce_context_depth = True
+    os.makedirs(cfg.paths.memory, exist_ok=True)
+
+    dim = 768
+    doc_emb = [1.0] + [0.0] * (dim - 1)
+    vs = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+    vs.add_document("Existing.java", "class Existing {}", doc_emb, chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
+    vs.close()
+
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Fix the token check",
+        "Design: Update AuthService.java",
+        '[{"filepath": "AuthService.java", "content": "class AuthService {}"}]',
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+
+    from kriya.memory.vector import LocalVectorStore as LVS
+    original_query_hybrid = LVS.query_hybrid
+    captured = {}
+
+    def spy_query_hybrid(self, *args, **kwargs):
+        captured["top_k"] = kwargs.get("top_k")
+        return original_query_hybrid(self, *args, **kwargs)
+
+    query_emb = [1.0] + [0.0] * (dim - 1)
+    with patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", new=AsyncMock(return_value=query_emb)), \
+         patch.object(LVS, "query_hybrid", new=spy_query_hybrid):
+        res = await we.run_generation_workflow(
+            goal="Fix bug: expired JWT tokens are still being accepted, they should be rejected",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert captured.get("top_k") == 10  # IMPACT_WIDE (HIGH risk from JWT/security language)
+
+
+@pytest.mark.asyncio
+async def test_workflow_context_depth_disabled_by_default_keeps_top_k_five(tmp_path):
+    """Regression lock: with process_profiles.enforce_context_depth left at
+    its packaged default (False), the exact same HIGH-risk goal must still
+    use today's hardcoded top_k=5 - confirms the new behavior is genuinely
+    opt-in."""
+    from kriya.memory.vector import LocalVectorStore
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.engineering_triage.enabled = True
+    cfg.engineering_triage.shadow_mode = False
+    # process_profiles left at its default: enabled=False, enforce_context_depth=False
+    os.makedirs(cfg.paths.memory, exist_ok=True)
+
+    dim = 768
+    doc_emb = [1.0] + [0.0] * (dim - 1)
+    vs = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+    vs.add_document("Existing.java", "class Existing {}", doc_emb, chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
+    vs.close()
+
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Fix the token check",
+        "Design: Update AuthService.java",
+        '[{"filepath": "AuthService.java", "content": "class AuthService {}"}]',
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+
+    from kriya.memory.vector import LocalVectorStore as LVS
+    original_query_hybrid = LVS.query_hybrid
+    captured = {}
+
+    def spy_query_hybrid(self, *args, **kwargs):
+        captured["top_k"] = kwargs.get("top_k")
+        return original_query_hybrid(self, *args, **kwargs)
+
+    query_emb = [1.0] + [0.0] * (dim - 1)
+    with patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", new=AsyncMock(return_value=query_emb)), \
+         patch.object(LVS, "query_hybrid", new=spy_query_hybrid):
+        res = await we.run_generation_workflow(
+            goal="Fix bug: expired JWT tokens are still being accepted, they should be rejected",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert captured.get("top_k") == 5
+
+
 def test_find_structural_corruption_catches_the_real_duplicate_class_shape():
     """Regression test for a real live corruption, 2026-08-08
     (ignite_qpid_protocol, run 20260808-053604): a model's SEARCH/REPLACE

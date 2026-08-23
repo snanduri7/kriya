@@ -12,13 +12,52 @@ import subprocess
 import sys
 import tokenize
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+from kriya.workflow.process_profile import ContextDepth
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RetrievalLimits:
+    """MA2.6 (control-plane implementation plan) - how far Graph RAG
+    retrieval reaches (kriya/workflow/workflow.py's "1.5. Graph RAG Context
+    Retrieval" stage: vector_store.query_hybrid's top_k, graph.get_
+    neighborhood's max_hops/max_results), NOT how much of what it finds
+    survives into the prompt - that stays entirely governed by
+    _reserve_graph_context_budget/build_code_context's own token budget
+    below, unchanged by this. Widening these limits only means MORE
+    CANDIDATES get scored and considered; the token budget still trims to
+    fit exactly as it does today."""
+
+    top_k: int
+    max_hops: int
+    max_neighborhood_results: int
+
+
+# NARROW matches today's hardcoded values EXACTLY (query_hybrid's top_k=5,
+# get_neighborhood's default max_hops=2/max_results=30) - a LIGHT-profile
+# request gets IDENTICAL retrieval behavior to what every request gets
+# today, never less. DEPENDENCY_AWARE/IMPACT_WIDE only ever ADD reach on
+# top of that baseline, matching the same purely-additive posture MA2.5
+# already established for approval - nothing here can ever narrow
+# retrieval below what Kriya already does unconditionally today.
+_RETRIEVAL_LIMITS_BY_DEPTH: Dict[ContextDepth, RetrievalLimits] = {
+    ContextDepth.NARROW: RetrievalLimits(top_k=5, max_hops=2, max_neighborhood_results=30),
+    ContextDepth.DEPENDENCY_AWARE: RetrievalLimits(top_k=8, max_hops=2, max_neighborhood_results=40),
+    ContextDepth.IMPACT_WIDE: RetrievalLimits(top_k=10, max_hops=3, max_neighborhood_results=50),
+}
+
+
+def retrieval_limits_for(depth: ContextDepth) -> RetrievalLimits:
+    """Pure lookup, same contract as process_profile_for/determine_risk_class
+    - no config, no LLM, no filesystem."""
+    return _RETRIEVAL_LIMITS_BY_DEPTH[depth]
 
 
 def skeletonize_code(content: str, filepath: str, tier: str) -> str:
