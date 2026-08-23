@@ -29,6 +29,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from kriya.agents.contracts import Milestone
 from kriya.workflow.context_projection import project_implementation_source
 from kriya.workflow.file_resolution import _resolve_run_command
+from kriya.workflow.milestone_normalization import normalize_legacy_milestones
+from kriya.workflow.milestone_validation import MilestonePlanValidator, MilestoneValidationResult
 from kriya.workflow.repository_topology import RepositoryTopology, detect_repository_topology
 from kriya.workflow.verification_contract import extract_contract_verdict
 from kriya.workflow.workflow import _log_phase_banner
@@ -195,31 +197,100 @@ def render_repository_topology_summary(topology: RepositoryTopology) -> str:
     ])
 
 
+_MAX_MILESTONE_PLANNING_ATTEMPTS = 3
+
+
+def _build_plan_correction_feedback(result: MilestoneValidationResult) -> str:
+    """Section 21's "specific failure -> specific correction -> bounded
+    retry" shape (the same retry philosophy Kriya's own Quality Gates loop
+    already uses, one level up) rather than a generic "try again": each line
+    names the real reason code and milestone id MilestonePlanValidator found,
+    so a capable model has a concrete checklist of exactly what to fix, not
+    just a vague rejection."""
+    lines = [
+        "PLAN_VALIDATION_ERROR",
+        "",
+        "Your previous milestone plan was rejected for the following reason(s):",
+    ]
+    for issue in result.errors:
+        location = f" (milestone '{issue.milestone_id}')" if issue.milestone_id else ""
+        lines.append(f"- [{issue.code}]{location}: {issue.message}")
+    lines.append("")
+    lines.append(
+        "Required correction: revise your milestone list to fix ALL of the issues "
+        "above, then resubmit. Return ONLY the corrected milestones JSON block in "
+        "the exact same shape as before - do not add prose explaining the change."
+    )
+    return "\n".join(lines)
+
+
 async def plan_milestones(
     milestone_planner: Any,
     goal: str,
     workspace_path: str,
     stream_callback: Optional[Callable[[str], None]] = None,
+    max_planning_attempts: int = _MAX_MILESTONE_PLANNING_ATTEMPTS,
 ) -> Tuple[Optional[MilestoneRunState], Optional[str]]:
-    """Runs the Milestone Planner once and returns a fresh, nothing-executed-
-    yet MilestoneRunState, or (None, error). Caller (kriya plan-milestones)
+    """Runs the Milestone Planner and returns a fresh, nothing-executed-yet
+    MilestoneRunState, or (None, error). Caller (kriya plan-milestones)
     persists the result via save_milestone_run_state() so a human can
     review/hand-edit the proposed slicing before `kriya generate
     --from-milestones` ever executes a single real generate call against
     their workspace - see the design doc's own note that this is a genuine
-    qualitative judgment call worth a human eyeballing, not just an assertion."""
+    qualitative judgment call worth a human eyeballing, not just an assertion.
+
+    MA3.6: each attempt's output is validated through MilestonePlanValidator
+    (DAG/capability/extension/acceptance/physical-topology -
+    kriya/workflow/milestone_validation.py) BEFORE being accepted - an
+    invalid plan never reaches MilestoneRunState or a human's review. On
+    rejection, a specific, reason-coded correction request
+    (_build_plan_correction_feedback above) is appended to the prompt and the
+    planner is asked again, bounded by max_planning_attempts - never an
+    unbounded re-planning loop (the design doc's own explicit "Do not
+    introduce a generic infinite re-planning loop" rule). A response that
+    fails to produce any parseable milestone list at all (parse_milestone_list
+    returning None - a genuinely different, pre-existing failure mode; see
+    MilestonePlannerAgent.run_with_milestone_list's own docstring) is still an
+    IMMEDIATE failure, not retried here - that degrade-on-malformed-output
+    behavior is unchanged from before this milestone.
+
+    Validation runs against the NORMALIZED v2 representation
+    (kriya/workflow/milestone_normalization.py) purely as a quality gate -
+    the MilestoneRunState this function returns still carries the ORIGINAL v1
+    Milestone objects unchanged; MA3.7 is what migrates the orchestrator's
+    own runtime representation to v2, not this function."""
     existing_files = _list_workspace_files(workspace_path)
     workspace_note = (
         "Workspace is currently empty (or new)."
         if not existing_files
         else "Workspace already contains these files:\n" + "\n".join(f"- {f}" for f in existing_files)
     )
-    topology_summary = render_repository_topology_summary(detect_repository_topology(workspace_path))
-    prompt = f"Goal: {goal}\n\n{workspace_note}\n\n{topology_summary}"
-    _raw, milestones = await milestone_planner.run_with_milestone_list(prompt, stream_callback=stream_callback)
-    if milestones is None:
-        return None, "Milestone Planner output did not produce a valid milestone list."
-    return MilestoneRunState(group_id=str(uuid.uuid4()), original_goal=goal, milestones=milestones), None
+    topology = detect_repository_topology(workspace_path)
+    base_prompt = f"Goal: {goal}\n\n{workspace_note}\n\n{render_repository_topology_summary(topology)}"
+
+    validator = MilestonePlanValidator()
+    correction_feedback = ""
+    last_error = ""
+
+    for attempt in range(1, max(1, max_planning_attempts) + 1):
+        prompt = base_prompt if not correction_feedback else f"{base_prompt}\n\n{correction_feedback}"
+        _raw, milestones = await milestone_planner.run_with_milestone_list(prompt, stream_callback=stream_callback)
+        if milestones is None:
+            return None, "Milestone Planner output did not produce a valid milestone list."
+
+        validation_result = validator.validate(
+            normalize_legacy_milestones(milestones), repository_topology=topology, goal_text=goal,
+        )
+        if validation_result.valid:
+            return MilestoneRunState(group_id=str(uuid.uuid4()), original_goal=goal, milestones=milestones), None
+
+        last_error = (
+            f"Milestone Planner output failed validation after {attempt} attempt(s): "
+            + "; ".join(f"[{e.code}] {e.message}" for e in validation_result.errors)
+        )
+        correction_feedback = _build_plan_correction_feedback(validation_result)
+
+    return None, last_error
 
 
 def build_milestone_goal_text(

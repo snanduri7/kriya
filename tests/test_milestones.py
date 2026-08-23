@@ -382,6 +382,104 @@ async def test_plan_milestones_failure_on_invalid_output():
 
 
 @pytest.mark.asyncio
+async def test_plan_milestones_well_formed_v1_plan_always_passes_validation_first_try():
+    """v1 Milestone has no entrypoint/mode/extends/consumes fields, so
+    normalize_legacy_milestones() can only ever produce a valid v2 plan -
+    this is an important, worth-pinning fact: with today's planner still
+    emitting v1-shaped JSON (MA3.5's deliberate choice), MA3.6's validator
+    gate can never actually reject a real plan yet; it becomes load-bearing
+    only once the planner's own JSON contract is taught to emit real v2
+    fields (a later step, not yet implemented)."""
+    planner = MagicMock()
+    milestones = [
+        Milestone(goal="protocol", success_criterion="c1", depends_on_previous=False),
+        Milestone(goal="cache", success_criterion="c2", depends_on_previous=True),
+    ]
+    planner.run_with_milestone_list = AsyncMock(return_value=("raw", milestones))
+    with tempfile.TemporaryDirectory() as tmp:
+        state, err = await plan_milestones(planner, "goal", tmp)
+    assert err is None
+    assert planner.run_with_milestone_list.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_milestones_retries_with_correction_feedback_on_rejection():
+    """MA3.6: a rejected plan gets a reason-coded PLAN_VALIDATION_ERROR
+    correction appended to the NEXT prompt, and a second, corrected attempt
+    is accepted - proves the retry-loop wiring independent of whether
+    today's v1 JSON contract can trigger a real rejection (see the test
+    above)."""
+    from unittest.mock import patch
+
+    from kriya.workflow.milestone_validation import MilestoneValidationIssue, MilestoneValidationResult
+
+    planner = MagicMock()
+    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    prompts_seen = []
+
+    async def fake_run(prompt, stream_callback=None):
+        prompts_seen.append(prompt)
+        return "raw", milestones
+
+    planner.run_with_milestone_list = fake_run
+
+    bad_result = MilestoneValidationResult(
+        valid=False, milestones=[],
+        errors=[MilestoneValidationIssue("UNJUSTIFIED_ENTRYPOINT", "M2", "test rejection reason")],
+        warnings=[],
+    )
+    good_result = MilestoneValidationResult(valid=True, milestones=[], errors=[], warnings=[])
+
+    with patch("kriya.workflow.milestones.MilestonePlanValidator") as mock_validator_cls:
+        mock_validator_cls.return_value.validate = MagicMock(side_effect=[bad_result, good_result])
+        with tempfile.TemporaryDirectory() as tmp:
+            state, err = await plan_milestones(planner, "goal", tmp)
+
+    assert err is None
+    assert state is not None
+    assert len(prompts_seen) == 2
+    assert "PLAN_VALIDATION_ERROR" in prompts_seen[1]
+    assert "UNJUSTIFIED_ENTRYPOINT" in prompts_seen[1]
+    assert "test rejection reason" in prompts_seen[1]
+    assert "PLAN_VALIDATION_ERROR" not in prompts_seen[0]
+
+
+@pytest.mark.asyncio
+async def test_plan_milestones_bounded_retry_never_infinite():
+    """A plan rejected on EVERY attempt fails after exactly
+    max_planning_attempts calls, never retries forever - the design doc's own
+    explicit "no generic infinite re-planning loop" rule."""
+    from unittest.mock import patch
+
+    from kriya.workflow.milestone_validation import MilestoneValidationIssue, MilestoneValidationResult
+
+    planner = MagicMock()
+    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    call_count = {"n": 0}
+
+    async def fake_run(prompt, stream_callback=None):
+        call_count["n"] += 1
+        return "raw", milestones
+
+    planner.run_with_milestone_list = fake_run
+
+    always_bad = MilestoneValidationResult(
+        valid=False, milestones=[],
+        errors=[MilestoneValidationIssue("EMPTY_ACCEPTANCE", "M1", "always rejected")],
+        warnings=[],
+    )
+    with patch("kriya.workflow.milestones.MilestonePlanValidator") as mock_validator_cls:
+        mock_validator_cls.return_value.validate = MagicMock(return_value=always_bad)
+        with tempfile.TemporaryDirectory() as tmp:
+            state, err = await plan_milestones(planner, "goal", tmp, max_planning_attempts=3)
+
+    assert state is None
+    assert err is not None
+    assert "EMPTY_ACCEPTANCE" in err
+    assert call_count["n"] == 3
+
+
+@pytest.mark.asyncio
 async def test_plan_milestones_prompt_includes_real_repository_topology():
     """MA3.5: the planner prompt now carries deterministic, real repo
     evidence (not just the raw file listing) so the model doesn't have to
