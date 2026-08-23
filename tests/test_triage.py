@@ -6,9 +6,12 @@ belong in one file. Deliberately NOT covering EngineeringTriageService.
 classify()'s goal-text/repository signal detectors here - that's MA1.2's
 own gap, out of scope for this pass."""
 
+import pytest
+
 from kriya.workflow.triage import (
     ChangeKind,
     EngineeringRoute,
+    EngineeringTriageService,
     ExecutionWeight,
     ImpactVector,
     RiskClass,
@@ -156,3 +159,81 @@ def test_reason_codes_accumulate_across_recomputations_not_overwritten():
     first = route.with_recomputed_risk(RiskClass.MEDIUM, ImpactVector(), ["a"])
     second = first.with_recomputed_risk(RiskClass.HIGH, ImpactVector(), ["b"])
     assert second.reason_codes == ["a", "b"]
+
+
+# --- MA2.4: post-Architect recomputation from real planned files -----------
+
+@pytest.mark.asyncio
+async def test_recompute_from_files_escalates_on_planned_pom_xml():
+    """The design's own worked example: an initially LIGHT request whose
+    Architect plan touches pom.xml must escalate to HEAVY before Developer
+    ever runs."""
+    svc = EngineeringTriageService()
+    initial = _route(ChangeKind.TASK, RiskClass.LOW)
+    assert initial.execution_weight == ExecutionWeight.LIGHT
+
+    recomputed = await svc.recompute_from_files(
+        route=initial, workspace_path="/tmp/does-not-matter",
+        planned_files=["src/main/java/com/acme/App.java", "pom.xml"],
+    )
+    assert recomputed.max_observed_risk_class == RiskClass.HIGH
+    assert recomputed.execution_weight == ExecutionWeight.HEAVY
+    assert recomputed.impact.build_system_change is True
+    assert recomputed.impact.dependency_change is True
+    assert any(c.startswith("post_architect:") for c in recomputed.reason_codes)
+
+
+@pytest.mark.asyncio
+async def test_recompute_from_files_detects_security_and_persistence_filenames():
+    svc = EngineeringTriageService()
+    initial = _route(ChangeKind.TASK, RiskClass.LOW)
+
+    security = await svc.recompute_from_files(
+        route=initial, workspace_path="/tmp/x", planned_files=["src/main/java/AuthService.java"],
+    )
+    assert security.impact.security_boundary_change is True
+    assert security.max_observed_risk_class == RiskClass.HIGH
+
+    persistence = await svc.recompute_from_files(
+        route=initial, workspace_path="/tmp/x", planned_files=["src/main/java/RecipeRepository.java"],
+    )
+    assert persistence.impact.persistence_change is True
+    assert persistence.max_observed_risk_class == RiskClass.MEDIUM  # persistence alone, no downstream_references
+
+
+@pytest.mark.asyncio
+async def test_recompute_from_files_never_downgrades_max_observed_risk():
+    svc = EngineeringTriageService()
+    initial = _route(ChangeKind.TASK, RiskClass.HIGH, impact=ImpactVector(security_boundary_change=True))
+
+    recomputed = await svc.recompute_from_files(
+        route=initial, workspace_path="/tmp/x", planned_files=["src/main/java/Helper.java"],
+    )
+    assert recomputed.current_risk_class == RiskClass.LOW  # nothing risky in THIS recomputation
+    assert recomputed.max_observed_risk_class == RiskClass.HIGH  # but the max survives
+    assert recomputed.execution_weight == ExecutionWeight.HEAVY
+
+
+@pytest.mark.asyncio
+async def test_recompute_from_files_preserves_public_contract_change_with_no_fresh_text():
+    """public_contract_change has no goal text to re-derive from here - it
+    must be carried forward from the route's existing impact, not silently
+    reset to False."""
+    svc = EngineeringTriageService()
+    initial = _route(ChangeKind.ENHANCEMENT, RiskClass.MEDIUM, impact=ImpactVector(public_contract_change=True))
+
+    recomputed = await svc.recompute_from_files(
+        route=initial, workspace_path="/tmp/x", planned_files=["src/main/java/Helper.java"],
+    )
+    assert recomputed.impact.public_contract_change is True
+
+
+@pytest.mark.asyncio
+async def test_recompute_from_files_no_kernel_degrades_honestly_no_crash():
+    svc = EngineeringTriageService()  # kernel=None
+    initial = _route(ChangeKind.TASK, RiskClass.LOW)
+    recomputed = await svc.recompute_from_files(
+        route=initial, workspace_path="/tmp/x", planned_files=["src/main/java/Helper.java"],
+    )
+    assert recomputed.impact.downstream_references == 0
+    assert recomputed.impact.symbols_impacted == 0

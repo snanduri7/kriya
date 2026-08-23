@@ -560,14 +560,39 @@ def _extract_named_symbols(goal: str, max_symbols: int = 8) -> List[str]:
     return _CAMEL_CASE_RE.findall(text)[:max_symbols]
 
 
-def _dependency_graph_signals(kernel: Optional[Any], goal: str) -> Dict[str, Any]:
+def _basenames_as_symbols(planned_files: List[str], max_symbols: int = 8) -> List[str]:
+    """Cheap proxy for "what symbol might this planned file define," for
+    MA2.4's post-Architect recomputation - the file doesn't exist on disk
+    yet at Architect time (Developer writes real content later), so there
+    is nothing to parse a class/function name out of. A file's basename
+    (the Java/most-OOP-language convention: a filename matches its primary
+    class name) is the best available signal without guessing at content
+    that doesn't exist yet - a false negative here (a language/convention
+    where this doesn't hold) just means an undercounted downstream-
+    reference signal, never a fabricated positive."""
+    names: List[str] = []
+    for path in planned_files[:max_symbols]:
+        base = os.path.basename(path)
+        stem = base.split(".")[0] if "." in base else base
+        if stem:
+            names.append(stem)
+    return names
+
+
+def _dependency_graph_signals(kernel: Optional[Any], symbols: List[str]) -> Dict[str, Any]:
     """Returns {"available": bool, "downstream_references": int,
     "symbols_impacted": int, "shared_entrypoint": bool}. `available` is
     False (with the numeric fields at 0 / shared_entrypoint False) whenever
     no kernel was supplied, the graph can't be opened, or it has never been
     indexed for this workspace - never raises, since a triage classifier
     failing an entire generation run over a missing/absent index would be a
-    bad trade for what is meant to be a lightweight, best-effort signal."""
+    bad trade for what is meant to be a lightweight, best-effort signal.
+
+    `symbols` is caller-supplied candidate identifiers to check - classify()
+    passes goal-text-extracted candidates (_extract_named_symbols);
+    recompute_from_files (MA2.4) passes planned-file basenames
+    (_basenames_as_symbols) instead, since that call has real file paths
+    but no goal text to re-derive symbols from."""
     result: Dict[str, Any] = {
         "available": False,
         "downstream_references": 0,
@@ -590,7 +615,6 @@ def _dependency_graph_signals(kernel: Optional[Any], goal: str) -> Dict[str, Any
             if not graph.has_indexed_files():
                 return result
 
-            symbols = _extract_named_symbols(goal)
             total_callers = 0
             symbols_found = 0
             max_callers_for_one_symbol = 0
@@ -657,7 +681,7 @@ class EngineeringTriageService:
         creation_language = _detect_creation_language(text)
         repo_appears_empty = _workspace_appears_empty(workspace_path)
 
-        graph_signals = _dependency_graph_signals(self.kernel, text)
+        graph_signals = _dependency_graph_signals(self.kernel, _extract_named_symbols(text))
 
         security_file_signal = _file_pattern_signal(files, _SECURITY_FILE_RE)
         persistence_file_signal = _file_pattern_signal(files, _PERSISTENCE_FILE_RE)
@@ -731,3 +755,69 @@ class EngineeringTriageService:
             router_used=False,
             router_confidence=None,
         )
+
+    async def recompute_from_files(
+        self,
+        *,
+        route: EngineeringRoute,
+        workspace_path: str,
+        planned_files: List[str],
+    ) -> EngineeringRoute:
+        """MA2.4 - recomputes risk from Architect's REAL planned file list,
+        the first point in the pipeline where Kriya knows more than the
+        original request's text/known_files could tell classify() above.
+        Reuses the EXACT SAME deterministic file-pattern machinery
+        classify() already uses (MA1.2) - no new heuristics, no LLM call,
+        matching this codebase's established "never trust an LLM's guess
+        when Kriya can compute deterministically" pattern.
+
+        Detects, directly against planned_files:
+          - pom.xml/build.gradle/package.json/etc -> build_system_change
+            AND dependency_change (touching a build manifest at all is
+            itself evidence of a dependency change, per the design's own
+            "pom.xml/build.gradle/package.json -> build_system_change /
+            dependency_change" signal mapping)
+          - application*.yml/.properties/XML config -> configuration_change
+          - auth/session/security/permission/credential-pattern filenames
+            -> security_boundary_change
+          - repository/DAO/schema/migration-pattern filenames ->
+            persistence_change
+          - a planned file's basename clearing the shared-reference
+            threshold in the dependency graph (best-effort, same honest
+            degradation as classify()'s own graph signals) ->
+            shared_entrypoint_change
+
+        public_contract_change is carried over from route.impact rather
+        than re-derived - there is no fresh goal text here to re-check for
+        creation language, and silently resetting a true signal already
+        found at initial classification to False would be a false
+        negative, not a more accurate answer.
+
+        Always returns via EngineeringRoute.with_recomputed_risk (MA2.2),
+        so max_observed_risk_class can only move up regardless of what
+        this recomputation finds, and every new reason code is tagged
+        `post_architect:` so the audit trail can distinguish initial
+        triage evidence from this later recomputation's own findings."""
+        security_file_signal = _file_pattern_signal(planned_files, _SECURITY_FILE_RE)
+        persistence_file_signal = _file_pattern_signal(planned_files, _PERSISTENCE_FILE_RE)
+        config_file_signal = _file_pattern_signal(planned_files, _CONFIG_FILE_RE)
+        build_system_file_signal = _file_pattern_signal(planned_files, _BUILD_SYSTEM_FILE_RE)
+
+        graph_signals = _dependency_graph_signals(self.kernel, _basenames_as_symbols(planned_files))
+
+        new_impact = ImpactVector(
+            files_touched=len(planned_files),
+            symbols_impacted=int(graph_signals["symbols_impacted"]),
+            downstream_references=int(graph_signals["downstream_references"]),
+            public_contract_change=route.impact.public_contract_change,
+            persistence_change=persistence_file_signal,
+            security_boundary_change=security_file_signal,
+            dependency_change=build_system_file_signal,
+            configuration_change=config_file_signal,
+            build_system_change=build_system_file_signal,
+            shared_entrypoint_change=bool(graph_signals["shared_entrypoint"]),
+        )
+
+        new_risk = determine_risk_class(new_impact)
+        new_reason_codes = [f"post_architect:{code}" for code in risk_reason_codes(new_impact)]
+        return route.with_recomputed_risk(new_risk, new_impact, new_reason_codes)

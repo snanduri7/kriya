@@ -1210,6 +1210,41 @@ class WorkflowEngine:
         if step_callback:
             step_callback("Design", design)
 
+        # MA2.4 - post-Architect risk recomputation (kriya/workflow/triage.py::
+        # EngineeringTriageService.recompute_from_files). architect_files is
+        # fully resolved by this point (resumed checkpoint, a fresh Architect
+        # call, or the regex-extraction fallback above all converge here) -
+        # this is the first point in the pipeline where Kriya knows real
+        # touched-file paths instead of MA1's goal-text/known_files estimate.
+        # A caught, logged failure never blocks generation - same posture as
+        # MA1.3's own classify() call. Still no runtime behavior change as of
+        # MA2.4 itself: nothing downstream reads `control` for context/
+        # planning/approval/verification decisions yet (MA2.5/MA2.6) - this
+        # only updates `control` and `state.engineering_route` so an
+        # escalation that happens here is visible in telemetry and available
+        # to whichever later MA2 task first reads it.
+        if control is not None:
+            try:
+                recomputed_route = await self.engineering_triage.recompute_from_files(
+                    route=control.engineering_route,
+                    workspace_path=workspace_path,
+                    planned_files=list(architect_files or []),
+                )
+                if recomputed_route.max_observed_risk_class > control.engineering_route.max_observed_risk_class:
+                    logger.info(
+                        "[Engineering Triage] post-Architect escalation: "
+                        f"{control.engineering_route.max_observed_risk_class.name}->"
+                        f"{recomputed_route.max_observed_risk_class.name} "
+                        f"weight={control.process_profile.execution_weight.value}->"
+                        f"{recomputed_route.execution_weight.value} "
+                        f"reasons={recomputed_route.reason_codes[len(control.engineering_route.reason_codes):]}"
+                    )
+                control = control.with_route(recomputed_route)
+                engineering_route = control.engineering_route
+                state.engineering_route = engineering_route
+            except Exception as e:
+                logger.warning(f"Post-Architect engineering triage recomputation failed, continuing without it: {e}")
+
         # Stage 2A: Post-architecture dependency scan
         if knowledge_config.check_enabled:
             from kriya.tools.knowledge import extract_library_versions
