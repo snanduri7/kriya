@@ -14,6 +14,7 @@ from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.triage import EngineeringRoute
+from kriya.workflow.process_profile import ProcessProfile
 
 
 @dataclass
@@ -112,6 +113,15 @@ class GenerationState:
     # write-once field, same shape as last_failure being carried for
     # downstream reporting rather than loop control.
     engineering_route: Optional[EngineeringRoute] = None
+    # MA2.6b - the ProcessProfile resolved alongside engineering_route (see
+    # WorkflowControlContext, kriya/workflow/control_context.py), carried
+    # here purely for generation_metrics() to serialize - same
+    # telemetry-only, write-once posture as engineering_route above. Kept
+    # as its own field rather than storing the whole WorkflowControlContext
+    # object, so this stays a plain, JSON-serializable value like every
+    # other GenerationState field, not a second copy of engineering_route
+    # nested inside a wrapper.
+    process_profile: Optional[ProcessProfile] = None
     # The active canonical typed failure behind repair prompts. Advisory and
     # auxiliary events remain in run_events/gate_outcomes but cannot replace an
     # existing authoritative failure here. Retry prompts project this object
@@ -286,6 +296,13 @@ class GenerationState:
             # own comment above and the control-plane plan's own "extend
             # generation_metrics first, not ten SQL columns" guidance.
             metrics["engineering_route"] = self.engineering_route.to_dict()
+        if self.process_profile is not None:
+            # MA2.6b - observational only. Recording this tells a human/future
+            # analysis what tier WOULD have applied and, for HEAVY, that its
+            # extended checks aren't real yet - it does NOT mean any of
+            # PolymorphicValidator/Quality Gates actually ran differently for
+            # this attempt. See ProcessProfile.to_dict()'s own docstring.
+            metrics["process_profile"] = self.process_profile.to_dict()
         return metrics
 
     def record_failure(self, failure: Any, *, operation: Optional[str] = None) -> RunEvent:

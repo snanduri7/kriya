@@ -460,7 +460,11 @@ class WorkflowEngine:
         # object instead of the bare `error_context` parameter early on and
         # `state.error_context` later. See kriya/workflow/state.py for the
         # rationale behind every other field.
-        state = GenerationState(error_context=error_context or "", engineering_route=engineering_route)
+        state = GenerationState(
+            error_context=error_context or "",
+            engineering_route=engineering_route,
+            process_profile=control.process_profile if control is not None else None,
+        )
         generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
         if generation_budget is None:
             logger.info(
@@ -1262,6 +1266,7 @@ class WorkflowEngine:
                 control = control.with_route(recomputed_route)
                 engineering_route = control.engineering_route
                 state.engineering_route = engineering_route
+                state.process_profile = control.process_profile
             except Exception as e:
                 logger.warning(f"Post-Architect engineering triage recomputation failed, continuing without it: {e}")
 

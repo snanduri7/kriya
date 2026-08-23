@@ -31,6 +31,7 @@ before.
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict
 
 from kriya.workflow.triage import ExecutionWeight
 
@@ -78,6 +79,28 @@ class ProcessProfile:
     auto_merge_allowed: bool
 
     verification_tier: VerificationTier
+
+    def to_dict(self) -> Dict[str, Any]:
+        """MA2.6b - content-free telemetry shape, same convention as
+        EngineeringRoute.to_dict() (kriya/workflow/triage.py). Always
+        includes heavy_extended_checks_not_yet_available, computed here
+        rather than left to each call site to remember - "HEAVY records
+        which future extended checks are not yet available" (MA2.6b's own
+        Definition-of-Done line) is guaranteed by construction, not by
+        convention."""
+        return {
+            "execution_weight": self.execution_weight.value,
+            "context_depth": self.context_depth.value,
+            "planning_required": self.planning_required,
+            "structured_subtasks_required": self.structured_subtasks_required,
+            "impact_revalidation_required": self.impact_revalidation_required,
+            "contract_analysis_required": self.contract_analysis_required,
+            "full_test_suite_required": self.full_test_suite_required,
+            "human_review_required": self.human_review_required,
+            "auto_merge_allowed": self.auto_merge_allowed,
+            "verification_tier": self.verification_tier.value,
+            "heavy_extended_checks_not_yet_available": self.verification_tier == VerificationTier.HEAVY,
+        }
 
 
 LIGHT_PROFILE = ProcessProfile(

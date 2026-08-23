@@ -3,7 +3,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +342,30 @@ class ProcessProfilesConfig(BaseModel):
     enabled: bool = Field(default=False)
     enforce_approval: bool = Field(default=False)
     enforce_context_depth: bool = Field(default=False)
+    # MA2.6b explicit decision (control-plane implementation plan): "ProcessProfile
+    # may increase safety/process cost, but it may not reduce Kriya's existing
+    # verification baseline." MA2 ships verification depth as telemetry-only -
+    # verification_tier is recorded, but PolymorphicValidator/Quality Gates run
+    # IDENTICALLY regardless of execution_weight (the full regression suite stays
+    # unconditional for LIGHT too, exactly as it is today). Rejected here, not just
+    # left unread, so a misconfiguration can never quietly believe reduced-LIGHT-
+    # verification is active when it isn't - see the validator below.
     enforce_verification_depth: bool = Field(default=False)
+
+    @field_validator("enforce_verification_depth")
+    @classmethod
+    def _not_yet_implemented(cls, v: bool) -> bool:
+        if v:
+            raise ValueError(
+                "process_profiles.enforce_verification_depth is not implemented yet - MA2 "
+                "ships verification depth as telemetry-only by explicit design decision "
+                "('a triage misclassification cannot reduce regression-test coverage in "
+                "MA2'). Setting this to true would silently do nothing rather than actually "
+                "changing verification behavior, which is exactly the quiet misconfiguration "
+                "this validator exists to prevent. Leave it false until a future milestone "
+                "implements real, deterministically-safeguarded behavioral enforcement."
+            )
+        return v
 
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)

@@ -11929,6 +11929,48 @@ async def test_workflow_heavy_context_depth_widens_retrieval_top_k(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_heavy_process_profile_records_telemetry_only(tmp_path):
+    """MA2.6b (control-plane implementation plan): a HEAVY-classified goal
+    completes with the SAME mocked LLM sequence and outcome as any ordinary
+    successful run - no extra verification call, no extra command - proving
+    verification_tier is observational only. generation_metrics still
+    records process_profile with heavy_extended_checks_not_yet_available."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.engineering_triage.enabled = True
+    cfg.engineering_triage.shadow_mode = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Fix the token check",
+        "Design: Update AuthService.java",
+        '[{"filepath": "AuthService.java", "content": "class AuthService {}"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Fix bug: expired JWT tokens are still being accepted, they should be rejected",
+        workspace_path=str(tmp_path),
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["files"] == ["AuthService.java"]
+
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    metrics = json.loads(trace_row["generation_metrics"])
+    profile = metrics["process_profile"]
+    assert profile["execution_weight"] == "heavy"
+    assert profile["verification_tier"] == "heavy"
+    assert profile["heavy_extended_checks_not_yet_available"] is True
+    # engineering_route recorded alongside it, same as before MA2.6b
+    assert metrics["engineering_route"]["max_observed_risk_class"] == "HIGH"
+
+
+@pytest.mark.asyncio
 async def test_workflow_context_depth_disabled_by_default_keeps_top_k_five(tmp_path):
     """Regression lock: with process_profiles.enforce_context_depth left at
     its packaged default (False), the exact same HIGH-risk goal must still
