@@ -80,9 +80,15 @@ MILESTONE_DAG_CYCLE = "MILESTONE_DAG_CYCLE"
 INVALID_EXTENSION = "INVALID_EXTENSION"
 UNKNOWN_PROVIDER = "UNKNOWN_PROVIDER"
 EMPTY_ACCEPTANCE = "EMPTY_ACCEPTANCE"
+DUPLICATE_ACCEPTANCE_ID = "DUPLICATE_ACCEPTANCE_ID"
 EXTENSION_DEPENDENCY_NORMALIZED = "EXTENSION_DEPENDENCY_NORMALIZED"
 UNJUSTIFIED_ENTRYPOINT = "UNJUSTIFIED_ENTRYPOINT"
-UNJUSTIFIED_BUILD_BOUNDARY = "UNJUSTIFIED_BUILD_BOUNDARY"  # reserved, MA3.8
+# Reserved, not yet emitted - a milestone plan alone has no field naming a
+# new build ROOT/module path, so this can only be checked post-execution
+# (diffing two detect_repository_topology() calls against real generated
+# files, not against the plan itself - see this module's own top-of-file
+# note on why that's a genuinely different code path from validate() here).
+UNJUSTIFIED_BUILD_BOUNDARY = "UNJUSTIFIED_BUILD_BOUNDARY"
 
 # Deliberately small and literal (not a general goal-understanding model) -
 # same "revisit once a live run produces real data" restraint as
@@ -192,6 +198,23 @@ class MilestonePlanValidator:
                     EMPTY_ACCEPTANCE, m.id,
                     f"milestone '{m.id}' has no acceptance criteria",
                 ))
+
+        # Checked globally, not just within one milestone's own list - these
+        # ids are used as flat labels wherever acceptance criteria are
+        # rendered (goal text, telemetry), so a cross-milestone collision is
+        # exactly as ambiguous as a within-milestone one.
+        acceptance_id_owners: Dict[str, str] = {}
+        for m in normalized_milestones:
+            for a in m.acceptance:
+                if a.id in acceptance_id_owners:
+                    errors.append(MilestoneValidationIssue(
+                        DUPLICATE_ACCEPTANCE_ID, m.id,
+                        f"acceptance id '{a.id}' is used by both milestone "
+                        f"'{acceptance_id_owners[a.id]}' and milestone '{m.id}' - "
+                        "acceptance ids must be unique across the whole plan",
+                    ))
+                else:
+                    acceptance_id_owners[a.id] = m.id
 
         errors.extend(self._check_physical_topology(normalized_milestones, repository_topology, goal_text))
 

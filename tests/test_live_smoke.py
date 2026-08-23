@@ -122,3 +122,47 @@ def test_ask_answers_a_question_about_the_repo_without_crashing(tmp_path):
     assert "Traceback (most recent call last)" not in result.stderr, result.stderr
     assert result.returncode == 0
     assert result.stdout.strip()
+
+
+def test_plan_milestones_runs_the_real_planner_without_crashing(tmp_path):
+    """MA3.8's own required real-model check (design doc section 28's
+    "not merely a prompt snapshot test... run the real MilestonePlanner
+    model path" - the deterministic DAG/capability/extension/acceptance/
+    physical-topology assertions themselves already live at the validator
+    level, tests/test_milestone_validation.py and
+    test_plan_milestones_end_to_end_planner_correction_against_real_
+    validator in tests/test_milestones.py, per that same section's "a
+    deterministic validator test should exist separately").
+
+    Same narrow bar as every other test in this module (see this file's own
+    docstring): does the real MilestonePlannerAgent -> parse_milestone_list_v2
+    -> MilestonePlanValidator -> bounded-retry pipeline survive a REAL small
+    model's actual JSON response shape, not "is the resulting decomposition
+    good." A tiny CI-pulled model may genuinely exhaust its bounded
+    correction attempts on a real single-module Maven goal (a small model
+    reliably emitting a fully v2-compliant, single-entrypoint 3-milestone
+    plan is a real, non-trivial ask) - that is still a CLEAN, DEFINED
+    outcome (`Milestone planning failed: ...`), not a crash, and is accepted
+    here exactly like `test_generate_runs_the_real_pipeline_without_crashing`
+    accepts either PASSED or FAILED quality gates above."""
+    _init_git_repo(tmp_path)
+    _write_config(tmp_path)
+    (tmp_path / "pom.xml").write_text(
+        "<project><groupId>test</groupId><artifactId>app</artifactId><version>1.0</version></project>"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add pom.xml"], cwd=tmp_path, check=True)
+    goal = (
+        "Create one Maven application that reads a message, stores it, "
+        "and exposes the stored value."
+    )
+
+    result = _run_kriya(["plan-milestones", goal], cwd=tmp_path, timeout=300)
+
+    assert "Traceback (most recent call last)" not in result.stderr, result.stderr
+    if result.returncode == 0:
+        assert "=== Proposed" in result.stdout, result.stdout
+        assert "Plan written to:" in result.stdout, result.stdout
+    else:
+        # A clean, defined validation-exhaustion failure - not a crash.
+        assert "Milestone planning failed:" in result.stdout, result.stdout

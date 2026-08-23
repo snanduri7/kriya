@@ -1,5 +1,6 @@
 from kriya.agents.contracts import AcceptanceCriterion, MilestoneMode, MilestoneV2, ProvidedCapability
 from kriya.workflow.milestone_validation import (
+    DUPLICATE_ACCEPTANCE_ID,
     DUPLICATE_MILESTONE_ID,
     EMPTY_ACCEPTANCE,
     EXTENSION_DEPENDENCY_NORMALIZED,
@@ -227,3 +228,37 @@ def test_explicit_goal_justifies_new_build_boundary():
         goal_text="Create a reusable Java library and a separate CLI executable that consumes the library.",
     )
     assert r.valid
+
+
+def test_duplicate_acceptance_id_across_milestones_rejected():
+    m1 = MilestoneV2(id="M1", goal="g", acceptance=[AcceptanceCriterion(id="A1", description="ok")])
+    m2 = MilestoneV2(id="M2", goal="g", depends_on=["M1"], acceptance=[AcceptanceCriterion(id="A1", description="ok")])
+    r = MilestonePlanValidator().validate([m1, m2])
+    assert not r.valid
+    assert any(e.code == DUPLICATE_ACCEPTANCE_ID for e in r.errors)
+
+
+def test_duplicate_acceptance_id_within_one_milestone_rejected():
+    m1 = MilestoneV2(id="M1", goal="g", acceptance=[
+        AcceptanceCriterion(id="A1", description="first"),
+        AcceptanceCriterion(id="A1", description="second"),
+    ])
+    r = MilestonePlanValidator().validate([m1])
+    assert not r.valid
+    assert any(e.code == DUPLICATE_ACCEPTANCE_ID for e in r.errors)
+
+
+def test_extension_entrypoint_need_not_exist_on_disk():
+    """Section 34's own distinction: an extension milestone's entrypoint is
+    frequently one the PREDECESSOR milestone is about to create, not
+    something already on disk - the validator must never require the literal
+    file to exist. This module never touches the filesystem for entrypoint
+    checks at all (only compares string values across milestones), so a
+    plausible-but-nonexistent path is accepted exactly like a real one."""
+    plan = [
+        mk("M1", entrypoint="src/main/java/com/example/NotYetWritten.java"),
+        mk("M2", depends_on=["M1"], mode=MilestoneMode.EXTENSION, extends="M1",
+           entrypoint="src/main/java/com/example/NotYetWritten.java"),
+    ]
+    r = MilestonePlanValidator().validate(plan, repository_topology=SINGLE_MODULE_TOPOLOGY, goal_text="goal")
+    assert r.valid, r.to_dict()

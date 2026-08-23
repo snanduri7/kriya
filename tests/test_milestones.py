@@ -579,6 +579,65 @@ async def test_plan_milestones_prompt_includes_real_repository_topology():
     assert "Build system: maven" in captured["prompt"]
 
 
+@pytest.mark.asyncio
+async def test_plan_milestones_end_to_end_planner_correction_against_real_validator():
+    """MA3.8 section 36's own required test: 'tests the actual safety
+    architecture rather than only the validator function.' Unlike
+    test_plan_milestones_retries_with_correction_feedback_on_rejection above
+    (which mocks MilestonePlanValidator to isolate the retry-loop's own
+    plumbing), this uses the REAL, unmocked validator against a REAL
+    single-module Maven topology on disk: the planner's first response
+    proposes 3 competing entrypoints (the historical incident's exact
+    shape), gets genuinely rejected by MilestonePlanValidator, receives a
+    real reason-coded correction, and its second, corrected response (single
+    entrypoint, extended across all 3 milestones) is genuinely accepted."""
+    planner = MagicMock()
+    prompts_seen = []
+
+    bad_plan = [
+        MilestoneV2(id="M1", goal="read protocol messages", entrypoint="Protocol.java",
+                    acceptance=[AcceptanceCriterion(id="M1-A1", description="message received")]),
+        MilestoneV2(id="M2", goal="store the result", depends_on=["M1"], entrypoint="Cache.java",
+                    acceptance=[AcceptanceCriterion(id="M2-A1", description="value stored")]),
+        MilestoneV2(id="M3", goal="expose the result", depends_on=["M2"], entrypoint="Api.java",
+                    acceptance=[AcceptanceCriterion(id="M3-A1", description="value readable")]),
+    ]
+    good_plan = [
+        MilestoneV2(id="M1", goal="read protocol messages", entrypoint="Application.java",
+                    acceptance=[AcceptanceCriterion(id="M1-A1", description="message received")]),
+        MilestoneV2(id="M2", goal="store the result", depends_on=["M1"], mode=MilestoneMode.EXTENSION,
+                    extends="M1", entrypoint="Application.java",
+                    acceptance=[AcceptanceCriterion(id="M2-A1", description="value stored")]),
+        MilestoneV2(id="M3", goal="expose the result", depends_on=["M2"], mode=MilestoneMode.EXTENSION,
+                    extends="M2", entrypoint="Application.java",
+                    acceptance=[AcceptanceCriterion(id="M3-A1", description="value readable")]),
+    ]
+    responses = [bad_plan, good_plan]
+
+    async def fake_run(prompt, stream_callback=None):
+        prompts_seen.append(prompt)
+        return "raw", responses[len(prompts_seen) - 1]
+
+    planner.run_with_milestone_list = fake_run
+    goal = (
+        "Create one Maven application that reads protocol messages, stores "
+        "the resulting values, and exposes the result through the same "
+        "application."
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "pom.xml"), "w") as f:
+            f.write("<project><groupId>x</groupId><artifactId>y</artifactId></project>")
+        state, err = await plan_milestones(planner, goal, tmp)
+
+    assert err is None, err
+    assert state is not None
+    assert len(prompts_seen) == 2
+    assert "PLAN_VALIDATION_ERROR" in prompts_seen[1]
+    assert "UNJUSTIFIED_ENTRYPOINT" in prompts_seen[1]
+    assert "competing" in prompts_seen[1]
+    assert [m.entrypoint for m in state.milestones] == ["Application.java"] * 3
+
+
 # ============================================================
 # render_repository_topology_summary
 # ============================================================
