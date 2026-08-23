@@ -32,6 +32,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.triage import EngineeringRoute, EngineeringTriageService
 
 from kriya.workflow.worktree import (
     _resolve_repo_head,
@@ -242,6 +243,13 @@ class WorkflowEngine:
         self.run_verifier = RunVerifierAgent("run_verifier", llm_client, roles.run_verifier.llm, roles.run_verifier.llm_chain)
         self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client, roles.skill_gap.llm, roles.skill_gap.llm_chain)
         self.spec_compliance = SpecComplianceAgent("spec_compliance", llm_client, roles.spec_compliance.llm, roles.spec_compliance.llm_chain)
+        # MA1 of the control-plane implementation plan (kriya/workflow/triage.py) -
+        # deliberately not constructed alongside the roles above: this isn't an
+        # "agent" (no LLM call happens in it yet, see EngineeringTriageService's
+        # own docstring), it's a deterministic classifier kept in shadow mode
+        # (kriya/config/config.py::EngineeringTriageConfig) until MA2 lets its
+        # result start influencing anything.
+        self.engineering_triage = EngineeringTriageService(kernel=kernel)
 
     async def _approve_web_lookup(
         self, terms: List[str], base_url: str,
@@ -405,6 +413,36 @@ class WorkflowEngine:
         # docstring (above) for the full gap this closes and why it's opt-in.
         if self.kernel.config.autonomy.auto_index_missing_dependency_graph:
             await _ensure_repository_indexed(self.kernel.config, workspace_path)
+
+        # MA1.3 - engineering triage, shadow mode (kriya/workflow/triage.py).
+        # Placed AFTER the optional auto-index above, same time-budget-exclusion
+        # reasoning as that block's own comment - and, not incidentally, so a
+        # freshly-built dependency graph is available to the triage classifier's
+        # own best-effort DependencyGraph signals. Placed BEFORE state =
+        # GenerationState(...) below purely to keep this near the top of the
+        # method, matching the design's own "triage runs before any of the rest
+        # of this document engages" ordering - engineering_route itself is not
+        # yet read by anything else in this method (that starts at MA2); this
+        # call exists ONLY to compute and log a classification for shadow-mode
+        # evaluation (MA1.5). A classification failure is caught and logged,
+        # never allowed to fail a real generation run over what is, in MA1,
+        # pure telemetry - not a gate.
+        engineering_route: Optional[EngineeringRoute] = None
+        if self.kernel.config.engineering_triage.enabled:
+            try:
+                engineering_route = await self.engineering_triage.classify(
+                    goal, workspace_path, known_files=established_files,
+                )
+                logger.info(
+                    "[Engineering Triage] "
+                    f"kind={engineering_route.kind.value} "
+                    f"risk={engineering_route.max_observed_risk_class.name} "
+                    f"weight={engineering_route.execution_weight.value} "
+                    f"shadow_mode={self.kernel.config.engineering_triage.shadow_mode} "
+                    f"reasons={engineering_route.reason_codes}"
+                )
+            except Exception as e:
+                logger.warning(f"Engineering triage classification failed, continuing without it: {e}")
 
         # Constructed once, right at the top, so every stage of the method -
         # including the pre-loop checkpoint fingerprinting and Planner prompt
