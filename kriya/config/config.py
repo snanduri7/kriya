@@ -306,6 +306,23 @@ class KnowledgeConfig(BaseModel):
     check_enabled: bool = Field(default=True)
     offline_mode: bool = Field(default=False)
 
+class EngineeringTriageConfig(BaseModel):
+    """MA1 of the control-plane implementation plan (kriya/workflow/triage.py) -
+    kind/risk_class/execution_weight classification for a generation request.
+    Two independent switches, same "flipping one alone does nothing" pattern
+    already used for autonomy.web_lookup_enabled + search.base_url: `enabled`
+    turns classification ON (so it actually runs and gets logged), `shadow_mode`
+    keeps its result from affecting anything current Kriya does. MA1 requires
+    shadow_mode to stay True regardless of `enabled` - nothing reads
+    EngineeringRoute for a real decision until MA2. Both default False here at
+    the pydantic-model level (the safe bare-AppConfig() fallback, same
+    convention as spec_compliance_enabled/auto_index_missing_dependency_graph
+    above) - default_config.yaml is what actually turns shadow classification
+    on for real usage once MA1.3 wires it in."""
+
+    enabled: bool = Field(default=False)
+    shadow_mode: bool = Field(default=True)
+
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
@@ -320,6 +337,7 @@ class AppConfig(BaseModel):
     search: SearchConfig = Field(default_factory=SearchConfig)
     agent_llms: AgentRolesConfig = Field(default_factory=AgentRolesConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
+    engineering_triage: EngineeringTriageConfig = Field(default_factory=EngineeringTriageConfig)
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""

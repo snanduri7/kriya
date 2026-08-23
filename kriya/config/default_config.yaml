@@ -85,6 +85,19 @@ routing:
   reject_threshold: 0.3
   ask_margin: 0.05
 
+# MA1 of the control-plane implementation plan (kriya/workflow/triage.py) -
+# classifies each generation request's kind/risk_class/execution_weight.
+# enabled: true here so shadow classification actually runs and gets logged
+# (the whole point of MA1 is collecting real data to evaluate before MA2
+# lets it affect anything); shadow_mode: true means current Kriya's
+# behavior - context, planning, approval, retries - is completely unchanged
+# regardless of what gets classified. Do not set shadow_mode: false until
+# MA2 ships and classifications have been evaluated against real Kriya
+# goals (MA1.5).
+engineering_triage:
+  enabled: true
+  shadow_mode: true
+
 autonomy:
   mode: "human-in-the-loop"
   sensitive_paths:
