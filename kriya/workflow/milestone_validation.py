@@ -400,3 +400,20 @@ def topological_order(milestones: List[MilestoneV2]) -> List[MilestoneV2]:
                 ready.append(nxt)
 
     return result
+
+
+def plan_structure_telemetry(milestones: List[MilestoneV2]) -> Dict[str, int]:
+    """MA3.9's structural telemetry fields (design doc section 37) - pure,
+    derived straight from the milestone list itself. Deliberately excludes
+    validation_attempts/validation_failures/repository_topology/schema_version
+    - those belong to the CALLER's own bookkeeping (kriya/workflow/
+    milestones.py's plan_milestones(), which knows how many attempts it took
+    and what topology it validated against), not to a fact derivable from
+    the milestones alone. Safe to call on an INVALID (rejected) plan too -
+    structure is still meaningful even when a specific check failed."""
+    return {
+        "milestone_count": len(milestones),
+        "dependency_edges": sum(len(m.depends_on) for m in milestones),
+        "extension_count": sum(1 for m in milestones if m.mode == MilestoneMode.EXTENSION),
+        "composition_count": sum(1 for m in milestones if m.mode == MilestoneMode.COMPOSITION),
+    }

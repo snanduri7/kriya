@@ -33,6 +33,7 @@ from kriya.workflow.milestone_normalization import normalize_legacy_milestones
 from kriya.workflow.milestone_validation import (
     MilestonePlanValidator,
     MilestoneValidationResult,
+    plan_structure_telemetry,
     topological_order,
 )
 from kriya.workflow.repository_topology import RepositoryTopology, detect_repository_topology
@@ -269,12 +270,54 @@ def _build_plan_correction_feedback(result: MilestoneValidationResult) -> str:
     return "\n".join(lines)
 
 
+def _log_milestone_plan_telemetry(
+    logs_path: Optional[str],
+    group_id: str,
+    status: str,
+    milestones: List[MilestoneV2],
+    validation_attempts: int,
+    validation_failures: List[str],
+    topology: RepositoryTopology,
+) -> None:
+    """MA3.9 - no-op when logs_path isn't supplied (kriya plan-milestones
+    passes config.paths.logs; a caller that doesn't care about telemetry,
+    e.g. most of this module's own tests, gets zero I/O). Lazy import + a
+    fresh TraceLogger per call, same convention as every trace-logging call
+    site in kriya/workflow/workflow.py."""
+    if not logs_path:
+        return
+    from kriya.core.trace import TraceLogger
+
+    structure = plan_structure_telemetry(milestones)
+    trace_logger = TraceLogger(os.path.join(logs_path, "traces.db"))
+    try:
+        trace_logger.log_milestone_plan(
+            group_id=group_id,
+            status=status,
+            schema_version=2,
+            milestone_count=structure["milestone_count"],
+            dependency_edges=structure["dependency_edges"],
+            extension_count=structure["extension_count"],
+            composition_count=structure["composition_count"],
+            validation_attempts=validation_attempts,
+            validation_failures=validation_failures,
+            repository_topology={
+                "build_system": topology.build_system,
+                "module_count": len(topology.build_roots),
+                "entrypoint_count": len(topology.entrypoints),
+            },
+        )
+    finally:
+        trace_logger.close()
+
+
 async def plan_milestones(
     milestone_planner: Any,
     goal: str,
     workspace_path: str,
     stream_callback: Optional[Callable[[str], None]] = None,
     max_planning_attempts: int = _MAX_MILESTONE_PLANNING_ATTEMPTS,
+    logs_path: Optional[str] = None,
 ) -> Tuple[Optional[MilestoneRunState], Optional[str]]:
     """Runs the Milestone Planner and returns a fresh, nothing-executed-yet
     MilestoneRunState, or (None, error). Caller (kriya plan-milestones)
@@ -309,7 +352,15 @@ async def plan_milestones(
     auto-merged into depends_on - see MilestonePlanValidator.validate()'s own
     `.milestones` result), not the raw pre-validation list, so
     run_milestones() sees the fully-correct dependency graph without
-    re-deriving it."""
+    re-deriving it.
+
+    MA3.9: when logs_path is supplied (kriya plan-milestones passes
+    config.paths.logs), one milestone_plans row (kriya/core/trace.py) is
+    recorded for this call REGARDLESS of outcome - accepted, rejected after
+    exhausting max_planning_attempts, or malformed_output - keyed by the
+    SAME group_id a resulting MilestoneRunState would carry, so an accepted
+    plan's telemetry row and its later executed `runs` rows share one id."""
+    group_id = str(uuid.uuid4())
     existing_files = _list_workspace_files(workspace_path)
     workspace_note = (
         "Workspace is currently empty (or new)."
@@ -322,25 +373,40 @@ async def plan_milestones(
     validator = MilestonePlanValidator()
     correction_feedback = ""
     last_error = ""
+    accumulated_failure_codes: List[str] = []
+    last_attempted_milestones: List[MilestoneV2] = []
 
     for attempt in range(1, max(1, max_planning_attempts) + 1):
         prompt = base_prompt if not correction_feedback else f"{base_prompt}\n\n{correction_feedback}"
         _raw, milestones = await milestone_planner.run_with_milestone_list(prompt, stream_callback=stream_callback)
         if milestones is None:
+            _log_milestone_plan_telemetry(
+                logs_path, group_id, "malformed_output", [], attempt, accumulated_failure_codes, topology,
+            )
             return None, "Milestone Planner output did not produce a valid milestone list."
 
+        last_attempted_milestones = milestones
         validation_result = validator.validate(milestones, repository_topology=topology, goal_text=goal)
         if validation_result.valid:
+            _log_milestone_plan_telemetry(
+                logs_path, group_id, "accepted", validation_result.milestones,
+                attempt, accumulated_failure_codes, topology,
+            )
             return MilestoneRunState(
-                group_id=str(uuid.uuid4()), original_goal=goal, milestones=validation_result.milestones,
+                group_id=group_id, original_goal=goal, milestones=validation_result.milestones,
             ), None
 
+        accumulated_failure_codes.extend(e.code for e in validation_result.errors)
         last_error = (
             f"Milestone Planner output failed validation after {attempt} attempt(s): "
             + "; ".join(f"[{e.code}] {e.message}" for e in validation_result.errors)
         )
         correction_feedback = _build_plan_correction_feedback(validation_result)
 
+    _log_milestone_plan_telemetry(
+        logs_path, group_id, "rejected", last_attempted_milestones,
+        max(1, max_planning_attempts), accumulated_failure_codes, topology,
+    )
     return None, last_error
 
 

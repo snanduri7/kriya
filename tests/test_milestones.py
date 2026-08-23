@@ -1062,3 +1062,84 @@ def test_trace_logger_schema_migration_is_idempotent():
         db_path = os.path.join(tmp, "traces.db")
         TraceLogger(db_path).close()
         TraceLogger(db_path).close()  # second init must not raise
+
+
+# ============================================================
+# MA3.9 - milestone-plan telemetry
+# ============================================================
+
+def test_trace_logger_persists_milestone_plan_row():
+    from kriya.core.trace import TraceLogger
+    import sqlite3
+    import json as _json
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = os.path.join(tmp, "traces.db")
+        t = TraceLogger(db_path)
+        t.log_milestone_plan(
+            group_id="grp1", status="accepted", schema_version=2, milestone_count=3,
+            dependency_edges=2, extension_count=2, composition_count=0,
+            validation_attempts=1, validation_failures=[],
+            repository_topology={"build_system": "maven", "module_count": 1, "entrypoint_count": 1},
+        )
+        t.close()
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT status, schema_version, milestone_count, dependency_edges, "
+            "extension_count, composition_count, validation_attempts, "
+            "validation_failures, repository_topology FROM milestone_plans WHERE group_id = ?",
+            ("grp1",),
+        ).fetchone()
+        conn.close()
+
+    assert row[:7] == ("accepted", 2, 3, 2, 2, 0, 1)
+    assert _json.loads(row[7]) == []
+    assert _json.loads(row[8]) == {"build_system": "maven", "module_count": 1, "entrypoint_count": 1}
+
+
+def test_plan_structure_telemetry_counts_edges_and_modes():
+    from kriya.workflow.milestone_validation import plan_structure_telemetry
+
+    m1 = mkv2("M1", goal="g1", success_criterion="c1")
+    m2 = mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"], mode=MilestoneMode.EXTENSION, extends="M1")
+    m3 = mkv2("M3", goal="g3", success_criterion="c3", depends_on=["M1", "M2"], mode=MilestoneMode.COMPOSITION)
+    assert plan_structure_telemetry([m1, m2, m3]) == {
+        "milestone_count": 3, "dependency_edges": 3, "extension_count": 1, "composition_count": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_plan_milestones_logs_telemetry_when_accepted():
+    import sqlite3
+    import json as _json
+
+    planner = MagicMock()
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1"), mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"])]
+    planner.run_with_milestone_list = AsyncMock(return_value=("raw", milestones))
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as logs:
+        state, err = await plan_milestones(planner, "goal", tmp, logs_path=logs)
+        assert err is None
+        conn = sqlite3.connect(os.path.join(logs, "traces.db"))
+        row = conn.execute(
+            "SELECT status, milestone_count, validation_attempts, validation_failures "
+            "FROM milestone_plans WHERE group_id = ?", (state.group_id,),
+        ).fetchone()
+        conn.close()
+    assert row[0] == "accepted"
+    assert row[1] == 2
+    assert row[2] == 1
+    assert _json.loads(row[3]) == []
+
+
+@pytest.mark.asyncio
+async def test_plan_milestones_without_logs_path_does_no_io():
+    """logs_path defaults to None - a caller that doesn't pass it (most of
+    this module's own tests, any pre-MA3.9 caller) gets zero telemetry I/O,
+    not an error."""
+    planner = MagicMock()
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
+    planner.run_with_milestone_list = AsyncMock(return_value=("raw", milestones))
+    with tempfile.TemporaryDirectory() as tmp:
+        state, err = await plan_milestones(planner, "goal", tmp)
+    assert err is None

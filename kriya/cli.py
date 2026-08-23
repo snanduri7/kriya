@@ -1628,7 +1628,9 @@ def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[
     async def run_plan():
         from kriya.workflow.milestones import plan_milestones
         await kernel.start()
-        result = await plan_milestones(we.milestone_planner, goal, os.getcwd(), stream_callback=on_stream)
+        result = await plan_milestones(
+            we.milestone_planner, goal, os.getcwd(), stream_callback=on_stream, logs_path=cfg.paths.logs,
+        )
         await kernel.stop()
         return result
 

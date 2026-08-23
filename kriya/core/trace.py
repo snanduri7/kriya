@@ -57,6 +57,30 @@ class TraceLogger:
                 cursor.execute(f"ALTER TABLE runs ADD COLUMN {col} {coltype}")
             except Exception:
                 pass
+
+        # MA3.9 - one row per kriya/workflow/milestones.py::plan_milestones()
+        # call, keyed by that call's own group_id (shared with the `runs`
+        # rows for the milestones actually executed under it, when the plan
+        # is accepted). A SEPARATE table from `runs`, not more nullable
+        # columns there - a plan is logged even when it's REJECTED (no
+        # MilestoneRunState, no group_id-linked runs rows ever created), and
+        # a plan can be re-logged (INSERT OR REPLACE) if the SAME group_id
+        # is somehow re-planned, which never applies to an individual run.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS milestone_plans (
+                group_id TEXT PRIMARY KEY,
+                timestamp TEXT,
+                status TEXT,
+                schema_version INTEGER,
+                milestone_count INTEGER,
+                dependency_edges INTEGER,
+                extension_count INTEGER,
+                composition_count INTEGER,
+                validation_attempts INTEGER,
+                validation_failures TEXT,
+                repository_topology TEXT
+            )
+        """)
         self.conn.commit()
 
     def log_run(
@@ -105,6 +129,44 @@ class TraceLogger:
             chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
             failure_category, milestone_group_id, milestone_index, milestone_total,
             events_json, evidence_json, generation_metrics_json
+        ))
+        self.conn.commit()
+
+    def log_milestone_plan(
+        self,
+        group_id: str,
+        status: str,
+        schema_version: int,
+        milestone_count: int,
+        dependency_edges: int,
+        extension_count: int,
+        composition_count: int,
+        validation_attempts: int,
+        validation_failures: list,
+        repository_topology: dict,
+    ) -> None:
+        """MA3.9 - see init_db()'s own docstring for why this is a separate
+        table from log_run(). `validation_failures` is the flat list of
+        reason codes (kriya/workflow/milestone_validation.py's
+        DUPLICATE_MILESTONE_ID/UNJUSTIFIED_ENTRYPOINT/etc.) accumulated
+        across every REJECTED attempt before this outcome - empty when the
+        plan was valid on its first try. `repository_topology` is the
+        compact summary the design doc's own telemetry spec calls for
+        (build_system/module_count/entrypoint_count), not the full
+        RepositoryTopology dataclass."""
+        cursor = self.conn.cursor()
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("""
+            INSERT OR REPLACE INTO milestone_plans (
+                group_id, timestamp, status, schema_version, milestone_count,
+                dependency_edges, extension_count, composition_count,
+                validation_attempts, validation_failures, repository_topology
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            group_id, timestamp, status, schema_version, milestone_count,
+            dependency_edges, extension_count, composition_count,
+            validation_attempts, json.dumps(validation_failures), json.dumps(repository_topology),
         ))
         self.conn.commit()
 
