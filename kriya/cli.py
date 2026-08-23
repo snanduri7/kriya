@@ -1311,7 +1311,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             workspace_path = os.getcwd()
             # milestones/original_goal always come from THIS load of the plan
             # file (so a hand-edit made between runs takes effect); progress
-            # (completed_milestone_indices/established_dependencies/
+            # (completed_milestone_ids/established_dependencies/
             # verification_commands) resumes from an existing same-group_id
             # sidecar if a prior invocation of this plan got partway through -
             # see load_or_resume_milestone_run_state's own docstring.
@@ -1649,9 +1649,12 @@ def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[
         json.dump(run_state.to_dict(), fh, indent=2)
 
     click.secho(f"\n=== Proposed {len(run_state.milestones)} milestone(s) ===", bold=True, fg="green")
-    for i, m in enumerate(run_state.milestones, start=1):
-        click.secho(f"\n{i}. {m.goal}", bold=True)
-        click.echo(f"   Verification: {m.success_criterion}")
+    for m in run_state.milestones:
+        click.secho(f"\n{m.id}. {m.goal}", bold=True)
+        for a in m.acceptance:
+            click.echo(f"   Verification: {a.description}")
+        if m.depends_on:
+            click.echo(f"   Depends on: {', '.join(sorted(m.depends_on))}")
     click.secho(f"\nPlan written to: {plan_path}", fg="cyan")
     click.echo("Review (and hand-edit if needed), then run:")
     click.secho(f"  kriya generate --from-milestones {plan_path} -y", fg="yellow")

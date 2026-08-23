@@ -361,6 +361,57 @@ def parse_milestone_list(text: str) -> Tuple[Optional[List[Milestone]], Optional
     return milestones, None
 
 
+class MilestoneListV2(BaseModel):
+    """MA3.7's Schema v2 counterpart to MilestoneList above - same bounds,
+    validated against MilestoneV2 instead of v1 Milestone. Kept as a SEPARATE
+    model (not a Union/discriminated field on MilestoneList) so
+    parse_milestone_list's own v1 contract - still needed to load OLD saved
+    plan files (kriya/workflow/milestones.py's MilestoneRunState.from_dict) -
+    stays byte-for-byte unchanged."""
+
+    milestones: List[MilestoneV2]
+
+    @field_validator("milestones")
+    @classmethod
+    def _non_empty_and_bounded(cls, v: List[MilestoneV2]) -> List[MilestoneV2]:
+        if not v:
+            raise ValueError("milestones list must not be empty")
+        if len(v) > 8:
+            raise ValueError(
+                f"{len(v)} milestones suggests over-slicing (by code structure, not "
+                "behavior) rather than genuine complexity - re-slice into fewer, "
+                "larger vertical-slice milestones"
+            )
+        return v
+
+
+def parse_milestone_list_v2(text: str) -> Tuple[Optional[List[MilestoneV2]], Optional[str]]:
+    """v2 counterpart to parse_milestone_list() above - this is what
+    MilestonePlannerAgent.run_with_milestone_list() actually calls now
+    (MA3.7): the planner's live output is asked for and parsed as Schema v2
+    directly, not v1-then-normalized. Reuses the SAME extraction regexes
+    (_FENCED_MILESTONES_BLOCK/_BARE_MILESTONES_OBJECT) - they only key off
+    the outer {"milestones": [...]} shape, identical in both schema
+    versions - and only the inner pydantic validation model differs."""
+    if not text or not text.strip():
+        return None, "text is empty"
+
+    candidates = _FENCED_MILESTONES_BLOCK.findall(text) or _BARE_MILESTONES_OBJECT.findall(text)
+    if not candidates:
+        return None, "no JSON milestones block found in the text"
+
+    try:
+        parsed = json.loads(candidates[-1])
+    except json.JSONDecodeError as e:
+        return None, f"milestones JSON block did not parse: {e}"
+
+    try:
+        milestones = MilestoneListV2.model_validate(parsed).milestones
+    except ValidationError as e:
+        return None, f"milestones JSON block failed schema validation: {e}"
+    return milestones, None
+
+
 def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
     """Extracts and validates a {"files": [...]} JSON block from a completion
     - a full Architect design (the file list is a trailing block inside a

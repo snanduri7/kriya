@@ -26,11 +26,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from kriya.agents.contracts import Milestone
+from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
 from kriya.workflow.context_projection import project_implementation_source
 from kriya.workflow.file_resolution import _resolve_run_command
 from kriya.workflow.milestone_normalization import normalize_legacy_milestones
-from kriya.workflow.milestone_validation import MilestonePlanValidator, MilestoneValidationResult
+from kriya.workflow.milestone_validation import (
+    MilestonePlanValidator,
+    MilestoneValidationResult,
+    topological_order,
+)
 from kriya.workflow.repository_topology import RepositoryTopology, detect_repository_topology
 from kriya.workflow.verification_contract import extract_contract_verdict
 from kriya.workflow.workflow import _log_phase_banner
@@ -56,6 +60,15 @@ _ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE = 4000
 
 
 
+def _is_legacy_milestone_dict(raw: Dict[str, Any]) -> bool:
+    """A v2-shaped dict always has "id" (required field); a v1-shaped dict
+    never does. A saved plan file is never a mix of the two (Kriya itself
+    only ever writes one shape per save), so checking the first entry is
+    sufficient - used by MilestoneRunState.from_dict below to load BOTH an
+    old (pre-MA3.7) saved plan/sidecar file and a new one."""
+    return "id" not in raw
+
+
 @dataclass
 class MilestoneRunState:
     """Orchestrator-owned bookkeeping for one decomposed goal, persisted to a
@@ -64,19 +77,29 @@ class MilestoneRunState:
     list there, and this is orchestration bookkeeping, not a trace record)
     or kriya/workflow/state.py's GenerationState (single-call-scoped by
     design; see the architecture review that led to this module's Option A
-    approach, which keeps that scoping unchanged)."""
+    approach, which keeps that scoping unchanged).
+
+    MA3.7: `milestones` is now Schema v2 (kriya/agents/contracts.py's
+    MilestoneV2) and completion tracking is ID-based
+    (`completed_milestone_ids`) rather than positional
+    (`completed_milestone_indices`) - milestone identity is never list
+    position, per the MA3 design doc's own invariant. from_dict() below
+    still loads an OLD (pre-MA3.7) saved plan/sidecar file transparently,
+    normalizing v1 milestones and migrating index-based progress fields to
+    their v2 id-based equivalents on the fly (Rule 9: "Legacy milestone
+    plans remain loadable")."""
 
     group_id: str
     original_goal: str
-    milestones: List[Milestone]
-    completed_milestone_indices: List[int] = field(default_factory=list)
+    milestones: List[MilestoneV2]
+    completed_milestone_ids: List[str] = field(default_factory=list)
     established_dependencies: List[str] = field(default_factory=list)
-    # milestone_index (1-based) -> RunVerifierAgent.judge()'s own run_commands
-    # shape (List[List[str]]), persisted so the integration phase's replay
-    # step (replay_prior_milestone_verifications) can re-execute an EARLIER
+    # milestone id -> RunVerifierAgent.judge()'s own run_commands shape
+    # (List[List[str]]), persisted so the integration phase's replay step
+    # (replay_prior_milestone_verifications) can re-execute an EARLIER
     # milestone's real verification without re-asking the model to re-infer
     # it, and so --resume can pick up mid-sequence.
-    verification_commands: Dict[int, List[List[str]]] = field(default_factory=dict)
+    verification_commands: Dict[str, List[List[str]]] = field(default_factory=dict)
     # filepath -> bounded real content (project_implementation_source, head+
     # tail if it doesn't fit) of every file an EARLIER, already-completed
     # milestone wrote - grows monotonically as milestones complete (see
@@ -91,7 +114,7 @@ class MilestoneRunState:
             "group_id": self.group_id,
             "original_goal": self.original_goal,
             "milestones": [m.model_dump() for m in self.milestones],
-            "completed_milestone_indices": self.completed_milestone_indices,
+            "completed_milestone_ids": self.completed_milestone_ids,
             "established_dependencies": self.established_dependencies,
             "verification_commands": {str(k): v for k, v in self.verification_commands.items()},
             "established_file_context": self.established_file_context,
@@ -99,15 +122,37 @@ class MilestoneRunState:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MilestoneRunState":
+        raw_milestones = data["milestones"]
+        is_legacy = bool(raw_milestones) and _is_legacy_milestone_dict(raw_milestones[0])
+        milestones = (
+            normalize_legacy_milestones([Milestone(**m) for m in raw_milestones])
+            if is_legacy
+            else [MilestoneV2(**m) for m in raw_milestones]
+        )
+
+        if "completed_milestone_ids" in data:
+            completed_ids = list(data["completed_milestone_ids"])
+        else:
+            # Legacy sidecar (completed_milestone_indices, 1-based list
+            # position) - canonical ids were assigned positionally by
+            # normalize_legacy_milestones (index i -> "M{i}"), so this
+            # migration is a direct, deterministic rename, not a guess.
+            completed_ids = [f"M{i}" for i in data.get("completed_milestone_indices", [])]
+
+        raw_verification_commands = data.get("verification_commands", {})
+        verification_commands = (
+            {f"M{int(k)}": v for k, v in raw_verification_commands.items()}
+            if is_legacy
+            else {str(k): v for k, v in raw_verification_commands.items()}
+        )
+
         return cls(
             group_id=data["group_id"],
             original_goal=data["original_goal"],
-            milestones=[Milestone(**m) for m in data["milestones"]],
-            completed_milestone_indices=list(data.get("completed_milestone_indices", [])),
+            milestones=milestones,
+            completed_milestone_ids=completed_ids,
             established_dependencies=list(data.get("established_dependencies", [])),
-            verification_commands={
-                int(k): v for k, v in data.get("verification_commands", {}).items()
-            },
+            verification_commands=verification_commands,
             established_file_context=dict(data.get("established_file_context", {})),
         )
 
@@ -138,7 +183,7 @@ def load_or_resume_milestone_run_state(workspace_path: str, plan_data: Dict[str,
     explicitly advertises "review and hand-edit" as the intended workflow, so
     an edit made to the plan file after a first partial run must take effect,
     not be silently discarded in favor of whatever was baked into the
-    sidecar the first time. Progress fields (completed_milestone_indices/
+    sidecar the first time. Progress fields (completed_milestone_ids/
     established_dependencies/verification_commands/established_file_context)
     DO come from an existing same-group_id sidecar when one exists, so
     re-running the same command still resumes rather than restarting the
@@ -146,7 +191,7 @@ def load_or_resume_milestone_run_state(workspace_path: str, plan_data: Dict[str,
     fresh_state = MilestoneRunState.from_dict(plan_data)
     sidecar_state = load_milestone_run_state(workspace_path, plan_data["group_id"])
     if sidecar_state is not None:
-        fresh_state.completed_milestone_indices = sidecar_state.completed_milestone_indices
+        fresh_state.completed_milestone_ids = sidecar_state.completed_milestone_ids
         fresh_state.established_dependencies = sidecar_state.established_dependencies
         fresh_state.verification_commands = sidecar_state.verification_commands
         fresh_state.established_file_context = sidecar_state.established_file_context
@@ -254,11 +299,17 @@ async def plan_milestones(
     IMMEDIATE failure, not retried here - that degrade-on-malformed-output
     behavior is unchanged from before this milestone.
 
-    Validation runs against the NORMALIZED v2 representation
-    (kriya/workflow/milestone_normalization.py) purely as a quality gate -
-    the MilestoneRunState this function returns still carries the ORIGINAL v1
-    Milestone objects unchanged; MA3.7 is what migrates the orchestrator's
-    own runtime representation to v2, not this function."""
+    MA3.7: MilestonePlannerAgent.run_with_milestone_list now returns Schema
+    v2 (MilestoneV2) directly - either the model genuinely emitted v2 JSON,
+    or it reverted to the old v1 shape and that agent's own fallback already
+    normalized it (see that method's docstring). Either way, what arrives
+    here is already MilestoneV2, so it's validated as-is - no normalization
+    call on this live path any more. The MilestoneRunState this function
+    returns carries the VALIDATOR's own normalized milestones (extends
+    auto-merged into depends_on - see MilestonePlanValidator.validate()'s own
+    `.milestones` result), not the raw pre-validation list, so
+    run_milestones() sees the fully-correct dependency graph without
+    re-deriving it."""
     existing_files = _list_workspace_files(workspace_path)
     workspace_note = (
         "Workspace is currently empty (or new)."
@@ -278,11 +329,11 @@ async def plan_milestones(
         if milestones is None:
             return None, "Milestone Planner output did not produce a valid milestone list."
 
-        validation_result = validator.validate(
-            normalize_legacy_milestones(milestones), repository_topology=topology, goal_text=goal,
-        )
+        validation_result = validator.validate(milestones, repository_topology=topology, goal_text=goal)
         if validation_result.valid:
-            return MilestoneRunState(group_id=str(uuid.uuid4()), original_goal=goal, milestones=milestones), None
+            return MilestoneRunState(
+                group_id=str(uuid.uuid4()), original_goal=goal, milestones=validation_result.milestones,
+            ), None
 
         last_error = (
             f"Milestone Planner output failed validation after {attempt} attempt(s): "
@@ -294,7 +345,7 @@ async def plan_milestones(
 
 
 def build_milestone_goal_text(
-    milestone: Milestone, index: int, total: int, established_deps: List[str]
+    milestone: MilestoneV2, position: int, total: int, established_deps: List[str]
 ) -> str:
     """Deterministic string assembly, no extra LLM call. The header/footer are
     the only genuinely new context a milestone's goal text needs -
@@ -304,26 +355,34 @@ def build_milestone_goal_text(
     plain file copy, never a git commit, so the next call's repo scan sees
     the real, current on-disk state).
 
-    index == 1 is treated as non-dependent unconditionally, regardless of
-    milestone.depends_on_previous - a first milestone structurally has no
-    predecessor to depend on. Milestone.depends_on_previous defaults to True
-    (kriya/agents/contracts.py), so a model that simply omits the field for
-    milestone 1 in its JSON output (a plausible under-specification for the
-    smaller local models this project targets) would otherwise silently get
-    the "prior milestones already exist - do NOT recreate/restructure
-    anything" header on a brand-new, empty workspace, discouraging it from
-    creating the very structure this milestone needs to create."""
+    MA3.7: header is now driven by milestone.depends_on being non-empty,
+    not index > 1 - a milestone whose EXPLICIT dependency list is empty
+    (a genuine DAG root, not just "happens to be first in the list")
+    structurally has no predecessor to warn about, matching
+    MilestonePlanValidator's own already-validated semantics rather than a
+    positional heuristic. `position`/`total` (this milestone's place in the
+    topological execution order - kriya/workflow/milestone_validation.py's
+    topological_order()) are still passed through for the human-readable
+    banner text only, never for dependency logic."""
     header = ""
-    if index > 1 and milestone.depends_on_previous:
+    if milestone.depends_on:
+        dep_list = ", ".join(sorted(milestone.depends_on))
         header = (
-            f"This is milestone {index} of {total} in a larger effort. Prior "
-            "milestones have already been applied to this project on disk - "
-            "inspect the existing code/build files in the Workspace Context below "
-            "rather than assuming a blank project, and do NOT recreate, "
-            "restructure, or rename anything that already exists and already "
-            "works unless this milestone's own goal below explicitly requires "
-            "changing it.\n\n"
+            f"This is milestone '{milestone.id}' ({position} of {total}) in a "
+            f"larger effort, depending on: {dep_list}. Prior milestones have "
+            "already been applied to this project on disk - inspect the "
+            "existing code/build files in the Workspace Context below rather "
+            "than assuming a blank project, and do NOT recreate, restructure, "
+            "or rename anything that already exists and already works unless "
+            "this milestone's own goal below explicitly requires changing "
+            "it.\n\n"
         )
+        if milestone.mode == MilestoneMode.EXTENSION and milestone.extends:
+            header += (
+                f"This milestone EXTENDS milestone '{milestone.extends}' - evolve "
+                "its existing entry point/build file, do not create a new "
+                "one.\n\n"
+            )
     footer = ""
     if established_deps:
         footer = (
@@ -332,7 +391,8 @@ def build_milestone_goal_text(
             "this milestone doesn't need them itself):\n"
             + "\n".join(f"- {d}" for d in sorted(established_deps))
         )
-    criterion = f"\n\nVerification: {milestone.success_criterion}"
+    acceptance_text = "; ".join(a.description for a in milestone.acceptance)
+    criterion = f"\n\nVerification: {acceptance_text}"
     return header + milestone.goal + criterion + footer
 
 
@@ -360,12 +420,14 @@ def render_established_file_context(established_file_context: Dict[str, str]) ->
     return "\n\n" + "\n\n".join(blocks)
 
 
-def build_integration_goal_text(original_goal: str, milestones: List[Milestone]) -> str:
-    """Synthesized from the original goal + every milestone's own success
-    criterion - deliberately NOT the original goal text re-submitted
+def build_integration_goal_text(original_goal: str, milestones: List[MilestoneV2]) -> str:
+    """Synthesized from the original goal + every milestone's own acceptance
+    criteria - deliberately NOT the original goal text re-submitted
     verbatim, which would risk re-triggering the exact "build everything at
     once" problem this whole feature exists to avoid."""
-    criteria_lines = "\n".join(f"{i + 1}. {m.success_criterion}" for i, m in enumerate(milestones))
+    criteria_lines = "\n".join(
+        f"{m.id}: {a.description}" for m in milestones for a in m.acceptance
+    )
     return (
         "This is the final integration/verification pass over a project "
         f"already built across {len(milestones)} milestones, in this "
@@ -416,25 +478,25 @@ def replay_prior_milestone_verifications(
     (not after) so a regression is attributable to milestone-to-milestone
     drift specifically, not muddied by the integration call's own edits.
 
-    Returns a list of {"milestone_index", "reason"} dicts, one per
-    regressed milestone, empty if everything replayed still passes. A
-    milestone with no deterministic marker in its captured output is
-    silently skipped (not counted as a failure) - a false alarm here would
-    be worse than staying silent, and the integration call's own full
-    regression suite still runs regardless of what this function finds."""
+    Returns a list of {"milestone_id", "reason"} dicts, one per regressed
+    milestone, empty if everything replayed still passes. A milestone with no
+    deterministic marker in its captured output is silently skipped (not
+    counted as a failure) - a false alarm here would be worse than staying
+    silent, and the integration call's own full regression suite still runs
+    regardless of what this function finds."""
     from kriya.tools.validate import PolymorphicValidator
 
     failures: List[Dict[str, Any]] = []
     validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path)
-    for idx in sorted(run_state.verification_commands):
-        raw_commands = run_state.verification_commands[idx]
+    for milestone_id in sorted(run_state.verification_commands):
+        raw_commands = run_state.verification_commands[milestone_id]
         if not raw_commands:
             continue
         resolved_commands = [_resolve_run_command(cmd, workspace_path) for cmd in raw_commands]
         run_res = validator.run_app_sequence(resolved_commands)
         if run_res["timed_out"]:
             failures.append({
-                "milestone_index": idx,
+                "milestone_id": milestone_id,
                 "reason": "replay timed out - possible resource-lifecycle regression",
             })
             continue
@@ -443,7 +505,7 @@ def replay_prior_milestone_verifications(
             continue
         if not verdict.get("passed"):
             failures.append({
-                "milestone_index": idx,
+                "milestone_id": milestone_id,
                 "reason": verdict.get("reasoning") or "verification marker reported FAIL on replay",
             })
     return failures
@@ -459,7 +521,7 @@ async def run_milestones(
     skill_conflict_callback: Optional[Callable[[str, str, str, str, str], Any]] = None,
     web_lookup_callback: Optional[Callable[[List[Dict[str, str]]], Any]] = None,
     web_lookup_query_callback: Optional[Callable[[List[str], str], Any]] = None,
-    milestone_failure_callback: Optional[Callable[[int, int, Milestone, Dict[str, Any]], str]] = None,
+    milestone_failure_callback: Optional[Callable[[int, int, MilestoneV2, Dict[str, Any]], str]] = None,
     knowledge_risk_confirmed: bool = False,
     resume: bool = False,
     resume_id: Optional[str] = None,
@@ -499,7 +561,7 @@ async def run_milestones(
     call below (each milestone and the integration pass alike), so a sequence
     interrupted mid a single milestone's own Plan/Design/Developer stage (a
     separate, finer-grained checkpoint than this module's own
-    completed_milestone_indices sidecar - see run_generation_workflow()'s own
+    completed_milestone_ids sidecar - see run_generation_workflow()'s own
     resume docstring) can pick back up inside that milestone instead of
     restarting it from scratch. This is safe to pass unconditionally to every
     call, not just the one milestone actually in flight when the interruption
@@ -507,17 +569,26 @@ async def run_milestones(
     whose goal/config/workspace fingerprints still match current state, and
     refuses (falling back to a fresh run, with a warning) on any drift -
     since each milestone's goal text differs, at most one call in the
-    sequence can ever match a given saved checkpoint."""
-    total = len(run_state.milestones)
+    sequence can ever match a given saved checkpoint.
 
-    for idx, milestone in enumerate(run_state.milestones, start=1):
-        if idx in run_state.completed_milestone_indices:
-            logger.info(f"Milestone {idx}/{total} already completed (resume) - skipping.")
+    MA3.7: milestones execute in DETERMINISTIC TOPOLOGICAL order
+    (kriya/workflow/milestone_validation.py's topological_order()), not
+    necessarily plan-list order - a hand-edited plan file's own list
+    position is no longer trusted as execution order, only its `depends_on`
+    DAG is (MA3 section 23's own "no parallel execution yet, correct logical
+    order first" rule - still strictly sequential, one milestone at a time).
+    completed_milestone_ids tracks progress by id, not list position."""
+    ordered = topological_order(run_state.milestones)
+    total = len(ordered)
+
+    for position, milestone in enumerate(ordered, start=1):
+        if milestone.id in run_state.completed_milestone_ids:
+            logger.info(f"Milestone '{milestone.id}' ({position}/{total}) already completed (resume) - skipping.")
             continue
 
-        _log_phase_banner(f"MILESTONE {idx}/{total}: {milestone.goal[:40]}")
+        _log_phase_banner(f"MILESTONE '{milestone.id}' ({position}/{total}): {milestone.goal[:40]}")
         milestone_goal = build_milestone_goal_text(
-            milestone, idx, total, run_state.established_dependencies
+            milestone, position, total, run_state.established_dependencies
         )
 
         while True:
@@ -531,7 +602,7 @@ async def run_milestones(
                 web_lookup_callback=web_lookup_callback,
                 web_lookup_query_callback=web_lookup_query_callback,
                 milestone_group_id=run_state.group_id,
-                milestone_index=idx,
+                milestone_index=position,
                 milestone_total=total,
                 knowledge_risk_confirmed=knowledge_risk_confirmed,
                 resume=resume,
@@ -563,15 +634,16 @@ async def run_milestones(
 
             decision = "abandon"
             if milestone_failure_callback:
-                decision = milestone_failure_callback(idx, total, milestone, result)
+                decision = milestone_failure_callback(position, total, milestone, result)
             if decision == "retry":
-                logger.info(f"Retrying milestone {idx}/{total} per milestone_failure_callback decision.")
+                logger.info(f"Retrying milestone '{milestone.id}' ({position}/{total}) per milestone_failure_callback decision.")
                 continue
 
             return {
                 "status": "milestone_failed",
                 "group_id": run_state.group_id,
-                "milestone_index": idx,
+                "milestone_id": milestone.id,
+                "milestone_index": position,
                 "milestone_total": total,
                 "result": result,
             }
@@ -584,14 +656,14 @@ async def run_milestones(
                     set(run_state.established_dependencies) | set(get_pom_dependencies(pom_path))
                 )
         except Exception as e:
-            logger.warning(f"Could not refresh established dependencies after milestone {idx}: {e}")
+            logger.warning(f"Could not refresh established dependencies after milestone '{milestone.id}': {e}")
 
         for path in result.get("files", []):
             try:
                 with open(os.path.join(workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
                     content = fh.read()
             except OSError as e:
-                logger.warning(f"Could not capture established content for '{path}' after milestone {idx}: {e}")
+                logger.warning(f"Could not capture established content for '{path}' after milestone '{milestone.id}': {e}")
                 continue
             projection = project_implementation_source(
                 content, path, _ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
@@ -611,7 +683,7 @@ async def run_milestones(
                 with open(os.path.join(workspace_path, "pom.xml"), "r", encoding="utf-8") as f:
                     pom_content_for_judge = f.read()
             except Exception as e:
-                logger.debug(f"No pom.xml available for milestone {idx}'s run-verification judgment: {e}")
+                logger.debug(f"No pom.xml available for milestone '{milestone.id}'s run-verification judgment: {e}")
             judgment = await we.run_verifier.judge(
                 goal=milestone_goal,
                 design=result.get("design", ""),
@@ -619,11 +691,11 @@ async def run_milestones(
                 build_file_content=pom_content_for_judge,
             )
             if judgment.get("should_run") and judgment.get("run_commands"):
-                run_state.verification_commands[idx] = judgment["run_commands"]
+                run_state.verification_commands[milestone.id] = judgment["run_commands"]
         except Exception as e:
-            logger.warning(f"Could not capture milestone {idx}'s verification commands for later replay: {e}")
+            logger.warning(f"Could not capture milestone '{milestone.id}'s verification commands for later replay: {e}")
 
-        run_state.completed_milestone_indices.append(idx)
+        run_state.completed_milestone_ids.append(milestone.id)
         save_milestone_run_state(workspace_path, run_state)
 
     replay_failures = replay_prior_milestone_verifications(workspace_path, run_state)
@@ -636,7 +708,7 @@ async def run_milestones(
         }
 
     _log_phase_banner("INTEGRATION")
-    integration_goal = build_integration_goal_text(run_state.original_goal, run_state.milestones)
+    integration_goal = build_integration_goal_text(run_state.original_goal, ordered)
     integration_result = await we.run_generation_workflow(
         goal=integration_goal,
         workspace_path=workspace_path,

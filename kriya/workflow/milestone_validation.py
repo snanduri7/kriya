@@ -335,3 +335,45 @@ class MilestonePlanValidator:
                     "milestone must extend the existing entrypoint, not create a competing one",
                 ))
         return issues
+
+
+def topological_order(milestones: List[MilestoneV2]) -> List[MilestoneV2]:
+    """Deterministic Kahn's-algorithm sort over `depends_on` - MA3 section
+    23's own "no parallel execution yet, get the logical model right first"
+    rule: kriya/workflow/milestones.py's run_milestones() calls this once per
+    run and executes the result strictly in order, never concurrently.
+
+    Assumes the plan is ALREADY validated (acyclic, every dependency
+    resolvable, extends already merged into depends_on - see
+    MilestonePlanValidator.validate()'s own `milestones` result above, which
+    is what a real caller passes here) - this function does not re-validate,
+    it only orders; an unresolvable dependency is silently ignored rather
+    than raising, so it stays safe to call defensively.
+
+    Ties (multiple milestones whose dependencies are all already satisfied)
+    break by ORIGINAL list position, so a plan with only one valid order -
+    every legacy-normalized plan, and any hand-edited plan that already lists
+    milestones in dependency order - comes back completely unchanged."""
+    by_id = {m.id: m for m in milestones}
+    order_index = {m.id: i for i, m in enumerate(milestones)}
+
+    in_degree: Dict[str, int] = {m.id: 0 for m in milestones}
+    dependents: Dict[str, List[str]] = {m.id: [] for m in milestones}
+    for m in milestones:
+        for dep in m.depends_on:
+            if dep in by_id:
+                in_degree[m.id] += 1
+                dependents[dep].append(m.id)
+
+    ready = sorted((mid for mid, deg in in_degree.items() if deg == 0), key=lambda mid: order_index[mid])
+    result: List[MilestoneV2] = []
+    while ready:
+        ready.sort(key=lambda mid: order_index[mid])
+        current = ready.pop(0)
+        result.append(by_id[current])
+        for nxt in dependents[current]:
+            in_degree[nxt] -= 1
+            if in_degree[nxt] == 0:
+                ready.append(nxt)
+
+    return result

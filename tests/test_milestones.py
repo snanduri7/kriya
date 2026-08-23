@@ -4,7 +4,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kriya.agents.contracts import Milestone, MilestoneList, parse_milestone_list
+from kriya.agents.contracts import (
+    AcceptanceCriterion,
+    Milestone,
+    MilestoneList,
+    MilestoneMode,
+    MilestoneV2,
+    parse_milestone_list,
+)
 from kriya.workflow.milestones import (
     MilestoneRunState,
     build_integration_goal_text,
@@ -20,6 +27,18 @@ from kriya.workflow.milestones import (
     save_milestone_run_state,
 )
 from kriya.workflow.repository_topology import RepositoryTopology
+
+
+def mkv2(id, goal="g", success_criterion="c", depends_on=None, mode=None, extends=None):
+    """MilestoneV2 test helper - `success_criterion` becomes the milestone's
+    single acceptance criterion, mirroring how normalize_legacy_milestones()
+    (kriya/workflow/milestone_normalization.py) maps a v1 milestone's own
+    single success_criterion, so most MA3.6/pre-MA3.7 test bodies below only
+    needed their `Milestone(...)` constructor calls swapped for this one."""
+    return MilestoneV2(
+        id=id, goal=goal, depends_on=depends_on or [], mode=mode, extends=extends,
+        acceptance=[AcceptanceCriterion(id=f"{id}-A1", description=success_criterion)],
+    )
 
 
 # ============================================================
@@ -99,7 +118,35 @@ def test_milestone_rejects_blank_goal_or_criterion():
 # ============================================================
 
 @pytest.mark.asyncio
-async def test_milestone_planner_agent_run_with_milestone_list():
+async def test_milestone_planner_agent_run_with_milestone_list_parses_v2_directly():
+    """MA3.7: the agent's real, live JSON contract is Schema v2 now - a
+    well-behaved model's response parses straight into MilestoneV2 without
+    ever touching the v1 fallback path."""
+    from kriya.agents.agent import MilestonePlannerAgent
+    from kriya.config import AppConfig
+    from kriya.core.llm import LLMClient
+
+    llm = LLMClient(AppConfig())
+    agent = MilestonePlannerAgent("milestone_planner", llm)
+    llm.complete = AsyncMock(
+        return_value='```json\n{"milestones": [{"id": "M1", "goal": "g", "depends_on": [], '
+        '"acceptance": [{"id": "M1-A1", "description": "c"}]}]}\n```'
+    )
+    raw, milestones = await agent.run_with_milestone_list("prompt")
+    assert milestones is not None
+    assert isinstance(milestones[0], MilestoneV2)
+    assert milestones[0].id == "M1"
+    assert milestones[0].goal == "g"
+    assert milestones[0].acceptance[0].description == "c"
+
+
+@pytest.mark.asyncio
+async def test_milestone_planner_agent_falls_back_to_v1_and_normalizes():
+    """A smaller local model reverting to the older, longer-established v1
+    shape despite the new v2 prompt is a real, expected risk - the same
+    reasoning behind the batch-JSON/iterative-per-file fallbacks already
+    established elsewhere in this codebase. Must still produce a usable
+    MilestoneV2 list, not fail decomposition outright."""
     from kriya.agents.agent import MilestonePlannerAgent
     from kriya.config import AppConfig
     from kriya.core.llm import LLMClient
@@ -111,7 +158,10 @@ async def test_milestone_planner_agent_run_with_milestone_list():
     )
     raw, milestones = await agent.run_with_milestone_list("prompt")
     assert milestones is not None
+    assert isinstance(milestones[0], MilestoneV2)
+    assert milestones[0].id == "M1"
     assert milestones[0].goal == "g"
+    assert milestones[0].acceptance[0].description == "c"
 
 
 @pytest.mark.asyncio
@@ -149,60 +199,57 @@ def test_milestone_planner_agent_prompt_preserves_physical_topology_by_default()
     assert "EXTENSION" in prompt
     assert "COMPOSITION" in prompt
     assert "SLICE BY BEHAVIOR, NOT BY STRUCTURE" in prompt
-    # JSON output contract is UNCHANGED in MA3.5 - MilestoneList/
-    # parse_milestone_list still only parse v1 fields; MA3.6 migrates the
-    # actual schema the planner is asked to emit.
-    assert '"depends_on_previous"' in prompt
+    # JSON output contract is Schema v2 as of MA3.7 (MilestoneListV2/
+    # parse_milestone_list_v2) - id/depends_on/acceptance, not the old v1
+    # success_criterion/depends_on_previous shape.
+    assert '"depends_on"' in prompt
+    assert '"acceptance"' in prompt
+    assert '"depends_on_previous"' not in prompt
 
 
 # ============================================================
 # Pure string-assembly functions
 # ============================================================
 
-def test_build_milestone_goal_text_first_milestone_has_no_prior_work_header():
-    """depends_on_previous=False (milestone 1's expected value) must NOT claim
-    prior milestones already exist - there aren't any yet. Regression guard
-    for a real finding: the header used to be unconditional, so milestone 1's
-    own goal text falsely told the model earlier work already existed."""
-    m = Milestone(goal="Start Ignite, stop cleanly", success_criterion="Prints PASS", depends_on_previous=False)
+def test_build_milestone_goal_text_root_milestone_has_no_prior_work_header():
+    """A milestone with an EMPTY depends_on (a real DAG root, MA3.7) must NOT
+    claim prior milestones already exist - there aren't any it depends on.
+    Regression guard for the original real finding this test predates: the
+    header used to be unconditional, so milestone 1's own goal text falsely
+    told the model earlier work already existed."""
+    m = mkv2("M1", goal="Start Ignite, stop cleanly", success_criterion="Prints PASS")
     text = build_milestone_goal_text(m, 1, 3, [])
     assert "Prior milestones have already been applied" not in text
-    assert "milestone 1 of 3" not in text
+    assert "depending on:" not in text
     assert "Start Ignite, stop cleanly" in text
     assert "Verification: Prints PASS" in text
     assert "Dependencies established" not in text
 
 
-def test_build_milestone_goal_text_first_milestone_ignores_depends_on_previous_true():
-    """Milestone.depends_on_previous defaults to True (kriya/agents/contracts.py) -
-    a model that simply omits the field for milestone 1 in its JSON output must
-    NOT get the "prior milestones already exist, do NOT recreate/restructure
-    anything" header on a brand-new, empty workspace. index == 1 structurally
-    has no predecessor, regardless of what depends_on_previous says."""
-    m = Milestone(goal="Start Ignite, stop cleanly", success_criterion="Prints PASS", depends_on_previous=True)
-    text = build_milestone_goal_text(m, 1, 3, [])
-    assert "Prior milestones have already been applied" not in text
-    assert "milestone 1 of 3" not in text
-
-
 def test_build_milestone_goal_text_dependent_milestone_gets_prior_work_header():
-    m = Milestone(goal="Add caching", success_criterion="Object round-trips", depends_on_previous=True)
+    m = mkv2("M2", goal="Add caching", success_criterion="Object round-trips", depends_on=["M1"])
     text = build_milestone_goal_text(m, 2, 3, ["org.apache.ignite:ignite-core"])
-    assert "milestone 2 of 3" in text
+    assert "depending on: M1" in text
     assert "Prior milestones have already been applied" in text
     assert "Dependencies established by earlier milestones" in text
     assert "org.apache.ignite:ignite-core" in text
 
 
-def test_build_integration_goal_text_synthesizes_from_success_criteria():
+def test_build_milestone_goal_text_extension_names_what_it_extends():
+    m = mkv2("M2", goal="Add caching", success_criterion="ok", depends_on=["M1"], mode=MilestoneMode.EXTENSION, extends="M1")
+    text = build_milestone_goal_text(m, 2, 2, [])
+    assert "EXTENDS milestone 'M1'" in text
+
+
+def test_build_integration_goal_text_synthesizes_from_acceptance_criteria():
     milestones = [
-        Milestone(goal="g1", success_criterion="c1", depends_on_previous=False),
-        Milestone(goal="g2", success_criterion="c2"),
+        mkv2("M1", goal="g1", success_criterion="c1"),
+        mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"]),
     ]
     text = build_integration_goal_text("original goal text", milestones)
     assert "original goal text" in text
-    assert "1. c1" in text
-    assert "2. c2" in text
+    assert "M1: c1" in text
+    assert "M2: c2" in text
     assert "Do NOT rewrite, restructure" in text
     # The original goal's OWN prose must not be what gets re-submitted as the
     # milestone success criteria - only the goal text itself appears once,
@@ -254,11 +301,11 @@ def test_render_established_file_context_calls_out_build_layout_not_just_signatu
 # ============================================================
 
 def test_milestone_run_state_round_trips_through_sidecar_file():
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     state = MilestoneRunState(
         group_id="grp-1", original_goal="orig", milestones=milestones,
-        completed_milestone_indices=[1], established_dependencies=["dep:a"],
-        verification_commands={1: [["mvn", "exec:exec"]]},
+        completed_milestone_ids=["M1"], established_dependencies=["dep:a"],
+        verification_commands={"M1": [["mvn", "exec:exec"]]},
         established_file_context={"src/Foo.java": "class Foo { void bar(); }"},
     )
     with tempfile.TemporaryDirectory() as tmp:
@@ -266,10 +313,38 @@ def test_milestone_run_state_round_trips_through_sidecar_file():
         loaded = load_milestone_run_state(tmp, "grp-1")
         assert loaded.group_id == "grp-1"
         assert loaded.milestones[0].goal == "g1"
-        assert loaded.completed_milestone_indices == [1]
+        assert loaded.completed_milestone_ids == ["M1"]
         assert loaded.established_dependencies == ["dep:a"]
-        assert loaded.verification_commands == {1: [["mvn", "exec:exec"]]}
+        assert loaded.verification_commands == {"M1": [["mvn", "exec:exec"]]}
         assert loaded.established_file_context == {"src/Foo.java": "class Foo { void bar(); }"}
+
+
+def test_milestone_run_state_loads_a_legacy_v1_sidecar_file():
+    """Rule 9: legacy (pre-MA3.7) milestone plans remain loadable. A saved v1
+    sidecar has no "id" field and int-keyed progress - both must migrate to
+    their v2/id-based equivalents transparently."""
+    legacy = {
+        "group_id": "grp-legacy", "original_goal": "orig",
+        "milestones": [
+            {"goal": "g1", "success_criterion": "c1", "depends_on_previous": False},
+            {"goal": "g2", "success_criterion": "c2", "depends_on_previous": True},
+        ],
+        "completed_milestone_indices": [1],
+        "established_dependencies": ["dep:a"],
+        "verification_commands": {"1": [["mvn", "exec:exec"]]},
+        "established_file_context": {"src/Foo.java": "class Foo {}"},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, ".kriya", "milestones", "grp-legacy.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        import json as _json
+        with open(path, "w") as f:
+            _json.dump(legacy, f)
+        loaded = load_milestone_run_state(tmp, "grp-legacy")
+    assert loaded.milestones[0].id == "M1" and loaded.milestones[1].id == "M2"
+    assert loaded.milestones[1].depends_on == ["M1"]
+    assert loaded.completed_milestone_ids == ["M1"]
+    assert loaded.verification_commands == {"M1": [["mvn", "exec:exec"]]}
 
 
 def test_load_milestone_run_state_returns_none_when_missing():
@@ -285,21 +360,21 @@ def test_load_or_resume_prefers_fresh_plan_milestones_but_resumes_progress():
     intended workflow. Editing the plan file between runs must take effect;
     resume progress must still be preserved."""
     original_milestones = [
-        Milestone(goal="original goal 1", success_criterion="c1", depends_on_previous=False),
-        Milestone(goal="original goal 2", success_criterion="c2"),
+        mkv2("M1", goal="original goal 1", success_criterion="c1"),
+        mkv2("M2", goal="original goal 2", success_criterion="c2", depends_on=["M1"]),
     ]
     with tempfile.TemporaryDirectory() as tmp:
         sidecar_state = MilestoneRunState(
             group_id="grp", original_goal="orig", milestones=original_milestones,
-            completed_milestone_indices=[1], established_dependencies=["dep:a"],
-            verification_commands={1: [["echo", "ok"]]},
+            completed_milestone_ids=["M1"], established_dependencies=["dep:a"],
+            verification_commands={"M1": [["echo", "ok"]]},
             established_file_context={"src/Foo.java": "class Foo {}"},
         )
         save_milestone_run_state(tmp, sidecar_state)
 
         edited_milestones = [
-            Milestone(goal="original goal 1", success_criterion="c1", depends_on_previous=False),
-            Milestone(goal="EDITED goal 2", success_criterion="c2-edited"),
+            mkv2("M1", goal="original goal 1", success_criterion="c1"),
+            mkv2("M2", goal="EDITED goal 2", success_criterion="c2-edited", depends_on=["M1"]),
         ]
         plan_data = MilestoneRunState(
             group_id="grp", original_goal="orig", milestones=edited_milestones
@@ -308,18 +383,18 @@ def test_load_or_resume_prefers_fresh_plan_milestones_but_resumes_progress():
         merged = load_or_resume_milestone_run_state(tmp, plan_data)
 
     assert merged.milestones[1].goal == "EDITED goal 2"  # hand-edit honored
-    assert merged.completed_milestone_indices == [1]  # progress preserved
+    assert merged.completed_milestone_ids == ["M1"]  # progress preserved
     assert merged.established_dependencies == ["dep:a"]
-    assert merged.verification_commands == {1: [["echo", "ok"]]}
+    assert merged.verification_commands == {"M1": [["echo", "ok"]]}
     assert merged.established_file_context == {"src/Foo.java": "class Foo {}"}
 
 
 def test_load_or_resume_with_no_existing_sidecar_starts_fresh():
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     plan_data = MilestoneRunState(group_id="grp-new", original_goal="orig", milestones=milestones).to_dict()
     with tempfile.TemporaryDirectory() as tmp:
         merged = load_or_resume_milestone_run_state(tmp, plan_data)
-    assert merged.completed_milestone_indices == []
+    assert merged.completed_milestone_ids == []
     assert merged.milestones[0].goal == "g1"
 
 
@@ -360,8 +435,10 @@ def test_check_dependency_regression_skips_when_no_pom_xml():
 
 @pytest.mark.asyncio
 async def test_plan_milestones_success():
+    """MilestonePlannerAgent.run_with_milestone_list's real return type is
+    List[MilestoneV2] (MA3.7) - this mock matches that real contract."""
     planner = MagicMock()
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     planner.run_with_milestone_list = AsyncMock(return_value=("raw", milestones))
     with tempfile.TemporaryDirectory() as tmp:
         state, err = await plan_milestones(planner, "big goal", tmp)
@@ -382,18 +459,19 @@ async def test_plan_milestones_failure_on_invalid_output():
 
 
 @pytest.mark.asyncio
-async def test_plan_milestones_well_formed_v1_plan_always_passes_validation_first_try():
-    """v1 Milestone has no entrypoint/mode/extends/consumes fields, so
-    normalize_legacy_milestones() can only ever produce a valid v2 plan -
-    this is an important, worth-pinning fact: with today's planner still
-    emitting v1-shaped JSON (MA3.5's deliberate choice), MA3.6's validator
-    gate can never actually reject a real plan yet; it becomes load-bearing
-    only once the planner's own JSON contract is taught to emit real v2
-    fields (a later step, not yet implemented)."""
+async def test_plan_milestones_well_formed_v2_plan_passes_validation_first_try():
+    """MA3.7: the planner now returns Schema v2 directly (either genuinely,
+    or via that agent's own v1-fallback-then-normalize - see
+    test_milestone_planner_agent_falls_back_to_v1_and_normalizes), and
+    plan_milestones() validates it AS-IS, no normalization call on this live
+    path any more (MilestonePlanValidator is the REAL, unmocked one here -
+    unlike test_plan_milestones_retries_with_correction_feedback_on_rejection
+    below, which mocks it out entirely to test the retry loop's wiring in
+    isolation)."""
     planner = MagicMock()
     milestones = [
-        Milestone(goal="protocol", success_criterion="c1", depends_on_previous=False),
-        Milestone(goal="cache", success_criterion="c2", depends_on_previous=True),
+        mkv2("M1", goal="protocol", success_criterion="c1"),
+        mkv2("M2", goal="cache", success_criterion="c2", depends_on=["M1"]),
     ]
     planner.run_with_milestone_list = AsyncMock(return_value=("raw", milestones))
     with tempfile.TemporaryDirectory() as tmp:
@@ -414,7 +492,7 @@ async def test_plan_milestones_retries_with_correction_feedback_on_rejection():
     from kriya.workflow.milestone_validation import MilestoneValidationIssue, MilestoneValidationResult
 
     planner = MagicMock()
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     prompts_seen = []
 
     async def fake_run(prompt, stream_callback=None):
@@ -454,7 +532,7 @@ async def test_plan_milestones_bounded_retry_never_infinite():
     from kriya.workflow.milestone_validation import MilestoneValidationIssue, MilestoneValidationResult
 
     planner = MagicMock()
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     call_count = {"n": 0}
 
     async def fake_run(prompt, stream_callback=None):
@@ -490,7 +568,7 @@ async def test_plan_milestones_prompt_includes_real_repository_topology():
 
     async def fake_run(prompt, stream_callback=None):
         captured["prompt"] = prompt
-        return "raw", [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+        return "raw", [mkv2("M1", goal="g1", success_criterion="c1")]
 
     planner.run_with_milestone_list = fake_run
     with tempfile.TemporaryDirectory() as tmp:
@@ -539,8 +617,8 @@ def test_render_repository_topology_summary_multi_module():
 @pytest.mark.asyncio
 async def test_run_milestones_success_path_through_all_milestones_and_integration():
     milestones = [
-        Milestone(goal="g1", success_criterion="c1", depends_on_previous=False),
-        Milestone(goal="g2", success_criterion="c2"),
+        mkv2("M1", goal="g1", success_criterion="c1"),
+        mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"]),
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
@@ -555,7 +633,7 @@ async def test_run_milestones_success_path_through_all_milestones_and_integratio
 
     assert result["status"] == "success"
     assert we.run_generation_workflow.await_count == 3  # 2 milestones + integration
-    assert state.completed_milestone_indices == [1, 2]
+    assert state.completed_milestone_ids == ["M1", "M2"]
 
 
 @pytest.mark.asyncio
@@ -571,8 +649,8 @@ async def test_run_milestones_grounds_later_milestones_on_earlier_ones_real_file
     via supplementary_context, and run_state.established_file_context must
     be populated from it."""
     milestones = [
-        Milestone(goal="Build Protocol class", success_criterion="c1", depends_on_previous=False),
-        Milestone(goal="Write a main class using Protocol", success_criterion="c2"),
+        mkv2("M1", goal="Build Protocol class", success_criterion="c1"),
+        mkv2("M2", goal="Write a main class using Protocol", success_criterion="c2", depends_on=["M1"]),
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
@@ -625,7 +703,7 @@ async def test_run_milestones_passes_pom_content_to_judge_for_exec_shape_inferen
     prompt/docstring) - exactly the goal shape (Ignite/Qpid, needing
     --add-opens) this whole feature was built around. Must read and pass the
     real, current pom.xml, same convention as attempt.py's own call site."""
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         pom_content = "<project><build><plugins>exec-maven-plugin</plugins></build></project>"
         with open(os.path.join(tmp, "pom.xml"), "w") as f:
@@ -646,7 +724,7 @@ async def test_run_milestones_passes_pom_content_to_judge_for_exec_shape_inferen
 
 @pytest.mark.asyncio
 async def test_run_milestones_judge_build_file_content_none_without_pom():
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
         we = MagicMock()
@@ -663,7 +741,7 @@ async def test_run_milestones_judge_build_file_content_none_without_pom():
 
 @pytest.mark.asyncio
 async def test_run_milestones_failure_defaults_to_abandon_with_no_callback():
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
         we = MagicMock()
@@ -677,8 +755,8 @@ async def test_run_milestones_failure_defaults_to_abandon_with_no_callback():
 @pytest.mark.asyncio
 async def test_run_milestones_failure_callback_abandon_stops_sequence():
     milestones = [
-        Milestone(goal="g1", success_criterion="c1", depends_on_previous=False),
-        Milestone(goal="g2", success_criterion="c2"),
+        mkv2("M1", goal="g1", success_criterion="c1"),
+        mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"]),
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
@@ -695,7 +773,7 @@ async def test_run_milestones_failure_callback_abandon_stops_sequence():
 
 @pytest.mark.asyncio
 async def test_run_milestones_failure_callback_retry_then_succeeds():
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
         we = MagicMock()
@@ -723,7 +801,7 @@ async def test_run_milestones_dependency_regression_routes_through_failure_callb
     the milestone's files were already applied to the real workspace by that
     point. Must now be reported to the SAME callback, not an uncaught
     exception."""
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         with open(os.path.join(tmp, "pom.xml"), "w") as f:
             f.write("<project></project>")
@@ -747,12 +825,12 @@ async def test_run_milestones_dependency_regression_routes_through_failure_callb
     assert failure_result["quality_gates_passed"] is False
     # Not marked complete - a re-run of the same plan would retry this
     # milestone, not silently skip past a workspace with a dropped dependency.
-    assert state.completed_milestone_indices == []
+    assert state.completed_milestone_ids == []
 
 
 @pytest.mark.asyncio
 async def test_run_milestones_dependency_regression_retry_recovers():
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         with open(os.path.join(tmp, "pom.xml"), "w") as f:
             f.write("<project></project>")
@@ -780,19 +858,19 @@ async def test_run_milestones_dependency_regression_retry_recovers():
 
     assert result["status"] == "success"
     cb.assert_called_once()
-    assert state.completed_milestone_indices == [1]
+    assert state.completed_milestone_ids == ["M1"]
 
 
 @pytest.mark.asyncio
 async def test_run_milestones_resume_skips_already_completed():
     milestones = [
-        Milestone(goal="g1", success_criterion="c1", depends_on_previous=False),
-        Milestone(goal="g2", success_criterion="c2"),
+        mkv2("M1", goal="g1", success_criterion="c1"),
+        mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"]),
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(
             group_id="grp", original_goal="orig", milestones=milestones,
-            completed_milestone_indices=[1],
+            completed_milestone_ids=["M1"],
         )
         we = MagicMock()
         we.run_generation_workflow = AsyncMock(
@@ -815,8 +893,8 @@ def test_replay_catches_a_real_regression():
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(
             group_id="grp", original_goal="orig",
-            milestones=[Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)],
-            verification_commands={1: [["echo", "hi"]]},
+            milestones=[mkv2("M1", goal="g1", success_criterion="c1")],
+            verification_commands={"M1": [["echo", "hi"]]},
         )
         mock_validator = MagicMock()
         mock_validator.run_app_sequence.return_value = {
@@ -826,7 +904,7 @@ def test_replay_catches_a_real_regression():
              patch("kriya.workflow.milestones._resolve_run_command", side_effect=lambda c, w: c):
             failures = replay_prior_milestone_verifications(tmp, state)
     assert len(failures) == 1
-    assert failures[0]["milestone_index"] == 1
+    assert failures[0]["milestone_id"] == "M1"
     assert "something broke" in failures[0]["reason"]
 
 
@@ -834,8 +912,8 @@ def test_replay_no_marker_is_not_treated_as_failure():
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(
             group_id="grp", original_goal="orig",
-            milestones=[Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)],
-            verification_commands={1: [["echo", "hi"]]},
+            milestones=[mkv2("M1", goal="g1", success_criterion="c1")],
+            verification_commands={"M1": [["echo", "hi"]]},
         )
         mock_validator = MagicMock()
         mock_validator.run_app_sequence.return_value = {"timed_out": False, "output": "no marker here"}
@@ -849,8 +927,8 @@ def test_replay_timeout_is_reported_as_a_failure():
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(
             group_id="grp", original_goal="orig",
-            milestones=[Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)],
-            verification_commands={1: [["sleep", "999"]]},
+            milestones=[mkv2("M1", goal="g1", success_criterion="c1")],
+            verification_commands={"M1": [["sleep", "999"]]},
         )
         mock_validator = MagicMock()
         mock_validator.run_app_sequence.return_value = {"timed_out": True, "output": ""}
@@ -858,13 +936,13 @@ def test_replay_timeout_is_reported_as_a_failure():
              patch("kriya.workflow.milestones._resolve_run_command", side_effect=lambda c, w: c):
             failures = replay_prior_milestone_verifications(tmp, state)
     assert len(failures) == 1
-    assert failures[0]["milestone_index"] == 1
+    assert failures[0]["milestone_id"] == "M1"
     assert "timed out" in failures[0]["reason"]
 
 
 @pytest.mark.asyncio
 async def test_run_milestones_stops_before_integration_call_on_replay_failure():
-    milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
         we = MagicMock()
@@ -875,12 +953,12 @@ async def test_run_milestones_stops_before_integration_call_on_replay_failure():
         we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
         with patch(
             "kriya.workflow.milestones.replay_prior_milestone_verifications",
-            return_value=[{"milestone_index": 1, "reason": "regressed"}],
+            return_value=[{"milestone_id": "M1", "reason": "regressed"}],
         ):
             result = await run_milestones(we, state, tmp)
 
     assert result["status"] == "milestone_replay_failed"
-    assert result["failures"][0]["milestone_index"] == 1
+    assert result["failures"][0]["milestone_id"] == "M1"
     assert we.run_generation_workflow.await_count == 1  # integration call never fired
 
 

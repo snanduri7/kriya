@@ -5,7 +5,7 @@ import re
 from abc import ABC
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from kriya.agents.contracts import Milestone, parse_file_list, parse_milestone_list
+from kriya.agents.contracts import MilestoneV2, parse_file_list, parse_milestone_list, parse_milestone_list_v2
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 
@@ -462,25 +462,46 @@ class MilestonePlannerAgent(BaseAgent):
             "physical structure, not a ban on multiple milestones.\n"
             "\n"
             "A later milestone that only evolves behavior an earlier "
-            "milestone already established (the common, default case) sets "
-            "\"depends_on_previous\": true, matching that earlier milestone's "
-            "own entry-point/build file - this is EXTENSION. A milestone that "
-            "genuinely depends on a separate capability another milestone "
-            "supplies, without evolving that milestone's own entry point, is "
-            "COMPOSITION - still never an excuse to invent a new build "
-            "artifact unless the repository or the goal already justifies "
-            "one.\n"
+            "milestone already established (the common, default case) is "
+            "EXTENSION - use \"mode\": \"extension\" with \"extends\" naming "
+            "that earlier milestone's id, matching its own entry-point/build "
+            "file. A milestone that genuinely depends on a separate "
+            "capability another milestone supplies, without evolving that "
+            "milestone's own entry point, is COMPOSITION - use \"mode\": "
+            "\"composition\" instead - still never an excuse to invent a new "
+            "build artifact unless the repository or the goal already "
+            "justifies one.\n"
             "\n"
             "Return your milestone list as a fenced JSON code block, the LAST "
-            "thing in your response, of the exact shape:\n"
-            '{"milestones": [{"goal": "...", "success_criterion": "...", '
-            '"depends_on_previous": true}, ...]}\n'
-            'milestone 1 always has "depends_on_previous": false.'
+            "thing in your response, of the shape:\n"
+            '{"milestones": [\n'
+            '  {"id": "M1", "goal": "...", "depends_on": [], '
+            '"acceptance": [{"id": "M1-A1", "description": "..."}]},\n'
+            "  ...\n"
+            "]}\n"
+            "\n"
+            "Required per milestone: \"id\" (a short stable label - \"M1\", "
+            "\"M2\", ..., in plan order), \"goal\", \"depends_on\" (ids of "
+            "earlier milestones this one needs - [] if none), \"acceptance\" "
+            "(at least one {\"id\", \"description\"} entry - the observable "
+            "outcome that makes this milestone verifiable).\n"
+            "\n"
+            "Optional per milestone, include ONLY when genuinely applicable - "
+            "never add these \"just in case\":\n"
+            '  "mode": "extension" or "composition" (see above)\n'
+            '  "extends": the id this milestone extends (required when mode '
+            'is "extension")\n'
+            '  "entrypoint": the project\'s entry-point file path, ONLY when '
+            "this milestone establishes or extends one\n"
+            '  "provides": [{"name": "...", "description": "..."}] - a '
+            "capability this milestone makes available to LATER milestones\n"
+            '  "consumes": ["..."] - capability names (matching an earlier '
+            "milestone's own \"provides\" name) this milestone depends on"
         )
 
     async def run_with_milestone_list(
         self, prompt: str, stream_callback: Optional[Callable[[str], None]] = None
-    ) -> Tuple[str, Optional[List[Milestone]]]:
+    ) -> Tuple[str, Optional[List[MilestoneV2]]]:
         """Same shape as ArchitectAgent.run_with_file_list() above: a single
         completion, structured output extracted+validated via
         kriya/agents/contracts.py, never a corrective follow-up call on a
@@ -488,12 +509,37 @@ class MilestonePlannerAgent(BaseAgent):
         outcome (local models get no schema-constrained decoding from
         LLMClient today), and the caller (kriya/workflow/milestones.py)
         degrades by treating (None) milestones as "decomposition failed,"
-        never by crashing."""
+        never by crashing.
+
+        MA3.7: parses Schema v2 (kriya/agents/contracts.py's MilestoneV2)
+        directly, matching this agent's own system_prompt's JSON contract
+        above. Falls back to the OLD v1 parser (goal/success_criterion/
+        depends_on_previous) + normalize_legacy_milestones() when v2 parsing
+        fails - a smaller local model reverting to the longer-established v1
+        shape despite the new prompt is a real, expected risk for this
+        project's target models, the SAME reasoning behind the batch-JSON/
+        iterative-per-file/raw-JSON-extraction fallbacks already established
+        elsewhere in this codebase (see DeveloperAgent.run_generation and
+        parse_file_list's own docstrings): degrade gracefully through an
+        older, more reliable shape rather than fail decomposition outright
+        just because a weaker model didn't follow the richer schema."""
+        from kriya.workflow.milestone_normalization import normalize_legacy_milestones
+
         raw = await self.run(prompt, stream_callback=stream_callback)
-        milestones, err = parse_milestone_list(raw)
-        if milestones is None:
-            logger.warning(f"Milestone Planner output didn't validate ({err}).")
-        return raw, milestones
+        milestones, err = parse_milestone_list_v2(raw)
+        if milestones is not None:
+            return raw, milestones
+
+        legacy_milestones, legacy_err = parse_milestone_list(raw)
+        if legacy_milestones is not None:
+            logger.info(
+                "Milestone Planner output was v1-shaped, not v2 - normalized "
+                "(see run_with_milestone_list's own fallback docstring)."
+            )
+            return raw, normalize_legacy_milestones(legacy_milestones)
+
+        logger.warning(f"Milestone Planner output didn't validate as v2 ({err}) or v1 ({legacy_err}).")
+        return raw, None
 
 
 class ArchitectAgent(BaseAgent):

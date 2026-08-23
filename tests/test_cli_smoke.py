@@ -496,9 +496,12 @@ def test_plan_milestones_bare_output_filename_does_not_crash(runner, tmp_path):
     component) made os.path.dirname(plan_path) return "", and
     os.makedirs("", exist_ok=True) raised an unhandled FileNotFoundError
     instead of the command's own clean error-handling pattern."""
-    from kriya.agents.contracts import Milestone
+    from kriya.agents.contracts import AcceptanceCriterion, MilestoneV2
 
-    fake_milestones = [Milestone(goal="g1", success_criterion="c1", depends_on_previous=False)]
+    # MA3.7: MilestonePlannerAgent.run_with_milestone_list's real contract is
+    # now List[MilestoneV2] (schema v2), not the old v1 Milestone shape - the
+    # mock below must match what the REAL method actually returns.
+    fake_milestones = [MilestoneV2(id="M1", goal="g1", acceptance=[AcceptanceCriterion(id="M1-A1", description="c1")])]
     with runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
         mock_we = MagicMock()
         mock_we.milestone_planner = MagicMock()
