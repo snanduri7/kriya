@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.edit_safety import content_revision
+from kriya.workflow.triage import EngineeringRoute
 
 
 @dataclass
@@ -101,6 +102,16 @@ class GenerationState:
     # per-file estimate without persisting prompt or proprietary source content.
     generation_timings: List[Dict[str, Any]] = field(default_factory=list)
     error_context: str = ""
+    # MA1.3/MA1.4 of the control-plane implementation plan (kriya/workflow/
+    # triage.py) - the shadow-mode classification computed once, before this
+    # object is even constructed (see run_generation_workflow's own MA1.3
+    # comment), carried here purely so generation_metrics() below has one
+    # place to serialize it into telemetry. Nothing in the retry loop reads
+    # or writes this - it is NOT becoming the general control-plane state
+    # object (see triage.py's own module docstring); it is one optional,
+    # write-once field, same shape as last_failure being carried for
+    # downstream reporting rather than loop control.
+    engineering_route: Optional[EngineeringRoute] = None
     # The active canonical typed failure behind repair prompts. Advisory and
     # auxiliary events remain in run_events/gate_outcomes but cannot replace an
     # existing authoritative failure here. Retry prompts project this object
@@ -247,7 +258,7 @@ class GenerationState:
 
     def generation_metrics(self) -> Dict[str, Any]:
         """Content-free operational telemetry safe to persist in local traces."""
-        return {
+        metrics: Dict[str, Any] = {
             "calls": len(self.generation_timings),
             "successful_calls": sum(
                 1 for timing in self.generation_timings if timing.get("succeeded")
@@ -267,6 +278,15 @@ class GenerationState:
             ),
             "validated_files": len(self.validated_file_revisions),
         }
+        if self.engineering_route is not None:
+            # MA1.4 - fold the shadow classification into the SAME dict
+            # (generation_metrics) that already flows to every
+            # trace_logger.log_run() call site, rather than adding a new
+            # column/parameter to each one individually - see this field's
+            # own comment above and the control-plane plan's own "extend
+            # generation_metrics first, not ten SQL columns" guidance.
+            metrics["engineering_route"] = self.engineering_route.to_dict()
+        return metrics
 
     def record_failure(self, failure: Any, *, operation: Optional[str] = None) -> RunEvent:
         try:

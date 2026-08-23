@@ -33,7 +33,7 @@ modules on purpose.
 import logging
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Dict, List, Optional
 
@@ -127,6 +127,26 @@ class EngineeringRoute:
 
     router_used: bool = False
     router_confidence: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Content-free operational telemetry shape (MA1.4) - matches
+        GenerationState.generation_metrics()'s own "safe to persist in local
+        traces" convention: only the classification and why it fired, never
+        goal text or file content. Enum members serialize to their plain
+        string/name form so this round-trips cleanly through
+        json.dumps (kriya/core/trace.py::TraceLogger.log_run)."""
+        return {
+            "kind": self.kind.value,
+            "initial_risk_class": self.initial_risk_class.name,
+            "current_risk_class": self.current_risk_class.name,
+            "max_observed_risk_class": self.max_observed_risk_class.name,
+            "execution_weight": self.execution_weight.value,
+            "impact": asdict(self.impact),
+            "reason_codes": list(self.reason_codes),
+            "deterministic_signals": dict(self.deterministic_signals),
+            "router_used": self.router_used,
+            "router_confidence": self.router_confidence,
+        }
 
 
 def risk_reason_codes(impact: ImpactVector) -> List[str]:

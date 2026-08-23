@@ -450,7 +450,7 @@ class WorkflowEngine:
         # object instead of the bare `error_context` parameter early on and
         # `state.error_context` later. See kriya/workflow/state.py for the
         # rationale behind every other field.
-        state = GenerationState(error_context=error_context or "")
+        state = GenerationState(error_context=error_context or "", engineering_route=engineering_route)
         generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
         if generation_budget is None:
             logger.info(
