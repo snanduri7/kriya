@@ -93,7 +93,7 @@ def load_subtask_checkpoints(checkpoint_data: Dict[str, Any]) -> Dict[str, Subta
     return {sid: SubtaskCheckpoint.from_dict(d) for sid, d in raw.items()}
 
 
-def _topological_order(plan: EngineeringPlan) -> List[str]:
+def topological_subtask_order(plan: EngineeringPlan) -> List[str]:
     """Kahn's algorithm, same edge direction as plan_validation._acyclic
     (dependency before dependent) - a resume decision must walk subtasks
     in an order their own depends_on actually permits, not just plan.subtasks'
@@ -172,7 +172,7 @@ def resolve_subtask_resume_point(
             mismatches=[f"plan_hash: checkpoint={stored_plan_hash!r} current={current_plan_hash!r}"],
         )
 
-    order = _topological_order(plan)
+    order = topological_subtask_order(plan)
     subtask_checkpoints = load_subtask_checkpoints(checkpoint_data)
 
     if not subtask_checkpoints:

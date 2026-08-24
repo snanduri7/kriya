@@ -130,6 +130,20 @@ execution_policy:
   enabled: true
   mode: audit
 
+# MA6 (kriya/workflow/workflow_controller.py) - whether WorkflowController
+# runs at all, and in what mode. enabled: false - not yet wired into any
+# CLI/repl command path, so turning this on today has no effect regardless.
+# mode: shadow is this session's binding constraint given code form -
+# kriya/config/config.py's WorkflowControllerConfig validator rejects
+# "enforce" outright at config-load time (SubtaskExecutor does not yet own
+# file writes/verification/approval - run_generation_workflow()'s Quality
+# Gates loop still does). Do not set mode to enforce; it will fail
+# validation until a future milestone ports that machinery and explicitly
+# lifts this restriction.
+workflow_controller:
+  enabled: false
+  mode: shadow
+
 autonomy:
   mode: "human-in-the-loop"
   sensitive_paths:

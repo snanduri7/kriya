@@ -423,6 +423,48 @@ class ExecutionPolicyConfig(BaseModel):
             )
         return v
 
+class WorkflowControllerConfig(BaseModel):
+    """MA6.13/6.14 of the MA6 structured-execution implementation plan
+    (kriya/workflow/workflow_controller.py) - mirrors ExecutionPolicyConfig's
+    own audit/enforce precedent immediately above, same reasoning: `enabled`
+    defaults False (a new, not-yet-live-validated capability stays off,
+    same "ship the mechanism, default it off" pattern as engineering_triage/
+    process_profiles when THEY were introduced). `mode` is the real gate -
+    "shadow" builds a real EngineeringPlan and runs SubtaskExecutor against
+    it for every subtask, but never lets the result affect real files or
+    the run's actual outcome (kriya/workflow/workflow_controller.py's
+    _run_structured_shadow) - the existing, unmodified run_generation_workflow()
+    still owns the real outcome unconditionally in this mode.
+
+    "enforce" (WorkflowController fully owns orchestration, including file
+    writes/verification/approval) is REJECTED at validation time below,
+    exactly mirroring execution_policy.mode's own precedent: SubtaskExecutor
+    (MA6.5) deliberately stops at "get file content or a tool result" and
+    does not itself apply edits, run compile/test verification, or gate on
+    approval - that machinery still lives only in run_generation_workflow()'s
+    own Quality Gates loop. Until it's ported (or shadow-mode comparison
+    across real runs proves parity some other way), "enforce" would silently
+    skip all of that if it were ever reachable - fail loud at config-load
+    time instead, never silently do something unsafe."""
+
+    enabled: bool = Field(default=False)
+    mode: str = Field(default="shadow")
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_must_be_shadow_for_now(cls, v: str) -> str:
+        if v not in ("shadow", "enforce"):
+            raise ValueError(f"workflow_controller.mode must be 'shadow' or 'enforce', got {v!r}")
+        if v == "enforce":
+            raise ValueError(
+                "workflow_controller.mode: 'enforce' is not enabled yet. SubtaskExecutor "
+                "does not yet own file writes/verification/approval (that machinery still "
+                "lives in run_generation_workflow()'s Quality Gates loop) - setting this to "
+                "'enforce' would silently skip all of it. Leave this as 'shadow' until a "
+                "future milestone ports that machinery and lifts this restriction."
+            )
+        return v
+
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
@@ -440,6 +482,7 @@ class AppConfig(BaseModel):
     engineering_triage: EngineeringTriageConfig = Field(default_factory=EngineeringTriageConfig)
     process_profiles: ProcessProfilesConfig = Field(default_factory=ProcessProfilesConfig)
     execution_policy: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
+    workflow_controller: WorkflowControllerConfig = Field(default_factory=WorkflowControllerConfig)
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""
