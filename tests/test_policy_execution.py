@@ -91,11 +91,13 @@ def test_well_formed_consequential_actions_default_deny_until_their_stage_lands(
     see tests/test_policy_command_allowlist.py for its own DENY (and
     ALLOW_SANDBOXED/REQUIRE_APPROVAL) coverage. NETWORK_ACCESS and
     LLM_NETWORK_ACCESS are excluded for the same reason: MA4.6 gave them
-    real stage-4 logic - see tests/test_policy_network_egress.py."""
+    real stage-4 logic - see tests/test_policy_network_egress.py.
+    INSTALL_PACKAGE is excluded for the same reason: MA4.7 gave it real
+    stage-5 logic (REQUIRE_APPROVAL/DENY, never the generic backstop) - see
+    tests/test_policy_package_supply_chain.py."""
     policy = ExecutionPolicy()
     cases = [
         ActionRequest(action_type=ActionType.WRITE_FILE, target="src/main.py"),
-        ActionRequest(action_type=ActionType.INSTALL_PACKAGE, target="left-pad"),
         ActionRequest(action_type=ActionType.GIT_WRITE, command=("git", "commit")),
         ActionRequest(action_type=ActionType.PUBLISH_ARTIFACT, target="my-artifact"),
     ]

@@ -14,14 +14,19 @@ sensitive-path denial always, workspace-containment ALLOW/DENY when a
 workspace_path is supplied). MA4.6 filled in stage 4 (network/egress,
 NETWORK_ACCESS/LLM_NETWORK_ACCESS only - local/private target ALLOW, every
 non-local target an explicit, specific DENY since no public-lookup
-allowlist config exists yet). Stages 3, 5, 7 (git-destructive,
-package/supply-chain, risk/profile approval) remain stubs, owned by MA4.7
-through MA4.9 respectively.
+allowlist config exists yet). MA4.7 filled in stage 5 (package/supply-chain,
+INSTALL_PACKAGE only - a URL/SCP-shaped source denies outright, everything
+else well-formed requires approval, never a bare ALLOW). Stages 3 and 7
+(git-destructive, risk/profile approval) remain stubs, owned by MA4.8 and
+MA4.9 respectively.
 
 MA4.4 gave ExecutionPolicy its first real caller (kriya/tools/validate.py's
-PolymorphicValidator, before every ProcessController.run()); MA4.5 added a
-second (kriya/workflow/edit_safety.py's atomic_write_file); MA4.6 added a
-third (kriya/tools/web.py's fetch_url_text) - all audit-only: logged, never
+PolymorphicValidator, before every ProcessController.run() - MA4.7 reuses
+this SAME call site, issuing a second, INSTALL_PACKAGE-classified audit
+request alongside the existing RUN_COMMAND one whenever the real command
+looks like a package install); MA4.5 added a second real caller
+(kriya/workflow/edit_safety.py's atomic_write_file); MA4.6 added a third
+(kriya/tools/web.py's fetch_url_text) - all audit-only: logged, never
 gating, exactly like kriya/core/llm.py's MA4.3 integration.
 This module itself still takes no config (constructor takes no arguments;
 config wiring is MA4.15's job, added additively, not as a signature change -
@@ -80,6 +85,63 @@ def _command_matches_prefix(command: Tuple[str, ...], prefix: Tuple[str, ...]) -
     if os.path.basename(command[0]) != os.path.basename(prefix[0]):
         return False
     return tuple(command[1:len(prefix)]) == tuple(prefix[1:])
+
+
+# MA4.7 - package-manager INSTALL verbs (section 26's own examples, minus
+# Maven: Kriya never shells out an explicit "install this new coordinate"
+# command for Maven - dependency resolution happens implicitly during
+# `mvn compile`/`test`, which section 27 explicitly calls "normal sandboxed
+# build behavior," not a supply-chain action this stage should intercept).
+_INSTALL_COMMAND_PREFIXES: Tuple[Tuple[str, ...], ...] = (
+    ("npm", "install"),
+    ("bundle", "install"),
+    ("gem", "install"),
+    ("cargo", "add"),
+)
+
+# A URL-shaped or SCP-style git target is exactly section 27's "unknown
+# external package source" - a registry name/version spec is not.
+_EXTERNAL_SOURCE_PATTERN = re.compile(r"(https?|ssh|git\+https?|git\+ssh)://|(^|\s)git@")
+
+
+def extract_install_package_target(command: Tuple[str, ...]) -> Optional[str]:
+    """MA4.7 - detects a package-manager install invocation from real
+    command shape (section 26: "introduce ActionType.INSTALL_PACKAGE rather
+    than depending only on command parsing" - the DETECTION here is still
+    necessarily shape-based, since Kriya only ever installs packages by
+    shelling out; what changes is that a match gets routed to its own
+    dedicated supply-chain policy stage instead of blending into the
+    generic command-allowlist stage's COMMAND_NOT_ALLOWLISTED signal).
+    Handles a venv-qualified pip invocation too (`<python> -m pip install
+    ...`, kriya/tools/validate.py's own real shape for _ensure_project_venv),
+    not just a bare `pip`/`pip3 install`.
+
+    Returns a short, audit-readable label for the install target (the
+    trailing arguments, space-joined) - NOT a precisely parsed single
+    package name/version; good enough for telemetry and this stage's
+    URL-vs-registry-name check, not meant for exact-match logic. Returns
+    None when `command` isn't an install invocation, or is one with no
+    trailing arguments at all (e.g. a bare `bundle install` with nothing
+    else to label - not itself suspicious, just nothing for this stage's
+    ActionRequest.target to carry)."""
+    if not command:
+        return None
+    executable = os.path.basename(command[0])
+    rest = command[1:]
+
+    if executable in ("pip", "pip3") and rest[:1] == ("install",):
+        return " ".join(rest[1:]) or None
+    if (
+        executable.startswith("python") and len(rest) >= 3
+        and rest[0] == "-m" and rest[1] in ("pip", "pip3") and rest[2] == "install"
+    ):
+        return " ".join(rest[3:]) or None
+
+    for prefix in _INSTALL_COMMAND_PREFIXES:
+        if _command_matches_prefix(command, prefix):
+            return " ".join(command[len(prefix):]) or None
+
+    return None
 
 # Section 11 of the MA4 design doc: this fixed order is itself a safety
 # property. Placing filesystem/git/network/package restrictions ahead of the
@@ -316,8 +378,34 @@ class ExecutionPolicy:
         )
 
     def _check_package_supply_chain(self, request: ActionRequest) -> Optional[PolicyResult]:
-        """MA4.7 - not yet implemented."""
-        return None
+        """MA4.7 - governs INSTALL_PACKAGE only. Per section 27/28: MA4 does
+        not implement full SCA (no SBOM, license scan, CVE scanner, package
+        reputation) - the essential improvement is that a new dependency
+        becomes an explicit, policy-controlled action at all, not that this
+        stage judges the package itself. A URL/SCP-shaped target (an
+        arbitrary source, not a registry name+version) denies outright;
+        everything else well-formed requires approval - never a bare ALLOW,
+        since "the build already had this dependency declared" isn't
+        something this stage can distinguish from "the agent just added a
+        new one" without config this task doesn't have (MA4.15)."""
+        if request.action_type != ActionType.INSTALL_PACKAGE or not request.target:
+            return None
+
+        if _EXTERNAL_SOURCE_PATTERN.search(request.target):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="UNKNOWN_PACKAGE_SOURCE_DENIED",
+                explanation=f"'{request.target}' names an arbitrary URL/git source, not a registry package.",
+                matched_rule="package_supply_chain.unknown_source_denied",
+            )
+
+        return PolicyResult(
+            decision=PolicyDecision.REQUIRE_APPROVAL,
+            reason_code="PACKAGE_INSTALL_REQUIRES_APPROVAL",
+            explanation=f"Installing '{request.target}' is a supply-chain action and requires approval.",
+            matched_rule="package_supply_chain.requires_approval",
+            requires_approval=True,
+        )
 
     def _check_command_allowlist(self, request: ActionRequest) -> Optional[PolicyResult]:
         """MA4.4 - only governs ActionType.RUN_COMMAND; git commands go

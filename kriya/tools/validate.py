@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.config import AutonomyConfig
-from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 from kriya.tools.process import ProcessController
@@ -267,7 +267,19 @@ class PolymorphicValidator:
         PolymorphicValidator is the ONLY real ProcessController call site in
         Kriya today, so this is ExecutionPolicy's first real caller (still
         audit-only - AUDIT/ENFORCE mode itself is MA4.15's config, not
-        added yet)."""
+        added yet).
+
+        MA4.7 - also issues a SECOND, separately-classified audit request
+        (INSTALL_PACKAGE, not RUN_COMMAND) whenever `cmd` looks like a
+        package-manager install invocation (extract_install_package_target -
+        real, live examples at this exact call site: _ensure_project_venv's
+        `pip install -r requirements.txt`, run_tests' Ruby path's `bundle
+        install --path vendor/bundle`). Per design doc section 26 ("treat
+        package installation as a supply-chain action, not just another
+        command"), this gets its own dedicated policy-stage reasoning
+        (kriya/policy/execution.py's _check_package_supply_chain) instead of
+        blending into the generic command-allowlist's COMMAND_NOT_ALLOWLISTED
+        signal - same audit-only guarantees as the RUN_COMMAND call above."""
         try:
             result = self.execution_policy.evaluate(
                 ActionRequest(action_type=ActionType.RUN_COMMAND, command=tuple(cmd), workspace_path=cwd)
@@ -276,6 +288,19 @@ class PolymorphicValidator:
                 "MA4 policy audit (not enforced): RUN_COMMAND '%s' -> %s (%s)",
                 " ".join(cmd), result.decision.value, result.reason_code,
             )
+        except Exception as e:
+            logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
+
+        try:
+            install_target = extract_install_package_target(tuple(cmd))
+            if install_target:
+                install_result = self.execution_policy.evaluate(
+                    ActionRequest(action_type=ActionType.INSTALL_PACKAGE, target=install_target, workspace_path=cwd)
+                )
+                logger.debug(
+                    "MA4 policy audit (not enforced): INSTALL_PACKAGE '%s' -> %s (%s)",
+                    install_target, install_result.decision.value, install_result.reason_code,
+                )
         except Exception as e:
             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
