@@ -9,6 +9,8 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.config import AutonomyConfig
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 from kriya.tools.process import ProcessController
 
@@ -112,6 +114,9 @@ class PolymorphicValidator:
         # entirely, breaking a Qpid Broker-J API call no goal-stated Java
         # version could have anticipated).
         self.java_home_override = java_home_override
+        # MA4.4 (control-plane implementation plan) - audit-only. See
+        # _run_cmd_with_timeout below; never consulted for enforcement.
+        self.execution_policy = ExecutionPolicy()
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
@@ -253,7 +258,29 @@ class PolymorphicValidator:
                 return True
         return False
 
+    def _audit_run_command(self, cmd: List[str], cwd: str) -> None:
+        """MA4.4 - audit-only ExecutionPolicy consultation, mirroring
+        kriya/core/llm.py's _audit_llm_network_access (MA4.3) exactly: this
+        can never affect whether ProcessController actually runs `cmd` -
+        its result is only logged, and any exception it raises is caught
+        and logged here, never propagated. kriya/tools/validate.py's own
+        PolymorphicValidator is the ONLY real ProcessController call site in
+        Kriya today, so this is ExecutionPolicy's first real caller (still
+        audit-only - AUDIT/ENFORCE mode itself is MA4.15's config, not
+        added yet)."""
+        try:
+            result = self.execution_policy.evaluate(
+                ActionRequest(action_type=ActionType.RUN_COMMAND, command=tuple(cmd), workspace_path=cwd)
+            )
+            logger.debug(
+                "MA4 policy audit (not enforced): RUN_COMMAND '%s' -> %s (%s)",
+                " ".join(cmd), result.decision.value, result.reason_code,
+            )
+        except Exception as e:
+            logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
+
     def _run_cmd_with_timeout(self, cmd: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
+        self._audit_run_command(cmd, cwd)
         env = None
         preexec_fn = None
         if self.autonomy_cfg.sandbox_execution:

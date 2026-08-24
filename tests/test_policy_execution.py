@@ -83,11 +83,16 @@ def test_well_formed_read_only_actions_default_allow():
 def test_well_formed_consequential_actions_default_deny_until_their_stage_lands():
     """MA4.4-MA4.9 haven't landed yet - every consequential action type must
     fail closed through the default-policy backstop, never silently allow,
-    per section 12's own "never silently default to ALLOW" rule."""
+    per section 12's own "never silently default to ALLOW" rule.
+
+    RUN_COMMAND is deliberately excluded here: MA4.4 gave it real stage-6
+    logic (kriya/policy/execution.py's _check_command_allowlist), so a
+    well-formed RUN_COMMAND request never reaches this backstop anymore -
+    see tests/test_policy_command_allowlist.py for its own DENY (and
+    ALLOW_SANDBOXED/REQUIRE_APPROVAL) coverage."""
     policy = ExecutionPolicy()
     cases = [
         ActionRequest(action_type=ActionType.WRITE_FILE, target="src/main.py"),
-        ActionRequest(action_type=ActionType.RUN_COMMAND, command=("mvn", "test")),
         ActionRequest(action_type=ActionType.NETWORK_ACCESS, network_target="example.com"),
         ActionRequest(action_type=ActionType.LLM_NETWORK_ACCESS, network_target="localhost"),
         ActionRequest(action_type=ActionType.INSTALL_PACKAGE, target="left-pad"),

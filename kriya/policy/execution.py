@@ -3,31 +3,76 @@ control-plane implementation plan (see kriya/policy/__init__.py for MA4's
 overall principle; kriya/policy/model.py for the MA4.1 domain types this
 engine consumes and returns).
 
-MA4.2 scope only, per the MA4 design doc's own task breakdown ("ExecutionPolicy
-deterministic engine - Behavior Change: None in audit"): the fixed
-evaluate() pipeline and its stage ORDER, plus the platform-invariants stage
-(1) and the terminal default-policy stage (8). Stages 2-7 (filesystem, git
-destructive-operation, network/egress, package/supply-chain, command
-allowlist, risk/profile approval) are deliberately stubbed here - each
-returns None (no rule matched, fall through) - their real rule content is
-scoped to MA4.4 through MA4.9 respectively, landing as separate, individually
-verified commits. Filling them in early would mean shipping unreviewed
-security rules in the same commit as the engine skeleton; keeping them
-empty here means every one of those later tasks is a pure addition to an
-already-tested pipeline, never a rewrite of it.
+MA4.2 stood up the fixed evaluate() pipeline and its stage ORDER, with real
+logic only in the platform-invariants stage (1) and the terminal
+default-policy stage (8); stages 2-7 were deliberately stubbed (each
+returning None - no rule matched, fall through), one per later MA4 sub-task,
+so each lands as a pure addition to an already-tested pipeline rather than a
+rewrite of it. MA4.4 filled in stage 6 (command allowlist, RUN_COMMAND
+only). Stages 2-5 and 7 (filesystem, git-destructive, network/egress,
+package/supply-chain, risk/profile approval) remain stubs, owned by MA4.5
+through MA4.9 respectively.
 
-Nothing calls ExecutionPolicy from a real Kriya code path yet - that wiring
-starts at MA4.4. This module is fully isolated and side-effect-free:
-deterministic in, deterministic out, no LLM, no filesystem access, no
-network access, no config dependency (constructor takes no arguments; config
+MA4.4 also gave ExecutionPolicy its first real caller: kriya/tools/
+validate.py's PolymorphicValidator consults it in AUDIT mode before every
+ProcessController.run() (see that file's _run_cmd_with_timeout) - logged
+only, never gating, exactly like kriya/core/llm.py's MA4.3 integration. This
+module itself still takes no config (constructor takes no arguments; config
 wiring is MA4.15's job, added additively, not as a signature change - the
 same "additive, not a signature change" precedent kriya/workflow/
-process_profile.py's own docstring already established for MA2).
+process_profile.py's own docstring already established for MA2), and still
+consults no LLM to reach a decision.
 """
 
+import os
 from typing import Optional, Tuple
 
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+
+# MA4.4 - deliberately small starter allowlist (design doc section 18: "start
+# small... do not try to support every shell command in MA4"). Matched by
+# PREFIX (executable basename + a fixed run of leading subcommand tokens),
+# not full literal argv - a real invocation carries extra flags (e.g.
+# "mvn clean compile -Dmaven.compiler.showWarnings=true") that a bare-literal
+# match would reject even though it's the same recognized operation. This is
+# intentionally narrower than everything Kriya's own toolchain already runs
+# internally (mvn dependency:build-classpath, javap, pip install, bundle
+# install, rspec, python -m venv, ...) - those fall through to
+# COMMAND_NOT_ALLOWLISTED below and are meant to, for now: this is AUDIT
+# mode (see kriya/tools/validate.py's own MA4.4 integration), so the
+# resulting "would have denied Kriya's own internal toolchain calls" signal
+# is exactly the real-run comparison data the MA4 design doc's rollout
+# section calls for before any future task grows this list or turns
+# enforcement on - not a bug to silence by pre-approving everything now.
+_ALLOWLISTED_COMMAND_PREFIXES: Tuple[Tuple[str, ...], ...] = (
+    ("mvn", "compile"),
+    ("mvn", "clean", "compile"),
+    ("mvn", "test"),
+    ("mvn", "clean", "test"),
+    ("mvn", "verify"),
+    ("mvn", "clean", "verify"),
+    ("gradle", "test"),
+    ("gradlew", "test"),
+    ("pytest",),
+    ("python", "-m", "pytest"),
+    ("npm", "test"),
+    ("npm", "run", "build"),
+    ("go", "test"),
+    ("cargo", "test"),
+)
+
+# Section 19: allowlisting a shell wrapper effectively allowlists arbitrary
+# nested commands, so these never fall into the plain allowlist match above -
+# they get their own, more cautious REQUIRE_APPROVAL rule instead.
+_SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "ksh", "dash"})
+
+
+def _command_matches_prefix(command: Tuple[str, ...], prefix: Tuple[str, ...]) -> bool:
+    if len(command) < len(prefix):
+        return False
+    if os.path.basename(command[0]) != os.path.basename(prefix[0]):
+        return False
+    return tuple(command[1:len(prefix)]) == tuple(prefix[1:])
 
 # Section 11 of the MA4 design doc: this fixed order is itself a safety
 # property. Placing filesystem/git/network/package restrictions ahead of the
@@ -129,8 +174,56 @@ class ExecutionPolicy:
         return None
 
     def _check_command_allowlist(self, request: ActionRequest) -> Optional[PolicyResult]:
-        """MA4.4 - not yet implemented."""
-        return None
+        """MA4.4 - only governs ActionType.RUN_COMMAND; git commands go
+        through GIT_READ/GIT_WRITE (default-allow for reads at MA4.2,
+        MA4.8's own git-write rules), never through this stage. Reasons from
+        parsed command shape (executable + leading subcommand tokens), never
+        raw substring matching (section 17: no `if "rm" in command`)."""
+        if request.action_type != ActionType.RUN_COMMAND or not request.command:
+            return None
+
+        command = request.command
+        executable = os.path.basename(command[0])
+
+        if executable == "sudo":
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="COMMAND_SUDO_DENIED",
+                explanation="Commands invoked via 'sudo' are denied unconditionally.",
+                matched_rule="command_allowlist.sudo_denied",
+            )
+
+        if executable in _SHELL_WRAPPER_EXECUTABLES and "-c" in command:
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL",
+                explanation=(
+                    f"'{executable} -c' can execute arbitrary nested commands and is not "
+                    "itself allowlistable; requires approval."
+                ),
+                matched_rule="command_allowlist.shell_wrapper",
+                requires_approval=True,
+            )
+
+        for prefix in _ALLOWLISTED_COMMAND_PREFIXES:
+            if _command_matches_prefix(command, prefix):
+                return PolicyResult(
+                    decision=PolicyDecision.ALLOW_SANDBOXED,
+                    reason_code="COMMAND_ALLOWLISTED",
+                    explanation=f"'{' '.join(prefix)}' matches the MA4.4 starter build/test allowlist.",
+                    matched_rule="command_allowlist.allowlisted",
+                    requires_sandbox=True,
+                )
+
+        return PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="COMMAND_NOT_ALLOWLISTED",
+            explanation=(
+                f"'{' '.join(command)}' does not match any entry in the MA4.4 starter "
+                "command allowlist."
+            ),
+            matched_rule="command_allowlist.not_allowlisted",
+        )
 
     def _check_approval_rules(self, request: ActionRequest) -> Optional[PolicyResult]:
         """MA4.9 - not yet implemented."""
