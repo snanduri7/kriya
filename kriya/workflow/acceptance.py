@@ -6,18 +6,22 @@ import re
 _EXPLICIT_TEST_REQUEST_RE = re.compile(
     r"\b(?:include|add|write|create|provide|with|run)\s+(?:appropriate\s+)?"
     r"(?:unit\s+|integration\s+|automated\s+)?tests?\b(?!\s+where\s+appropriate)"
-    # "test" used as an attributive adjective before a data noun ("test
-    # values", "test data") describes sample/demo input, not a request for a
-    # test suite - found live, 2026-08-21 (protocol_encoder_java milestone
-    # 5): the Planner's own milestone goal read "initializes it with test
-    # values, encodes it..." (ordinary English for "some sample values"),
-    # which satisfied "with (appropriate)? (unit|integration|automated)?
-    # tests?" purely because "test" is a whole-word match for "tests?" (the
-    # trailing 's' is optional) - the milestone was never about writing
-    # tests at all, but Quality Gates demanded a runnable test module for it
-    # anyway and burned its entire retry budget on an unwinnable gate before
-    # the milestone failed outright.
-    r"(?!\s+(?:values?|data)\b)",
+    # "test" used as an attributive adjective before a non-suite noun
+    # ("test values", "test data", "test logic") describes sample/demo
+    # input or ad hoc verification code, not a request for a real test
+    # suite - found live, 2026-08-21 (protocol_encoder_java milestone 5,
+    # "with test values") and again 2026-08-24 (protocol_encoder_java,
+    # WorkflowController enforce mode, "with test logic for encode/decode
+    # round-trip demonstration"). Both times it was the PLANNER'S OWN
+    # generated goal/subtask text that introduced the trigger phrase, not
+    # anything the human actually asked for - the milestone/subtask was
+    # never about writing a formal test suite, but Quality Gates demanded
+    # a runnable test module for it anyway and burned its entire retry
+    # budget on an unwinnable gate before failing outright. Each fix here
+    # closes the ONE concrete phrasing found live, not every conceivable
+    # future paraphrase - this heuristic will likely need another word
+    # added here again someday, the same way it did this time.
+    r"(?!\s+(?:values?|data|logic|code|routine|method|function|demonstration|output)\b)",
     re.IGNORECASE,
 )
 _ZERO_TEST_PATTERNS = (

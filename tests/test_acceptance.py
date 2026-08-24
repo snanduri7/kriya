@@ -37,6 +37,35 @@ def test_explicit_test_contract_ignores_test_used_as_sample_data_adjective():
     )
 
 
+def test_explicit_test_contract_ignores_test_used_as_logic_or_code_adjective():
+    """Regression test for a real live bug, 2026-08-24 (protocol_encoder_java,
+    WorkflowController enforce mode, subtask s2): the Planner's own subtask
+    description read "Create Main.java file with test logic for encode/decode
+    round-trip demonstration" and its acceptance criterion read "...with
+    working encode/decode round-trip test logic that demonstrates successful
+    serialization/deserialization..." - same bug class as the "test values"
+    incident above (test as an attributive adjective before a non-suite
+    noun), new phrasing ("test logic" rather than "test values"). The subtask
+    was never about writing a test suite; Quality Gates demanded a runnable
+    test module anyway and burned all 8 retry attempts on an unwinnable gate
+    before the subtask failed outright."""
+    assert not goal_explicitly_requires_tests(
+        "Create Main.java file with test logic for encode/decode round-trip "
+        "demonstration"
+    )
+    assert not goal_explicitly_requires_tests(
+        "Main.java file is created with working encode/decode round-trip "
+        "test logic that demonstrates successful serialization/"
+        "deserialization of Protocol objects"
+    )
+    assert not goal_explicitly_requires_tests("Add test code to validate the flow")
+    assert not goal_explicitly_requires_tests("Write a test routine for the demo")
+    # A genuine request must still be detected alongside a "test logic" adjective use.
+    assert goal_explicitly_requires_tests(
+        "Add test logic to Main.java and write tests for the parser"
+    )
+
+
 def test_test_acceptance_detects_known_zero_execution_outputs():
     assert not output_confirms_nonzero_test_execution("collected 0 items")
     assert not output_confirms_nonzero_test_execution("Tests run: 0, Failures: 0")
