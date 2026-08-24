@@ -17,6 +17,8 @@ from openai import (
 )
 
 from kriya.config import AppConfig
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,13 @@ _LLM_RETRY_EXCLUDED_EXCEPTIONS = (
 )
 
 class EgressViolationError(ValueError):
-    """Raised when an LLM completion request violates local_only egress policy."""
+    """Raised when an LLM completion request violates local_only egress policy.
+
+    MA4.3 (control-plane implementation plan, kriya/policy/__init__.py): this
+    is Kriya's hard local-only egress boundary and stays authoritative
+    independently of kriya/policy/execution.py's ExecutionPolicy - see
+    LLMClient._audit_llm_network_access below. Nothing in kriya/policy/ may
+    ever replace, gate, or suppress this check."""
     pass
 
 def is_local_url(url: str) -> bool:
@@ -86,6 +94,34 @@ class LLMClient:
         self.model = config.llm.model
         self.temperature = config.llm.temperature
         self.max_tokens = config.llm.max_tokens
+        # MA4.3 - audit-only. See _audit_llm_network_access below; this is
+        # never consulted for enforcement, only logged.
+        self.execution_policy = ExecutionPolicy()
+
+    def _audit_llm_network_access(self, url: str) -> None:
+        """MA4.3 - audit-only ExecutionPolicy consultation, wired in front of
+        (never in place of) this file's own is_local_url/EgressViolationError
+        enforcement below. Per kriya/policy/__init__.py's own principle,
+        policy DECIDES, existing mechanisms ENFORCE - and for the LLM egress
+        boundary specifically, the existing mechanism remains the sole
+        enforcer no matter what policy says. This call can never affect
+        whether the real request proceeds: its result is only logged (audit
+        mode - see the MA4 design doc's rollout plan), and any exception it
+        raises is caught here and logged, never propagated - a bug in the
+        still-young policy engine (which default-denies LLM_NETWORK_ACCESS
+        today, since MA4.6's real network rules haven't landed yet) must
+        never block, alter, or take credit for this file's own unconditional
+        egress enforcement."""
+        try:
+            result = self.execution_policy.evaluate(
+                ActionRequest(action_type=ActionType.LLM_NETWORK_ACCESS, network_target=url)
+            )
+            logger.debug(
+                "MA4 policy audit (not enforced): LLM_NETWORK_ACCESS to '%s' -> %s (%s)",
+                url, result.decision.value, result.reason_code,
+            )
+        except Exception as e:
+            logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
     async def complete(
         self,
@@ -115,9 +151,13 @@ class LLMClient:
         the same way it already passes that entry's model/base_url/api_key/temperature -
         otherwise the primary's own extra_body (e.g. a reasoning_effort tuned for a
         completely different model) silently applies to the fallback call instead."""
-        # Validate egress policy
+        # MA4.3 - audit-only, always runs regardless of egress_policy, and can
+        # never affect the unconditional enforcement immediately below.
+        url_to_check = base_url_override or self.config.llm.base_url
+        self._audit_llm_network_access(url_to_check)
+
+        # Validate egress policy (unchanged - the sole enforcement path)
         if self.config.autonomy.egress_policy == "local_only":
-            url_to_check = base_url_override or self.config.llm.base_url
             if not is_local_url(url_to_check):
                 raise EgressViolationError(
                     f"Egress violation: Request to external API '{url_to_check}' blocked under 'local_only' policy."
@@ -325,8 +365,10 @@ class LLMClient:
         tool-calling turn (see this session's tool-use scoping decision - a tool
         loop's own turn content is a short plan/summary, not the kind of long-form
         output those features exist for)."""
+        url_to_check = base_url_override or self.config.llm.base_url
+        self._audit_llm_network_access(url_to_check)
+
         if self.config.autonomy.egress_policy == "local_only":
-            url_to_check = base_url_override or self.config.llm.base_url
             if not is_local_url(url_to_check):
                 raise EgressViolationError(
                     f"Egress violation: Request to external API '{url_to_check}' blocked under 'local_only' policy."
