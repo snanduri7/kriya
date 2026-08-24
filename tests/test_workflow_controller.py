@@ -45,10 +45,20 @@ def _workflow_engine(route=None, legacy_result=None):
 # --- migration_mode validation ---
 
 @pytest.mark.asyncio
-async def test_enforce_migration_mode_is_rejected(tmp_path):
-    controller = WorkflowController(_workflow_engine())
-    with pytest.raises(WorkflowControllerConfigurationError, match="not safe yet"):
-        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+async def test_enforce_migration_mode_is_now_accepted_not_rejected(tmp_path):
+    """MA7.8 (2026-08-24): 'enforce' is real, explicitly-authorized code
+    now - the prior rejection (WorkflowControllerConfigurationError,
+    'not safe yet') no longer applies. Full enforce-mode behavior coverage
+    lives in tests/test_workflow_controller_enforce.py; this just confirms
+    the mode string itself is no longer refused at the top of execute()."""
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value="prose plan, no JSON block")
+    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(None, "no fenced JSON block found")):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+    # reaches _run_structured_enforce's own clean-failure path, not the
+    # top-of-execute() migration_mode rejection
+    assert result.legacy_result["status"] == "enforce_mode_plan_unavailable"
 
 
 @pytest.mark.asyncio

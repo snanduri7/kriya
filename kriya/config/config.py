@@ -436,33 +436,30 @@ class WorkflowControllerConfig(BaseModel):
     _run_structured_shadow) - the existing, unmodified run_generation_workflow()
     still owns the real outcome unconditionally in this mode.
 
-    "enforce" (WorkflowController fully owns orchestration, including file
-    writes/verification/approval) is REJECTED at validation time below,
-    exactly mirroring execution_policy.mode's own precedent: SubtaskExecutor
-    (MA6.5) deliberately stops at "get file content or a tool result" and
-    does not itself apply edits, run compile/test verification, or gate on
-    approval - that machinery still lives only in run_generation_workflow()'s
-    own Quality Gates loop. Until it's ported (or shadow-mode comparison
-    across real runs proves parity some other way), "enforce" would silently
-    skip all of that if it were ever reachable - fail loud at config-load
-    time instead, never silently do something unsafe."""
+    "enforce" (MA7.8, 2026-08-24) is now real, allowed code - lifting the
+    prior rejection was its own deliberate decision, confirmed with the
+    user directly (mirroring how MA7.3 handled the analogous
+    execution_policy.mode restriction: asked first, never silently
+    lifted). SubtaskExecutor (MA6.5) still deliberately stops at "get file
+    content or a tool result" - "enforce" does NOT port compile/test
+    verification or approval gating into new machinery; instead
+    WorkflowController._run_structured_enforce reuses the existing,
+    mature run_generation_workflow() itself, once per subtask, the same
+    real pattern kriya/workflow/milestones.py::run_milestones() already
+    uses for milestones - see that method's own docstring for exactly
+    what it does and its honest remaining scope boundaries (TOOL-tagged
+    subtasks are refused outright, not silently skipped). `enabled`/`mode`
+    both still default to False/"shadow" - "enforce" only ever runs for a
+    project that explicitly opts in."""
 
     enabled: bool = Field(default=False)
     mode: str = Field(default="shadow")
 
     @field_validator("mode")
     @classmethod
-    def _mode_must_be_shadow_for_now(cls, v: str) -> str:
+    def _mode_must_be_valid(cls, v: str) -> str:
         if v not in ("shadow", "enforce"):
             raise ValueError(f"workflow_controller.mode must be 'shadow' or 'enforce', got {v!r}")
-        if v == "enforce":
-            raise ValueError(
-                "workflow_controller.mode: 'enforce' is not enabled yet. SubtaskExecutor "
-                "does not yet own file writes/verification/approval (that machinery still "
-                "lives in run_generation_workflow()'s Quality Gates loop) - setting this to "
-                "'enforce' would silently skip all of it. Leave this as 'shadow' until a "
-                "future milestone ports that machinery and lifts this restriction."
-            )
         return v
 
 class AppConfig(BaseModel):

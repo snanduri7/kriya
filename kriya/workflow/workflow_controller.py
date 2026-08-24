@@ -33,24 +33,40 @@ verification, or gate on approval, all of which still live only in
 run_generation_workflow()'s own Quality Gates loop. Any exception in the
 shadow path is caught and logged, never allowed to fail the real run.
 
-`migration_mode="enforce"` (WorkflowController fully owns orchestration)
-is refused here defensively - kriya.config.config.WorkflowControllerConfig's
-own validator already rejects it at config-load time (MA6.14), but this
-class checks again rather than trusting every caller to have gone through
-that config path, matching this codebase's "fail loud, never silently do
-something unsafe" convention (kriya/core/llm.py's egress check, this
-project's own precedent).
+MA7.8 (2026-08-24): `migration_mode="enforce"` is now real, explicitly
+authorized code, not refused. kriya.config.config.WorkflowControllerConfig's
+own validator no longer rejects it either - lifting that restriction was
+its own deliberate decision, confirmed with the user directly, mirroring
+how MA7.3 handled the analogous execution_policy.mode restriction (asked
+first, never silently lifted). Still defaults to `mode: shadow`/
+`enabled: false` in the packaged config - "enforce" only ever runs for a
+project that explicitly opts in, matching every other "ship the mechanism,
+default it off" precedent in this codebase (MA4.15/MA5/MA6 alike).
+
+What "enforce" actually does (_run_structured_enforce): deliberately does
+NOT reimplement edit-application/compile-test verification/approval
+gating from scratch - SubtaskExecutor still only produces file content or
+a tool result, exactly as before. Instead reuses the SAME real, mature
+mechanism kriya/workflow/milestones.py::run_milestones() already uses for
+the analogous problem (decomposing one big goal into smaller real
+generation calls): calls the EXISTING, unmodified
+run_generation_workflow() once PER SUBTASK (instead of once per
+milestone), in dependency order, threading each subtask's real written
+output forward via the same render_established_file_context/
+project_implementation_source machinery run_milestones() already uses.
+This genuinely delivers per-subtask retry locality (each subtask gets its
+own independent Quality-Gates retry budget) without inventing a new,
+unproven apply/verify/approve mechanism. See that method's own docstring
+for the honest scope boundaries this first cut still has (TOOL-tagged
+subtasks refused outright, MA6.7's per-subtask checkpoint not yet wired).
 
 MA7.1: wired into `kriya generate`'s real call path (kriya/cli.py's
-`_run_generation` helper, all three run_generation_workflow call sites in
-the `generate` command) - still gated by `workflow_controller.enabled:
-false` by default in kriya.yaml, mirroring MA4.15/MA5's own "ship the
-mechanism, default it off" pattern, so a stock install's behavior is
-byte-for-byte unchanged. Setting `workflow_controller.enabled: true` (mode
-stays "shadow", "enforce" is refused) is what actually makes this class
-construct and run for a real `kriya generate` call. `kriya fix` and
-`kriya plan-milestones` are NOT wired - deliberately out of MA7.1's scope,
-left for a later increment.
+`_dispatch_generation` helper, all three run_generation_workflow call
+sites in the `generate` command) - still gated by
+`workflow_controller.enabled: false` by default in kriya.yaml, so a stock
+install's behavior is byte-for-byte unchanged regardless of mode. `kriya
+fix` and `kriya plan-milestones` are NOT wired - deliberately out of
+MA7.1's scope, left for a later increment.
 """
 from __future__ import annotations
 
@@ -75,8 +91,14 @@ from kriya.workflow.context_package import (
     contract_entry_from_record,
     make_context_item,
 )
+from kriya.workflow.context_projection import project_implementation_source, render_established_file_context
 from kriya.workflow.control_context import WorkflowControlContext
-from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, build_engineering_plan_from_planner_output
+from kriya.workflow.plan_schema import (
+    EngineeringPlan,
+    ExecutionMethod,
+    Subtask,
+    build_engineering_plan_from_planner_output,
+)
 from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.subtask_checkpoint import topological_subtask_order
 from kriya.workflow.subtask_context_projection import project_for_subtask
@@ -92,11 +114,50 @@ from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, Verifica
 
 logger = logging.getLogger(__name__)
 
-_VALID_MIGRATION_MODES = ("legacy", "shadow")
+_VALID_MIGRATION_MODES = ("legacy", "shadow", "enforce")
+
+# MA7.8 - mirrors kriya/workflow/milestones.py's own
+# _ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE exactly (same value, a local
+# constant rather than importing that module's private name across a
+# module boundary - the two orchestrators are siblings, not one built on
+# the other).
+_ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE = 4000
 
 
 class WorkflowControllerConfigurationError(ValueError):
     pass
+
+
+def build_subtask_goal_text(subtask: Subtask, position: int, total: int) -> str:
+    """MA7.8 - the per-subtask analogue of kriya/workflow/milestones.py's
+    build_milestone_goal_text(): deterministic string assembly, no extra
+    LLM call, same reasoning (run_generation_workflow's own repo-analysis
+    stage re-scans workspace_path fresh on every call, so "what does
+    subtask N see of subtasks 1..N-1" is already free once their real
+    output is on disk - no new context-plumbing needed here beyond what
+    milestones.py's own precedent already established)."""
+    header = ""
+    if subtask.depends_on:
+        dep_list = ", ".join(sorted(subtask.depends_on))
+        header = (
+            f"This is subtask '{subtask.id}' ({position} of {total}) of a larger "
+            f"structured plan, depending on: {dep_list}. Earlier subtasks' output has "
+            "already been applied to this project on disk - inspect the existing "
+            "code/build files in the Workspace Context below rather than assuming a "
+            "blank project, and do NOT recreate, restructure, or rename anything that "
+            "already exists and already works unless this subtask's own goal below "
+            "explicitly requires changing it.\n\n"
+        )
+    planned = ""
+    if subtask.planned_files:
+        planned = "\n\nFiles this subtask should touch:\n" + "\n".join(
+            f"- {pf.path} ({pf.action.value})" + (f" - {pf.reason}" if pf.reason else "")
+            for pf in subtask.planned_files
+        )
+    verification = ""
+    if subtask.verification:
+        verification = "\n\nVerification: " + "; ".join(v.description for v in subtask.verification)
+    return header + subtask.description + planned + verification
 
 
 class WorkflowController:
@@ -124,8 +185,7 @@ class WorkflowController:
     ) -> WorkflowResult:
         if migration_mode not in _VALID_MIGRATION_MODES:
             raise WorkflowControllerConfigurationError(
-                f"migration_mode must be one of {_VALID_MIGRATION_MODES!r}, got {migration_mode!r} - "
-                "'enforce' is not safe yet (see this module's own docstring)."
+                f"migration_mode must be one of {_VALID_MIGRATION_MODES!r}, got {migration_mode!r}."
             )
 
         run_id = run_id or new_run_id()
@@ -154,6 +214,39 @@ class WorkflowController:
         subtask_results: Tuple[SubtaskResult, ...] = ()
         decisions: Tuple[Decision, ...] = ()
         verification_report: Optional[VerificationReport] = None
+
+        if migration_mode == "enforce":
+            # MA7.8 - deliberately NOT wrapped in the shadow path's own
+            # broad try/except. Shadow must never take down the real run
+            # because shadow ISN'T the real run - enforce mode IS, so a bug
+            # here has to surface loudly (this codebase's own "fail loud,
+            # never silently do something unsafe" convention), not be
+            # mistaken for a different outcome. _run_structured_enforce
+            # itself already degrades a genuine plan/validation/TOOL-subtask
+            # problem into a clean, normally-shaped failure result (same
+            # status/quality_gates_passed shape run_generation_workflow's
+            # own ordinary failures use) rather than raising for those -
+            # only a real bug in this orchestration code itself propagates
+            # as an exception.
+            legacy_result, plan, subtask_results, decisions, verification_report = (
+                await self._run_structured_enforce(
+                    goal, workspace_path, route, run_id, control_context, control_state, legacy_kwargs,
+                )
+            )
+            if plan is not None:
+                control_state = control_state.with_updates(current_plan_hash=plan.content_hash())
+
+            try:
+                save_control_state(workspace_path, control_state)
+            except Exception as e:
+                logger.warning(f"WorkflowController run {run_id!r}: failed to persist ControlState (non-fatal): {e}")
+
+            return WorkflowResult(
+                run_id=run_id, control_state=control_state, route=route,
+                legacy_result=legacy_result, subtask_results=subtask_results,
+                decisions=decisions, verification_report=verification_report,
+            )
+
         if migration_mode == "shadow":
             try:
                 plan, subtask_results, decisions, verification_report, notes = await self._run_structured_shadow(
@@ -381,6 +474,183 @@ class WorkflowController:
 
         report = build_verification_report(plan.acceptance_criteria)
         return plan, tuple(results), ledger.all(), report, notes
+
+    async def _run_structured_enforce(
+        self, goal: str, workspace_path: str, route: Any, run_id: str,
+        control_context: WorkflowControlContext, control_state: ControlState,
+        legacy_kwargs: Dict[str, Any],
+    ) -> Tuple[
+        Dict[str, Any], Optional[EngineeringPlan], Tuple[SubtaskResult, ...],
+        Tuple[Decision, ...], Optional[VerificationReport],
+    ]:
+        """MA7.8 - WorkflowController actually OWNING the real outcome for
+        the first time. Deliberately does NOT reimplement edit-application/
+        compile-test verification/approval gating (SubtaskExecutor still
+        only produces file content or a tool result, exactly as documented
+        elsewhere in this module) - instead reuses the SAME real, mature
+        mechanism kriya/workflow/milestones.py::run_milestones() already
+        uses for the analogous "decompose one big goal into smaller real
+        generation calls" problem: call the EXISTING, unmodified
+        self.workflow_engine.run_generation_workflow() once per SUBTASK
+        (instead of once per MILESTONE), in dependency order, threading
+        each completed subtask's real written-file content forward as the
+        next one's supplementary_context/established_files - the exact
+        same render_established_file_context/project_implementation_source
+        machinery run_milestones() already calls, not a second copy of it.
+        This is real per-subtask retry locality (MA7's own stated goal):
+        each subtask gets its OWN run_generation_workflow() call, with its
+        own independent retry budget/Quality-Gates loop/approval gate - a
+        failure in subtask 2 only ever retries subtask 2's own call, never
+        re-triggers subtask 1 or 3.
+
+        Known, honest scope boundaries for this first real cut (not silent
+        gaps - each is a deliberate, separate decision):
+        - TOOL-tagged subtasks are refused outright (see below) - the same
+          reasoning as _run_structured_shadow's own hard stop:
+          SubtaskExecutor's TOOL dispatch has zero policy gate a raw shell
+          string can't trivially defeat. Enforcing SAFELY requires either a
+          real per-tool policy mapping or accepting a materially weaker
+          guarantee - a separate, later decision, not bundled into this one.
+        - MA6.7's SubtaskCheckpoint/resolve_subtask_resume_point are NOT
+          wired in here - each subtask's own run_generation_workflow() call
+          already gets real resume-safety for free via ITS OWN existing
+          checkpoint mechanism (the actual correctness-load-bearing
+          property); a SEPARATE subtask-spanning checkpoint layer would add
+          efficient multi-subtask resume, a real enhancement, not a
+          correctness requirement for a first working version.
+        - Some duplication with _run_structured_shadow's own plan-build/
+          validate prologue (Planner call, parse, validate_plan) is
+          accepted here rather than refactoring that already-live,
+          independently-tested method under time pressure - a real,
+          flagged simplification opportunity, not something to silently
+          leave undocumented.
+
+        A structural problem (no parseable plan, zero subtasks, failed
+        validation, a TOOL-tagged subtask present) returns a normally-
+        shaped FAILURE result (same status/quality_gates_passed shape any
+        ordinary run_generation_workflow() failure already has) rather than
+        raising - this is what an "enforce mode isn't ready for this goal
+        shape yet" outcome should look like to a caller, not a stack trace.
+        Only a genuine bug in this method's own code propagates as a real
+        exception (see execute()'s own comment for why that's deliberate)."""
+        ledger = DecisionLedger()
+
+        def _failure_result(reason: str) -> Dict[str, Any]:
+            logger.warning(f"WorkflowController enforce run {run_id!r}: {reason}")
+            return {
+                "status": "enforce_mode_plan_unavailable",
+                "quality_gates_passed": False,
+                "run_id": run_id,
+                "reason": reason,
+            }
+
+        plan_text = await self.workflow_engine.planner.run(goal)
+        structured_output, parse_issue = parse_planner_structured_output(plan_text)
+        if structured_output is None:
+            return _failure_result(f"no structured plan: {parse_issue}"), None, (), ledger.all(), None
+
+        plan = build_engineering_plan_from_planner_output(structured_output, plan_id=run_id, kind=route.kind)
+        if plan is None:
+            return (
+                _failure_result("structured output parsed but produced zero subtasks"),
+                None, (), ledger.all(), None,
+            )
+
+        record_plan_created(ledger, plan)
+
+        tool_subtasks = [st.id for st in plan.subtasks if st.execution_method == ExecutionMethod.TOOL]
+        if tool_subtasks:
+            return (
+                _failure_result(
+                    f"plan contains TOOL-tagged subtask(s) {tool_subtasks!r} - enforce mode does not "
+                    "yet execute TOOL subtasks for real (see this method's own docstring)"
+                ),
+                plan, (), ledger.all(), None,
+            )
+
+        kernel = getattr(self.workflow_engine, "kernel", None)
+        available_tool_names = None
+        if kernel is not None:
+            try:
+                available_tool_names = kernel.registry.list_components("tool")
+            except Exception as e:
+                logger.debug(f"WorkflowController enforce run {run_id!r}: could not list registered tools: {e}")
+
+        validation = await validate_plan(
+            plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
+            route=route, triage_service=self.workflow_engine.engineering_triage,
+        )
+        if not validation.valid:
+            return _failure_result(f"plan failed validation: {validation.errors}"), plan, (), ledger.all(), None
+
+        order = topological_subtask_order(plan)
+        total = len(order)
+        established_file_context: Dict[str, str] = {}
+        subtask_results: List[SubtaskResult] = []
+        last_call_result: Optional[Dict[str, Any]] = None
+
+        for position, subtask_id in enumerate(order, start=1):
+            subtask = plan.subtask_by_id(subtask_id)
+            if subtask is None:
+                continue
+
+            subtask_goal = build_subtask_goal_text(subtask, position, total)
+            call_result = await self.workflow_engine.run_generation_workflow(
+                goal=subtask_goal,
+                workspace_path=workspace_path,
+                supplementary_context=render_established_file_context(established_file_context),
+                established_files=sorted(established_file_context.keys()),
+                **legacy_kwargs,
+            )
+            last_call_result = call_result
+
+            passed = bool(call_result.get("quality_gates_passed"))
+            result = SubtaskResult(
+                subtask_id=subtask.id, status=(SubtaskStatus.COMPLETED if passed else SubtaskStatus.FAILED),
+                execution_method=ExecutionMethod.MODEL.value,
+                error=None if passed else f"subtask did not pass Quality Gates (status={call_result.get('status')!r})",
+            )
+            subtask_results.append(result)
+            record_subtask_attempt(ledger, plan, result, attempt=1)
+
+            if not passed:
+                logger.warning(
+                    f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} "
+                    f"({position}/{total}) - did not pass Quality Gates."
+                )
+                break
+
+            for path in call_result.get("files", []):
+                try:
+                    with open(os.path.join(workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
+                        content = fh.read()
+                except OSError as e:
+                    logger.warning(
+                        f"WorkflowController enforce run {run_id!r}: could not capture established "
+                        f"content for {path!r} after subtask {subtask_id!r}: {e}"
+                    )
+                    continue
+                projection = project_implementation_source(
+                    content, path, _ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+                    reason="established_by_earlier_subtask",
+                )
+                established_file_context[path] = projection.content
+
+        all_completed = len(subtask_results) == total and all(
+            r.status == SubtaskStatus.COMPLETED for r in subtask_results
+        )
+        aggregated: Dict[str, Any] = {
+            "status": "success" if all_completed else "failed",
+            "quality_gates_passed": all_completed,
+            "run_id": run_id,
+            "subtask_results": [r.to_dict() for r in subtask_results],
+            "files": sorted(established_file_context.keys()),
+        }
+        if last_call_result is not None:
+            aggregated["last_subtask_result"] = last_call_result
+
+        report = build_verification_report(plan.acceptance_criteria)
+        return aggregated, plan, tuple(subtask_results), ledger.all(), report
 
     async def _build_context(
         self, goal: str, plan: EngineeringPlan, workspace_path: str, route: Any,
