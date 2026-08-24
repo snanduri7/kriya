@@ -2272,6 +2272,45 @@ async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_failure_report_wires_real_failures_through_categorize_failure(tmp_path):
+    """MA7.6's categorize_failure()/build_failure_report_entry() were built
+    (28 tests) but had zero real callers anywhere - genuinely dead code as
+    of 2026-08-24 (confirmed via full-repo grep), not just opt-in-dormant.
+    Fixed by wiring them into this exact real failure path (the same
+    scenario test_workflow_failure_category_quality_gates_exhausted above
+    exercises): a run whose every attempt hits the same real syntax-error
+    failure must produce a non-empty, correctly-categorized failure_report,
+    additive to (not replacing) failure_category - both a fixed-value
+    'why did the loop stop' answer AND a per-attempt 'what kind of thing
+    kept failing' answer now coexist on the same result."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=(
+        ["Step 1: Write code", "Design: Write app.py"]
+        + ["print('unterminated string"] * 15
+        + ["Review: Approved"]
+    ))
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is False
+    assert res["failure_category"] == "quality_gates_exhausted"
+    assert res["failure_report"], "a real failing run must produce at least one failure_report entry"
+    for entry in res["failure_report"]:
+        assert set(entry.keys()) == {"failure_type", "category", "attribution_tier"}
+        assert entry["failure_type"]
+        assert entry["category"]
+
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    persisted = json.loads(trace_row["failure_report"])
+    assert persisted == res["failure_report"]
+
+
+@pytest.mark.asyncio
 async def test_workflow_traces_knowledge_gap(tmp_path):
     """The knowledge-gap early return happens before the retry loop even starts,
     so it used to skip trace logging entirely - closing that gap so an eval

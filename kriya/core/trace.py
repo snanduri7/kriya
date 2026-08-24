@@ -52,6 +52,13 @@ class TraceLogger:
             ("run_events", "TEXT"),
             ("evidence_records", "TEXT"),
             ("generation_metrics", "TEXT"),
+            # MA7.6 (kriya/workflow/failure_reporting.py) - additive to,
+            # never a replacement for, failure_category above: this is a
+            # JSON list of {failure_type, category, attribution_tier} - one
+            # entry per real failed attempt (gate_outcomes), letting a
+            # human/dashboard ask "what KIND of thing kept failing across
+            # this run's attempts", not just "why did the loop stop".
+            ("failure_report", "TEXT"),
         ):
             try:
                 cursor.execute(f"ALTER TABLE runs ADD COLUMN {col} {coltype}")
@@ -103,6 +110,7 @@ class TraceLogger:
         run_events: list = None,
         evidence_records: list = None,
         generation_metrics: dict = None,
+        failure_report: list = None,
     ) -> None:
         cursor = self.conn.cursor()
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -115,20 +123,21 @@ class TraceLogger:
         events_json = json.dumps(run_events or [])
         evidence_json = json.dumps(evidence_records or [])
         generation_metrics_json = json.dumps(generation_metrics or {})
+        failure_report_json = json.dumps(failure_report or [])
 
         cursor.execute("""
             INSERT OR REPLACE INTO runs (
                 run_id, timestamp, goal, duration_sec, attempts, status, files_modified,
                 retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops,
                 failure_category, milestone_group_id, milestone_index, milestone_total,
-                run_events, evidence_records, generation_metrics
+                run_events, evidence_records, generation_metrics, failure_report
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             run_id, timestamp, goal, duration_sec, attempts, status, files_str,
             chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
             failure_category, milestone_group_id, milestone_index, milestone_total,
-            events_json, evidence_json, generation_metrics_json
+            events_json, evidence_json, generation_metrics_json, failure_report_json
         ))
         self.conn.commit()
 

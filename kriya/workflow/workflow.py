@@ -33,6 +33,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.triage import EngineeringRoute, EngineeringTriageService
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.errors import PolicyDeniedError
@@ -2462,6 +2463,26 @@ class WorkflowEngine:
         if not quality_passed:
             failure_category = "environment_failure" if state.environment_failure else "quality_gates_exhausted"
 
+        # MA7.6 (kriya/workflow/failure_reporting.py) - additive, NOT a
+        # replacement for failure_category above: that field answers "why
+        # did the retry loop stop" (2 fixed values, a stable contract
+        # tests/test_traces_command.py already asserts on literally).
+        # This answers a different question - "what KIND of thing kept
+        # failing across the attempts" - by mapping every real gate_outcome
+        # (one per failed attempt, kriya/workflow/failure.py's own
+        # Failure.to_gate_outcome()) through the existing, previously-
+        # unwired categorize_failure()/build_failure_report_entry(). Empty
+        # list on a clean success (state.gate_outcomes only ever holds
+        # failures) or a run that never got past a single passing attempt.
+        failure_report = [
+            build_failure_report_entry(outcome.get("type", ""), outcome.get("attribution_tier"))
+            for outcome in state.gate_outcomes
+        ]
+        failure_report_dicts = [
+            {"failure_type": e.failure_type, "category": e.category.value, "attribution_tier": e.attribution_tier}
+            for e in failure_report
+        ]
+
         # Write persistent trace log
         try:
             from kriya.core.trace import TraceLogger
@@ -2484,6 +2505,7 @@ class WorkflowEngine:
                 gate_outcomes=state.gate_outcomes,
                 model_hops=state.model_hops,
                 failure_category=failure_category,
+                failure_report=failure_report_dicts,
                 milestone_group_id=milestone_group_id,
                 milestone_index=milestone_index,
                 milestone_total=milestone_total,
@@ -2528,6 +2550,7 @@ class WorkflowEngine:
             "quality_gates_passed": quality_passed,
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
+            "failure_report": failure_report_dicts,
             "toolchain_warning": state.toolchain_warning,
             "lsp_warning": state.lsp_warning,
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,

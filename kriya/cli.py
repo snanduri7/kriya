@@ -20,6 +20,7 @@ from kriya.plugins.plugin import PluginManager
 from kriya.prompt import PromptEngine
 from kriya.skills import SkillEngine
 from kriya.workflow import WorkflowEngine
+from kriya.workflow.failure_reporting import dominant_category
 from kriya.workflow.workflow_controller import WorkflowController
 
 logger = logging.getLogger(__name__)
@@ -2237,7 +2238,10 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
     conn = get_connection(db_path)
     cursor = conn.cursor()
     total = cursor.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified, failure_category FROM runs ORDER BY timestamp DESC"
+    query = (
+        "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified, "
+        "failure_category, failure_report FROM runs ORDER BY timestamp DESC"
+    )
     if not show_all:
         query += " LIMIT ?"
         cursor.execute(query, (limit,))
@@ -2250,14 +2254,33 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
         click.echo("No run traces recorded yet.")
         return
 
-    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'CATEGORY':<22} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
-    click.echo("-" * 120)
-    for _r_id, ts, goal, dur, att, status, _files, category in rows:
+    # MA7.6 (kriya/workflow/failure_reporting.py) - KIND is additive to,
+    # never a replacement for, CATEGORY: CATEGORY answers "why did the
+    # retry loop stop" (a stable value tests/test_traces_command.py
+    # already asserts on literally), KIND answers "what kind of thing
+    # kept failing" (derived from the real Failure.type of every failed
+    # attempt) - a NULL/old-row failure_report degrades to a blank KIND,
+    # not an error.
+    click.secho(
+        f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'CATEGORY':<22} | {'KIND':<22} | "
+        f"{'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}",
+        bold=True,
+    )
+    click.echo("-" * 145)
+    for _r_id, ts, goal, dur, att, status, _files, category, failure_report_json in rows:
         dur_str = f"{dur:.2f}s"
         status_color = "green" if status.lower() == "success" else "red"
         status_styled = click.style(f"{status:<10}", fg=status_color)
         category_str = category or ""
-        click.echo(f"{ts:<20} | {status_styled} | {category_str:<22} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
+        try:
+            entries = json.loads(failure_report_json) if failure_report_json else []
+        except (TypeError, ValueError):
+            entries = []
+        kind_str = dominant_category(entries) or ""
+        click.echo(
+            f"{ts:<20} | {status_styled} | {category_str:<22} | {kind_str:<22} | "
+            f"{att:<8} | {dur_str:<10} | {goal[:40]:<40}"
+        )
 
     if not show_all and total > len(rows):
         click.echo(f"\nShowing {len(rows)} of {total} recorded runs. Use -n/--limit or --all to see more.")

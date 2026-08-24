@@ -110,6 +110,63 @@ def test_traces_custom_limit_option(tmp_path):
     assert "Showing 5 of 30 recorded runs" in res.output
 
 
+def test_traces_shows_kind_column_from_failure_report(tmp_path):
+    """MA7.6's categorize_failure()/build_failure_report_entry() were dead
+    code (zero real callers anywhere) until wired into workflow.py's real
+    failure path - this confirms the KIND column (dominant_category over
+    the persisted failure_report JSON) actually renders, additive to the
+    pre-existing CATEGORY column which test_traces_shows_failure_category_column
+    above already locks in and which this must NOT disturb."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    db_path = str(logs_dir / "traces.db")
+    logger = TraceLogger(db_path)
+    logger.log_run(
+        run_id="run-kind-1",
+        goal="A goal that keeps hitting edit-targeting failures",
+        duration_sec=1.0,
+        attempts=3,
+        status="failure",
+        files_modified=["a.py"],
+        failure_category="quality_gates_exhausted",
+        failure_report=[
+            {"failure_type": "no_op_edit", "category": "edit_targeting", "attribution_tier": "locator"},
+            {"failure_type": "no_op_edit", "category": "edit_targeting", "attribution_tier": "locator"},
+            {"failure_type": "compile", "category": "build", "attribution_tier": None},
+        ],
+    )
+
+    cfg = AppConfig()
+    cfg.paths.logs = str(logs_dir)
+
+    runner = CliRunner()
+    with patch("kriya.cli.load_config", return_value=cfg):
+        res = runner.invoke(main, ["traces"])
+
+    assert res.exit_code == 0
+    assert "KIND" in res.output
+    assert "edit_targeting" in res.output
+    assert "quality_gates_exhausted" in res.output
+
+
+def test_traces_kind_column_blank_for_rows_predating_failure_report(tmp_path):
+    """A row from before this field existed (or a clean success, which
+    never populates failure_report) must render a blank KIND, not crash."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    db_path = str(logs_dir / "traces.db")
+    _seed_traces(db_path, 1)
+
+    cfg = AppConfig()
+    cfg.paths.logs = str(logs_dir)
+
+    runner = CliRunner()
+    with patch("kriya.cli.load_config", return_value=cfg):
+        res = runner.invoke(main, ["traces"])
+
+    assert res.exit_code == 0
+
+
 def test_traces_shows_failure_category_column(tmp_path):
     """failure_category is persisted (kriya/core/trace.py) so an eval harness
     reading traces.db can aggregate by it - confirm `kriya traces` itself

@@ -9,6 +9,7 @@ from kriya.workflow.failure_reporting import (
     FailureCategory,
     build_failure_report_entry,
     categorize_failure,
+    dominant_category,
 )
 from kriya.workflow.retry_strategy import _REPAIR_FEEDBACK_FAILURE_TYPES
 
@@ -89,3 +90,27 @@ def test_build_failure_report_entry_attribution_tier_defaults_to_none():
     entry = build_failure_report_entry("general_error")
     assert entry.attribution_tier is None
     assert entry.category == FailureCategory.UNCLASSIFIED
+
+
+# --- dominant_category: consumes traces.db's persisted dict shape, not FailureReportEntry ---
+
+def test_dominant_category_empty_list_is_none():
+    assert dominant_category([]) is None
+
+
+def test_dominant_category_single_entry():
+    entries = [{"failure_type": "compile", "category": "build", "attribution_tier": None}]
+    assert dominant_category(entries) == "build"
+
+
+def test_dominant_category_picks_the_most_frequent():
+    entries = (
+        [{"failure_type": "compile", "category": "build", "attribution_tier": None}] * 1
+        + [{"failure_type": "no_op_edit", "category": "edit_targeting", "attribution_tier": "locator"}] * 3
+    )
+    assert dominant_category(entries) == "edit_targeting"
+
+
+def test_dominant_category_ignores_entries_missing_a_category():
+    entries = [{"failure_type": "compile", "attribution_tier": None}]
+    assert dominant_category(entries) is None

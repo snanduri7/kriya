@@ -141,3 +141,23 @@ def build_failure_report_entry(failure_type: str, attribution_tier: Optional[str
         category=categorize_failure(failure_type),
         attribution_tier=attribution_tier,
     )
+
+
+def dominant_category(entries: "list[dict]") -> Optional[str]:
+    """The single most-common category across a run's failure_report
+    entries (kriya/core/trace.py's persisted JSON shape - plain dicts with
+    a `category` key, not FailureReportEntry objects, since this is meant
+    to run on data read back OUT of traces.db, not on live objects). None
+    for an empty list (a run that succeeded on its first attempt, or
+    predates this field). Ties break on first-seen order - acceptable for
+    a compact display hint, not a statistical claim."""
+    if not entries:
+        return None
+    counts: Dict[str, int] = {}
+    for entry in entries:
+        cat = entry.get("category")
+        if cat:
+            counts[cat] = counts.get(cat, 0) + 1
+    if not counts:
+        return None
+    return max(counts, key=lambda k: counts[k])
