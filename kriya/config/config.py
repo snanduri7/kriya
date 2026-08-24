@@ -426,15 +426,23 @@ class ExecutionPolicyConfig(BaseModel):
 class WorkflowControllerConfig(BaseModel):
     """MA6.13/6.14 of the MA6 structured-execution implementation plan
     (kriya/workflow/workflow_controller.py) - mirrors ExecutionPolicyConfig's
-    own audit/enforce precedent immediately above, same reasoning: `enabled`
-    defaults False (a new, not-yet-live-validated capability stays off,
-    same "ship the mechanism, default it off" pattern as engineering_triage/
-    process_profiles when THEY were introduced). `mode` is the real gate -
-    "shadow" builds a real EngineeringPlan and runs SubtaskExecutor against
-    it for every subtask, but never lets the result affect real files or
-    the run's actual outcome (kriya/workflow/workflow_controller.py's
-    _run_structured_shadow) - the existing, unmodified run_generation_workflow()
-    still owns the real outcome unconditionally in this mode.
+    own audit/enforce precedent immediately above for the `mode` field, but
+    `enabled` itself flipped to default True on 2026-08-24 (was False):
+    MA7.0's runtime-reachability audit found the entire MA5 control-plane
+    (ControlState/ContractRegistry/ArtifactRegistry/ContextOrchestrator/
+    DecisionLedger) fully INERT - unreachable in any real run - because
+    nothing but WorkflowController ever constructs them, and
+    WorkflowController itself had no default caller. `mode` stays "shadow"
+    by default - a real EngineeringPlan is built and SubtaskExecutor runs
+    against it for every subtask, but the result never affects real files
+    or the run's actual outcome (kriya/workflow/workflow_controller.py's
+    _run_structured_shadow, provably non-mutating - hard-stops on any
+    TOOL-tagged subtask, wrapped in a broad try/except) - the existing,
+    unmodified run_generation_workflow() still owns the real outcome
+    unconditionally in this mode. So this default flip is zero-risk to
+    real generation output; the cost is extra LLM calls (Planner/
+    Architect/SubtaskExecutor) and wall-clock time on every generate run,
+    for every project that doesn't override it.
 
     "enforce" (MA7.8, 2026-08-24) is now real, allowed code - lifting the
     prior rejection was its own deliberate decision, confirmed with the
@@ -448,11 +456,13 @@ class WorkflowControllerConfig(BaseModel):
     real pattern kriya/workflow/milestones.py::run_milestones() already
     uses for milestones - see that method's own docstring for exactly
     what it does and its honest remaining scope boundaries (TOOL-tagged
-    subtasks are refused outright, not silently skipped). `enabled`/`mode`
-    both still default to False/"shadow" - "enforce" only ever runs for a
-    project that explicitly opts in."""
+    subtasks are refused outright, not silently skipped). `mode` still
+    defaults to "shadow", not "enforce" - confirmed with the user
+    (2026-08-24) NOT to flip to enforce-by-default yet, since it's been
+    live-validated on only one project/goal shape so far - "enforce" only
+    ever runs for a project that explicitly opts in."""
 
-    enabled: bool = Field(default=False)
+    enabled: bool = Field(default=True)
     mode: str = Field(default="shadow")
 
     @field_validator("mode")

@@ -132,15 +132,26 @@ execution_policy:
 
 # MA6/MA7.8 (kriya/workflow/workflow_controller.py) - whether
 # WorkflowController runs at all for `kriya generate`, and in what mode.
-# enabled: false by default - a project opts in explicitly. mode: shadow
-# is observational only (never touches real files); mode: enforce (real
-# as of MA7.8) makes WorkflowController own the real outcome, calling
-# run_generation_workflow() once per subtask instead of once for the
-# whole goal - see workflow_controller.py's own module docstring and
-# _run_structured_enforce's docstring for exactly what that does and its
-# still-open scope boundaries (TOOL-tagged subtasks are refused outright).
+# enabled: true / mode: shadow by default as of 2026-08-24 (previously
+# enabled: false, meaning MA5/6's ControlState/ContractRegistry/
+# ArtifactRegistry/ContextOrchestrator/DecisionLedger machinery was fully
+# unreachable in any real run - MA7.0's "INERT" finding). shadow mode is
+# provably observational only - never touches real files, never affects
+# the real outcome (hard-stops on any TOOL-tagged subtask, wrapped in a
+# broad try/except so a shadow-path failure can never fail the real run) -
+# so this default flip carries zero risk to real generation output, at the
+# cost of extra LLM calls (Planner/Architect/SubtaskExecutor) and wall-
+# clock time on every generate run. mode: enforce (real as of MA7.8) makes
+# WorkflowController own the real outcome, calling run_generation_workflow()
+# once per subtask instead of once for the whole goal - see
+# workflow_controller.py's own module docstring and _run_structured_enforce's
+# docstring for exactly what that does and its still-open scope boundaries
+# (TOOL-tagged subtasks are refused outright). enforce is NOT the default
+# yet - validated live on only one project/goal shape so far (see
+# kriya/workflow/workflow_controller.py's module docstring and this
+# project's own MA7 memory) - a project opts into enforce explicitly.
 workflow_controller:
-  enabled: false
+  enabled: true
   mode: shadow
 
 autonomy:

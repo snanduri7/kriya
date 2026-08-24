@@ -35,6 +35,23 @@ def test_routing_enabled_by_default():
     assert load_config().routing.enabled is True
 
 
+def test_workflow_controller_shadow_mode_enabled_by_default():
+    """Locks in the deliberate 2026-08-24 default flip: workflow_controller.
+    enabled is now True (mode stays "shadow") out of the box - was False,
+    meaning MA5/6's ControlState/ContractRegistry/ArtifactRegistry/
+    ContextOrchestrator/DecisionLedger machinery was fully unreachable in
+    any real run (MA7.0's "INERT" finding). Shadow mode is provably
+    non-mutating (hard-stops on any TOOL-tagged subtask, wrapped in a broad
+    try/except - see kriya/workflow/workflow_controller.py), so this is
+    zero-risk to real generation output; mode stays "shadow", not "enforce"
+    - enforce is deliberately still opt-in, validated live on only one
+    project/goal shape so far."""
+    assert AppConfig().workflow_controller.enabled is True
+    assert AppConfig().workflow_controller.mode == "shadow"
+    assert load_config().workflow_controller.enabled is True
+    assert load_config().workflow_controller.mode == "shadow"
+
+
 def test_load_custom_config(tmp_path):
     custom_yaml = {
         "llm": {
