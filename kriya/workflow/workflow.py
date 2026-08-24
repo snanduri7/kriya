@@ -752,7 +752,7 @@ class WorkflowEngine:
                 f"them. If that's not intended, stop this run and set paths.skills in this "
                 f"project's kriya.yaml, e.g. \"./skills\"."
             )
-        se = SkillEngine.from_config(self.kernel.config)
+        se = SkillEngine.from_config(self.kernel.config, workspace_path=workspace_path)
         se.discover_and_load()
         
         convention_prompt = ""

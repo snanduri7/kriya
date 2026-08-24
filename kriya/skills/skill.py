@@ -47,6 +47,40 @@ def is_accidental_shared_skills_write(skills_dir: str, workspace_path: str) -> b
     except Exception:
         return False
 
+def is_accidental_shared_skill_write(skill_source_path: str, workspace_path: str) -> bool:
+    """MA7.4 - the actual root-cause predicate behind [[kriya_backlog_and_lessons]]'s
+    durable lesson #4 (recurred 4 times: 67e34b6, a2eb184, fc1c603, and this
+    session's b8a56ab, all independently). is_accidental_shared_skills_write()
+    above catches a DIFFERENT, narrower case (a project's OWN new-skill/
+    auto-bootstrap writes landing in the shared dir because paths.skills was
+    never overridden) - every real incident was something else: a project
+    with perfectly correctly configured paths.skills still loaded a GLOBAL
+    skill (skills.load_global/load_cwd not set to false) that happened to
+    match an unrelated goal, and SkillEngine.mark_verified() wrote real
+    verification data back to that skill's OWN source_path - which, for a
+    genuinely global skill, correctly IS the shared install directory. The
+    bug was never "where does this project write its own skills," it's
+    "should THIS run be allowed to overwrite a skill's real, shared,
+    cross-project verification record at all." True whenever skill_source_path
+    resolves inside Kriya's own shared install skills/ directory (not just
+    equal to it - a skill's source_path is a SUBdirectory, e.g. skills/auto-core)
+    and workspace_path isn't the Kriya install itself - the one workspace
+    where writing to its own skills/ is completely normal."""
+    try:
+        resolved_source = os.path.abspath(skill_source_path)
+        global_skills_dir = get_global_skills_dir()
+        kriya_install_dir = os.path.dirname(global_skills_dir)
+        resolved_workspace = os.path.abspath(workspace_path)
+        inside_global = resolved_source == global_skills_dir or resolved_source.startswith(global_skills_dir + os.sep)
+        return (
+            inside_global
+            and resolved_workspace != kriya_install_dir
+            and not resolved_workspace.startswith(kriya_install_dir + os.sep)
+        )
+    except Exception:
+        return False
+
+
 def git_commit_if_tracked(path: str, message: str) -> None:
     """Best-effort commit of a skill-file change, scoped to `path`, if it lives inside a
     git work tree. Gives skill content a structured undo/audit trail (git log/revert)
@@ -321,8 +355,39 @@ class SkillEngine:
 
     def __init__(
         self, skills_dir: str, load_global: bool = True,
-        load_cwd: Optional[bool] = None,
+        load_cwd: Optional[bool] = None, workspace_path: Optional[str] = None,
     ) -> None:
+        # MA7.4 - "no flag required for safety": defaults to os.getcwd() when
+        # a caller doesn't supply one, rather than skipping the write-safety
+        # check entirely - every documented incident of durable lesson #4
+        # ([[kriya_backlog_and_lessons]]) happened precisely because SOME
+        # caller (a live-validation run, a standalone test script, an ad hoc
+        # sweep) never threaded real workspace context through, and "the
+        # check silently doesn't run without an explicit opt-in" would just
+        # reproduce that exact failure mode one level down. See
+        # is_accidental_shared_skill_write's own docstring for what this
+        # actually protects against.
+        #
+        # One deliberate exception: if the CALLER explicitly points
+        # `skills_dir` itself AT (or inside) the shared install directory -
+        # `kriya skills promote`/`approve`'s own real construction,
+        # SkillEngine(global_skills_dir, ...) - that's a strong, explicit
+        # signal of intent to author a global skill, not an accidental
+        # cross-project write, regardless of the human's actual cwd when
+        # they ran the command. Treat that case as if workspace_path IS the
+        # Kriya install, so is_accidental_shared_skill_write correctly
+        # recognizes it as intentional rather than hard-blocking a
+        # legitimate, already-confirmed CLI action.
+        if workspace_path:
+            self.workspace_path = os.path.abspath(workspace_path)
+        else:
+            _global_skills_dir = get_global_skills_dir()
+            _kriya_install_dir = os.path.dirname(_global_skills_dir)
+            _supplied = os.path.abspath(skills_dir)
+            if _supplied == _global_skills_dir or _supplied.startswith(_global_skills_dir + os.sep):
+                self.workspace_path = _kriya_install_dir
+            else:
+                self.workspace_path = os.getcwd()
         self.skills_dirs = []
         # Backward compatibility: the historic load_global=False flag disabled
         # both implicit sources. New config callers pass load_cwd explicitly.
@@ -362,11 +427,12 @@ class SkillEngine:
         self._skills: Dict[str, Skill] = {}
 
     @classmethod
-    def from_config(cls, config: Any) -> "SkillEngine":
+    def from_config(cls, config: Any, workspace_path: Optional[str] = None) -> "SkillEngine":
         return cls(
             config.paths.skills,
             load_global=config.skills.load_global,
             load_cwd=config.skills.load_cwd,
+            workspace_path=workspace_path,
         )
 
     def discover_and_load(self) -> None:
@@ -539,6 +605,24 @@ class SkillEngine:
         skill = self._resolve_skill(skill_name)
         if not skill or not skill.source_path:
             logger.warning(f"Cannot update skill '{skill_name}': not found or has no known source path.")
+            return False
+
+        # MA7.4 - HARD refusal, not a warning: durable lesson #4's real
+        # incidents (see is_accidental_shared_skill_write's own docstring)
+        # all happened at exactly this write - a run for one workspace
+        # overwriting a DIFFERENT, shared skill file's real verification
+        # data. self.workspace_path always has a real value (defaults to
+        # os.getcwd() in __init__, never None) - this check cannot be
+        # silently skipped by a caller forgetting to pass one.
+        if is_accidental_shared_skill_write(skill.source_path, self.workspace_path):
+            logger.error(
+                f"Refusing to write skill.yaml for '{skill_name}': its source ({skill.source_path}) "
+                f"lives inside Kriya's own shared install skills directory, but this run's workspace "
+                f"({self.workspace_path}) is a different project. Writing here would overwrite this "
+                f"skill's real, shared verification record with data from an unrelated run - see "
+                f"durable lesson #4 in project memory. Set skills.load_global/load_cwd: false in this "
+                f"workspace's kriya.yaml if it shouldn't be touching global skills at all."
+            )
             return False
 
         yaml_path = os.path.join(skill.source_path, "skill.yaml")
