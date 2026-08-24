@@ -12,6 +12,8 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.policy.enforcement import enforce_hard_invariants
+from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
 
@@ -25,34 +27,46 @@ _execution_policy = ExecutionPolicy()
 
 
 def _audit_git_write(command: List[str], workspace_path: str) -> None:
-    """MA4.8 - audit-only ExecutionPolicy consultation, mirroring
-    kriya/core/llm.py's _audit_llm_network_access (MA4.3), kriya/tools/
-    validate.py's _audit_run_command (MA4.4/4.7), kriya/workflow/
-    edit_safety.py's _audit_write_file (MA4.5), and kriya/tools/web.py's
-    _audit_network_access (MA4.6) exactly: can never affect whether the
-    real git command actually runs - any exception raised here is caught
-    and logged, never propagated, and the decision is only logged, never
-    branched on.
+    """MA4.8 - ExecutionPolicy consultation, mirroring kriya/core/llm.py's
+    _audit_llm_network_access (MA4.3), kriya/tools/validate.py's
+    _audit_run_command (MA4.4/4.7), kriya/workflow/edit_safety.py's
+    _audit_write_file (MA4.5), and kriya/tools/web.py's
+    _audit_network_access (MA4.6): the decision is logged, never branched
+    on for ALLOW/ALLOW_SANDBOXED/REQUIRE_APPROVAL/most DENY reasons - those
+    can never affect whether the real git command actually runs.
+
+    MA7.3 (2026-08-24): kriya.policy.enforcement.enforce_hard_invariants
+    now really raises PolicyDeniedError for a small, fixed set of DENY
+    reason_codes (force-push, protected-ref mutation, git config/remote
+    mutation) - the same narrow, explicitly-authorized real-enforcement
+    pattern as kriya/policy/filesystem.py's AuthorizedFileWriter. A
+    PolicyDeniedError propagates out of this function (this function's own
+    caller - the bootstrap-commit try/except below - is what actually
+    stops the real git command from running); every other exception
+    (a broken/misconfigured policy engine, not a real denial) is still
+    caught and logged here, exactly as before.
 
     This is the ONE real GIT_WRITE call this file (or anywhere else in
     Kriya's pipeline - confirmed via a full-codebase grep before
     implementing MA4.8) performs today: create_git_worktree's own
     `git commit --allow-empty` bootstrap for a zero-commit repo, below.
-    Real audit signal: this specific invocation falls through
+    Real signal: this specific invocation falls through
     kriya/policy/execution.py's _check_git_destructive to its ordinary-write
-    GIT_WRITE_REQUIRES_APPROVAL backstop - expected, not a bug; MA4 doesn't
-    special-case this call as an ALLOW, since --allow-empty alone doesn't
-    guarantee the commit is actually content-free (it only means git won't
-    REFUSE an empty commit, not that one was staged) - see this stage's own
-    docstring for why that's deliberately not treated as a safe bypass."""
+    GIT_WRITE_REQUIRES_APPROVAL backstop, never one of MA7.3's hard-enforced
+    reason_codes - GitTool (plugins/core_tools) has no push/branch-delete/
+    config/remote code path at all, so this enforcement is real defense-in-
+    depth for a future change here, not the closure of a currently-live gap."""
     try:
-        result = _execution_policy.evaluate(
-            ActionRequest(action_type=ActionType.GIT_WRITE, command=tuple(command), workspace_path=workspace_path)
+        result = enforce_hard_invariants(
+            _execution_policy,
+            ActionRequest(action_type=ActionType.GIT_WRITE, command=tuple(command), workspace_path=workspace_path),
         )
         logger.debug(
-            "MA4 policy audit (not enforced): GIT_WRITE '%s' -> %s (%s)",
+            "MA4 policy audit: GIT_WRITE '%s' -> %s (%s)",
             " ".join(command), result.decision.value, result.reason_code,
         )
+    except PolicyDeniedError:
+        raise
     except Exception as e:
         logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 

@@ -5,6 +5,9 @@ condition including a misconfigured or outright broken policy engine.
 """
 from unittest.mock import MagicMock
 
+import pytest
+
+from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.model import PolicyDecision, PolicyResult
 from kriya.tools.validate import PolymorphicValidator
 
@@ -38,6 +41,24 @@ def test_a_forced_deny_never_blocks_the_real_command(tmp_path):
 
     result = validator._run_cmd_with_timeout(["pip", "--version"], cwd=str(tmp_path), timeout=30)
     assert result["returncode"] == 0
+
+
+def test_a_hard_enforced_deny_really_blocks_the_real_command(tmp_path):
+    """MA7.3: unlike an ordinary DENY (test_a_forced_deny_never_blocks... above),
+    COMMAND_SUDO_DENIED is one of the fixed hard-invariant reason_codes
+    (kriya.policy.enforcement.HARD_ENFORCED_REASON_CODES) - it really
+    raises PolicyDeniedError, and _run_cmd_with_timeout has no try/except
+    of its own around _audit_run_command, so the real subprocess never
+    runs."""
+    validator = PolymorphicValidator(str(tmp_path))
+    validator.execution_policy.evaluate = MagicMock(return_value=PolicyResult(
+        decision=PolicyDecision.DENY,
+        reason_code="COMMAND_SUDO_DENIED",
+        explanation="simulated",
+    ))
+
+    with pytest.raises(PolicyDeniedError):
+        validator._run_cmd_with_timeout(["pip", "--version"], cwd=str(tmp_path), timeout=30)
 
 
 def test_audit_call_observes_the_real_command_shape(tmp_path):

@@ -7,6 +7,8 @@ condition including a misconfigured or outright broken policy engine.
 import subprocess
 from unittest.mock import MagicMock
 
+import pytest
+
 import kriya.workflow.worktree as worktree_mod
 from kriya.policy.model import PolicyDecision, PolicyResult
 from kriya.workflow.worktree import create_git_worktree
@@ -52,6 +54,37 @@ def test_a_forced_deny_never_blocks_the_real_bootstrap_commit(tmp_path, monkeypa
         ["git", "log", "--oneline"], cwd=tmp_path, capture_output=True, text=True, check=True,
     )
     assert len(log.stdout.strip().splitlines()) == 1
+
+
+def test_a_hard_enforced_deny_blocks_the_real_bootstrap_commit(tmp_path, monkeypatch):
+    """MA7.3: unlike an ordinary DENY (test_a_forced_deny_never_blocks... above),
+    one of the fixed hard-invariant reason_codes (kriya.policy.enforcement.
+    HARD_ENFORCED_REASON_CODES) really refuses - the bootstrap commit's own
+    try/except catches the resulting PolicyDeniedError and skips the real
+    commit (logged as "creating an initial empty commit failed"), exactly
+    like any other failure at this step. With no bootstrap commit, the repo
+    stays at zero commits and `git worktree add --detach` (later in
+    create_git_worktree) has no HEAD to detach at and fails for real -
+    that's the SAME pre-existing "falls back to the unisolated workspace"
+    path any other bootstrap failure already takes (see this function's own
+    "no commits yet" comment), not something this test's fix needs to (or
+    should) paper over."""
+    _init_zero_commit_repo(tmp_path)
+    monkeypatch.setattr(worktree_mod._execution_policy, "evaluate", MagicMock(return_value=PolicyResult(
+        decision=PolicyDecision.DENY, reason_code="GIT_FORCE_PUSH_DENIED", explanation="simulated",
+    )))
+
+    with pytest.raises(subprocess.CalledProcessError):
+        create_git_worktree(str(tmp_path))
+
+    # git log on a zero-commit repo exits non-zero ("does not have any
+    # commits yet") rather than succeeding with empty output - that failure
+    # itself IS the proof no bootstrap commit was made.
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=tmp_path, capture_output=True, text=True, check=False,
+    )
+    assert log.returncode != 0
+    assert log.stdout.strip() == ""
 
 
 def test_audit_call_observes_the_real_bootstrap_command(tmp_path, monkeypatch):

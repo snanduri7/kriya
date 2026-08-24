@@ -9,6 +9,8 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.config import AutonomyConfig
+from kriya.policy.enforcement import enforce_hard_invariants
+from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
@@ -259,15 +261,30 @@ class PolymorphicValidator:
         return False
 
     def _audit_run_command(self, cmd: List[str], cwd: str) -> None:
-        """MA4.4 - audit-only ExecutionPolicy consultation, mirroring
-        kriya/core/llm.py's _audit_llm_network_access (MA4.3) exactly: this
-        can never affect whether ProcessController actually runs `cmd` -
-        its result is only logged, and any exception it raises is caught
-        and logged here, never propagated. kriya/tools/validate.py's own
-        PolymorphicValidator is the ONLY real ProcessController call site in
-        Kriya today, so this is ExecutionPolicy's first real caller (still
-        audit-only - AUDIT/ENFORCE mode itself is MA4.15's config, not
-        added yet).
+        """MA4.4 - ExecutionPolicy consultation, mirroring kriya/core/llm.py's
+        _audit_llm_network_access (MA4.3): the decision is logged, never
+        branched on for ALLOW/ALLOW_SANDBOXED/REQUIRE_APPROVAL/most DENY
+        reasons - those can never affect whether ProcessController actually
+        runs `cmd`. kriya/tools/validate.py's own PolymorphicValidator is
+        the ONLY real ProcessController call site in Kriya today.
+
+        MA7.3 (2026-08-24): kriya.policy.enforcement.enforce_hard_invariants
+        now really raises PolicyDeniedError for one specific DENY reason_code
+        here - COMMAND_SUDO_DENIED - the same narrow, explicitly-authorized
+        real-enforcement pattern as kriya/policy/filesystem.py's
+        AuthorizedFileWriter. Deliberately NOT COMMAND_NOT_ALLOWLISTED - MA4.4's
+        narrow starter allowlist denies plenty of real, legitimate compile/test
+        commands across supported stacks that just aren't on that short list
+        yet, and turning THAT into a real gate would break real generation
+        runs. `cmd` here is always constructed by this class's own stack-
+        detection logic (mvn/gradle/pytest/npm/...), never from untrusted
+        model/tool output, so COMMAND_SUDO_DENIED firing here is real
+        defense-in-depth for a future bug, not the closure of a currently-live
+        gap - it should structurally never trigger today. PolicyDeniedError
+        propagates out of this function (this function's caller,
+        _run_cmd_with_timeout, has no try/except of its own around this call,
+        so a raise here genuinely prevents the real subprocess from running);
+        every other exception is still caught and logged, exactly as before.
 
         MA4.7 - also issues a SECOND, separately-classified audit request
         (INSTALL_PACKAGE, not RUN_COMMAND) whenever `cmd` looks like a
@@ -279,15 +296,19 @@ class PolymorphicValidator:
         command"), this gets its own dedicated policy-stage reasoning
         (kriya/policy/execution.py's _check_package_supply_chain) instead of
         blending into the generic command-allowlist's COMMAND_NOT_ALLOWLISTED
-        signal - same audit-only guarantees as the RUN_COMMAND call above."""
+        signal - still audit-only (no INSTALL_PACKAGE reason_code is in
+        HARD_ENFORCED_REASON_CODES)."""
         try:
-            result = self.execution_policy.evaluate(
-                ActionRequest(action_type=ActionType.RUN_COMMAND, command=tuple(cmd), workspace_path=cwd)
+            result = enforce_hard_invariants(
+                self.execution_policy,
+                ActionRequest(action_type=ActionType.RUN_COMMAND, command=tuple(cmd), workspace_path=cwd),
             )
             logger.debug(
-                "MA4 policy audit (not enforced): RUN_COMMAND '%s' -> %s (%s)",
+                "MA4 policy audit: RUN_COMMAND '%s' -> %s (%s)",
                 " ".join(cmd), result.decision.value, result.reason_code,
             )
+        except PolicyDeniedError:
+            raise
         except Exception as e:
             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
