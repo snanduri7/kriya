@@ -37,6 +37,7 @@ from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.policy.telemetry import build_decision_record
 
 from kriya.workflow.worktree import (
     _resolve_repo_head,
@@ -358,10 +359,17 @@ class WorkflowEngine:
             logger.debug("MA4.13 _authorize_action: policy evaluation failed (ignored): %s", e)
             return None
 
-        logger.debug(
-            "MA4 policy authorize (enforce=%s): %s -> %s (%s)",
-            enforce, request.action_type.value, result.decision.value, result.reason_code,
-        )
+        # MA4.14 - structured telemetry (kriya/policy/telemetry.py) in place
+        # of a plain debug string: same log level and audit-only intent,
+        # but a stable, redacted shape a future consumer can key off by
+        # field instead of parsing text. Building the record itself is
+        # exception-safe on its own terms - a redaction bug must never be
+        # the reason a real policy decision fails to be logged, let alone
+        # the reason _authorize_action's own caller sees an error.
+        try:
+            logger.debug("MA4 policy decision: %s", build_decision_record(request, result, enforced=enforce).to_json())
+        except Exception as e:
+            logger.debug("MA4.14 telemetry record build failed (ignored): %s", e)
 
         if not enforce:
             return result
