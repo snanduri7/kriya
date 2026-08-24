@@ -11,7 +11,9 @@ references resolve, the dependency graph is acyclic, every planned file
 either already exists or is explicitly marked `action=create`, every
 acceptance criterion is covered by at least one subtask (and every
 subtask's acceptance_criteria_ids resolve to a real criterion),
-extension_points are present for enhancement/milestone plans,
+extension_points are present for enhancement/milestone plans (exempted
+for a genuinely empty workspace - MA7.8 fix, nothing established yet
+means no real insertion point could exist for any plan to name),
 refactor_baseline is set for refactor plans, every TOOL-tagged
 subtask/verification/acceptance-criterion tool_name resolves to a real
 registered tool, every planned file lands inside the supplied context
@@ -27,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, Subtask, VerificationMethodType
-from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService
+from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
 
 import os
 
@@ -137,7 +139,23 @@ async def validate_plan(
     if uncovered:
         errors.append(f"acceptance criteria not covered by any subtask: {uncovered}")
 
-    if plan.kind in (ChangeKind.ENHANCEMENT, ChangeKind.MILESTONE) and not plan.extension_points:
+    # MA7.8 fix (2026-08-24, real live-validation finding, protocol_encoder_java):
+    # a genuinely EMPTY workspace (zero commits, nothing established) has
+    # no real insertion point ANY plan could name - requiring
+    # extension_points there asks for something that structurally cannot
+    # exist yet, not for a justification the Planner failed to give. Reuses
+    # triage.py's own _workspace_appears_empty() (the SAME real check
+    # EngineeringTriageService.classify() already uses for its own
+    # "repo empty / brand new" signal) rather than a second, driftable
+    # emptiness heuristic. A workspace with ANY established content still
+    # requires a real extension_points justification, unchanged - this is
+    # a narrow exemption for the true first-plan-ever case, not a general
+    # loosening of MA3's own physical-topology-preservation intent.
+    if (
+        plan.kind in (ChangeKind.ENHANCEMENT, ChangeKind.MILESTONE)
+        and not plan.extension_points
+        and not _workspace_appears_empty(workspace_path)
+    ):
         errors.append(
             f"plan kind={plan.kind.value} requires at least one extension_points entry "
             "(a real insertion point the new capability attaches to) but none were given"

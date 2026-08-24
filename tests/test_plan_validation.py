@@ -139,6 +139,9 @@ async def test_covered_acceptance_criterion_passes(tmp_path):
 
 @pytest.mark.asyncio
 async def test_enhancement_plan_requires_extension_points(tmp_path):
+    # a NON-empty workspace (real established content) - the case the
+    # extension_points requirement is actually meant to protect
+    (tmp_path / "Existing.java").write_text("class Existing {}")
     plan = _plan([_model_subtask()], kind=ChangeKind.ENHANCEMENT, extension_points=[])
     result = await validate_plan(plan, workspace_path=str(tmp_path))
     assert result.valid is False
@@ -147,10 +150,38 @@ async def test_enhancement_plan_requires_extension_points(tmp_path):
 
 @pytest.mark.asyncio
 async def test_milestone_plan_requires_extension_points(tmp_path):
+    (tmp_path / "Existing.java").write_text("class Existing {}")
     plan = _plan([_model_subtask()], kind=ChangeKind.MILESTONE, extension_points=[])
     result = await validate_plan(plan, workspace_path=str(tmp_path))
     assert result.valid is False
     assert any("extension_points" in e for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_milestone_plan_on_a_genuinely_empty_workspace_does_not_require_extension_points(tmp_path):
+    """MA7.8 fix (2026-08-24, real live-validation finding,
+    protocol_encoder_java): a workspace with zero established content has
+    no real insertion point ANY plan could name - requiring
+    extension_points there was asking for something that structurally
+    cannot exist yet, not a justification the Planner failed to give."""
+    plan = _plan([_model_subtask()], kind=ChangeKind.MILESTONE, extension_points=[])
+    result = await validate_plan(plan, workspace_path=str(tmp_path))  # tmp_path is empty
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
+async def test_enhancement_plan_on_a_genuinely_empty_workspace_does_not_require_extension_points(tmp_path):
+    plan = _plan([_model_subtask()], kind=ChangeKind.ENHANCEMENT, extension_points=[])
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
+async def test_milestone_plan_with_real_extension_points_is_valid_even_on_a_non_empty_workspace(tmp_path):
+    (tmp_path / "Existing.java").write_text("class Existing {}")
+    plan = _plan([_model_subtask()], kind=ChangeKind.MILESTONE, extension_points=["Existing.java#method"])
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True
 
 
 @pytest.mark.asyncio
