@@ -559,13 +559,48 @@ def _workspace_appears_empty(workspace_path: str) -> bool:
     short-circuit (see EngineeringTriageService.classify) - stops at the
     first file found rather than building a full listing the way
     milestones.py::_list_workspace_files does for a different consumer
-    (the Milestone Planner's prompt, which genuinely needs the names)."""
-    ignored_dirs = {".git", ".kriya", "__pycache__", "node_modules", "target", ".venv", "venv"}
+    (the Milestone Planner's prompt, which genuinely needs the names).
+
+    Two real bugs fixed 2026-08-24 (live-validation, protocol_encoder_java),
+    both the same shape: this function counted Kriya's OWN files as
+    "established project content."
+
+    1. "logs"/"memory" are Kriya's own PACKAGED DEFAULT paths.logs/
+       paths.memory basenames (kriya/config/default_config.yaml) - project-
+       local, sibling to the real workspace root, same as this function's
+       existing .kriya exclusion. Without excluding them, the mere act of
+       Kriya running once (even a run that writes zero real source files -
+       just its own log/trace state) made every SUBSEQUENT call to this
+       function report "not empty."
+    2. kriya.yaml/kriya.yml (this project's own config file) and a bare
+       goal-text file passed via `kriya generate -f <file>` both sit
+       directly in the workspace root by convention (see
+       reference_kriya_live_validation.md's own documented shape) - NEITHER
+       is established project code an extension point could ever attach
+       to, but a plain "any file present" check counted both. Since a
+       goal file's real name is caller-chosen (no fixed basename to
+       exclude), excluded by SHAPE instead: any bare `.md` file at the
+       workspace root - documentation/goal-text, never compiled/executed
+       project content, the same reasoning that makes a README.md not
+       count as "established code" either.
+
+    Both bugs silently affected this function's ORIGINAL caller too
+    (EngineeringTriageService.classify's own "repo empty" signal, wrong
+    since before this session, never previously noticed) - not just
+    plan_validation.py's newer extension_points exemption (MA7.8) that
+    surfaced them. Not excluding "skills" or non-.md top-level files in
+    general - unlike logs/memory/a bare .md file, those can legitimately
+    be real, human-authored project content."""
+    ignored_dirs = {".git", ".kriya", "__pycache__", "node_modules", "target", ".venv", "venv", "logs", "memory"}
+    ignored_root_files = {"kriya.yaml", "kriya.yml"}
     if not os.path.isdir(workspace_path):
         return True
     for root, dirs, filenames in os.walk(workspace_path):
         dirs[:] = [d for d in dirs if d not in ignored_dirs]
-        if filenames:
+        is_root = os.path.abspath(root) == os.path.abspath(workspace_path)
+        for name in filenames:
+            if is_root and (name in ignored_root_files or name.lower().endswith(".md")):
+                continue
             return False
     return True
 
