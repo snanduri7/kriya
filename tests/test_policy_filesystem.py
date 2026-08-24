@@ -1,3 +1,6 @@
+import os
+import tempfile
+
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
 
@@ -85,6 +88,41 @@ def test_write_without_workspace_context_falls_through_to_default_deny():
     result = policy.evaluate(ActionRequest(action_type=ActionType.WRITE_FILE, target="/repo/README.md"))
     assert result.decision == PolicyDecision.DENY
     assert result.reason_code == "DEFAULT_UNKNOWN_ACTION_DENIED"
+
+
+def test_symlinked_subdirectory_escaping_the_workspace_is_denied():
+    """MA4.16 - _normalize_path uses os.path.realpath (resolves symlinks),
+    not os.path.abspath. A real symlink is created on disk here (not
+    mocked) so this proves the escape is actually closed, not just that
+    the code calls the right stdlib function."""
+    with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as outside:
+        link_path = os.path.join(workspace, "escape")
+        os.symlink(outside, link_path)
+
+        policy = ExecutionPolicy()
+        result = policy.evaluate(ActionRequest(
+            action_type=ActionType.WRITE_FILE,
+            target=os.path.join(link_path, "payload.py"),
+            workspace_path=workspace,
+        ))
+        assert result.decision == PolicyDecision.DENY
+        assert result.reason_code == "PATH_OUTSIDE_WORKSPACE_DENIED"
+
+
+def test_symlinked_subdirectory_staying_inside_the_workspace_is_allowed():
+    with tempfile.TemporaryDirectory() as workspace:
+        real_dir = os.path.join(workspace, "real")
+        os.mkdir(real_dir)
+        link_path = os.path.join(workspace, "link")
+        os.symlink(real_dir, link_path)
+
+        policy = ExecutionPolicy()
+        result = policy.evaluate(ActionRequest(
+            action_type=ActionType.WRITE_FILE,
+            target=os.path.join(link_path, "app.py"),
+            workspace_path=workspace,
+        ))
+        assert result.decision == PolicyDecision.ALLOW
 
 
 def test_filesystem_stage_ignores_non_file_action_types():

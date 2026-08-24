@@ -28,18 +28,27 @@ def _audit_write_file(full_path: str) -> None:
     caught and logged, never propagated, and the decision is only logged,
     never branched on.
 
-    No workspace_path is available at this call site - atomic_write_file()
-    is a pure path-in/bytes-in primitive with no concept of "which repo/
-    worktree root is this write happening under" (see this module's own
-    docstring: it's shared by kriya/workflow/attempt.py and self_correction.py,
-    neither of which currently threads that context down to here). That means
-    kriya/policy/execution.py's ExecutionPolicy._check_filesystem's
-    workspace-containment rule cannot run for this real caller today - only
-    its context-free sensitive-path rule can. A known, deliberately-flagged
-    limitation of this task's audit signal (most real writes fall through to
-    the generic default-deny backstop rather than a specific filesystem-stage
-    reason code), not a silent gap - see kriya/policy/execution.py's own
-    _check_filesystem docstring."""
+    No workspace_path is available at THIS call site - atomic_write_file()
+    remains a pure path-in/bytes-in primitive with no concept of "which
+    repo/worktree root is this write happening under", deliberately kept
+    that way (see kriya/policy/filesystem.py's module docstring). That
+    means kriya/policy/execution.py's ExecutionPolicy._check_filesystem's
+    workspace-containment rule still cannot run from HERE - only its
+    context-free sensitive-path rule can, so this remains audit-only
+    telemetry, not enforcement.
+
+    MA4.16 update: this is no longer the only policy consultation Kriya's
+    two real content-write call sites (kriya/workflow/attempt.py,
+    kriya/workflow/self_correction.py) go through. Both now call
+    kriya/policy/filesystem.py's AuthorizedFileWriter FIRST, with the real
+    worktree_path they've always had in scope - that layer REALLY enforces
+    containment and a narrow sensitive-path check (raises PolicyDeniedError,
+    nothing reaches this function at all on a denial) before
+    commit_revision_grounded_file/batch are ever called. This audit-only
+    call therefore now only fires for writes that already passed real
+    enforcement upstream, plus any other/future caller of
+    atomic_write_file directly - it's a second, defense-in-depth signal,
+    not the only one anymore."""
     try:
         result = _execution_policy.evaluate(
             ActionRequest(action_type=ActionType.WRITE_FILE, target=full_path)

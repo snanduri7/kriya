@@ -21,10 +21,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
+from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
     apply_anchored_edits,
-    commit_revision_grounded_batch,
     content_revision,
     find_cross_file_type_conflict,
     find_structural_corruption,
@@ -1757,7 +1757,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # deterministic checks.  The batch commit re-checks all source revisions
     # before the first write and rolls back already-written targets if an OS
     # error or last-moment revision conflict interrupts the commit.
-    commit_revision_grounded_batch(staged_writes)
+    # MA4.16 - AuthorizedFileWriter really enforces (raises PolicyDeniedError,
+    # not audit-only) workspace containment + a narrow sensitive-path check
+    # BEFORE any write in the batch, using the real ctx.worktree_path this
+    # call site has always had in scope - propagates uncaught, same as
+    # FileRevisionConflict/BatchCommitError already do from this call.
+    AuthorizedFileWriter(ctx.worktree_path).commit_batch(staged_writes)
     changed_files = [
         os.path.relpath(staged.target_path, ctx.worktree_path)
         for staged in staged_writes

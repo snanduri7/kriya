@@ -2002,6 +2002,16 @@ class WorkflowEngine:
                                 # isolation on this path), so a kill mid-write here would
                                 # corrupt the user's actual pre-existing source, not just
                                 # a scratch sandbox file.
+                                # MA4.16 migration classification: (4) explicitly
+                                # documented safe/internal-only, not routed through
+                                # AuthorizedFileWriter. `orig_content` is content Kriya
+                                # itself already read from `actual_file` earlier THIS
+                                # run (state.all_original_contents), and `actual_file`
+                                # is that exact same real path - a rollback restoring a
+                                # file to its own prior real content, not new/model-
+                                # influenced content reaching a new/uncertain path. No
+                                # containment or sensitive-path question this call site
+                                # could meaningfully still fail.
                                 atomic_write_file(actual_file, orig_content)
                             elif os.path.exists(actual_file):
                                 os.remove(actual_file)

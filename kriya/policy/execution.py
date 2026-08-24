@@ -237,7 +237,16 @@ def _is_sensitive_path(normalized_path: str, patterns: Tuple[re.Pattern, ...]) -
 
 
 def _normalize_path(path: str) -> str:
-    return os.path.abspath(os.path.expanduser(path))
+    # MA4.16 - os.path.realpath, not os.path.abspath: abspath is pure string
+    # manipulation and never follows symlinks, so a symlinked subdirectory
+    # pointing outside an authorized root would lexically look contained
+    # while actually resolving elsewhere. realpath is non-strict by default
+    # (doesn't require the path to exist), so this is still safe for a
+    # target file that hasn't been written yet - it resolves as far as real,
+    # existing parent directories go and appends any nonexistent tail
+    # components literally, which is exactly the "where would this write
+    # really land" question containment needs answered.
+    return os.path.realpath(os.path.expanduser(path))
 
 
 # MA4.8 - git-write classification, all effect-based (section 31: "requires

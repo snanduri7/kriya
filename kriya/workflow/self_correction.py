@@ -35,10 +35,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from kriya.core.llm import LLMClient
+from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.tools.resolver import resolve_maven_class
 from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies
 from kriya.workflow.edit_safety import (
-    FileRevisionConflict, apply_anchored_edits, commit_revision_grounded_file,
+    FileRevisionConflict, apply_anchored_edits,
     content_revision,
 )
 
@@ -466,11 +468,22 @@ def _dispatch_tool_call(
 
         full_path = os.path.join(worktree_path, filepath)
         try:
-            new_revision = commit_revision_grounded_file(
+            # MA4.16 - AuthorizedFileWriter really enforces (raises
+            # PolicyDeniedError, not audit-only) workspace containment + a
+            # narrow sensitive-path check before this micro-loop's own
+            # tool-driven patch reaches disk, using the real worktree_path
+            # this call site has always had in scope.
+            new_revision = AuthorizedFileWriter(worktree_path).commit_file(
                 full_path, new_content, expected_revision=expected_revision,
             )
         except FileRevisionConflict as revision_ex:
             return f"ERROR: {revision_ex}"
+        except PolicyDeniedError as denial:
+            # Fed back to the model as this tool call's result, same as a
+            # revision conflict - a real containment/sensitive-path denial
+            # here is a signal the model should stop and reconsider, not a
+            # terminal crash of the whole self-correction loop.
+            return f"ERROR: {denial}"
         modified_files[filepath] = new_content
         observed_revisions[filepath] = new_revision
         return (
