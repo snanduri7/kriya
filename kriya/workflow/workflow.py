@@ -259,7 +259,11 @@ class WorkflowEngine:
         self.engineering_triage = EngineeringTriageService(kernel=kernel)
         # MA4.9 (control-plane implementation plan) - audit-only. See
         # _audit_approval_rules below; never consulted for enforcement.
-        self.execution_policy = ExecutionPolicy()
+        # MA4.15 - hands in the real AutonomyConfig.sensitive_paths instead
+        # of ExecutionPolicy's hardcoded default, the one real caller with
+        # config access naturally in scope (see execution.py's own
+        # docstring for why the other 5 real callers still don't).
+        self.execution_policy = ExecutionPolicy(sensitive_path_patterns=kernel.config.autonomy.sensitive_paths)
 
     def _audit_approval_rules(
         self, files_written: Iterable[str], workspace_path: str,
@@ -294,8 +298,13 @@ class WorkflowEngine:
         this attempt (not the whole batch collapsed into one call) - keeps
         the audit signal attributable per file, mirroring how MA2's own
         sensitive-path check above already loops `state.all_files_written`
-        the same way."""
-        if control is None:
+        the same way.
+
+        MA4.15 - gated on execution_policy.enabled (default True, matching
+        this call's exact behavior before this flag existed) so a project
+        can turn this specific audit signal off without needing config it
+        doesn't otherwise use."""
+        if control is None or not self.kernel.config.execution_policy.enabled:
             return
         for filepath in files_written:
             try:
@@ -1413,20 +1422,38 @@ class WorkflowEngine:
 
             if new_gaps:
                 logger.info(f"Stage 2A: Detected {len(new_gaps)} new library gaps in architect design.")
-                # MA4.13 - audit-only, does not affect the approval_callback
-                # decision below (never enforce=True). The first real
-                # INSTALL_PACKAGE caller besides validate.py's command-shaped
-                # detection (MA4.7): this seam already knows the package name
-                # directly, so it's constructed here rather than parsed from a
-                # command string via extract_install_package_target.
-                for g in new_gaps:
-                    try:
-                        await self._authorize_action(ActionRequest(
-                            action_type=ActionType.INSTALL_PACKAGE, target=g["library"],
-                            metadata={"version": g["version"], "risk_level": g["risk_level"]},
-                        ))
-                    except Exception as e:
-                        logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
+                # MA4.13 - audit-only today (execution_policy.mode is
+                # validated to always be "audit" as of MA4.15 - see
+                # kriya/config/config.py::ExecutionPolicyConfig), does not
+                # affect the approval_callback decision below. The first
+                # real INSTALL_PACKAGE caller besides validate.py's
+                # command-shaped detection (MA4.7): this seam already knows
+                # the package name directly, so it's constructed here rather
+                # than parsed from a command string via
+                # extract_install_package_target.
+                # MA4.15 - `enforce` is read from config rather than left at
+                # _authorize_action's Python-level default, and PolicyDeniedError
+                # is deliberately let through (not swallowed by the broad
+                # except below) - it can never actually be raised while the
+                # config validator keeps mode pinned to "audit", but a future
+                # milestone lifting that restriction shouldn't ALSO have to
+                # remember to fix this try/except to stop silently eating a
+                # real denial.
+                execution_policy_cfg = self.kernel.config.execution_policy
+                if execution_policy_cfg.enabled:
+                    for g in new_gaps:
+                        try:
+                            await self._authorize_action(
+                                ActionRequest(
+                                    action_type=ActionType.INSTALL_PACKAGE, target=g["library"],
+                                    metadata={"version": g["version"], "risk_level": g["risk_level"]},
+                                ),
+                                enforce=(execution_policy_cfg.mode == "enforce"),
+                            )
+                        except PolicyDeniedError:
+                            raise
+                        except Exception as e:
+                            logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
                 desc = "\n".join([
                     (
                         f"- {g['library']} (no specific version mentioned) [Risk: {g['risk_level']}]: {g['reason']}"

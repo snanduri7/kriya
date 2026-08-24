@@ -46,16 +46,22 @@ WorkflowControlContext - pairing a real EngineeringRoute with its resolved
 ProcessProfile - is already in scope, so stage 7 has real, non-None input
 to reason about for at least one caller) - all audit-only: logged, never
 gating, exactly like kriya/core/llm.py's MA4.3 integration.
-This module itself still takes no config (constructor takes no arguments;
-config wiring is MA4.15's job, added additively, not as a signature change -
-the same "additive, not a signature change" precedent kriya/workflow/
-process_profile.py's own docstring already established for MA2), and still
-consults no LLM to reach a decision.
+MA4.15 closed the loop: the constructor gained one optional, additive
+parameter (sensitive_path_patterns - see ExecutionPolicy's own docstring)
+so a real caller with config access (WorkflowEngine) can hand in
+AutonomyConfig.sensitive_paths instead of drifting from the hardcoded
+default; ExecutionPolicy() with no arguments is still every other call
+site's exact construction, unchanged. This module itself still never
+imports or reads kriya.config directly, and still consults no LLM to reach
+a decision - MA4.15's actual AUDIT-vs-ENFORCE mode switch
+(kriya.config.config.ExecutionPolicyConfig) lives in the callers
+(WorkflowEngine._authorize_action's `enforce` argument), never inside this
+engine.
 """
 
 import os
 import re
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.workflow.triage import ExecutionWeight, RiskClass
@@ -197,13 +203,20 @@ _DEFAULT_ALLOW_ACTION_TYPES = frozenset({ActionType.READ_FILE, ActionType.GIT_RE
 # MA4.5 - universal, context-free sensitive-path denials: these fire
 # regardless of whether an ActionRequest carries a workspace_path, since
 # "this is a credential/SSH-key/secrets path" doesn't depend on which repo
-# is in play. Deliberately a small, hardcoded list here, NOT a read of
-# kriya.config.config.AutonomyConfig.sensitive_paths - ExecutionPolicy still
-# takes no config dependency at all (MA4.2's own principle; config wiring is
-# MA4.15's job). This duplicates a few of that config's baseline patterns
-# for now; MA4.15 is expected to replace this hardcoded list with a real
-# config read rather than leaving two copies to drift.
-_SENSITIVE_PATH_PATTERNS: Tuple[re.Pattern, ...] = tuple(re.compile(p, re.IGNORECASE) for p in (
+# is in play. This is the DEFAULT list, used whenever a caller constructs
+# ExecutionPolicy() with no override - it duplicated kriya.config.config.
+# AutonomyConfig.sensitive_paths's baseline patterns until MA4.15, which
+# added ExecutionPolicy.__init__'s optional sensitive_path_patterns
+# parameter specifically so a real caller with config access (today: only
+# WorkflowEngine, the one real construction site that already has
+# self.kernel.config in scope) can hand in AutonomyConfig.sensitive_paths
+# directly instead of drifting from it. ExecutionPolicy itself still never
+# imports kriya.config or reads it directly (MA4.2's own principle intact -
+# this is a caller-supplied override, not the engine acquiring a config
+# dependency); the other real callers (llm.py, validate.py, edit_safety.py,
+# web.py, worktree.py) still construct ExecutionPolicy() with no override
+# and get this same default list.
+_DEFAULT_SENSITIVE_PATH_PATTERN_STRINGS: Tuple[str, ...] = (
     r"(^|/)\.ssh(/|$)",
     r"(^|/)\.aws(/|$)",
     r"(^|/)\.kube(/|$)",
@@ -212,11 +225,15 @@ _SENSITIVE_PATH_PATTERNS: Tuple[re.Pattern, ...] = tuple(re.compile(p, re.IGNORE
     r"credentials",
     r"secrets",
     r"password",
-))
+)
 
 
-def _is_sensitive_path(normalized_path: str) -> bool:
-    return any(p.search(normalized_path) for p in _SENSITIVE_PATH_PATTERNS)
+def _compile_path_patterns(pattern_strings: Sequence[str]) -> Tuple[re.Pattern, ...]:
+    return tuple(re.compile(p, re.IGNORECASE) for p in pattern_strings)
+
+
+def _is_sensitive_path(normalized_path: str, patterns: Tuple[re.Pattern, ...]) -> bool:
+    return any(p.search(normalized_path) for p in patterns)
 
 
 def _normalize_path(path: str) -> str:
@@ -271,7 +288,19 @@ class ExecutionPolicy:
     """Policy decides whether an action is allowed; it never performs or
     enforces the action itself (see kriya/policy/__init__.py). evaluate()
     is the single entry point and is deterministic - no LLM is ever
-    consulted to decide whether an action is allowed."""
+    consulted to decide whether an action is allowed.
+
+    MA4.15 - the constructor takes one optional, additive parameter
+    (sensitive_path_patterns) rather than a config object: ExecutionPolicy
+    still never imports or reads kriya.config itself. ExecutionPolicy()
+    with no arguments - every call site's exact current construction,
+    unchanged - keeps using the same hardcoded default list stage 2 always
+    has."""
+
+    def __init__(self, sensitive_path_patterns: Optional[Sequence[str]] = None) -> None:
+        self._sensitive_path_patterns = _compile_path_patterns(
+            sensitive_path_patterns if sensitive_path_patterns else _DEFAULT_SENSITIVE_PATH_PATTERN_STRINGS
+        )
 
     def evaluate(self, request: ActionRequest) -> PolicyResult:
         for stage_name in _STAGE_METHOD_NAMES:
@@ -328,7 +357,7 @@ class ExecutionPolicy:
             return None
 
         normalized = _normalize_path(request.target)
-        if _is_sensitive_path(normalized):
+        if _is_sensitive_path(normalized, self._sensitive_path_patterns):
             return PolicyResult(
                 decision=PolicyDecision.DENY,
                 reason_code="SENSITIVE_PATH_DENIED",

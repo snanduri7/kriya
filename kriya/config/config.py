@@ -367,6 +367,62 @@ class ProcessProfilesConfig(BaseModel):
             )
         return v
 
+class ExecutionPolicyConfig(BaseModel):
+    """MA4.15 of the control-plane implementation plan - whether
+    kriya/policy/execution.py::ExecutionPolicy's real decisions ever get to
+    influence Kriya's actual behavior, beyond being computed and logged.
+
+    `enabled` defaults to True, unlike engineering_triage.enabled/
+    process_profiles.enabled above (both default False at the pydantic-model
+    level - "a new capability stays off until it's been live-validated").
+    ExecutionPolicy's audit-only consultation is NOT a new, unvalidated
+    capability the way those were when their own config sections were
+    introduced: every MA4.3-4.14 real call site (kriya/core/llm.py,
+    kriya/tools/validate.py, kriya/workflow/edit_safety.py, kriya/tools/
+    web.py, kriya/workflow/worktree.py, kriya/workflow/workflow.py) has
+    already been calling ExecutionPolicy.evaluate() unconditionally, safely,
+    and exception-guarded for this task's entire duration - defaulting
+    `enabled` to False now would be a real regression (telemetry that's
+    already flowing today would silently stop), not a safe-activation
+    default. `enabled` only gates WorkflowEngine's own two call sites today
+    (_audit_approval_rules, _authorize_action's Stage 2A caller) - it is not
+    yet threaded through every real call site (see kriya/policy/execution.py
+    and kriya/workflow/workflow.py's own comments for the honestly-tracked
+    boundary on that).
+
+    `mode` is the actual audit-vs-enforce gate, and is where this session's
+    binding constraint lives in code: MA4 was to roll out in AUDIT mode
+    only, "before any future ENFORCE mode is considered" - not "before it
+    is implemented," which MA4.13 already did (WorkflowEngine.
+    _authorize_action's enforce=True branch is real, tested code). The
+    validator below is what actually keeps that promise: "enforce" is
+    accepted as a syntactically valid value (so a project can express
+    intent and see a clear, deliberate rejection) but is REJECTED at
+    validation time, exactly mirroring ProcessProfilesConfig.
+    enforce_verification_depth's own precedent immediately above - fail
+    loud at config-load time, never silently do nothing. Lifting this
+    restriction is a distinct, later, explicit decision, not something
+    accidentally reachable by editing a YAML file today."""
+
+    enabled: bool = Field(default=True)
+    mode: str = Field(default="audit")
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_must_be_audit_for_now(cls, v: str) -> str:
+        if v not in ("audit", "enforce"):
+            raise ValueError(f"execution_policy.mode must be 'audit' or 'enforce', got {v!r}")
+        if v == "enforce":
+            raise ValueError(
+                "execution_policy.mode: 'enforce' is not enabled yet. MA4's rollout "
+                "requires an explicit AUDIT-only period before ENFORCE mode is ever "
+                "turned on for real - setting this to 'enforce' would silently do "
+                "nothing useful without that separate, deliberate decision having been "
+                "made yet. Leave this as 'audit' until a future milestone lifts this "
+                "restriction."
+            )
+        return v
+
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
@@ -383,6 +439,7 @@ class AppConfig(BaseModel):
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     engineering_triage: EngineeringTriageConfig = Field(default_factory=EngineeringTriageConfig)
     process_profiles: ProcessProfilesConfig = Field(default_factory=ProcessProfilesConfig)
+    execution_policy: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""

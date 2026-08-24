@@ -116,6 +116,20 @@ process_profiles:
   enforce_context_depth: false
   enforce_verification_depth: false
 
+# MA4 of the control-plane implementation plan (kriya/policy/) - whether
+# ExecutionPolicy's decisions actually influence Kriya's behavior. enabled:
+# true here matches what's already true in practice (every MA4.3-4.14 real
+# call site has been consulting ExecutionPolicy unconditionally all along;
+# this section just gives that an off-switch for the first time, not a new
+# default). mode: audit is this session's binding constraint given code
+# form - kriya/config/config.py's ExecutionPolicyConfig validator rejects
+# "enforce" outright at config-load time. Do not set mode to enforce; it
+# will fail validation until a future, separate milestone explicitly lifts
+# that restriction.
+execution_policy:
+  enabled: true
+  mode: audit
+
 autonomy:
   mode: "human-in-the-loop"
   sensitive_paths:
