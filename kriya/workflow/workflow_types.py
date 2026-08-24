@@ -76,3 +76,27 @@ class SubtaskResult:
             "error": self.error,
             "reason_codes": list(self.reason_codes),
         }
+
+
+@dataclass(frozen=True)
+class WorkflowResult:
+    """WorkflowController.execute()'s (MA6.8) own return shape - control-
+    plane bookkeeping (run_id/control_state/route) wrapped AROUND whatever
+    the dispatched handler actually produced. `legacy_result` is
+    run_generation_workflow()'s existing, unchanged Dict[str, Any] return
+    value for this incremental slice (every ChangeKind still routes
+    through _run_legacy_generation - see workflow_controller.py's own
+    docstring); `subtask_results` stays empty until MA6.9/6.10 wire a real
+    kind-specific adapter that actually drives SubtaskExecutor.
+
+    control_state/route are typed Any here (not kriya.control.state.
+    ControlState / kriya.workflow.triage.EngineeringRoute directly) purely
+    to avoid this shared types module importing either - both already
+    depend on plan_schema-adjacent modules; workflow_controller.py, the
+    one real producer of a WorkflowResult, has the concrete types."""
+
+    run_id: str
+    control_state: Any
+    route: Any
+    legacy_result: Optional[Dict[str, Any]] = None
+    subtask_results: Tuple[SubtaskResult, ...] = ()
