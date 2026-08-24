@@ -39,11 +39,16 @@ that config path, matching this codebase's "fail loud, never silently do
 something unsafe" convention (kriya/core/llm.py's egress check, this
 project's own precedent).
 
-Not wired into any CLI/repl command path yet - `workflow_controller.enabled:
+MA7.1: wired into `kriya generate`'s real call path (kriya/cli.py's
+`_run_generation` helper, all three run_generation_workflow call sites in
+the `generate` command) - still gated by `workflow_controller.enabled:
 false` by default in kriya.yaml, mirroring MA4.15/MA5's own "ship the
-mechanism, default it off" pattern. This class is importable and
-independently testable today, invoked by nothing in the default
-`kriya generate` path until a future milestone adds that wiring.
+mechanism, default it off" pattern, so a stock install's behavior is
+byte-for-byte unchanged. Setting `workflow_controller.enabled: true` (mode
+stays "shadow", "enforce" is refused) is what actually makes this class
+construct and run for a real `kriya generate` call. `kriya fix` and
+`kriya plan-milestones` are NOT wired - deliberately out of MA7.1's scope,
+left for a later increment.
 """
 from __future__ import annotations
 
@@ -52,6 +57,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import parse_planner_structured_output
+from kriya.control.decisions import Decision, DecisionLedger
 from kriya.control.state import ControlState
 from kriya.workflow import subtask_executor
 from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash, new_run_id
@@ -61,8 +67,15 @@ from kriya.workflow.plan_schema import EngineeringPlan, build_engineering_plan_f
 from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.subtask_checkpoint import topological_subtask_order
 from kriya.workflow.subtask_context_projection import project_for_subtask
+from kriya.workflow.subtask_telemetry import (
+    record_context_package_for_subtask,
+    record_plan_created,
+    record_subtask_attempt,
+    record_undeclared_file_touch,
+)
 from kriya.workflow.triage import ChangeKind
-from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, WorkflowResult
+from kriya.workflow.verification_report import build_verification_report
+from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport, WorkflowResult
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +139,11 @@ class WorkflowController:
         # decision, not an oversight.
 
         subtask_results: Tuple[SubtaskResult, ...] = ()
+        decisions: Tuple[Decision, ...] = ()
+        verification_report: Optional[VerificationReport] = None
         if migration_mode == "shadow":
             try:
-                plan, subtask_results, notes = await self._run_structured_shadow(
+                plan, subtask_results, decisions, verification_report, notes = await self._run_structured_shadow(
                     goal, workspace_path, route, run_id,
                 )
                 if plan is not None:
@@ -142,6 +157,8 @@ class WorkflowController:
                 # real generation run underneath it.
                 logger.warning(f"WorkflowController shadow run {run_id!r} failed (non-fatal): {e}")
                 subtask_results = ()
+                decisions = ()
+                verification_report = None
 
         legacy_result = await self._run_legacy_generation(
             goal, workspace_path,
@@ -152,6 +169,7 @@ class WorkflowController:
         return WorkflowResult(
             run_id=run_id, control_state=control_state, route=route,
             legacy_result=legacy_result, subtask_results=subtask_results,
+            decisions=decisions, verification_report=verification_report,
         )
 
     def _attach_milestone_metadata(
@@ -175,7 +193,10 @@ class WorkflowController:
 
     async def _run_structured_shadow(
         self, goal: str, workspace_path: str, route: Any, run_id: str,
-    ) -> Tuple[Optional[EngineeringPlan], Tuple[SubtaskResult, ...], List[str]]:
+    ) -> Tuple[
+        Optional[EngineeringPlan], Tuple[SubtaskResult, ...],
+        Tuple[Decision, ...], Optional[VerificationReport], List[str],
+    ]:
         """Builds a real EngineeringPlan and runs SubtaskExecutor against
         every subtask - purely observational, see this module's own
         docstring for why the result never touches the real outcome.
@@ -184,19 +205,39 @@ class WorkflowController:
         builds internally - a real, honestly-tracked gap (not silently
         pretended away) between what this shadow path sees and what the
         legacy path actually sees; closing it means integrating
-        ContextOrchestrator (MA5.7) here, out of scope for this slice."""
+        ContextOrchestrator (MA5.7) here, out of scope for this slice.
+
+        MA7.1: also drives subtask_telemetry (MA6.12) and
+        build_verification_report (MA6.11) - both existed as pure,
+        independently-tested functions since MA6 but were never actually
+        CALLED anywhere, including this method, until now (MA7.0's
+        reachability inventory flagged this as a second, smaller dead spot
+        beyond WorkflowController's own lack of a caller). The returned
+        DecisionLedger is in-memory only here - persisting it to
+        .kriya/control/decisions.jsonl is left to a future increment once
+        this path is more than observational, same reasoning as
+        ControlState/ContractRegistry/ArtifactRegistry not being persisted
+        from here either. The VerificationReport is necessarily
+        UNRESOLVED-heavy in shadow mode: SubtaskExecutor never runs real
+        compile/test/tool verification (see this module's own docstring),
+        so build_verification_report is called with no tool_results/
+        judgment_results - an honest reflection of what shadow mode can
+        actually attest to, not a simulated pass."""
         notes: List[str] = []
+        ledger = DecisionLedger()
 
         plan_text = await self.workflow_engine.planner.run(goal)
         structured_output, parse_issue = parse_planner_structured_output(plan_text)
         if structured_output is None:
             notes.append(f"no structured plan: {parse_issue}")
-            return None, (), notes
+            return None, (), (), None, notes
 
         plan = build_engineering_plan_from_planner_output(structured_output, plan_id=run_id, kind=route.kind)
         if plan is None:
             notes.append("structured output parsed but produced zero subtasks")
-            return None, (), notes
+            return None, (), (), None, notes
+
+        record_plan_created(ledger, plan)
 
         kernel = getattr(self.workflow_engine, "kernel", None)
         available_tool_names = None
@@ -212,7 +253,7 @@ class WorkflowController:
         )
         if not validation.valid:
             notes.append(f"plan failed validation: {validation.errors}")
-            return plan, (), notes
+            return plan, (), ledger.all(), None, notes
 
         context = self._build_minimal_context(plan, workspace_path)
 
@@ -222,16 +263,21 @@ class WorkflowController:
             if subtask is None:
                 continue
             projected = project_for_subtask(context, subtask)
+            record_context_package_for_subtask(ledger, plan, subtask_id, projected)
             result = await subtask_executor.execute(
                 subtask=subtask, plan=plan, context=projected,
                 kernel=kernel, developer_agent=self.workflow_engine.developer,
             )
             results.append(result)
+            record_subtask_attempt(ledger, plan, result, attempt=1)
+            if result.undeclared_files:
+                record_undeclared_file_touch(ledger, plan, result)
             if result.status != SubtaskStatus.COMPLETED:
                 notes.append(f"stopped at subtask {subtask_id!r}: status={result.status.value}")
                 break
 
-        return plan, tuple(results), notes
+        report = build_verification_report(plan.acceptance_criteria)
+        return plan, tuple(results), ledger.all(), report, notes
 
     def _build_minimal_context(self, plan: EngineeringPlan, workspace_path: str) -> ContextPackage:
         """Deliberately MINIMAL: reads each planned file's CURRENT on-disk

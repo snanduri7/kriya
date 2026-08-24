@@ -20,6 +20,7 @@ from kriya.plugins.plugin import PluginManager
 from kriya.prompt import PromptEngine
 from kriya.skills import SkillEngine
 from kriya.workflow import WorkflowEngine
+from kriya.workflow.workflow_controller import WorkflowController
 
 logger = logging.getLogger(__name__)
 
@@ -1081,6 +1082,25 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Failed to update skill '{skill_name}'.", fg="red")
         sys.exit(1)
 
+async def _dispatch_generation(we: "WorkflowEngine", cfg: AppConfig, **kwargs: Any) -> Dict[str, Any]:
+    """MA7.1 - routes through WorkflowController when workflow_controller.enabled
+    (kriya.yaml, default False) so its shadow-mode control-plane bookkeeping
+    (MA5/MA6) actually runs alongside a real `kriya generate` call instead
+    of being permanently unreachable, per WorkflowController's own
+    docstring. `mode` is only ever "legacy" or "shadow" here - "enforce" is
+    rejected at config-load time (WorkflowControllerConfig's validator,
+    MA6.14) - so with the packaged default this is a pure passthrough to
+    we.run_generation_workflow, identical to every call site before this
+    change. Module-level (not a nested closure inside `generate()`) so it's
+    independently unit-testable without invoking the full CLI command."""
+    if cfg.workflow_controller.enabled:
+        result = await WorkflowController(we).execute(
+            migration_mode=cfg.workflow_controller.mode, **kwargs,
+        )
+        return result.legacy_result
+    return await we.run_generation_workflow(**kwargs)
+
+
 def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> None:
     """Overwrites a transient `knowledge_gap` trace row with an honest `in_progress`
     marker the instant a knowledge-gap retry actually starts executing the real
@@ -1386,7 +1406,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             goal = f"{goal}\n\n=== Web Reference Documentation Context ===\n{rag_context}"
 
         await kernel.start()
-        res = await we.run_generation_workflow(
+        res = await _dispatch_generation(
+            we, cfg,
             goal=goal,
             workspace_path=os.getcwd(),
             approval_callback=on_approval,
@@ -1409,7 +1430,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
 
             if not unacked_gaps or knowledge_policy == 'permissive':
                 _mark_run_in_progress(cfg, res.get("run_id"), goal)
-                res = await we.run_generation_workflow(
+                res = await _dispatch_generation(
+                    we, cfg,
                     goal=goal,
                     workspace_path=os.getcwd(),
                     approval_callback=on_approval,
@@ -1455,7 +1477,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
 
                 if confirm:
                     _mark_run_in_progress(cfg, res.get("run_id"), goal)
-                    res = await we.run_generation_workflow(
+                    res = await _dispatch_generation(
+                        we, cfg,
                         goal=goal,
                         workspace_path=os.getcwd(),
                         approval_callback=on_approval,

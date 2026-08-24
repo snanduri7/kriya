@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.control.decisions import Decision
+
 
 class SubtaskStatus(str, Enum):
     """COMPLETED: the subtask's own execution (model generation or tool
@@ -93,13 +95,24 @@ class WorkflowResult:
     ControlState / kriya.workflow.triage.EngineeringRoute directly) purely
     to avoid this shared types module importing either - both already
     depend on plan_schema-adjacent modules; workflow_controller.py, the
-    one real producer of a WorkflowResult, has the concrete types."""
+    one real producer of a WorkflowResult, has the concrete types.
+
+    decisions/verification_report (MA7.1): the shadow path's own
+    subtask_telemetry (MA6.12) and verification_report (MA6.11) output -
+    both existed as pure functions since MA6 but were never actually
+    called by anything, including WorkflowController's own shadow branch,
+    until this field gave their output somewhere real to land. Empty/None
+    for migration_mode="legacy" (no shadow run happened) or when the
+    shadow run failed before producing a plan - see
+    WorkflowController._run_structured_shadow's own docstring."""
 
     run_id: str
     control_state: Any
     route: Any
     legacy_result: Optional[Dict[str, Any]] = None
     subtask_results: Tuple[SubtaskResult, ...] = ()
+    decisions: Tuple[Decision, ...] = ()
+    verification_report: Optional["VerificationReport"] = None
 
 
 class VerificationVerdict(str, Enum):
