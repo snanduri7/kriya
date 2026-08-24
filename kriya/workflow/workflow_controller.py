@@ -660,27 +660,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             except Exception as e:
                 logger.debug(f"WorkflowController enforce run {run_id!r}: could not list registered tools: {e}")
 
-        validation = await validate_plan(
-            plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
-            route=route, triage_service=self.workflow_engine.engineering_triage,
-        )
-        if not validation.valid:
-            raise _StructuredPlanUnavailable(f"plan failed validation: {validation.errors}")
-
         # Subtask-spanning resume (MA5.9 finally wired to something,
         # 2026-08-24) - opt-in only, same convention as
         # run_generation_workflow()'s own resume (no auto-detection from
-        # goal-text matching). MA6 has no separate plan-persistence sidecar
-        # the way MA3's milestone flow does (plan_text above is a FRESH
-        # Planner call every time), so trusting a persisted ControlState's
-        # subtask_states is only safe when the freshly-rebuilt plan and the
-        # real workspace both still match what was recorded - exactly the
-        # drift compute_control_plane_hashes/validate_resume_against_reality
-        # were built to catch. Any mismatch (or no prior state at all) ->
-        # resumed_subtask_states stays empty and the plan runs fresh from
-        # subtask 1, same as if resume had never been requested.
+        # goal-text matching). Loaded BEFORE validate_plan (moved here
+        # 2026-08-24, see prior_control_state_has_own_progress below for
+        # why) - MA6 has no separate plan-persistence sidecar the way MA3's
+        # milestone flow does (plan_text above is a FRESH Planner call
+        # every time), so trusting a persisted ControlState's subtask_states
+        # for the actual SKIP decision is only safe when the freshly-
+        # rebuilt plan and the real workspace both still match what was
+        # recorded - exactly the drift compute_control_plane_hashes/
+        # validate_resume_against_reality were built to catch. Any mismatch
+        # (or no prior state at all) -> resumed_subtask_states stays empty
+        # and the plan runs fresh from subtask 1, same as if resume had
+        # never been requested.
         current_plan_hash = plan.content_hash()
-        resumed_subtask_states: Dict[str, str] = {}
+        prior_control_state: Optional[ControlState] = None
         if legacy_kwargs.get("resume") or legacy_kwargs.get("resume_id"):
             prior_control_state = load_control_state(workspace_path)
             if prior_control_state is None:
@@ -688,7 +684,42 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     f"WorkflowController enforce run {run_id!r}: resume requested but no prior "
                     "ControlState found for this workspace - starting the plan fresh."
                 )
-            elif prior_control_state.current_plan_hash != current_plan_hash:
+
+        # Real live-validation finding, 2026-08-24, protocol_encoder_java:
+        # after subtask s1 genuinely completed (real Protocol.java on disk)
+        # and s2 exhausted its retries, a resumed run's FRESH re-plan
+        # correctly triggered extension_points validation (the workspace is
+        # no longer empty - _workspace_appears_empty's own exemption
+        # correctly stopped applying) - but the Planner, unprompted about
+        # continuation, didn't supply one. That validation failure raised
+        # _StructuredPlanUnavailable, which fell back to the LEGACY
+        # whole-goal path - the exact safety net built for a truly
+        # side-effect-free pre-execution failure - except here real side
+        # effects already existed (s1's Protocol.java), and the legacy
+        # Developer, with no reason to leave it alone, regenerated it from
+        # scratch and introduced new bugs that didn't exist before. The
+        # established content here is Kriya's OWN prior subtask output for
+        # THIS SAME resumed goal, not foreign pre-existing work the
+        # extension_points rule exists to protect - so a real resume in
+        # progress (a persisted ControlState with at least one completed
+        # subtask) exempts extension_points the same honest way a truly
+        # empty workspace already does, via the has_own_established_progress
+        # flag threaded into validate_plan below.
+        has_own_established_progress = bool(
+            prior_control_state and any(v == "completed" for v in prior_control_state.subtask_states.values())
+        )
+
+        validation = await validate_plan(
+            plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
+            route=route, triage_service=self.workflow_engine.engineering_triage,
+            resuming_own_established_progress=has_own_established_progress,
+        )
+        if not validation.valid:
+            raise _StructuredPlanUnavailable(f"plan failed validation: {validation.errors}")
+
+        resumed_subtask_states: Dict[str, str] = {}
+        if prior_control_state is not None:
+            if prior_control_state.current_plan_hash != current_plan_hash:
                 logger.warning(
                     f"WorkflowController enforce run {run_id!r}: refusing subtask resume - the "
                     "freshly re-planned goal no longer matches the plan these subtask states "

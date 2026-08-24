@@ -13,7 +13,14 @@ acceptance criterion is covered by at least one subtask (and every
 subtask's acceptance_criteria_ids resolve to a real criterion),
 extension_points are present for enhancement/milestone plans (exempted
 for a genuinely empty workspace - MA7.8 fix, nothing established yet
-means no real insertion point could exist for any plan to name),
+means no real insertion point could exist for any plan to name; ALSO
+exempted when the caller passes resuming_own_established_progress=True -
+MA5.9/subtask-resume fix, 2026-08-24 - established content that is
+Kriya's OWN prior subtask output for the SAME resumed goal is not the
+foreign pre-existing work this rule exists to protect, and requiring a
+justification the fresh re-plan has no way to know it needs previously
+sent a resumed run down the legacy whole-goal fallback, which regenerated
+and broke an already-working, already-completed file),
 refactor_baseline is set for refactor plans, every TOOL-tagged
 subtask/verification/acceptance-criterion tool_name resolves to a real
 registered tool, every planned file lands inside the supplied context
@@ -85,6 +92,7 @@ async def validate_plan(
     route: Optional[EngineeringRoute] = None,
     triage_service: Optional[EngineeringTriageService] = None,
     context_files: Optional[Iterable[str]] = None,
+    resuming_own_established_progress: bool = False,
 ) -> PlanValidationResult:
     """available_tool_names=None SKIPS the tool-registry check entirely -
     only safe for contexts guaranteed not to contain TOOL-tagged subtasks
@@ -101,7 +109,16 @@ async def validate_plan(
     route+triage_service must both be supplied together to get risk
     recomputation; either alone is treated as "recomputation not
     requested" (no error - a caller validating a plan in isolation, before
-    a route even exists, is a legitimate use)."""
+    a route even exists, is a legitimate use).
+
+    resuming_own_established_progress=True (default False) tells the
+    extension_points check that whatever real content the workspace
+    already has was produced by an EARLIER, genuinely-completed subtask of
+    the SAME plan being resumed (kriya/workflow/workflow_controller.py's
+    subtask-spanning resume, 2026-08-24) - not pre-existing, foreign work a
+    plan needs to justify extending. The caller is responsible for that
+    judgment (a persisted ControlState showing at least one completed
+    subtask); this function only trusts the flag it's given."""
     errors: List[str] = []
 
     ids = [st.id for st in plan.subtasks]
@@ -155,6 +172,7 @@ async def validate_plan(
         plan.kind in (ChangeKind.ENHANCEMENT, ChangeKind.MILESTONE)
         and not plan.extension_points
         and not _workspace_appears_empty(workspace_path)
+        and not resuming_own_established_progress
     ):
         errors.append(
             f"plan kind={plan.kind.value} requires at least one extension_points entry "

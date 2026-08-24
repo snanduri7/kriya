@@ -177,6 +177,34 @@ async def test_enhancement_plan_on_a_genuinely_empty_workspace_does_not_require_
 
 
 @pytest.mark.asyncio
+async def test_milestone_plan_resuming_own_established_progress_does_not_require_extension_points(tmp_path):
+    """Real live-validation finding, 2026-08-24, protocol_encoder_java: a
+    resumed enforce-mode run's fresh re-plan correctly triggered this
+    check (the workspace is no longer empty - subtask s1 already wrote a
+    real file), but the Planner wasn't prompted about continuation and
+    didn't supply extension_points. That validation failure sent the
+    resumed run down the legacy whole-goal fallback, which regenerated and
+    broke s1's already-working file. The caller (WorkflowController) now
+    tells validate_plan the established content is its OWN prior subtask
+    output for this same resumed goal, not foreign existing work."""
+    (tmp_path / "Protocol.java").write_text("class Protocol {}")
+    plan = _plan([_model_subtask()], kind=ChangeKind.MILESTONE, extension_points=[])
+    result = await validate_plan(plan, workspace_path=str(tmp_path), resuming_own_established_progress=True)
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
+async def test_milestone_plan_not_resuming_still_requires_extension_points_on_non_empty_workspace(tmp_path):
+    """The exemption is real and scoped - a plain (non-resume) run against
+    a non-empty workspace must still require a real justification;
+    resuming_own_established_progress defaults False."""
+    (tmp_path / "Existing.java").write_text("class Existing {}")
+    plan = _plan([_model_subtask()], kind=ChangeKind.MILESTONE, extension_points=[])
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is False
+
+
+@pytest.mark.asyncio
 async def test_milestone_plan_with_real_extension_points_is_valid_even_on_a_non_empty_workspace(tmp_path):
     (tmp_path / "Existing.java").write_text("class Existing {}")
     plan = _plan([_model_subtask()], kind=ChangeKind.MILESTONE, extension_points=["Existing.java#method"])

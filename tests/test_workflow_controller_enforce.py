@@ -713,3 +713,67 @@ async def test_enforce_resume_with_no_prior_state_behaves_like_a_fresh_run(tmp_p
 
     assert result.legacy_result["quality_gates_passed"] is True
     assert len(calls) == 2
+
+
+# --- extension_points exemption during a real resume (2026-08-24 live-validation finding) ---
+
+@pytest.mark.asyncio
+async def test_enforce_resume_passes_own_progress_flag_to_validate_plan_when_a_subtask_already_completed(tmp_path):
+    """Real live-validation bug, protocol_encoder_java: subtask s1
+    genuinely completed (real file on disk), s2 exhausted its retries. On
+    resume, the freshly re-planned goal correctly triggered extension_points
+    validation (workspace is no longer empty) but the Planner wasn't
+    prompted about continuation and didn't supply one - sending the
+    resumed run down the legacy whole-goal fallback, which regenerated and
+    broke s1's already-working file. WorkflowController must tell
+    validate_plan this is its own established progress, not foreign
+    existing work, whenever a real resume is in progress."""
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+
+    async def fake_run_first(**kwargs):
+        (tmp_path / "a.py").write_text("# a.py")
+        return {"status": "failed", "quality_gates_passed": False, "files": ["a.py"]} \
+            if "'s2'" in kwargs["goal"] else {"status": "success", "quality_gates_passed": True, "files": ["a.py"]}
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3 as mock_validate_plan:
+        controller = WorkflowController(we)
+        we.run_generation_workflow = fake_run_first
+        first = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+        assert first.legacy_result["quality_gates_passed"] is False
+        assert mock_validate_plan.await_args.kwargs["resuming_own_established_progress"] is False, (
+            "the first, non-resumed call must never claim established progress"
+        )
+
+        we.run_generation_workflow = AsyncMock(
+            return_value={"status": "success", "quality_gates_passed": True, "files": ["b.py"]},
+        )
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
+
+    assert mock_validate_plan.await_args.kwargs["resuming_own_established_progress"] is True, (
+        "a resume with a real completed subtask must tell validate_plan so"
+    )
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_does_not_claim_own_progress_when_nothing_completed_yet(tmp_path):
+    """A resume request with no prior completed subtask (e.g. a
+    misconfigured --resume on a workspace with real, genuinely foreign
+    existing content) must NOT exempt extension_points - the exemption is
+    earned by real completed progress, not merely by passing --resume."""
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(
+        return_value={"status": "success", "quality_gates_passed": True, "files": ["a.py"]},
+    )
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3 as mock_validate_plan:
+        controller = WorkflowController(we)
+        # No prior ControlState exists for this workspace at all.
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
+
+    assert mock_validate_plan.await_args.kwargs["resuming_own_established_progress"] is False
