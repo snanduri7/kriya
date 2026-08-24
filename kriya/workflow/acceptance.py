@@ -5,23 +5,35 @@ import re
 
 _EXPLICIT_TEST_REQUEST_RE = re.compile(
     r"\b(?:include|add|write|create|provide|with|run)\s+(?:appropriate\s+)?"
-    r"(?:unit\s+|integration\s+|automated\s+)?tests?\b(?!\s+where\s+appropriate)"
-    # "test" used as an attributive adjective before a non-suite noun
-    # ("test values", "test data", "test logic") describes sample/demo
-    # input or ad hoc verification code, not a request for a real test
-    # suite - found live, 2026-08-21 (protocol_encoder_java milestone 5,
-    # "with test values") and again 2026-08-24 (protocol_encoder_java,
-    # WorkflowController enforce mode, "with test logic for encode/decode
-    # round-trip demonstration"). Both times it was the PLANNER'S OWN
-    # generated goal/subtask text that introduced the trigger phrase, not
-    # anything the human actually asked for - the milestone/subtask was
-    # never about writing a formal test suite, but Quality Gates demanded
-    # a runnable test module for it anyway and burned its entire retry
-    # budget on an unwinnable gate before failing outright. Each fix here
-    # closes the ONE concrete phrasing found live, not every conceivable
-    # future paraphrase - this heuristic will likely need another word
-    # added here again someday, the same way it did this time.
-    r"(?!\s+(?:values?|data|logic|code|routine|method|function|demonstration|output)\b)",
+    r"(?:"
+    # A qualified test - "unit test(s)", "integration tests",
+    # "automated test" - singular or plural, always a genuine request.
+    r"(?:unit\s+|integration\s+|automated\s+)tests?\b"
+    # Bare PLURAL "tests" always counts - "write tests", "include tests" -
+    # nothing after it needs checking, plural is unambiguous.
+    r"|tests\b"
+    # Bare SINGULAR "test" only counts when followed by a noun that
+    # itself names a real test-suite artifact (suite/case/class/module/
+    # file) - "test suite", "test case".
+    r"|test\s+(?:suite|case|cases|class|classes|module|modules|file|files)\b"
+    r")(?!\s+where\s+appropriate)",
+    # Structural fix, 2026-08-24, replacing a growing per-phrase exclusion
+    # list: bare singular "test" used as an attributive adjective before an
+    # arbitrary noun ("test values", "test data", "test logic", "test
+    # functionality", "test code", ...) describes sample/demo input or ad
+    # hoc verification code, not a request for a real test suite - found
+    # live 3 times on the same project (2026-08-21 "test values", 2026-08-24
+    # "test logic", 2026-08-24 again "test functionality" minutes after the
+    # "test logic" fix shipped), always in PLANNER-GENERATED subtask/goal
+    # text, never anything the human actually asked for. Each prior fix
+    # added one more excluded noun to a blocklist and predicted, correctly,
+    # that another paraphrase would defeat it - "functionality" wasn't on
+    # the list. Rather than adding a fourth word, this closes the whole
+    # class structurally: singular "test" only ever counts when qualified
+    # (unit/integration/automated before it, or suite/case/class/module/
+    # file after it) or when plural - "test <anything else>" can no longer
+    # match regardless of which noun follows, so no future paraphrase of
+    # this exact shape can reopen the same bug.
     re.IGNORECASE,
 )
 _ZERO_TEST_PATTERNS = (

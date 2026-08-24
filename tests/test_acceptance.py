@@ -66,6 +66,48 @@ def test_explicit_test_contract_ignores_test_used_as_logic_or_code_adjective():
     )
 
 
+def test_explicit_test_contract_ignores_test_used_as_functionality_adjective():
+    """Regression test for a real live bug, 2026-08-24 (protocol_encoder_java,
+    WorkflowController enforce mode, subtask s2, minutes after the "test
+    logic" fix above shipped): the Planner's own subtask description read
+    "Create Main.java with test functionality to demonstrate encode/decode
+    round-trip for Protocol class" and its acceptance criterion read
+    "...with proper encode/decode round-trip test functionality that
+    validates Protocol class encoding/decoding logic" - the THIRD real
+    live occurrence of the same bug class (test values -> test logic ->
+    test functionality), each with a different noun the previous fix's
+    blocklist didn't happen to cover. This is why the fix was rebuilt
+    structurally (see _EXPLICIT_TEST_REQUEST_RE's own updated docstring) -
+    "functionality" was never added to any list; the whole class of
+    "singular test + arbitrary noun" no longer matches, period."""
+    assert not goal_explicitly_requires_tests(
+        "Create Main.java with test functionality to demonstrate encode/decode "
+        "round-trip for Protocol class"
+    )
+    assert not goal_explicitly_requires_tests(
+        "Main.java file is created with proper encode/decode round-trip test "
+        "functionality that validates Protocol class encoding/decoding logic"
+    )
+
+
+def test_explicit_test_contract_structurally_rejects_any_unqualified_singular_test_noun():
+    """The generic case the three regression tests above are each one
+    instance of: bare singular "test" followed by ANY noun that isn't
+    itself a test-suite artifact must never match, for any noun at all -
+    not just the three specific ones (values/logic/functionality) that
+    happened to be found live. A future paraphrase of this exact shape
+    must not need a fourth regression test to catch it."""
+    for noun in ("values", "logic", "functionality", "code", "data", "output", "scenario", "harness", "setup"):
+        assert not goal_explicitly_requires_tests(f"Create Main.java with test {noun} for the demo"), noun
+
+    # But a genuinely qualified singular "test" (unit/integration/automated
+    # prefix, or a real suite-noun suffix) - or any plural "tests" - must
+    # still be detected as a real request, regardless of this fix.
+    assert goal_explicitly_requires_tests("add unit test coverage for the parser")
+    assert goal_explicitly_requires_tests("include test suite for the parser")
+    assert goal_explicitly_requires_tests("write tests for the parser")
+
+
 def test_test_acceptance_detects_known_zero_execution_outputs():
     assert not output_confirms_nonzero_test_execution("collected 0 items")
     assert not output_confirms_nonzero_test_execution("Tests run: 0, Failures: 0")
