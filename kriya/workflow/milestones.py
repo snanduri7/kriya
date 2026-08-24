@@ -27,7 +27,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
-from kriya.workflow.context_projection import project_implementation_source
+from kriya.workflow.context_projection import (
+    project_implementation_source,
+    render_established_file_context,  # MA5.8 - moved to context_projection.py, re-exported here for
+                                        # backward compatibility (tests/test_milestones.py's own import,
+                                        # any other existing consumer of kriya.workflow.milestones.render_established_file_context).
+)
 from kriya.workflow.file_resolution import _resolve_run_command
 from kriya.workflow.milestone_normalization import normalize_legacy_milestones
 from kriya.workflow.milestone_validation import (
@@ -460,30 +465,6 @@ def build_milestone_goal_text(
     acceptance_text = "; ".join(a.description for a in milestone.acceptance)
     criterion = f"\n\nVerification: {acceptance_text}"
     return header + milestone.goal + criterion + footer
-
-
-def render_established_file_context(established_file_context: Dict[str, str]) -> str:
-    """Renders established_file_context into run_generation_workflow()'s
-    `supplementary_context` - see that parameter's own docstring for why this
-    goes there rather than into the goal text passed to
-    build_milestone_goal_text() above: goal text only reliably reaches
-    Planner, not Architect or Developer's initial generation."""
-    if not established_file_context:
-        return ""
-    blocks = [
-        f"=== {path} (already built by an earlier milestone in this sequence "
-        "- this is its REAL current content, not a guess. Match its actual "
-        "constructor/method signatures exactly, AND match its build layout: "
-        "the exact package it declares (or, if it declares none, the default/"
-        "unnamed package) and its directory location relative to the "
-        "workspace root. A class in one named package can never reference a "
-        "class in a different or default package, in any language version - "
-        "if new code must interoperate with this file, adapt the NEW file's "
-        "package/directory to match this established one, never the "
-        f"reverse.) ===\n{content}"
-        for path, content in sorted(established_file_context.items())
-    ]
-    return "\n\n" + "\n\n".join(blocks)
 
 
 def build_integration_goal_text(original_goal: str, milestones: List[MilestoneV2]) -> str:
