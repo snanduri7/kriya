@@ -155,6 +155,30 @@ class Failure:
     attribution_tier: Optional[str] = None
     attribution_confidence: Optional[str] = None
     attribution_reasoning: Optional[str] = None
+    # MA6.6 - set only by a caller executing failure grounding within MA6's
+    # structured subtask execution (kriya/workflow/subtask_executor.py);
+    # None for every failure raised by the legacy, non-subtask-scoped
+    # Quality Gates loop (the overwhelming majority of failures as of this
+    # writing - run_generation_workflow() is not yet wired to populate
+    # these, see MA6.9/6.10). subtask_id/plan_id/milestone_id are plain
+    # ids, not object references, so Failure (deliberately a pure data
+    # shape, see this module's own docstring) never needs to import
+    # plan_schema.py/EngineeringPlan - kriya/workflow/attribution.py's
+    # subtask_attribution_context_from_plan() is what actually resolves
+    # subtask_id back into real planned-file evidence, given the caller's
+    # own EngineeringPlan. planned_files mirrors the executing subtask's
+    # own Subtask.planned_files paths at the moment of failure (so this
+    # Failure record stays self-describing even without a plan object on
+    # hand later, e.g. when only reading it back out of traces.db).
+    # verification_target names which VerificationMethod (plan_schema.py)
+    # this failure came from, e.g. "tool:pytest" or "judgment:<criterion
+    # id>" - free-form, mirroring `mode`'s own plain-string convention
+    # above, not a new enum this module would need to import.
+    subtask_id: Optional[str] = None
+    plan_id: Optional[str] = None
+    milestone_id: Optional[str] = None
+    planned_files: List[str] = field(default_factory=list)
+    verification_target: Optional[str] = None
 
     def to_gate_outcome(self) -> dict:
         """The shape kriya/workflow/workflow.py's gate_outcomes list expects -
@@ -179,6 +203,11 @@ class Failure:
             "attribution_tier": self.attribution_tier,
             "attribution_confidence": self.attribution_confidence,
             "attribution_reasoning": self.attribution_reasoning,
+            "subtask_id": self.subtask_id,
+            "plan_id": self.plan_id,
+            "milestone_id": self.milestone_id,
+            "planned_files": list(self.planned_files),
+            "verification_target": self.verification_target,
         }
 
 

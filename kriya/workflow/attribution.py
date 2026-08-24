@@ -154,16 +154,31 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 from kriya.workflow.edit_safety import normalize_whitespace
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import extract_error_source_locations, extract_implicated_files
+from kriya.workflow.plan_schema import EngineeringPlan
 
 logger = logging.getLogger(__name__)
 
-AttributionTier = Literal["self_diagnosis", "locator", "judge", "triage", "full_set"]
+# MA6.6 - "subtask_scope"/"subtask_dependency" are NEW tiers, ranked
+# between "locator" and "judge": no real file:line evidence beats a
+# locator, but "we structurally know what this subtask was allowed to
+# touch" (SubtaskExecutor never lets a MODEL-tagged subtask touch anything
+# outside its own planned_files - MA6 invariant 4) is stronger evidence
+# than a filename-substring/likely_files guess over the WHOLE known-file
+# set, which is what "judge" is. Only reachable when a caller passes
+# `plan` to attribute_failure() AND the failing Failure carries a
+# subtask_id (see attribute_failure's own docstring) - every existing,
+# non-MA6 caller passes neither, so this ordering change is a pure
+# addition with zero effect on any failure attributed today.
+AttributionTier = Literal[
+    "self_diagnosis", "locator", "subtask_scope", "subtask_dependency", "judge", "triage", "full_set",
+]
 Confidence = Literal["high", "medium", "low"]
 
 
@@ -173,6 +188,105 @@ class AttributionResult:
     files: List[str]
     confidence: Confidence
     reasoning: str
+
+
+@dataclass
+class SubtaskAttributionContext:
+    """Structural evidence for the subtask_scope/subtask_dependency tiers -
+    built by subtask_attribution_context_from_plan() below, never
+    hand-constructed by a caller. planned_files is the executing subtask's
+    own target files (Failure.subtask_id resolved against the plan);
+    dependency_files is the union of planned_files from every subtask it
+    depends_on (plan_schema.Subtask.depends_on) - files a CONSUMING
+    subtask's failure might legitimately trace back to even though this
+    subtask never touched them itself (e.g. subtask B fails because
+    subtask A, which B depends on, actually wrote the wrong thing)."""
+
+    subtask_id: str
+    planned_files: List[str] = field(default_factory=list)
+    dependency_files: List[str] = field(default_factory=list)
+
+
+def subtask_attribution_context_from_plan(
+    plan: EngineeringPlan, subtask_id: str
+) -> Optional[SubtaskAttributionContext]:
+    """None when subtask_id doesn't resolve against `plan` (a stale id, a
+    plan that has since changed) - attribute_failure() treats that as "no
+    subtask context available," falling through to judge/triage/full_set
+    exactly as it would if `plan` had never been passed at all, never a
+    crash on a dangling reference."""
+    subtask = plan.subtask_by_id(subtask_id)
+    if subtask is None:
+        return None
+    planned_files = [pf.path for pf in subtask.planned_files]
+    dependency_files: List[str] = []
+    for dep_id in subtask.depends_on:
+        dep = plan.subtask_by_id(dep_id)
+        if dep is None:
+            continue
+        for pf in dep.planned_files:
+            if pf.path not in dependency_files:
+                dependency_files.append(pf.path)
+    return SubtaskAttributionContext(
+        subtask_id=subtask.id, planned_files=planned_files, dependency_files=dependency_files
+    )
+
+
+class RetryScopeVerdict(str, Enum):
+    """What kind of retry an AttributionResult, resolved against a plan,
+    calls for - the structural classification retry_strategy.py/a future
+    WorkflowController (MA6.9) needs to choose between "retry this one
+    subtask," "retry/re-plan a multi-subtask set," or "treat as an
+    integration-level failure and re-plan remaining milestone scope."
+    Deliberately NOT itself a policy decision (never retries or re-plans
+    anything) and deliberately does NOT compute "the smallest connected
+    set" the MA6 spec's retry-behavior language describes for the
+    MULTI_SUBTASK case - that's a real graph-connectivity computation over
+    the plan's dependency DAG with no consumer yet (WorkflowController
+    doesn't exist until MA6.8); building it now, unused and untestable
+    against real orchestration behavior, would be exactly the kind of
+    speculative machinery this codebase avoids. classify_retry_scope
+    below gives whoever implements that consumer the structural fact
+    (single/multi/none) it needs to branch on."""
+
+    SINGLE_SUBTASK = "single_subtask"
+    MULTI_SUBTASK = "multi_subtask"
+    INTEGRATION_LEVEL = "integration_level"
+
+
+@dataclass
+class SubtaskRetryScope:
+    subtask_ids: List[str] = field(default_factory=list)
+    unattributed_files: List[str] = field(default_factory=list)
+
+
+def resolve_subtask_retry_scope(result: AttributionResult, plan: EngineeringPlan) -> SubtaskRetryScope:
+    """Maps an AttributionResult's files back to the subtask(s) that
+    declared them as planned_files - pure lookup, no new attribution
+    logic. A file that matches no subtask in the plan (e.g. attribution
+    fell back to an established file from an earlier milestone, or a
+    judge/triage guess named something outside the plan entirely) is
+    recorded in unattributed_files rather than silently dropped."""
+    subtask_ids: List[str] = []
+    unattributed: List[str] = []
+    for f in result.files:
+        matched = False
+        for subtask in plan.subtasks:
+            if any(pf.path == f for pf in subtask.planned_files):
+                if subtask.id not in subtask_ids:
+                    subtask_ids.append(subtask.id)
+                matched = True
+        if not matched:
+            unattributed.append(f)
+    return SubtaskRetryScope(subtask_ids=subtask_ids, unattributed_files=unattributed)
+
+
+def classify_retry_scope(scope: SubtaskRetryScope) -> RetryScopeVerdict:
+    if len(scope.subtask_ids) == 1 and not scope.unattributed_files:
+        return RetryScopeVerdict.SINGLE_SUBTASK
+    if scope.subtask_ids:
+        return RetryScopeVerdict.MULTI_SUBTASK
+    return RetryScopeVerdict.INTEGRATION_LEVEL
 
 
 def resolve_fallback_model(retry_count: int, chain: list) -> Optional[Any]:
@@ -231,15 +345,21 @@ def extract_self_diagnosed_files(files: List[dict], known_files: List[str]) -> L
     return implicated
 
 
-def _attribute_from_existing_evidence(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
-    raw_text = failure.raw_output or failure.message
+def _attribute_from_locator(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
+    """A real file:line locator always wins - both the tier label AND which
+    files get used - over failure.likely_files/a substring scan, even if
+    likely_files is already non-empty (e.g. stale/judge-provided from a
+    DIFFERENT signal than the precise locator this failure's own text
+    actually carries). Mirrors extract_implicated_files()'s own internal
+    "prefer a locator" precedence, just surfaced here as an explicit tier.
 
-    # A real file:line locator always wins - both the tier label AND which
-    # files get used - over failure.likely_files/a substring scan, even if
-    # likely_files is already non-empty (e.g. stale/judge-provided from a
-    # DIFFERENT signal than the precise locator this failure's own text
-    # actually carries). Mirrors extract_implicated_files()'s own internal
-    # "prefer a locator" precedence, just surfaced here as an explicit tier.
+    Split out from the combined locator+judge check (previously one
+    function, _attribute_from_existing_evidence) by MA6.6 so
+    attribute_failure() can insert the subtask_scope/subtask_dependency
+    tiers strictly BETWEEN locator and judge - the combined function is
+    kept below, unchanged in behavior, as a thin wrapper for any caller
+    that still wants the old all-in-one check."""
+    raw_text = failure.raw_output or failure.message
     located_basenames = {b for b, _ in extract_error_source_locations(raw_text)}
     if located_basenames:
         locator_files = [f for f in known_files if os.path.basename(f) in located_basenames]
@@ -248,7 +368,11 @@ def _attribute_from_existing_evidence(failure: Failure, known_files: List[str]) 
                 tier="locator", files=locator_files, confidence="high",
                 reasoning="Precise file:line locator found in the failure output.",
             )
+    return None
 
+
+def _attribute_from_judge_evidence(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
+    raw_text = failure.raw_output or failure.message
     files = list(failure.likely_files) if failure.likely_files else []
     if not files:
         files = extract_implicated_files(raw_text, known_files)
@@ -259,6 +383,45 @@ def _attribute_from_existing_evidence(failure: Failure, known_files: List[str]) 
         reasoning="Already-validated likely_files (e.g. RunVerifierAgent.grade()'s own inference, "
         "or an anchored-edit's known filepath) or a filename substring match, with no precise line locator.",
     )
+
+
+def _attribute_from_subtask_context(
+    known_files: List[str], subtask_context: SubtaskAttributionContext
+) -> Optional[AttributionResult]:
+    """Deterministic, zero-guess default when no locator fired: attribute
+    to the subtask's own planned_files first (SubtaskExecutor never let a
+    MODEL-tagged subtask touch anything outside this list - MA6 invariant
+    4 - so it's the strongest available evidence short of a real file:line
+    locator), then to dependency_files (files planned by a subtask this
+    one depends on, in case a consuming subtask's failure actually traces
+    back to an upstream subtask's output). Narrowed to files that are
+    ACTUALLY in known_files - never attributes to a path the caller didn't
+    already know about."""
+    own_files = [f for f in subtask_context.planned_files if f in known_files]
+    if own_files:
+        return AttributionResult(
+            tier="subtask_scope", files=own_files, confidence="high",
+            reasoning=(
+                f"No file:line locator; SubtaskExecutor only permitted subtask "
+                f"{subtask_context.subtask_id!r} to touch {own_files} - attributing to its own scope."
+            ),
+        )
+    dep_files = [f for f in subtask_context.dependency_files if f in known_files]
+    if dep_files:
+        return AttributionResult(
+            tier="subtask_dependency", files=dep_files, confidence="medium",
+            reasoning=(
+                f"No file:line locator and subtask {subtask_context.subtask_id!r} declared no planned "
+                "files of its own; attributing to files planned by the subtask(s) it depends on."
+            ),
+        )
+    return None
+
+
+def _attribute_from_existing_evidence(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
+    """Unchanged combined behavior (locator, else judge) - kept as-is so
+    every call site that predates MA6.6 sees zero behavior change."""
+    return _attribute_from_locator(failure, known_files) or _attribute_from_judge_evidence(failure, known_files)
 
 
 _TRIAGE_SYSTEM_PROMPT = (
@@ -380,11 +543,20 @@ async def attribute_failure(
     llm,
     file_content_provider: Callable[[str], Optional[str]],
     self_diagnosed_files: Optional[List[str]] = None,
+    plan: Optional[EngineeringPlan] = None,
 ) -> AttributionResult:
     """The one entry point every retry site should call instead of
     independently re-deriving "which file". Always returns a result - the
     honest, low-confidence full_set case (files=[]) when nothing narrows the
     failure, never a silent None that a caller might forget to handle.
+
+    plan (MA6.6, optional): when supplied AND `failure.subtask_id` is set,
+    unlocks the subtask_scope/subtask_dependency tiers between locator and
+    judge (see subtask_attribution_context_from_plan() and
+    _attribute_from_subtask_context() above) - a caller executing failure
+    grounding within MA6's structured subtask execution passes its
+    EngineeringPlan here; every other, non-MA6 caller passes nothing and
+    sees IDENTICAL behavior to before this parameter existed.
 
     self_diagnosed_files, when passed, MUST already be gated by the caller
     to only the case where the CURRENT failure is a confirmed repeat of the
@@ -437,7 +609,24 @@ async def attribute_failure(
             ),
         )
 
-    result = _attribute_from_existing_evidence(failure, known_files)
+    result = _attribute_from_locator(failure, known_files)
+    if result:
+        return result
+
+    # MA6.6 - only reachable when the caller supplied `plan` and this
+    # failure carries a subtask_id (both None for every pre-MA6 caller,
+    # so this block is a no-op for them). Deliberately sits AFTER locator
+    # (real file:line evidence always wins) and BEFORE judge/triage/
+    # full_set (a subtask's own declared scope is stronger evidence than
+    # a filename-substring guess over the whole known-file set).
+    if plan is not None and failure.subtask_id:
+        subtask_context = subtask_attribution_context_from_plan(plan, failure.subtask_id)
+        if subtask_context is not None:
+            result = _attribute_from_subtask_context(known_files, subtask_context)
+            if result:
+                return result
+
+    result = _attribute_from_judge_evidence(failure, known_files)
     if result:
         return result
 
