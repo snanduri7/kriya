@@ -112,6 +112,7 @@ from kriya.workflow.subtask_telemetry import (
 )
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.verification_report import build_verification_report
+from kriya.workflow.workflow import _log_phase_banner
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport, WorkflowResult
 
 logger = logging.getLogger(__name__)
@@ -659,6 +660,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             if subtask is None:
                 continue
 
+            _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
             subtask_goal = build_subtask_goal_text(subtask, position, total)
             call_result = await self.workflow_engine.run_generation_workflow(
                 goal=subtask_goal,

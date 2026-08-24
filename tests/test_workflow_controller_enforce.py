@@ -88,6 +88,37 @@ async def test_enforce_calls_run_generation_workflow_once_per_subtask(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_enforce_logs_a_subtask_progress_banner_before_each_subtask(tmp_path, caplog):
+    """Real live-validation gap, 2026-08-24: a 3-subtask enforce run's log
+    showed 3 back-to-back PLANNING/ARCHITECTURE/DEVELOPMENT/REVIEW cycles
+    with no indication of which subtask number was running or how many
+    subtasks the plan had in total - unlike run_milestones(), which prints
+    a real "MILESTONE 'id' (2/3): ..." banner per milestone. This mirrors
+    that exact convention for subtasks."""
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        path = "a.py" if len(calls) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with caplog.at_level("INFO", logger="kriya.workflow.workflow"):
+        with p1, p2, p3:
+            controller = WorkflowController(we)
+            await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    banner_text = "\n".join(r.message for r in caplog.records)
+    assert "SUBTASK 'S1' (1/2)" in banner_text.upper()
+    assert "SUBTASK 'S2' (2/2)" in banner_text.upper()
+
+
+@pytest.mark.asyncio
 async def test_enforce_threads_established_files_forward_to_the_next_subtask(tmp_path):
     plan = _two_subtask_plan()
     we = _workflow_engine()
