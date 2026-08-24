@@ -27,7 +27,7 @@ import logging
 import os
 import re
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -443,6 +443,70 @@ def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
     return _normalize_file_list_paths(files), None
 
 
+def _self_heal_structured_plan_dict(parsed: Any) -> Any:
+    """MA7.8 fix (2026-08-24, real live-validation finding,
+    protocol_encoder_java): self-heals a small, fixed set of MECHANICALLY
+    UNAMBIGUOUS malformed shapes in the model's raw Stage A JSON output
+    BEFORE pydantic validation, rather than letting one small tagging
+    mistake invalidate the ENTIRE structured plan. Real live incident this
+    specifically fixes: a subtask tagged execution_method="tool" with no
+    tool_name (Subtask's own _execution_method_invariants correctly
+    rejects this shape) - previously meant the whole Stage A output was
+    discarded and enforce mode fell back to the legacy path for a plan
+    that was otherwise entirely fine.
+
+    Every correction here is a real, unambiguous DOWNGRADE or removal -
+    never invents new information (never guesses a missing tool_name, a
+    real dependency, or which files a subtask should touch). Downgrading
+    an under-specified "tool" tag to "model" is always a SAFE
+    reinterpretation (a MODEL subtask can always attempt real work; the
+    alternative - guessing a tool_name - is exactly the kind of
+    fabrication kriya/workflow/file_resolution.py's own entrypoint-
+    grounding functions already refuse to do elsewhere in this codebase).
+    Applied uniformly everywhere this same type/method + tool_name
+    invariant appears in the schema (Subtask.execution_method,
+    AcceptanceCriterion.method, VerificationMethod.type) - fixing only the
+    one shape that happened to occur live would leave the identical bug
+    pattern unfixed in its siblings.
+
+    Mutates and returns `parsed` in place; a non-dict/malformed shape is
+    returned unchanged (model_validate below still catches whatever this
+    can't fix, exactly as before - this is a best-effort pre-pass, not a
+    replacement for real schema validation)."""
+    if not isinstance(parsed, dict):
+        return parsed
+
+    def _heal_tool_pair(obj: Dict[str, Any], kind_field: str, tool_value: str, other_value: str) -> None:
+        if not isinstance(obj, dict):
+            return
+        if obj.get(kind_field) == tool_value and not obj.get("tool_name"):
+            obj[kind_field] = other_value
+            obj.pop("tool_arguments", None)
+        elif obj.get(kind_field) == other_value:
+            obj.pop("tool_name", None)
+            obj.pop("tool_arguments", None)
+
+    for subtask in parsed.get("subtasks") or []:
+        if not isinstance(subtask, dict):
+            continue
+        _heal_tool_pair(subtask, "execution_method", "tool", "model")
+
+        subtask_id = subtask.get("id")
+        depends_on = subtask.get("depends_on")
+        if isinstance(depends_on, list):
+            deduped = list(dict.fromkeys(d for d in depends_on if d != subtask_id))
+            if deduped != depends_on:
+                subtask["depends_on"] = deduped
+
+        for verification in subtask.get("verification") or []:
+            _heal_tool_pair(verification, "type", "tool", "judgment")
+
+    for criterion in parsed.get("acceptance_criteria") or []:
+        _heal_tool_pair(criterion, "method", "tool", "judgment")
+
+    return parsed
+
+
 def parse_planner_structured_output(text: str) -> Tuple[Optional[PlannerStructuredOutput], Optional[str]]:
     """MA6.3 Stage A extraction for PlannerAgent's trailing structured-plan
     JSON block (kriya/workflow/plan_schema.py::PlannerStructuredOutput).
@@ -451,7 +515,11 @@ def parse_planner_structured_output(text: str) -> Tuple[Optional[PlannerStructur
     using the prose plan as-is," identical to every other extraction step
     in this module. Stage A callers are expected to only LOG/telemetry
     this result, never branch execution on it - see this module's own
-    docstring on PlannerStructuredOutput for why."""
+    docstring on PlannerStructuredOutput for why.
+
+    MA7.8 fix: _self_heal_structured_plan_dict runs BEFORE validation -
+    see that function's own docstring for exactly what it corrects and
+    why every correction is safe (never guesses new information)."""
     if not text or not text.strip():
         return None, "text is empty"
 
@@ -463,6 +531,8 @@ def parse_planner_structured_output(text: str) -> Tuple[Optional[PlannerStructur
         parsed = json.loads(candidates[-1])
     except json.JSONDecodeError as e:
         return None, f"structured plan JSON block did not parse: {e}"
+
+    parsed = _self_heal_structured_plan_dict(parsed)
 
     try:
         output = PlannerStructuredOutput.model_validate(parsed)
