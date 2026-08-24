@@ -329,3 +329,73 @@ class ContractRegistry:
         for contract_id, records in data.get("contracts", {}).items():
             registry._history[contract_id] = [ContractRecord.from_dict(r) for r in records]
         return registry
+
+
+def contract_records_from_provided_capabilities(
+    registry: "ContractRegistry", milestone: Any,
+) -> Tuple[ContractRecord, ...]:
+    """The one-way bridge this module's own docstring promised since MA5.2
+    but was never built (confirmed dead - zero callers anywhere - until
+    2026-08-24): registers one PROPOSED ContractRecord per entry in
+    `milestone.provides` (kriya/agents/contracts.py's MilestoneV2.provides,
+    a List[ProvidedCapability] - MA3 planning-level intent, "milestone M1
+    says it will provide X", already real and validated for reachability by
+    kriya/workflow/milestone_validation.py's MilestonePlanValidator, but
+    never durably tracked past plan-validation time until now).
+
+    `milestone` is typed Any, not MilestoneV2, to avoid this control-plane
+    module importing kriya.agents.contracts (a planning-layer module) -
+    only `.id`/`.provides` (each with `.name`/`.description`) are actually
+    read, structurally.
+
+    contract_id is scoped f"{milestone.id}:{capability.name}", not just
+    capability.name - reachability between a provider and a consumer is
+    milestone_validation.py's job (a capability NAME is the resolution
+    key there); this registry only needs a stable, globally-unique id, and
+    two different milestones are free to declare the same capability name
+    without colliding here.
+
+    shape is capability.description when given, else capability.name -
+    ProvidedCapability has no formal shape/schema field, only a name and
+    an optional free-text description; this bridge does not invent a
+    schema that was never there. Already-registered ids are returned
+    as-is, not re-registered (register() would raise) - a resumed
+    multi-milestone run re-processing a milestone whose capabilities were
+    already registered on an earlier attempt must not crash."""
+    records = []
+    for capability in milestone.provides:
+        contract_id = f"{milestone.id}:{capability.name}"
+        existing = registry.try_get(contract_id)
+        if existing is not None:
+            records.append(existing)
+            continue
+        records.append(registry.register(
+            contract_id=contract_id,
+            name=capability.name,
+            provider_milestone_id=milestone.id,
+            shape=capability.description or capability.name,
+        ))
+    return tuple(records)
+
+
+def mark_capabilities_implemented(registry: "ContractRegistry", milestone: Any) -> None:
+    """Called once `milestone` (the PROVIDER) has genuinely completed - real
+    Quality Gates passed, real files applied to the real workspace, not a
+    planning-time assumption. An autonomous pipeline has no separate
+    "a human approved this contract's shape" step distinct from the
+    providing milestone finishing for real, so APPROVED -> FROZEN ->
+    IMPLEMENTED (contracts.py's own strictly-linear lifecycle) collapse
+    into the same real event here - an honest reflection of what this
+    pipeline actually has a signal for, not a simulated finer-grained
+    review workflow. No-ops per capability (non-fatal, never raises) when
+    it was never registered (a plan that changed shape mid-run) or is
+    already past PROPOSED (a resumed run re-processing an already-
+    IMPLEMENTED milestone)."""
+    for capability in milestone.provides:
+        contract_id = f"{milestone.id}:{capability.name}"
+        record = registry.try_get(contract_id)
+        if record is None or record.state != ContractState.PROPOSED:
+            continue
+        registry.approve(contract_id)
+        registry.freeze(contract_id)
+        registry.mark_implemented(contract_id)

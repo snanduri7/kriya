@@ -12,7 +12,10 @@ from kriya.control.contracts import (
     ContractState,
     ContractStateError,
     compute_shape_hash,
+    contract_records_from_provided_capabilities,
+    mark_capabilities_implemented,
 )
+from kriya.agents.contracts import MilestoneV2, ProvidedCapability
 
 
 def _registry_with_one_contract(consumers=("M2", "M3")):
@@ -205,3 +208,92 @@ def test_to_dict_from_dict_round_trips_full_history_and_state():
     assert reloaded.get("M1:ProtocolClient").state == ContractState.PROPOSED
     assert len(reloaded.history_for("M1:ProtocolClient")) == 2
     assert reloaded.history_for("M1:ProtocolClient")[0].state == ContractState.FROZEN
+
+
+# --- contract_records_from_provided_capabilities / mark_capabilities_implemented (MA5.2/5.7 bridge) ---
+# The "one-way bridge" this module's own docstring promised since MA5.2 but
+# was never built - confirmed dead code (zero callers anywhere) until
+# 2026-08-24, when it was wired into kriya/workflow/milestones.py::run_milestones().
+
+def _milestone(id="M1", provides=None):
+    return MilestoneV2(
+        id=id, goal="build the thing",
+        provides=[ProvidedCapability(**p) for p in (provides or [])],
+    )
+
+
+def test_bridge_registers_one_proposed_record_per_provided_capability():
+    reg = ContractRegistry()
+    m = _milestone(provides=[
+        {"name": "ProtocolCodec", "description": "encode/decode Protocol objects"},
+        {"name": "Logger"},
+    ])
+    records = contract_records_from_provided_capabilities(reg, m)
+
+    assert len(records) == 2
+    codec = reg.get("M1:ProtocolCodec")
+    assert codec.state == ContractState.PROPOSED
+    assert codec.provider_milestone_id == "M1"
+    assert codec.shape == "encode/decode Protocol objects"
+
+    logger_record = reg.get("M1:Logger")
+    assert logger_record.shape == "Logger", "falls back to the capability name when no description is given"
+
+
+def test_bridge_scopes_contract_id_by_milestone_not_just_capability_name():
+    """Two different milestones may declare the same capability name without
+    colliding - reachability between provider/consumer is
+    milestone_validation.py's job, this registry only needs a unique id."""
+    reg = ContractRegistry()
+    contract_records_from_provided_capabilities(reg, _milestone(id="M1", provides=[{"name": "Cache"}]))
+    contract_records_from_provided_capabilities(reg, _milestone(id="M2", provides=[{"name": "Cache"}]))
+
+    assert reg.get("M1:Cache").provider_milestone_id == "M1"
+    assert reg.get("M2:Cache").provider_milestone_id == "M2"
+
+
+def test_bridge_is_idempotent_on_a_resumed_run():
+    """A resumed multi-milestone run re-processing a milestone whose
+    capabilities were already registered on an earlier attempt must not
+    crash (register() raises on a duplicate id)."""
+    reg = ContractRegistry()
+    m = _milestone(provides=[{"name": "Cache"}])
+    first = contract_records_from_provided_capabilities(reg, m)
+    second = contract_records_from_provided_capabilities(reg, m)
+
+    assert first[0].id == second[0].id
+    assert len(reg.history_for("M1:Cache")) == 1, "must not create a second revision, just return the existing one"
+
+
+def test_mark_capabilities_implemented_advances_the_full_lifecycle():
+    reg = ContractRegistry()
+    m = _milestone(provides=[{"name": "Cache"}])
+    contract_records_from_provided_capabilities(reg, m)
+
+    mark_capabilities_implemented(reg, m)
+
+    assert reg.get("M1:Cache").state == ContractState.IMPLEMENTED
+
+
+def test_mark_capabilities_implemented_noops_on_an_unregistered_capability():
+    """A capability that was never registered (e.g. the plan changed shape
+    mid-run) must not raise - this is bookkeeping, never allowed to break a
+    real milestone completion."""
+    reg = ContractRegistry()
+    m = _milestone(provides=[{"name": "NeverRegistered"}])
+    mark_capabilities_implemented(reg, m)  # must not raise
+    assert reg.try_get("M1:NeverRegistered") is None
+
+
+def test_mark_capabilities_implemented_is_idempotent():
+    """A resumed run re-processing an already-IMPLEMENTED milestone must not
+    crash trying to re-transition it (approve()/freeze() raise on the
+    wrong prior state)."""
+    reg = ContractRegistry()
+    m = _milestone(provides=[{"name": "Cache"}])
+    contract_records_from_provided_capabilities(reg, m)
+    mark_capabilities_implemented(reg, m)
+
+    mark_capabilities_implemented(reg, m)  # must not raise
+
+    assert reg.get("M1:Cache").state == ContractState.IMPLEMENTED

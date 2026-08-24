@@ -10,8 +10,11 @@ from kriya.agents.contracts import (
     MilestoneList,
     MilestoneMode,
     MilestoneV2,
+    ProvidedCapability,
     parse_milestone_list,
 )
+from kriya.control.contracts import ContractState
+from kriya.control.persistence import load_contract_registry
 from kriya.workflow.milestones import (
     MilestoneRunState,
     build_integration_goal_text,
@@ -29,15 +32,19 @@ from kriya.workflow.milestones import (
 from kriya.workflow.repository_topology import RepositoryTopology
 
 
-def mkv2(id, goal="g", success_criterion="c", depends_on=None, mode=None, extends=None):
+def mkv2(id, goal="g", success_criterion="c", depends_on=None, mode=None, extends=None, provides=None):
     """MilestoneV2 test helper - `success_criterion` becomes the milestone's
     single acceptance criterion, mirroring how normalize_legacy_milestones()
     (kriya/workflow/milestone_normalization.py) maps a v1 milestone's own
     single success_criterion, so most MA3.6/pre-MA3.7 test bodies below only
-    needed their `Milestone(...)` constructor calls swapped for this one."""
+    needed their `Milestone(...)` constructor calls swapped for this one.
+    `provides`, when given, is a list of {"name": ..., "description": ...}
+    dicts (description optional) - kept as plain dicts here rather than
+    requiring every caller to import ProvidedCapability directly."""
     return MilestoneV2(
         id=id, goal=goal, depends_on=depends_on or [], mode=mode, extends=extends,
         acceptance=[AcceptanceCriterion(id=f"{id}-A1", description=success_criterion)],
+        provides=[ProvidedCapability(**p) for p in (provides or [])],
     )
 
 
@@ -693,6 +700,61 @@ async def test_run_milestones_success_path_through_all_milestones_and_integratio
     assert result["status"] == "success"
     assert we.run_generation_workflow.await_count == 3  # 2 milestones + integration
     assert state.completed_milestone_ids == ["M1", "M2"]
+
+
+@pytest.mark.asyncio
+async def test_run_milestones_registers_and_implements_declared_capabilities():
+    """MA5.2/5.7's ContractRegistry bridge (kriya/control/contracts.py::
+    contract_records_from_provided_capabilities/mark_capabilities_implemented)
+    was genuinely dead code (zero callers anywhere) until wired into this
+    exact real orchestration loop, 2026-08-24. A milestone that declares
+    provides[] must end this run with a real, persisted, IMPLEMENTED
+    ContractRecord - not just a planning-time validation signal that
+    evaporates once the plan is accepted."""
+    milestones = [
+        mkv2("M1", goal="g1", success_criterion="c1", provides=[
+            {"name": "ProtocolCodec", "description": "encode/decode Protocol objects"},
+        ]),
+        mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"], provides=[{"name": "MainEntrypoint"}]),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+        we = MagicMock()
+        we.run_generation_workflow = AsyncMock(
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
+        )
+        we.run_verifier = MagicMock()
+        we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+
+        result = await run_milestones(we, state, tmp)
+
+        assert result["status"] == "success"
+        registry = load_contract_registry(tmp)
+        codec = registry.get("M1:ProtocolCodec")
+        assert codec.state == ContractState.IMPLEMENTED
+        assert codec.shape == "encode/decode Protocol objects"
+        assert registry.get("M2:MainEntrypoint").state == ContractState.IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_run_milestones_capability_stays_proposed_when_its_milestone_fails():
+    """The providing milestone never actually completing must leave its
+    declared capability at PROPOSED, not silently advanced - an honest
+    signal that the capability never became real, distinct from a
+    milestone that simply never declared one at all."""
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1", provides=[{"name": "ProtocolCodec"}])]
+    with tempfile.TemporaryDirectory() as tmp:
+        state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+        we = MagicMock()
+        we.run_generation_workflow = AsyncMock(
+            return_value={"quality_gates_passed": False, "design": "d", "files": []}
+        )
+
+        result = await run_milestones(we, state, tmp)
+
+        assert result["status"] == "milestone_failed"
+        registry = load_contract_registry(tmp)
+        assert registry.get("M1:ProtocolCodec").state == ContractState.PROPOSED
 
 
 @pytest.mark.asyncio

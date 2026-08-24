@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
+from kriya.control.contracts import contract_records_from_provided_capabilities, mark_capabilities_implemented
+from kriya.control.persistence import load_contract_registry, save_contract_registry
 from kriya.workflow.context_projection import (
     project_implementation_source,
     render_established_file_context,  # MA5.8 - moved to context_projection.py, re-exported here for
@@ -628,6 +630,28 @@ async def run_milestones(
     ordered = topological_order(run_state.milestones)
     total = len(ordered)
 
+    # MA5.2/5.7 (kriya/control/contracts.py) - the "one-way bridge" that
+    # module's own docstring promised since MA5.2 but was never built until
+    # 2026-08-24 (confirmed dead code - zero callers anywhere): every
+    # milestone's declared provides[] becomes a real, durable, lifecycle-
+    # tracked ContractRecord (previously this was planning-level intent
+    # only, real for reachability validation at plan-acceptance time via
+    # milestone_validation.py, but never persisted past that point).
+    # Registered PROPOSED for the WHOLE plan up front - matches
+    # ProvidedCapability's own "milestone M1 says it will provide X"
+    # planning-time framing - then advanced to IMPLEMENTED per milestone
+    # as each one genuinely completes, below. Best-effort/non-fatal
+    # throughout: a bookkeeping failure must never break a real milestone
+    # run, matching every other control-plane persistence call site.
+    contract_registry = load_contract_registry(workspace_path)
+    for m in run_state.milestones:
+        if m.provides:
+            contract_records_from_provided_capabilities(contract_registry, m)
+    try:
+        save_contract_registry(workspace_path, contract_registry)
+    except Exception as e:
+        logger.warning(f"Failed to persist ContractRegistry (non-fatal): {e}")
+
     for position, milestone in enumerate(ordered, start=1):
         if milestone.id in run_state.completed_milestone_ids:
             logger.info(f"Milestone '{milestone.id}' ({position}/{total}) already completed (resume) - skipping.")
@@ -677,6 +701,12 @@ async def run_milestones(
                     result["status"] = "dependency_regression"
                     result["dropped_dependencies"] = dropped
                 else:
+                    if milestone.provides:
+                        mark_capabilities_implemented(contract_registry, milestone)
+                        try:
+                            save_contract_registry(workspace_path, contract_registry)
+                        except Exception as e:
+                            logger.warning(f"Failed to persist ContractRegistry (non-fatal): {e}")
                     break
 
             decision = "abandon"
