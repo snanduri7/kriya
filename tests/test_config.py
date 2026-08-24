@@ -35,20 +35,27 @@ def test_routing_enabled_by_default():
     assert load_config().routing.enabled is True
 
 
-def test_workflow_controller_shadow_mode_enabled_by_default():
-    """Locks in the deliberate 2026-08-24 default flip: workflow_controller.
-    enabled is now True (mode stays "shadow") out of the box - was False,
-    meaning MA5/6's ControlState/ContractRegistry/ArtifactRegistry/
-    ContextOrchestrator/DecisionLedger machinery was fully unreachable in
-    any real run (MA7.0's "INERT" finding). Shadow mode is provably
-    non-mutating (hard-stops on any TOOL-tagged subtask, wrapped in a broad
-    try/except - see kriya/workflow/workflow_controller.py), so this is
-    zero-risk to real generation output; mode stays "shadow", not "enforce"
-    - enforce is deliberately still opt-in, validated live on only one
-    project/goal shape so far."""
-    assert AppConfig().workflow_controller.enabled is True
+def test_workflow_controller_stays_disabled_by_default():
+    """TRIED AND REVERTED same day (2026-08-24): enabled=true was briefly
+    the default, reasoned as zero-risk since shadow mode never affects real
+    generation output. That missed a real regression - shadow mode makes
+    its own real Planner/Architect/SubtaskExecutor LLM calls through the
+    real WorkflowEngine, independent of run_generation_workflow(). A common
+    test pattern in this suite (tests/test_file_goal.py and others) mocks
+    ONLY WorkflowEngine.run_generation_workflow, not Kernel/LLMClient -
+    previously sufficient to guarantee zero real network calls end to end.
+    With workflow_controller.enabled=true by default, that same pattern let
+    shadow's own agent calls silently reach a real, unmocked LLMClient,
+    hanging/failing against a live endpoint the test never expected to hit
+    (confirmed live: tests/test_cli_smoke.py and tests/test_file_goal.py
+    both broke/hung). Reverted before ever reaching origin. This test locks
+    the safe default back in - see kriya/config/config.py::
+    WorkflowControllerConfig's own docstring for the full account before
+    trying this again; it needs a real test-suite audit first (every
+    run_generation_workflow-only mock site), not a casual re-flip."""
+    assert AppConfig().workflow_controller.enabled is False
     assert AppConfig().workflow_controller.mode == "shadow"
-    assert load_config().workflow_controller.enabled is True
+    assert load_config().workflow_controller.enabled is False
     assert load_config().workflow_controller.mode == "shadow"
 
 
