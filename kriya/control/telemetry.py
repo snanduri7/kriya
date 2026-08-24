@@ -80,16 +80,26 @@ def record_artifact_drift(ledger: DecisionLedger, result: ArtifactValidationResu
     )
 
 
-def record_context_package_summary(ledger: DecisionLedger, package: ContextPackage) -> Decision:
+def _context_package_summary_fields(package: ContextPackage) -> Dict[str, Any]:
     """"context package size" + "context provenance" together - a
-    per-source_type count breakdown, never any item's real content."""
+    per-source_type count breakdown, never any item's real content.
+    Pure (no ledger side effect) so a caller that wants these fields under
+    a DIFFERENT decision type/with extra tags (e.g. MA6.12's
+    kriya/workflow/subtask_telemetry.py::record_context_package_for_subtask,
+    which adds plan_id/subtask_id) can reuse the exact computation without
+    also recording this module's own "context_package_built" event a
+    second time as a side effect."""
 
     provenance_counts = Counter(item.source_type for item in package.relevant_files)
-    return ledger.record(
-        "context_package_built", package_hash=package.package_hash, token_count=package.token_count,
-        relevant_file_count=len(package.relevant_files), contract_entry_count=len(package.contract_entries),
-        artifact_entry_count=len(package.artifact_entries), provenance_counts=dict(provenance_counts),
-    )
+    return {
+        "package_hash": package.package_hash, "token_count": package.token_count,
+        "relevant_file_count": len(package.relevant_files), "contract_entry_count": len(package.contract_entries),
+        "artifact_entry_count": len(package.artifact_entries), "provenance_counts": dict(provenance_counts),
+    }
+
+
+def record_context_package_summary(ledger: DecisionLedger, package: ContextPackage) -> Decision:
+    return ledger.record("context_package_built", **_context_package_summary_fields(package))
 
 
 def record_omitted_context(ledger: DecisionLedger, package: ContextPackage) -> Decision:
