@@ -26,6 +26,11 @@ def test_failure_to_gate_outcome_shape():
         "attribution_tier": None,
         "attribution_confidence": None,
         "attribution_reasoning": None,
+        "subtask_id": None,
+        "plan_id": None,
+        "milestone_id": None,
+        "planned_files": [],
+        "verification_target": None,
     }
 
 
