@@ -34,8 +34,9 @@ from kriya.workflow.checkpoint import (
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.triage import EngineeringRoute, EngineeringTriageService
 from kriya.workflow.control_context import WorkflowControlContext
+from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
-from kriya.policy.model import ActionRequest, ActionType
+from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 
 from kriya.workflow.worktree import (
     _resolve_repo_head,
@@ -308,6 +309,76 @@ class WorkflowEngine:
                 )
             except Exception as e:
                 logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
+
+    async def _authorize_action(
+        self,
+        request: ActionRequest,
+        *,
+        diffs_to_show: Optional[List[Dict[str, str]]] = None,
+        approval_callback: Optional[Callable[[List[Dict[str, str]], str], Any]] = None,
+        enforce: bool = False,
+    ) -> Optional[PolicyResult]:
+        """MA4.13 - the general-purpose policy consultation helper (design
+        doc's "_authorize_action" / "PolicyDeniedError"), distinct from
+        MA4.9's narrower, single-purpose _audit_approval_rules above.
+
+        `enforce` defaults to False and EVERY real call site in today's
+        codebase calls this with enforce left at its default - identical in
+        effect to every prior MA4.3-4.12 integration: evaluate, log,
+        return, never branch on the result, never raise. MA4.15's config
+        wiring is what will eventually let a real caller pass enforce=True;
+        until then this method's enforce=True branch is real, working code
+        exercised only by this module's own unit tests, not by any live
+        Kriya run - built now, deliberately dormant, so it doesn't need to
+        be invented under pressure once enforcement is actually turned on
+        somewhere.
+
+        When enforce=True: DENY raises PolicyDeniedError immediately (no
+        callback - DENY means no, not "ask a human"). REQUIRE_APPROVAL
+        invokes `approval_callback` using the EXACT shape Kriya's one real
+        approval mechanism already uses everywhere else in this file
+        (`Callable[[List[Dict[str, str]], str], Any]`, awaited only if it
+        returns a coroutine - see run_generation_workflow's own
+        `approved = approval_callback(...); if asyncio.iscoroutine(approved): ...`
+        a few hundred lines below) and raises PolicyDeniedError if not
+        approved or if no callback was supplied at all. ALLOW and
+        ALLOW_SANDBOXED never raise - ALLOW_SANDBOXED's actual sandboxing
+        is ProcessController's job (defense in depth), not this method's.
+
+        A broken/misconfigured policy engine (evaluate() itself raising)
+        never blocks the caller regardless of `enforce` - that failure mode
+        is about this new subsystem being broken, not about a real policy
+        decision, and is logged and treated as "no verdict available"
+        (returns None) rather than either failing open or closed on
+        something that isn't actually a decision."""
+
+        try:
+            result = self.execution_policy.evaluate(request)
+        except Exception as e:
+            logger.debug("MA4.13 _authorize_action: policy evaluation failed (ignored): %s", e)
+            return None
+
+        logger.debug(
+            "MA4 policy authorize (enforce=%s): %s -> %s (%s)",
+            enforce, request.action_type.value, result.decision.value, result.reason_code,
+        )
+
+        if not enforce:
+            return result
+
+        if result.decision == PolicyDecision.DENY:
+            raise PolicyDeniedError(request=request, result=result)
+
+        if result.decision == PolicyDecision.REQUIRE_APPROVAL:
+            if not approval_callback:
+                raise PolicyDeniedError(request=request, result=result)
+            approved = approval_callback(diffs_to_show or [], result.explanation)
+            if asyncio.iscoroutine(approved):
+                approved = await approved
+            if not approved:
+                raise PolicyDeniedError(request=request, result=result)
+
+        return result
 
     async def _approve_web_lookup(
         self, terms: List[str], base_url: str,
@@ -1334,6 +1405,20 @@ class WorkflowEngine:
 
             if new_gaps:
                 logger.info(f"Stage 2A: Detected {len(new_gaps)} new library gaps in architect design.")
+                # MA4.13 - audit-only, does not affect the approval_callback
+                # decision below (never enforce=True). The first real
+                # INSTALL_PACKAGE caller besides validate.py's command-shaped
+                # detection (MA4.7): this seam already knows the package name
+                # directly, so it's constructed here rather than parsed from a
+                # command string via extract_install_package_target.
+                for g in new_gaps:
+                    try:
+                        await self._authorize_action(ActionRequest(
+                            action_type=ActionType.INSTALL_PACKAGE, target=g["library"],
+                            metadata={"version": g["version"], "risk_level": g["risk_level"]},
+                        ))
+                    except Exception as e:
+                        logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
                 desc = "\n".join([
                     (
                         f"- {g['library']} (no specific version mentioned) [Risk: {g['risk_level']}]: {g['reason']}"
