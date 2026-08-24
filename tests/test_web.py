@@ -116,7 +116,14 @@ async def test_fetch_url_text_quiet_on_failure_logs_debug_without_traceback(capl
     alarming to read for something that isn't a bug. quiet_on_failure=True
     (as live_lookup.py now passes) must downgrade this to a single DEBUG
     line with no traceback, not suppress it entirely - still useful for
-    real debugging, just not alarming at a normal log level."""
+    real debugging, just not alarming at a normal log level.
+
+    Scoped to the specific "Failed to fetch..." message (not "however many
+    DEBUG records exist at this logger") since MA4.6 added its own,
+    unrelated audit-only DEBUG line (_audit_network_access) that now also
+    fires on every fetch_url_text call - this test only cares about the
+    quiet-failure downgrade behavior, not the module's total debug-log
+    volume."""
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, text="Forbidden")
 
@@ -135,8 +142,9 @@ async def test_fetch_url_text_quiet_on_failure_logs_debug_without_traceback(capl
 
     assert not any(r.levelno == logging.ERROR for r in caplog.records)
     debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
-    assert len(debug_records) == 1
-    assert debug_records[0].exc_info is None
+    fetch_failure_records = [r for r in debug_records if "Failed to fetch content from URL" in r.getMessage()]
+    assert len(fetch_failure_records) == 1
+    assert fetch_failure_records[0].exc_info is None
 
 @pytest.mark.asyncio
 async def test_fetch_url_text_enforces_byte_cap_while_streaming():

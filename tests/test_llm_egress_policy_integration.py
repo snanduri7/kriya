@@ -97,11 +97,13 @@ async def test_new_policy_path_does_not_swallow_egress_violation_error():
 
 
 @pytest.mark.asyncio
-async def test_audit_call_never_blocks_a_local_call_even_when_policy_denies():
-    """ExecutionPolicy today default-denies LLM_NETWORK_ACCESS entirely
-    (MA4.6's real network rules haven't landed) - a local, otherwise-legal
-    call must still succeed, proving the audit result never gates
-    execution."""
+async def test_local_call_succeeds_and_the_real_audit_signal_now_agrees():
+    """Since MA4.6 filled in ExecutionPolicy's network-egress stage, the
+    REAL (unmocked) audit result for a local LLM endpoint is now ALLOW
+    (LOCAL_LLM_ENDPOINT_ALLOWED) - but that result is still never what
+    authorizes this call; kriya/core/llm.py's own is_local_url check is.
+    See the forced-DENY variant below for proof the audit result still
+    can't gate execution either way."""
     cfg = AppConfig()
     cfg.autonomy.egress_policy = "local_only"
     cfg.llm.base_url = "http://localhost:11434/v1"
@@ -110,7 +112,26 @@ async def test_audit_call_never_blocks_a_local_call_even_when_policy_denies():
     real_result = llm.execution_policy.evaluate(
         ActionRequest(action_type=ActionType.LLM_NETWORK_ACCESS, network_target=cfg.llm.base_url)
     )
-    assert real_result.decision == PolicyDecision.DENY  # confirms today's real audit signal
+    assert real_result.decision == PolicyDecision.ALLOW
+    assert real_result.reason_code == "LOCAL_LLM_ENDPOINT_ALLOWED"
+
+    mock_create = AsyncMock(return_value=_mock_response())
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        result = await llm.complete("system", "user")
+    assert result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_audit_call_never_blocks_a_local_call_even_when_forced_to_deny():
+    cfg = AppConfig()
+    cfg.autonomy.egress_policy = "local_only"
+    cfg.llm.base_url = "http://localhost:11434/v1"
+    llm = LLMClient(cfg)
+    llm.execution_policy.evaluate = MagicMock(return_value=PolicyResult(
+        decision=PolicyDecision.DENY,
+        reason_code="TEST_FORCED_DENY",
+        explanation="simulated",
+    ))
 
     mock_create = AsyncMock(return_value=_mock_response())
     with patch.object(llm.client.chat.completions, "create", new=mock_create):

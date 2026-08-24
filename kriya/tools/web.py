@@ -6,7 +6,46 @@ from urllib.parse import urlparse
 
 import httpx
 
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType
+
 logger = logging.getLogger(__name__)
+
+# MA4.6 (control-plane implementation plan) - audit-only, module-level since
+# this file has no class/instance to hold it (same pattern as
+# kriya/workflow/edit_safety.py's MA4.5 integration). See _audit_network_access.
+_execution_policy = ExecutionPolicy()
+
+
+def _audit_network_access(url: str) -> None:
+    """MA4.6 - audit-only ExecutionPolicy consultation, mirroring
+    kriya/core/llm.py's _audit_llm_network_access (MA4.3), kriya/tools/
+    validate.py's _audit_run_command (MA4.4), and kriya/workflow/
+    edit_safety.py's _audit_write_file (MA4.5) exactly: can never affect
+    whether fetch_url_text actually fetches `url` - any exception raised
+    here is caught and logged, never propagated, and the decision is only
+    logged, never branched on. This file's own _is_safe_external_url SSRF
+    guard (below) remains the sole real enforcement for this call site,
+    completely untouched by this integration - see kriya/policy/__init__.py's
+    own "policy decides, existing mechanisms enforce" principle.
+
+    Honest note on today's real audit signal: fetch_url_text() only ever
+    targets genuinely external URLs by design (that's the whole point of
+    _is_safe_external_url), so kriya/policy/execution.py's MA4.6
+    local/private-target ALLOW rule essentially never applies here - expect
+    NETWORK_TARGET_DENIED on every real call, since no public-lookup
+    allowlist config exists yet (MA4.15). Expected for audit mode, not a
+    bug."""
+    try:
+        result = _execution_policy.evaluate(
+            ActionRequest(action_type=ActionType.NETWORK_ACCESS, network_target=url)
+        )
+        logger.debug(
+            "MA4 policy audit (not enforced): NETWORK_ACCESS '%s' -> %s (%s)",
+            url, result.decision.value, result.reason_code,
+        )
+    except Exception as e:
+        logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
 # The URL fetch_url_text() fetches always comes from an untrusted external
 # source (a live web-search result via search_web(), or a redirect target
@@ -79,6 +118,7 @@ async def fetch_url_text(url: str, quiet_on_failure: bool = False) -> str:
     regardless, alarming to read for something that isn't a problem. Default
     False (unchanged behavior for every existing caller) - only
     live_lookup.py's candidate loop opts in."""
+    _audit_network_access(url)
     if not _is_safe_external_url(url):
         raise ValueError(f"Refusing to fetch '{url}': not a safe external http(s) URL.")
     try:

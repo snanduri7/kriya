@@ -89,12 +89,12 @@ def test_well_formed_consequential_actions_default_deny_until_their_stage_lands(
     logic (kriya/policy/execution.py's _check_command_allowlist), so a
     well-formed RUN_COMMAND request never reaches this backstop anymore -
     see tests/test_policy_command_allowlist.py for its own DENY (and
-    ALLOW_SANDBOXED/REQUIRE_APPROVAL) coverage."""
+    ALLOW_SANDBOXED/REQUIRE_APPROVAL) coverage. NETWORK_ACCESS and
+    LLM_NETWORK_ACCESS are excluded for the same reason: MA4.6 gave them
+    real stage-4 logic - see tests/test_policy_network_egress.py."""
     policy = ExecutionPolicy()
     cases = [
         ActionRequest(action_type=ActionType.WRITE_FILE, target="src/main.py"),
-        ActionRequest(action_type=ActionType.NETWORK_ACCESS, network_target="example.com"),
-        ActionRequest(action_type=ActionType.LLM_NETWORK_ACCESS, network_target="localhost"),
         ActionRequest(action_type=ActionType.INSTALL_PACKAGE, target="left-pad"),
         ActionRequest(action_type=ActionType.GIT_WRITE, command=("git", "commit")),
         ActionRequest(action_type=ActionType.PUBLISH_ARTIFACT, target="my-artifact"),

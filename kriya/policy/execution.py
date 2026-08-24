@@ -11,14 +11,18 @@ so each lands as a pure addition to an already-tested pipeline rather than a
 rewrite of it. MA4.4 filled in stage 6 (command allowlist, RUN_COMMAND
 only). MA4.5 filled in stage 2 (filesystem, READ_FILE/WRITE_FILE only -
 sensitive-path denial always, workspace-containment ALLOW/DENY when a
-workspace_path is supplied). Stages 3, 4, 5, 7 (git-destructive,
-network/egress, package/supply-chain, risk/profile approval) remain stubs,
-owned by MA4.6 through MA4.9 respectively.
+workspace_path is supplied). MA4.6 filled in stage 4 (network/egress,
+NETWORK_ACCESS/LLM_NETWORK_ACCESS only - local/private target ALLOW, every
+non-local target an explicit, specific DENY since no public-lookup
+allowlist config exists yet). Stages 3, 5, 7 (git-destructive,
+package/supply-chain, risk/profile approval) remain stubs, owned by MA4.7
+through MA4.9 respectively.
 
 MA4.4 gave ExecutionPolicy its first real caller (kriya/tools/validate.py's
 PolymorphicValidator, before every ProcessController.run()); MA4.5 added a
-second, kriya/workflow/edit_safety.py's atomic_write_file - both audit-only:
-logged, never gating, exactly like kriya/core/llm.py's MA4.3 integration.
+second (kriya/workflow/edit_safety.py's atomic_write_file); MA4.6 added a
+third (kriya/tools/web.py's fetch_url_text) - all audit-only: logged, never
+gating, exactly like kriya/core/llm.py's MA4.3 integration.
 This module itself still takes no config (constructor takes no arguments;
 config wiring is MA4.15's job, added additively, not as a signature change -
 the same "additive, not a signature change" precedent kriya/workflow/
@@ -245,12 +249,71 @@ class ExecutionPolicy:
         return None
 
     def _check_network_egress(self, request: ActionRequest) -> Optional[PolicyResult]:
-        """MA4.6 - not yet implemented. Note this stage governs the
-        DECISION layer only; kriya/core/llm.py's is_local_url/
-        EgressViolationError enforcement (MA4.3) is a separate, independent
-        hard boundary that this stage's future rules can never substitute
-        for - see kriya/policy/__init__.py."""
-        return None
+        """MA4.6 - governs NETWORK_ACCESS and LLM_NETWORK_ACCESS only. Note
+        this stage governs the DECISION layer only; kriya/core/llm.py's
+        is_local_url/EgressViolationError enforcement (MA4.3) is a separate,
+        independent hard boundary this stage's rules can never substitute
+        for - see kriya/policy/__init__.py. This is why the local/non-local
+        check below deliberately reuses kriya.core.llm.is_local_url itself
+        (a deferred import - kriya/core/llm.py imports this module at
+        module level, so importing it back at module level here would be
+        circular; a function-local import is safe since by the time this
+        method is ever CALLED, both modules are already fully loaded) rather
+        than a second, independently-written local/private-address check
+        that could quietly drift from the real enforcement boundary's own
+        definition of "local" and produce misleading audit telemetry.
+
+        No config exists yet (MA4.15's job) to distinguish "known public
+        registry/lookup" from "arbitrary URL" (section 22) for plain
+        NETWORK_ACCESS, so - matching section 12's "never silently default
+        to ALLOW" - only a local/private target gets a real ALLOW here;
+        every non-local NETWORK_ACCESS or LLM_NETWORK_ACCESS gets an
+        explicit, specific DENY (not a fall-through to the generic
+        backstop) so the audit log at least shows WHICH stage denied it."""
+        if request.action_type not in (ActionType.NETWORK_ACCESS, ActionType.LLM_NETWORK_ACCESS):
+            return None
+        if not request.network_target:
+            return None
+
+        from kriya.core.llm import is_local_url
+
+        target_is_local = is_local_url(request.network_target)
+
+        if request.action_type == ActionType.LLM_NETWORK_ACCESS:
+            if target_is_local:
+                return PolicyResult(
+                    decision=PolicyDecision.ALLOW,
+                    reason_code="LOCAL_LLM_ENDPOINT_ALLOWED",
+                    explanation=f"'{request.network_target}' resolves to a local/private address.",
+                    matched_rule="network_egress.local_llm_endpoint_allowed",
+                )
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="NETWORK_TARGET_DENIED",
+                explanation=(
+                    f"'{request.network_target}' is not a local/private address; non-local LLM "
+                    "endpoints are denied by this stage (kriya/core/llm.py's own egress check is "
+                    "the real, independent enforcement boundary regardless of this decision)."
+                ),
+                matched_rule="network_egress.non_local_llm_denied",
+            )
+
+        if target_is_local:
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="LOCAL_NETWORK_TARGET_ALLOWED",
+                explanation=f"'{request.network_target}' resolves to a local/private address.",
+                matched_rule="network_egress.local_network_target_allowed",
+            )
+        return PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="NETWORK_TARGET_DENIED",
+            explanation=(
+                f"'{request.network_target}' is not a local/private address, and no config-driven "
+                "public-lookup allowlist exists yet (MA4.15) to authorize it."
+            ),
+            matched_rule="network_egress.non_local_network_target_denied",
+        )
 
     def _check_package_supply_chain(self, request: ActionRequest) -> Optional[PolicyResult]:
         """MA4.7 - not yet implemented."""
