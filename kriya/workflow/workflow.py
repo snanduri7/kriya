@@ -19,6 +19,7 @@ from kriya.agents.agent import (
     SkillGapAgent,
     SpecComplianceAgent,
 )
+from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -1289,6 +1290,25 @@ class WorkflowEngine:
                 stream_callback=plan_stream
             )
             _save_stage_checkpoint("plan", plan=plan)
+
+            # MA6.3 Stage A - parse only, never act on the result yet (MA6
+            # spec section 40: "do not jump directly to Stage C with a
+            # local model"). Kriya still executes off the prose `plan`
+            # above unchanged; this purely observes whether/how well the
+            # model followed PlannerAgent's new structured-JSON instruction,
+            # so that signal exists before any later stage starts relying
+            # on it. A missing/malformed block is expected and unlogged at
+            # warning level - see parse_planner_structured_output's own
+            # "never raises, always degrades cleanly" contract.
+            _structured_plan, _structured_plan_issue = parse_planner_structured_output(plan)
+            if _structured_plan is not None:
+                logger.info(
+                    f"Planner structured plan (Stage A, observed only): "
+                    f"{len(_structured_plan.subtasks)} subtask(s), "
+                    f"{len(_structured_plan.acceptance_criteria)} acceptance criteria."
+                )
+            else:
+                logger.debug(f"Planner structured plan (Stage A) not available: {_structured_plan_issue}")
 
         # SME review finding 1 (2026-08-15): PlannerAgent had zero output-
         # sanity check of any kind, unlike ArchitectAgent.run_with_file_list()

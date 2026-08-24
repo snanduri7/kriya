@@ -375,7 +375,22 @@ class PlannerAgent(BaseAgent):
             "directly contradicting the goal's own explicit constraint. If the goal states a specific "
             "entry-point class name or says logic must live in a single class, that constraint applies to "
             "the WHOLE implementation, not just part of it - do not let a goal's own multi-part "
-            "description (e.g. numbered layers/phases) suggest a multi-module answer on its own."
+            "description (e.g. numbered layers/phases) suggest a multi-module answer on its own.\n"
+            "\n"
+            "After your Markdown plan, ALSO include a fenced ```json code block (the LAST thing in your "
+            "response) with this exact shape - a structured breakdown of your plan into independent "
+            "subtasks, used for tooling, in ADDITION TO (never instead of) the Markdown plan above:\n"
+            '{"subtasks": [{"id": "s1", "description": "...", "execution_method": "model", '
+            '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete"}], '
+            '"acceptance_criteria_ids": ["ac1"]}], '
+            '"acceptance_criteria": [{"id": "ac1", "description": "...", "method": "judgment"}], '
+            '"extension_points": [], "refactor_baseline": null}\n'
+            "Each subtask is either execution_method \"model\" (normal code generation - never set "
+            "tool_name/tool_arguments) or \"tool\" (a deterministic check like a test/lint run - must set "
+            "tool_name; only use \"tool\" for a check you are certain is a real, already-registered tool, "
+            "never invent one). depends_on lists other subtask ids that must complete first. If you "
+            "cannot confidently produce this breakdown, still include your best-effort attempt rather "
+            "than omitting the block."
         )
 
 

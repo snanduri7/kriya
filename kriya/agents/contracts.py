@@ -31,6 +31,7 @@ from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from kriya.workflow.plan_schema import PlannerStructuredOutput
 from kriya.workflow.triage import ChangeKind
 
 logger = logging.getLogger(__name__)
@@ -440,3 +441,31 @@ def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
     except ValidationError as e:
         return None, f"file-list JSON block failed schema validation: {e}"
     return _normalize_file_list_paths(files), None
+
+
+def parse_planner_structured_output(text: str) -> Tuple[Optional[PlannerStructuredOutput], Optional[str]]:
+    """MA6.3 Stage A extraction for PlannerAgent's trailing structured-plan
+    JSON block (kriya/workflow/plan_schema.py::PlannerStructuredOutput).
+    Mirrors parse_file_list's own contract exactly - never raises, returns
+    (None, reason) on any failure so a caller degrades cleanly to "keep
+    using the prose plan as-is," identical to every other extraction step
+    in this module. Stage A callers are expected to only LOG/telemetry
+    this result, never branch execution on it - see this module's own
+    docstring on PlannerStructuredOutput for why."""
+    if not text or not text.strip():
+        return None, "text is empty"
+
+    candidates = _FENCED_JSON_BLOCK.findall(text)
+    if not candidates:
+        return None, "no structured plan JSON block found in the text"
+
+    try:
+        parsed = json.loads(candidates[-1])
+    except json.JSONDecodeError as e:
+        return None, f"structured plan JSON block did not parse: {e}"
+
+    try:
+        output = PlannerStructuredOutput.model_validate(parsed)
+    except ValidationError as e:
+        return None, f"structured plan JSON block failed schema validation: {e}"
+    return output, None

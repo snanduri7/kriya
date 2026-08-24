@@ -229,3 +229,48 @@ class EngineeringPlan(BaseModel):
         change is meant to produce a different hash."""
         blob = json.dumps(self.model_dump(mode="json"), sort_keys=True, default=str)
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+class PlannerStructuredOutput(BaseModel):
+    """MA6.3 Stage A - the JSON block PlannerAgent (kriya/agents/agent.py)
+    is asked to emit ALONGSIDE its existing prose plan, extracted by
+    kriya.agents.contracts.parse_planner_structured_output(). Deliberately
+    narrower than EngineeringPlan itself: plan_id (generated per run) and
+    kind (already deterministically classified by EngineeringTriageService,
+    kriya/workflow/triage.py - never re-asked of the model, the same
+    "never asked of a model" discipline triage.py's own ImpactVector
+    already follows) are supplied by the CALLER, via
+    build_engineering_plan_from_planner_output() below, not requested
+    here.
+
+    Stage A only PARSES this - Kriya still executes off the existing prose
+    plan path (MA6 spec section 40: "do not jump directly to Stage C with
+    a local model"). A malformed or missing structured block must never
+    break generation; every extraction failure degrades to "no structured
+    plan available," identical to today's prose-only behavior - see
+    parse_planner_structured_output's own contract."""
+
+    subtasks: List[Subtask] = Field(default_factory=list)
+    acceptance_criteria: List[AcceptanceCriterion] = Field(default_factory=list)
+    extension_points: List[str] = Field(default_factory=list)
+    refactor_baseline: Optional[str] = None
+
+
+def build_engineering_plan_from_planner_output(
+    output: PlannerStructuredOutput, *, plan_id: str, kind: ChangeKind
+) -> Optional[EngineeringPlan]:
+    """None (never raises) when output.subtasks is empty - EngineeringPlan
+    requires at least one subtask; a Stage A response with zero subtasks
+    (a model that only produced prose, or an empty/degenerate JSON block)
+    simply has no structured plan to build yet, the same "degrade, don't
+    break" contract as every extraction step in this pipeline. The result,
+    even when non-None, is NOT execution-authorized - still must pass
+    through plan_validation.validate_plan() (MA6.2) before anything acts
+    on it, same as any other EngineeringPlan."""
+    if not output.subtasks:
+        return None
+    return EngineeringPlan(
+        plan_id=plan_id, kind=kind, subtasks=output.subtasks,
+        acceptance_criteria=output.acceptance_criteria, extension_points=output.extension_points,
+        refactor_baseline=output.refactor_baseline,
+    )
