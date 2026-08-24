@@ -100,3 +100,43 @@ class WorkflowResult:
     route: Any
     legacy_result: Optional[Dict[str, Any]] = None
     subtask_results: Tuple[SubtaskResult, ...] = ()
+
+
+class VerificationVerdict(str, Enum):
+    """PASS only when every check that could be evaluated passed AND
+    nothing was left unresolved. A JUDGMENT criterion with no independent
+    grader is UNRESOLVED, not passed - MA6.11's own rule (MA6 spec):
+    "the Implementer must never self-grade it." NEEDS_REVIEW is what an
+    unresolved check (missing tool result, or any judgment criterion)
+    produces; FAIL is reserved for something that was actually checked and
+    came back negative."""
+
+    PASS = "pass"
+    FAIL = "fail"
+    NEEDS_REVIEW = "needs_review"
+
+
+@dataclass(frozen=True)
+class VerificationCheck:
+    """One AcceptanceCriterion's (plan_schema.py) resolved status.
+    `passed=None` means unresolved (no grader ran, or it was a judgment
+    criterion with no independent grading) - never treated the same as
+    `passed=False`; see VerificationVerdict's own docstring."""
+
+    criterion_id: str
+    method_type: str
+    description: str
+    passed: Optional[bool]
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class VerificationReport:
+    """kriya/workflow/verification_report.py::build_verification_report()
+    is the one real constructor - initially just WRAPS existing Kriya
+    verification results (the Quality Gates loop's own pass/fail, tool
+    results a caller already ran), never replaces or re-implements them."""
+
+    checks: Tuple[VerificationCheck, ...] = ()
+    failures: Tuple[str, ...] = ()
+    verdict: VerificationVerdict = VerificationVerdict.NEEDS_REVIEW
