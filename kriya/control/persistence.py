@@ -27,6 +27,7 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry
 from kriya.control.state import ControlState
 from kriya.policy.filesystem import AuthorizedFileWriter
@@ -117,3 +118,18 @@ def load_contract_registry(workspace_path: str) -> ContractRegistry:
     except Exception:
         logger.warning("Failed to reconstruct ContractRegistry from %s - starting empty", contract_registry_path(workspace_path), exc_info=True)
         return ContractRegistry()
+
+
+def save_artifact_registry(workspace_path: str, registry: ArtifactRegistry) -> None:
+    _save_json_document(workspace_path, artifact_registry_path(workspace_path), registry.to_dict())
+
+
+def load_artifact_registry(workspace_path: str) -> ArtifactRegistry:
+    data = _load_json_document(artifact_registry_path(workspace_path))
+    if data is None:
+        return ArtifactRegistry()
+    try:
+        return ArtifactRegistry.from_dict(data)
+    except Exception:
+        logger.warning("Failed to reconstruct ArtifactRegistry from %s - starting empty", artifact_registry_path(workspace_path), exc_info=True)
+        return ArtifactRegistry()
