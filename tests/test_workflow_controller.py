@@ -1,6 +1,12 @@
-"""MA6.8/6.9/6.10/6.13/6.14: WorkflowController (kriya/workflow/workflow_controller.py) -
+"""MA6.8/6.9/6.10/6.13/6.14/MA7.2: WorkflowController (kriya/workflow/workflow_controller.py) -
 first real pytest coverage for this module (previously only ad hoc-verified,
-never as a permanent regression test)."""
+never as a permanent regression test).
+
+Every test uses `tmp_path` (a real, isolated directory) rather than a bare
+string like "/tmp/proj" - execute() now really writes to
+<workspace_path>/.kriya/control/state.json (MA7.2's save_control_state),
+so a fake, nonexistent workspace_path would leave real, uncleaned files
+under a shared /tmp/proj on the machine running these tests."""
 
 import subprocess
 import tempfile
@@ -10,17 +16,23 @@ import pytest
 
 from kriya.workflow.plan_schema import AcceptanceCriterion, EngineeringPlan, ExecutionMethod, Subtask
 from kriya.workflow.plan_validation import PlanValidationResult
-from kriya.workflow.triage import ChangeKind, ExecutionWeight, RiskClass
+from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import WorkflowController, WorkflowControllerConfigurationError
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
 
 
 def _route(kind=ChangeKind.TASK):
-    route = MagicMock()
-    route.kind = kind
-    route.execution_weight = ExecutionWeight.LIGHT
-    route.max_observed_risk_class = RiskClass.LOW
-    return route
+    """A real EngineeringRoute, not a MagicMock - MA7.2's save_control_state
+    really JSON-serializes ControlState.engineering_route.to_dict(), which a
+    MagicMock can't do (json.dumps fails on the mock object it returns).
+    Using a real, minimal route here also exercises real
+    process_profile_for()/execute()'s downstream code paths instead of
+    special-casing mocked attribute lookups."""
+    return EngineeringRoute(
+        kind=kind, impact=ImpactVector(),
+        initial_risk_class=RiskClass.LOW, current_risk_class=RiskClass.LOW, max_observed_risk_class=RiskClass.LOW,
+        execution_weight=ExecutionWeight.LIGHT,
+    )
 
 
 def _workflow_engine(route=None, legacy_result=None):
@@ -33,27 +45,27 @@ def _workflow_engine(route=None, legacy_result=None):
 # --- migration_mode validation ---
 
 @pytest.mark.asyncio
-async def test_enforce_migration_mode_is_rejected():
+async def test_enforce_migration_mode_is_rejected(tmp_path):
     controller = WorkflowController(_workflow_engine())
     with pytest.raises(WorkflowControllerConfigurationError, match="not safe yet"):
-        await controller.execute("goal", "/tmp/proj", migration_mode="enforce")
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
 
 
 @pytest.mark.asyncio
-async def test_unknown_migration_mode_is_rejected():
+async def test_unknown_migration_mode_is_rejected(tmp_path):
     controller = WorkflowController(_workflow_engine())
     with pytest.raises(WorkflowControllerConfigurationError):
-        await controller.execute("goal", "/tmp/proj", migration_mode="bogus")
+        await controller.execute("goal", str(tmp_path), migration_mode="bogus")
 
 
 # --- legacy mode: zero-overhead passthrough, shadow fields stay empty ---
 
 @pytest.mark.asyncio
-async def test_legacy_mode_never_touches_the_shadow_path():
+async def test_legacy_mode_never_touches_the_shadow_path(tmp_path):
     we = _workflow_engine(legacy_result={"status": "success", "run_id": "r1"})
     controller = WorkflowController(we)
 
-    result = await controller.execute("goal", "/tmp/proj", migration_mode="legacy")
+    result = await controller.execute("goal", str(tmp_path), migration_mode="legacy")
 
     assert result.legacy_result == {"status": "success", "run_id": "r1"}
     assert result.subtask_results == ()
@@ -63,29 +75,62 @@ async def test_legacy_mode_never_touches_the_shadow_path():
 
 
 @pytest.mark.asyncio
-async def test_legacy_mode_forwards_legacy_kwargs_unchanged():
+async def test_legacy_mode_forwards_legacy_kwargs_unchanged(tmp_path):
     we = _workflow_engine()
     controller = WorkflowController(we)
     approval_cb = MagicMock()
 
-    await controller.execute("goal", "/tmp/proj", migration_mode="legacy", approval_callback=approval_cb, resume=True)
+    await controller.execute(
+        "goal", str(tmp_path), migration_mode="legacy", approval_callback=approval_cb, resume=True,
+    )
 
     we.run_generation_workflow.assert_awaited_once_with(
-        "goal", "/tmp/proj",
+        "goal", str(tmp_path),
         milestone_group_id=None, milestone_index=None, milestone_total=None,
         approval_callback=approval_cb, resume=True,
     )
 
 
+# --- MA7.2: ControlState is now persisted ---
+
+@pytest.mark.asyncio
+async def test_execute_persists_control_state_to_disk(tmp_path):
+    we = _workflow_engine()
+    controller = WorkflowController(we)
+
+    result = await controller.execute("goal", str(tmp_path), migration_mode="legacy")
+
+    state_file = tmp_path / ".kriya" / "control" / "state.json"
+    assert state_file.is_file()
+    import json
+    saved = json.loads(state_file.read_text())
+    assert saved["run_id"] == result.run_id
+
+
+@pytest.mark.asyncio
+async def test_control_state_persist_failure_is_non_fatal(tmp_path, monkeypatch):
+    we = _workflow_engine(legacy_result={"status": "success", "run_id": "r1"})
+    controller = WorkflowController(we)
+
+    def boom(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("kriya.workflow.workflow_controller.save_control_state", boom)
+
+    result = await controller.execute("goal", str(tmp_path), migration_mode="legacy")
+
+    assert result.legacy_result == {"status": "success", "run_id": "r1"}
+
+
 # --- per-kind control-plane bookkeeping (MA6.9) ---
 
 @pytest.mark.asyncio
-async def test_milestone_kind_attaches_milestone_metadata():
+async def test_milestone_kind_attaches_milestone_metadata(tmp_path):
     we = _workflow_engine(route=_route(kind=ChangeKind.MILESTONE))
     controller = WorkflowController(we)
 
     result = await controller.execute(
-        "goal", "/tmp/proj", migration_mode="legacy", milestone_group_id="grp1", milestone_index=2,
+        "goal", str(tmp_path), migration_mode="legacy", milestone_group_id="grp1", milestone_index=2,
     )
 
     assert result.control_state.milestone_group_id == "grp1"
@@ -93,11 +138,11 @@ async def test_milestone_kind_attaches_milestone_metadata():
 
 
 @pytest.mark.asyncio
-async def test_milestone_kind_with_no_group_id_leaves_state_unchanged():
+async def test_milestone_kind_with_no_group_id_leaves_state_unchanged(tmp_path):
     we = _workflow_engine(route=_route(kind=ChangeKind.MILESTONE))
     controller = WorkflowController(we)
 
-    result = await controller.execute("goal", "/tmp/proj", migration_mode="legacy")
+    result = await controller.execute("goal", str(tmp_path), migration_mode="legacy")
 
     assert result.control_state.milestone_group_id is None
 
@@ -123,11 +168,11 @@ async def test_refactor_kind_attaches_real_git_baseline():
 
 
 @pytest.mark.asyncio
-async def test_task_kind_gets_no_extra_bookkeeping():
+async def test_task_kind_gets_no_extra_bookkeeping(tmp_path):
     we = _workflow_engine(route=_route(kind=ChangeKind.TASK))
     controller = WorkflowController(we)
 
-    result = await controller.execute("goal", "/tmp/proj", migration_mode="legacy")
+    result = await controller.execute("goal", str(tmp_path), migration_mode="legacy")
 
     assert result.control_state.milestone_group_id is None
     assert result.control_state.base_commit is None
@@ -144,7 +189,7 @@ def _shadow_plan():
 
 
 @pytest.mark.asyncio
-async def test_shadow_mode_still_returns_the_real_legacy_result_unchanged():
+async def test_shadow_mode_still_returns_the_real_legacy_result_unchanged(tmp_path):
     we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
     we.planner.run = AsyncMock(return_value="fake plan text")
     we.kernel = None
@@ -157,7 +202,7 @@ async def test_shadow_mode_still_returns_the_real_legacy_result_unchanged():
          patch("kriya.workflow.workflow_controller.subtask_executor.execute", new=AsyncMock(return_value=fake_result)):
 
         controller = WorkflowController(we)
-        result = await controller.execute("goal", "/tmp/proj", migration_mode="shadow")
+        result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
 
     # the real outcome is exactly what the legacy call produced, regardless
     # of what the shadow run did
@@ -166,7 +211,7 @@ async def test_shadow_mode_still_returns_the_real_legacy_result_unchanged():
 
 
 @pytest.mark.asyncio
-async def test_shadow_mode_populates_subtask_results_decisions_and_verification_report():
+async def test_shadow_mode_populates_subtask_results_decisions_and_verification_report(tmp_path):
     we = _workflow_engine()
     we.planner.run = AsyncMock(return_value="fake plan text")
     we.kernel = None
@@ -179,7 +224,7 @@ async def test_shadow_mode_populates_subtask_results_decisions_and_verification_
          patch("kriya.workflow.workflow_controller.subtask_executor.execute", new=AsyncMock(return_value=fake_result)):
 
         controller = WorkflowController(we)
-        result = await controller.execute("goal", "/tmp/proj", migration_mode="shadow")
+        result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
 
     assert len(result.subtask_results) == 1
     assert result.subtask_results[0].subtask_id == "s1"
@@ -191,7 +236,7 @@ async def test_shadow_mode_populates_subtask_results_decisions_and_verification_
 
 
 @pytest.mark.asyncio
-async def test_shadow_mode_records_undeclared_file_touch_decision():
+async def test_shadow_mode_records_undeclared_file_touch_decision(tmp_path):
     we = _workflow_engine()
     we.planner.run = AsyncMock(return_value="fake plan text")
     we.kernel = None
@@ -206,19 +251,19 @@ async def test_shadow_mode_records_undeclared_file_touch_decision():
          patch("kriya.workflow.workflow_controller.subtask_executor.execute", new=AsyncMock(return_value=fake_result)):
 
         controller = WorkflowController(we)
-        result = await controller.execute("goal", "/tmp/proj", migration_mode="shadow")
+        result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
 
     assert "subtask_undeclared_file_touch" in [d.type for d in result.decisions]
 
 
 @pytest.mark.asyncio
-async def test_shadow_mode_no_structured_plan_leaves_shadow_fields_empty_but_legacy_still_runs():
+async def test_shadow_mode_no_structured_plan_leaves_shadow_fields_empty_but_legacy_still_runs(tmp_path):
     we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
     we.planner.run = AsyncMock(return_value="prose plan, no JSON block")
 
     with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(None, "no fenced JSON block found")):
         controller = WorkflowController(we)
-        result = await controller.execute("goal", "/tmp/proj", migration_mode="shadow")
+        result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
 
     assert result.subtask_results == ()
     assert result.decisions == ()
@@ -227,7 +272,7 @@ async def test_shadow_mode_no_structured_plan_leaves_shadow_fields_empty_but_leg
 
 
 @pytest.mark.asyncio
-async def test_shadow_mode_plan_validation_failure_still_lets_legacy_run():
+async def test_shadow_mode_plan_validation_failure_still_lets_legacy_run(tmp_path):
     we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
     we.planner.run = AsyncMock(return_value="fake plan text")
     we.kernel = None
@@ -237,7 +282,7 @@ async def test_shadow_mode_plan_validation_failure_still_lets_legacy_run():
          patch("kriya.workflow.workflow_controller.validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=False, errors=["bad plan"]))):
 
         controller = WorkflowController(we)
-        result = await controller.execute("goal", "/tmp/proj", migration_mode="shadow")
+        result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
 
     assert result.subtask_results == ()
     assert result.verification_report is None
@@ -245,14 +290,117 @@ async def test_shadow_mode_plan_validation_failure_still_lets_legacy_run():
 
 
 @pytest.mark.asyncio
-async def test_shadow_mode_exception_is_swallowed_and_never_fails_the_real_run():
+async def test_shadow_mode_exception_is_swallowed_and_never_fails_the_real_run(tmp_path):
     we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
     we.planner.run = AsyncMock(side_effect=RuntimeError("planner exploded"))
 
     controller = WorkflowController(we)
-    result = await controller.execute("goal", "/tmp/proj", migration_mode="shadow")
+    result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
 
     assert result.legacy_result == {"status": "success", "run_id": "legacy-run"}
     assert result.subtask_results == ()
     assert result.decisions == ()
     assert result.verification_report is None
+
+
+# --- MA7.2: ContextOrchestrator + ContractRegistry/ArtifactRegistry wiring ---
+
+@pytest.mark.asyncio
+async def test_shadow_context_includes_real_on_disk_planned_file_content(tmp_path):
+    (tmp_path / "a.py").write_text("print('hello')")
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="edit a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[{"path": "a.py", "action": "modify"}],
+        )],
+    )
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value="fake plan text")
+    we.kernel = None
+    we.developer = MagicMock()
+    we.developer.run_generation = AsyncMock(return_value=[])
+
+    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(MagicMock(), None)), \
+         patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output", return_value=plan), \
+         patch("kriya.workflow.workflow_controller.validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))):
+
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="shadow")
+
+    # real DeveloperAgent.run_generation was called (not the fully-mocked
+    # subtask_executor.execute this time) - confirms _build_context handed
+    # it real design_context containing a.py's actual on-disk content
+    _, kwargs = we.developer.run_generation.call_args
+    assert "print('hello')" in kwargs["design_context"]
+
+
+@pytest.mark.asyncio
+async def test_shadow_context_surfaces_persisted_contract_and_artifact_entries(tmp_path):
+    from kriya.control.contracts import ContractRegistry
+    from kriya.control.artifacts import ArtifactRecord, ArtifactRegistry
+    from kriya.control.persistence import save_artifact_registry, save_contract_registry
+
+    contracts = ContractRegistry()
+    contracts.register(
+        contract_id="c1", name="Widget", provider_milestone_id="m1",
+        shape={"kind": "interface", "name": "Widget"},
+    )
+    save_contract_registry(str(tmp_path), contracts)
+
+    artifacts = ArtifactRegistry()
+    artifacts.record(ArtifactRecord(
+        milestone_id="m1", ecosystem="python", kind="library",
+        coordinates={"name": "mypkg", "version": "1.0"},
+    ))
+    save_artifact_registry(str(tmp_path), artifacts)
+
+    plan = _shadow_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value="fake plan text")
+    we.kernel = None
+    we.developer = MagicMock()
+    fake_result = SubtaskResult(subtask_id="s1", status=SubtaskStatus.COMPLETED, execution_method="model")
+
+    captured_context = {}
+
+    async def spy_execute(*, subtask, plan, context, **kwargs):
+        captured_context["package"] = context
+        return fake_result
+
+    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(MagicMock(), None)), \
+         patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output", return_value=plan), \
+         patch("kriya.workflow.workflow_controller.validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))), \
+         patch("kriya.workflow.workflow_controller.subtask_executor.execute", new=AsyncMock(side_effect=spy_execute)):
+
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="shadow")
+
+    package = captured_context["package"]
+    assert len(package.contract_entries) == 1
+    assert package.contract_entries[0]["id"] == "c1"
+    assert len(package.artifact_entries) == 1
+    assert package.artifact_entries[0]["coordinates"] == {"name": "mypkg", "version": "1.0"}
+
+
+@pytest.mark.asyncio
+async def test_shadow_context_empty_registries_are_honest_not_an_error(tmp_path):
+    """No .kriya/control/ store exists at all for this workspace - real,
+    common case (nothing registered yet), not a failure."""
+    plan = _shadow_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value="fake plan text")
+    we.kernel = None
+    we.developer = MagicMock()
+    fake_result = SubtaskResult(subtask_id="s1", status=SubtaskStatus.COMPLETED, execution_method="model")
+
+    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(MagicMock(), None)), \
+         patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output", return_value=plan), \
+         patch("kriya.workflow.workflow_controller.validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))), \
+         patch("kriya.workflow.workflow_controller.subtask_executor.execute", new=AsyncMock(return_value=fake_result)):
+
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
+
+    # ran cleanly through to completion despite empty registries
+    assert result.subtask_results[0].status == SubtaskStatus.COMPLETED

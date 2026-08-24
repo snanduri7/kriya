@@ -19,10 +19,12 @@ MA6.10/6.13's remaining, real scope in this slice: `migration_mode="shadow"`
 builds an actual EngineeringPlan (Planner -> parse_planner_structured_output,
 MA6.3) validates it (plan_validation.validate_plan, MA6.2) and, if valid,
 runs EVERY subtask through the real SubtaskExecutor (MA6.5) against a
-deliberately minimal, on-disk-only ContextPackage (NOT the full
-ContextOrchestrator/Graph RAG retrieval MA5.7 already does for the legacy
-path - that integration is real scope MA6.10 does not attempt in this
-slice). Critically: this NEVER replaces or influences the real outcome -
+ContextPackage assembled through the real ContextOrchestrator (MA5.7,
+wired in MA7.2 - see _build_context) PLUS real on-disk content of the
+plan's own planned files. Still NOT the hybrid vector/graph retrieval the
+legacy path's Graph RAG stage does - _build_context's own docstring
+explains why that stays out of scope here. Critically: this NEVER
+replaces or influences the real outcome -
 _run_legacy_generation still runs unconditionally and its result is what
 WorkflowResult.legacy_result reports. Why the new path can't safely own
 the real outcome yet: SubtaskExecutor stops at "get file content or a
@@ -58,10 +60,21 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import parse_planner_structured_output
 from kriya.control.decisions import Decision, DecisionLedger
+from kriya.control.persistence import (
+    load_artifact_registry,
+    load_contract_registry,
+    save_control_state,
+)
 from kriya.control.state import ControlState
 from kriya.workflow import subtask_executor
 from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash, new_run_id
-from kriya.workflow.context_package import ContextPackage, build_context_package, make_context_item
+from kriya.workflow.context_orchestrator import ContextOrchestrator
+from kriya.workflow.context_package import (
+    ContextPackage,
+    artifact_entry_from_record,
+    contract_entry_from_record,
+    make_context_item,
+)
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.plan_schema import EngineeringPlan, build_engineering_plan_from_planner_output
 from kriya.workflow.plan_validation import validate_plan
@@ -144,7 +157,7 @@ class WorkflowController:
         if migration_mode == "shadow":
             try:
                 plan, subtask_results, decisions, verification_report, notes = await self._run_structured_shadow(
-                    goal, workspace_path, route, run_id,
+                    goal, workspace_path, route, run_id, control_context, control_state,
                 )
                 if plan is not None:
                     control_state = control_state.with_updates(current_plan_hash=plan.content_hash())
@@ -180,6 +193,19 @@ class WorkflowController:
             milestone_total=milestone_total, **legacy_kwargs,
         )
 
+        # MA7.2: ControlState is now durable, not just an in-memory return
+        # value - a caller of THIS run can load it back
+        # (kriya.control.persistence.load_control_state) after the process
+        # exits. Written last, with every bookkeeping update (milestone/
+        # refactor baseline, shadow's current_plan_hash) already folded in,
+        # so a partial/interrupted run never persists a half-updated state.
+        # Best-effort: a write failure here must not fail a real generation
+        # run that otherwise succeeded.
+        try:
+            save_control_state(workspace_path, control_state)
+        except Exception as e:
+            logger.warning(f"WorkflowController run {run_id!r}: failed to persist ControlState (non-fatal): {e}")
+
         return WorkflowResult(
             run_id=run_id, control_state=control_state, route=route,
             legacy_result=legacy_result, subtask_results=subtask_results,
@@ -207,6 +233,7 @@ class WorkflowController:
 
     async def _run_structured_shadow(
         self, goal: str, workspace_path: str, route: Any, run_id: str,
+        control_context: WorkflowControlContext, control_state: ControlState,
     ) -> Tuple[
         Optional[EngineeringPlan], Tuple[SubtaskResult, ...],
         Tuple[Decision, ...], Optional[VerificationReport], List[str],
@@ -218,8 +245,19 @@ class WorkflowController:
         RAG/skills/conventions-assembled plan_prompt run_generation_workflow()
         builds internally - a real, honestly-tracked gap (not silently
         pretended away) between what this shadow path sees and what the
-        legacy path actually sees; closing it means integrating
-        ContextOrchestrator (MA5.7) here, out of scope for this slice.
+        legacy path actually sees. MA7.2 wires ContextOrchestrator (MA5.7)
+        itself in (see _build_context below), but NOT the Graph RAG
+        retrieval that feeds its raw_rag_context parameter in the legacy
+        path - ContextOrchestrator's own docstring is explicit that
+        retrieval is out of its reuse boundary (it composes ALREADY-
+        RETRIEVED content, never re-implements the retrieval itself), and
+        duplicating workflow.py's deeply embedded Graph RAG stage here
+        would violate MA5's "preserve current execution core" constraint.
+        So this shadow path's context is real strategy selection + real
+        contract/artifact entries + real on-disk content of planned files,
+        still without the hybrid vector/graph retrieval the legacy path's
+        Developer actually sees - a narrower, honestly-labeled slice, not a
+        parity claim.
 
         MA7.1: also drives subtask_telemetry (MA6.12) and
         build_verification_report (MA6.11) - both existed as pure,
@@ -229,9 +267,12 @@ class WorkflowController:
         beyond WorkflowController's own lack of a caller). The returned
         DecisionLedger is in-memory only here - persisting it to
         .kriya/control/decisions.jsonl is left to a future increment once
-        this path is more than observational, same reasoning as
-        ControlState/ContractRegistry/ArtifactRegistry not being persisted
-        from here either. The VerificationReport is necessarily
+        this path is more than observational (execute(), not this method,
+        now persists ControlState itself - MA7.2 - but ContractRegistry/
+        ArtifactRegistry are only READ here via _build_context, never
+        written back: this path never derives new contracts/artifacts from
+        the workspace or records changes to them, only surfaces whatever
+        was already persisted by something else). The VerificationReport is necessarily
         UNRESOLVED-heavy in shadow mode: SubtaskExecutor never runs real
         compile/test/tool verification (see this module's own docstring),
         so build_verification_report is called with no tool_results/
@@ -269,7 +310,7 @@ class WorkflowController:
             notes.append(f"plan failed validation: {validation.errors}")
             return plan, (), ledger.all(), None, notes
 
-        context = self._build_minimal_context(plan, workspace_path)
+        context = await self._build_context(goal, plan, workspace_path, route, control_context, control_state)
 
         results: List[SubtaskResult] = []
         for subtask_id in topological_subtask_order(plan):
@@ -293,14 +334,49 @@ class WorkflowController:
         report = build_verification_report(plan.acceptance_criteria)
         return plan, tuple(results), ledger.all(), report, notes
 
-    def _build_minimal_context(self, plan: EngineeringPlan, workspace_path: str) -> ContextPackage:
-        """Deliberately MINIMAL: reads each planned file's CURRENT on-disk
-        content directly - no Graph RAG/vector retrieval/dependency-graph
-        expansion (ContextOrchestrator, MA5.7). Real enough to let a
-        MODEL-tagged subtask see existing content for files it modifies;
-        narrower than what run_generation_workflow's own context assembly
-        actually retrieves, which is exactly why this path stays
-        shadow-only rather than becoming the source of truth."""
+    async def _build_context(
+        self, goal: str, plan: EngineeringPlan, workspace_path: str, route: Any,
+        control_context: WorkflowControlContext, control_state: ControlState,
+    ) -> ContextPackage:
+        """MA7.2: routes through the real ContextOrchestrator (MA5.7) for
+        strategy selection, token-budget-aware assembly, and real
+        contract_entries/artifact_entries (loaded from whatever
+        ContractRegistry/ArtifactRegistry already have persisted for this
+        workspace - kriya/control/persistence.py, empty registries are a
+        legitimate, honest result for a workspace with no prior milestone
+        history, not an error). `milestone=None`: WorkflowController does
+        not receive a real MilestoneV2 object today, only bare
+        milestone_group_id/milestone_index identifiers (MA6.9) - passing
+        None here rather than fabricating one is the same "don't guess"
+        discipline as raw_rag_context=None below.
+
+        What ContextOrchestrator.build() does NOT give this path: the
+        actual current-on-disk content of files the plan's subtasks will
+        touch - its own reuse boundary only accepts already-assembled
+        `established_file_context` (labeled, by that parameter's real
+        semantics, as content from an EARLIER COMPLETED MILESTONE) or an
+        opaque `raw_rag_context` blob. Neither is an honest label for "this
+        subtask's own planned file, read fresh off disk right now" -
+        mislabeling it as established_file_context would corrupt exactly
+        the kind of real provenance this whole control-plane initiative
+        exists to guarantee (kriya/workflow/context_package.py's own
+        CONTEXT_SOURCE_TYPES docstring). So that content is still read
+        directly here, with the SAME correct
+        source_type="named_in_request" labeling the pre-MA7.2 version of
+        this method already used, and layered on top of
+        ContextOrchestrator's own package via with_changes() rather than
+        threaded through build() under a false pretense."""
+        contract_registry = load_contract_registry(workspace_path)
+        artifact_registry = load_artifact_registry(workspace_path)
+        contract_entries = tuple(contract_entry_from_record(r) for r in contract_registry.all_records())
+        artifact_entries = tuple(artifact_entry_from_record(r) for r in artifact_registry.all_records())
+
+        base_package = await ContextOrchestrator().build(
+            request=goal, route=route, profile=control_context.process_profile,
+            workspace_path=workspace_path, milestone=None, control_state=control_state,
+            contract_entries=contract_entries, artifact_entries=artifact_entries,
+        )
+
         items = []
         seen = set()
         for subtask in plan.subtasks:
@@ -321,7 +397,8 @@ class WorkflowController:
                     path=pf.path, content=content, reason="planned file, current on-disk content",
                     source_type="named_in_request", trust_level="repository",
                 ))
-        return build_context_package(relevant_files=tuple(items))
+
+        return base_package.with_changes(relevant_files=base_package.relevant_files + tuple(items))
 
     async def _run_legacy_generation(self, goal: str, workspace_path: str, **legacy_kwargs: Any) -> Dict[str, Any]:
         """MA6.10's LegacyGenerationAdapter, in its very first, unmodified
