@@ -94,11 +94,14 @@ def test_well_formed_consequential_actions_default_deny_until_their_stage_lands(
     real stage-4 logic - see tests/test_policy_network_egress.py.
     INSTALL_PACKAGE is excluded for the same reason: MA4.7 gave it real
     stage-5 logic (REQUIRE_APPROVAL/DENY, never the generic backstop) - see
-    tests/test_policy_package_supply_chain.py."""
+    tests/test_policy_package_supply_chain.py. GIT_WRITE is excluded for the
+    same reason: MA4.8 gave it real stage-3 logic - see
+    tests/test_policy_git_destructive.py. PUBLISH_ARTIFACT has no owning
+    stage yet (MA5's ArtifactRegistry territory) and legitimately still
+    reaches this backstop."""
     policy = ExecutionPolicy()
     cases = [
         ActionRequest(action_type=ActionType.WRITE_FILE, target="src/main.py"),
-        ActionRequest(action_type=ActionType.GIT_WRITE, command=("git", "commit")),
         ActionRequest(action_type=ActionType.PUBLISH_ARTIFACT, target="my-artifact"),
     ]
     for request in cases:

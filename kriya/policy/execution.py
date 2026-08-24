@@ -16,9 +16,13 @@ NETWORK_ACCESS/LLM_NETWORK_ACCESS only - local/private target ALLOW, every
 non-local target an explicit, specific DENY since no public-lookup
 allowlist config exists yet). MA4.7 filled in stage 5 (package/supply-chain,
 INSTALL_PACKAGE only - a URL/SCP-shaped source denies outright, everything
-else well-formed requires approval, never a bare ALLOW). Stages 3 and 7
-(git-destructive, risk/profile approval) remain stubs, owned by MA4.8 and
-MA4.9 respectively.
+else well-formed requires approval, never a bare ALLOW). MA4.8 filled in
+stage 3 (git-destructive, GIT_WRITE only - force-push and protected-ref
+deletion hard-deny, config/remote mutation hard-deny, an ordinary push
+weighted LIGHT allows (matching today's actual unrestricted behavior,
+since Kriya never pushes on its own) while STANDARD/HEAVY or unknown weight
+requires approval, everything else requires approval). Stage 7 (risk/
+profile approval) remains a stub, owned by MA4.9.
 
 MA4.4 gave ExecutionPolicy its first real caller (kriya/tools/validate.py's
 PolymorphicValidator, before every ProcessController.run() - MA4.7 reuses
@@ -26,8 +30,11 @@ this SAME call site, issuing a second, INSTALL_PACKAGE-classified audit
 request alongside the existing RUN_COMMAND one whenever the real command
 looks like a package install); MA4.5 added a second real caller
 (kriya/workflow/edit_safety.py's atomic_write_file); MA4.6 added a third
-(kriya/tools/web.py's fetch_url_text) - all audit-only: logged, never
-gating, exactly like kriya/core/llm.py's MA4.3 integration.
+(kriya/tools/web.py's fetch_url_text); MA4.8 added a fourth
+(kriya/workflow/worktree.py's create_git_worktree - the ONE real GIT_WRITE
+Kriya's pipeline performs today, an empty bootstrap commit for a
+zero-commit repo) - all audit-only: logged, never gating, exactly like
+kriya/core/llm.py's MA4.3 integration.
 This module itself still takes no config (constructor takes no arguments;
 config wiring is MA4.15's job, added additively, not as a signature change -
 the same "additive, not a signature change" precedent kriya/workflow/
@@ -40,6 +47,7 @@ import re
 from typing import Optional, Tuple
 
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.workflow.triage import ExecutionWeight
 
 # MA4.4 - deliberately small starter allowlist (design doc section 18: "start
 # small... do not try to support every shell command in MA4"). Matched by
@@ -204,6 +212,37 @@ def _normalize_path(path: str) -> str:
     return os.path.abspath(os.path.expanduser(path))
 
 
+# MA4.8 - git-write classification, all effect-based (section 31: "requires
+# effect-based protection rather than matching only one command spelling"),
+# never a single literal string match.
+_GIT_FORCE_PUSH_FLAGS = frozenset({"--force", "-f"})
+_GIT_DELETE_FLAGS = frozenset({"--delete", "-d", "-D"})
+# Deliberately small and generic (not read from this repo's own real branch
+# name, which this stage has no way to know) - "start small" per MA4.4's own
+# precedent; a real project's actual default branch is config territory
+# (MA4.15), not something this stage can discover on its own.
+_GIT_PROTECTED_REFS = frozenset({"main", "master"})
+_GIT_MUTATING_REMOTE_VERBS = frozenset({"set-url", "remove", "rm", "add", "rename", "set-head"})
+
+
+def _git_subcommand_and_args(command: Tuple[str, ...]) -> Tuple[Optional[str], Tuple[str, ...]]:
+    args = list(command)
+    if args and os.path.basename(args[0]) == "git":
+        args = args[1:]
+    if not args:
+        return None, ()
+    return args[0], tuple(args[1:])
+
+
+def _is_force_push(rest: Tuple[str, ...]) -> bool:
+    return any(a in _GIT_FORCE_PUSH_FLAGS or a.startswith("--force-with-lease") for a in rest)
+
+
+def _targets_protected_ref(rest: Tuple[str, ...]) -> bool:
+    positional = [a for a in rest if not a.startswith("-")]
+    return any(a in _GIT_PROTECTED_REFS for a in positional)
+
+
 _REQUIRED_FIELDS_BY_ACTION_TYPE = {
     ActionType.READ_FILE: ("target",),
     ActionType.WRITE_FILE: ("target",),
@@ -305,10 +344,103 @@ class ExecutionPolicy:
         )
 
     def _check_git_destructive(self, request: ActionRequest) -> Optional[PolicyResult]:
-        """MA4.8 - not yet implemented. See _check_filesystem's docstring;
-        the same "honest no-op, not a placeholder decision" reasoning
-        applies to every stubbed stage in this class."""
-        return None
+        """MA4.8 - governs GIT_WRITE only (GIT_READ default-allows at MA4.2's
+        own backstop, untouched here). Every rule reasons from parsed
+        command shape/effect (section 31), never a single literal spelling:
+        a force-push denies via ANY of --force/-f/--force-with-lease(=...),
+        not just one exact flag string; a branch/ref deletion denies only
+        when the ref being deleted is a recognized protected name, not
+        merely because -D was used.
+
+        `git push` gets its own weight-sensitive rule (section 33): LIGHT
+        allows (today's actual behavior is unrestricted, since Kriya never
+        pushes on its own - see kriya/workflow/worktree.py's own MA4.8
+        integration note for the one real GIT_WRITE call site that exists);
+        STANDARD/HEAVY, or no route to weigh at all, requires approval.
+        `git config` and a mutating `git remote` verb (set-url/remove/rm/
+        add/rename/set-head - section 30's "remote modification"/"git
+        config mutation") hard-deny unconditionally, no approval path, per
+        section 32. Everything else well-formed GIT_WRITE (an ordinary
+        commit, tag, merge, non-force push already handled above, a
+        non-protected branch delete) requires approval - never a bare
+        ALLOW, mirroring MA4.7's INSTALL_PACKAGE precedent."""
+        if request.action_type != ActionType.GIT_WRITE or not request.command:
+            return None
+
+        subcommand, rest = _git_subcommand_and_args(request.command)
+        if subcommand is None:
+            return None
+
+        if subcommand == "push":
+            if _is_force_push(rest):
+                return PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="GIT_FORCE_PUSH_DENIED",
+                    explanation="Force-push variants are denied unconditionally.",
+                    matched_rule="git_destructive.force_push_denied",
+                )
+            if any(f in _GIT_DELETE_FLAGS for f in rest) and _targets_protected_ref(rest):
+                return PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="PROTECTED_REF_MUTATION_DENIED",
+                    explanation="Deleting a protected ref via push is denied unconditionally.",
+                    matched_rule="git_destructive.protected_ref_push_delete_denied",
+                )
+            weight = request.engineering_route.execution_weight if request.engineering_route else None
+            if weight == ExecutionWeight.LIGHT:
+                return PolicyResult(
+                    decision=PolicyDecision.ALLOW,
+                    reason_code="GIT_PUSH_ALLOWED_LIGHT",
+                    explanation="Ordinary push under a LIGHT execution weight matches today's unrestricted behavior.",
+                    matched_rule="git_destructive.push_allowed_light",
+                )
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="GIT_PUSH_REQUIRES_APPROVAL",
+                explanation="Push requires approval outside a LIGHT execution weight (or with no route to weigh).",
+                matched_rule="git_destructive.push_requires_approval",
+                requires_approval=True,
+            )
+
+        if subcommand == "branch" and any(f in _GIT_DELETE_FLAGS for f in rest):
+            if _targets_protected_ref(rest):
+                return PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="PROTECTED_REF_MUTATION_DENIED",
+                    explanation="Deleting a protected branch is denied unconditionally.",
+                    matched_rule="git_destructive.protected_branch_delete_denied",
+                )
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="GIT_WRITE_REQUIRES_APPROVAL",
+                explanation="Deleting a non-protected branch requires approval.",
+                matched_rule="git_destructive.branch_delete_requires_approval",
+                requires_approval=True,
+            )
+
+        if subcommand == "config":
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="GIT_CONFIG_MUTATION_DENIED",
+                explanation="git config mutation is denied unconditionally.",
+                matched_rule="git_destructive.config_mutation_denied",
+            )
+
+        if subcommand == "remote" and rest and rest[0] in _GIT_MUTATING_REMOTE_VERBS:
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="GIT_REMOTE_MUTATION_DENIED",
+                explanation=f"'git remote {rest[0]}' is denied unconditionally.",
+                matched_rule="git_destructive.remote_mutation_denied",
+            )
+
+        return PolicyResult(
+            decision=PolicyDecision.REQUIRE_APPROVAL,
+            reason_code="GIT_WRITE_REQUIRES_APPROVAL",
+            explanation=f"'git {subcommand}' is a write operation and requires approval.",
+            matched_rule="git_destructive.ordinary_write_requires_approval",
+            requires_approval=True,
+        )
 
     def _check_network_egress(self, request: ActionRequest) -> Optional[PolicyResult]:
         """MA4.6 - governs NETWORK_ACCESS and LLM_NETWORK_ACCESS only. Note

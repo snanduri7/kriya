@@ -12,7 +12,49 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType
+
 logger = logging.getLogger(__name__)
+
+# MA4.8 (control-plane implementation plan) - audit-only, module-level since
+# this file has no class/instance to hold it (same pattern as
+# kriya/workflow/edit_safety.py's MA4.5 integration and kriya/tools/web.py's
+# MA4.6 one). See _audit_git_write below.
+_execution_policy = ExecutionPolicy()
+
+
+def _audit_git_write(command: List[str], workspace_path: str) -> None:
+    """MA4.8 - audit-only ExecutionPolicy consultation, mirroring
+    kriya/core/llm.py's _audit_llm_network_access (MA4.3), kriya/tools/
+    validate.py's _audit_run_command (MA4.4/4.7), kriya/workflow/
+    edit_safety.py's _audit_write_file (MA4.5), and kriya/tools/web.py's
+    _audit_network_access (MA4.6) exactly: can never affect whether the
+    real git command actually runs - any exception raised here is caught
+    and logged, never propagated, and the decision is only logged, never
+    branched on.
+
+    This is the ONE real GIT_WRITE call this file (or anywhere else in
+    Kriya's pipeline - confirmed via a full-codebase grep before
+    implementing MA4.8) performs today: create_git_worktree's own
+    `git commit --allow-empty` bootstrap for a zero-commit repo, below.
+    Real audit signal: this specific invocation falls through
+    kriya/policy/execution.py's _check_git_destructive to its ordinary-write
+    GIT_WRITE_REQUIRES_APPROVAL backstop - expected, not a bug; MA4 doesn't
+    special-case this call as an ALLOW, since --allow-empty alone doesn't
+    guarantee the commit is actually content-free (it only means git won't
+    REFUSE an empty commit, not that one was staged) - see this stage's own
+    docstring for why that's deliberately not treated as a safe bypass."""
+    try:
+        result = _execution_policy.evaluate(
+            ActionRequest(action_type=ActionType.GIT_WRITE, command=tuple(command), workspace_path=workspace_path)
+        )
+        logger.debug(
+            "MA4 policy audit (not enforced): GIT_WRITE '%s' -> %s (%s)",
+            " ".join(command), result.decision.value, result.reason_code,
+        )
+    except Exception as e:
+        logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
 
 def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) -> None:
@@ -122,8 +164,12 @@ def create_git_worktree(repo_path: str) -> str:
     # real content the target repo already has.
     if _resolve_repo_head(repo_path) is None:
         try:
+            bootstrap_commit_command = [
+                "git", "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation",
+            ]
+            _audit_git_write(bootstrap_commit_command, repo_path)
             subprocess.run(
-                ["git", "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation"],
+                bootstrap_commit_command,
                 cwd=repo_path, check=True, capture_output=True,
             )
         except Exception as e:
