@@ -21,8 +21,15 @@ stage 3 (git-destructive, GIT_WRITE only - force-push and protected-ref
 deletion hard-deny, config/remote mutation hard-deny, an ordinary push
 weighted LIGHT allows (matching today's actual unrestricted behavior,
 since Kriya never pushes on its own) while STANDARD/HEAVY or unknown weight
-requires approval, everything else requires approval). Stage 7 (risk/
-profile approval) remains a stub, owned by MA4.9.
+requires approval, everything else requires approval). MA4.9 filled in
+stage 7 (risk/profile approval - trusts request.process_profile.
+human_review_required and request.engineering_route.max_observed_risk_class
+exactly as given, never reads config itself; only ever ADDS an approval
+requirement on top of whatever the backstop would otherwise decide, never
+grants a bare ALLOW). Every stage now has real logic - MA4.10 onward
+(trust model, approved sources, injection detection, failure mapping,
+telemetry, enforcement-mode validation) build on top of this engine rather
+than filling in more of it.
 
 MA4.4 gave ExecutionPolicy its first real caller (kriya/tools/validate.py's
 PolymorphicValidator, before every ProcessController.run() - MA4.7 reuses
@@ -33,8 +40,12 @@ looks like a package install); MA4.5 added a second real caller
 (kriya/tools/web.py's fetch_url_text); MA4.8 added a fourth
 (kriya/workflow/worktree.py's create_git_worktree - the ONE real GIT_WRITE
 Kriya's pipeline performs today, an empty bootstrap commit for a
-zero-commit repo) - all audit-only: logged, never gating, exactly like
-kriya/core/llm.py's MA4.3 integration.
+zero-commit repo); MA4.9 added a fifth (kriya/workflow/workflow.py's own
+existing MA2 approval-gate computation, the one real place
+WorkflowControlContext - pairing a real EngineeringRoute with its resolved
+ProcessProfile - is already in scope, so stage 7 has real, non-None input
+to reason about for at least one caller) - all audit-only: logged, never
+gating, exactly like kriya/core/llm.py's MA4.3 integration.
 This module itself still takes no config (constructor takes no arguments;
 config wiring is MA4.15's job, added additively, not as a signature change -
 the same "additive, not a signature change" precedent kriya/workflow/
@@ -47,7 +58,7 @@ import re
 from typing import Optional, Tuple
 
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
-from kriya.workflow.triage import ExecutionWeight
+from kriya.workflow.triage import ExecutionWeight, RiskClass
 
 # MA4.4 - deliberately small starter allowlist (design doc section 18: "start
 # small... do not try to support every shell command in MA4"). Matched by
@@ -592,7 +603,51 @@ class ExecutionPolicy:
         )
 
     def _check_approval_rules(self, request: ActionRequest) -> Optional[PolicyResult]:
-        """MA4.9 - not yet implemented."""
+        """MA4.9 - preserves MA2's STANDARD/HEAVY approval-requirement rule
+        (design doc section 35) as a policy-level decision, WITHOUT any
+        config dependency of its own: this stage trusts
+        request.process_profile.human_review_required and
+        request.engineering_route.max_observed_risk_class exactly as given,
+        the same way stages 2-6 already trust request.workspace_path/
+        network_target/command/etc. Whether to actually POPULATE those two
+        fields for a real call is the CALLER's responsibility (and, for a
+        real production caller, itself requires
+        process_profiles.enabled/enforce_approval per MA2's own config
+        gating - kriya/workflow/workflow.py's process_profile_requires_review
+        computation) - this stage has and needs no config of its own.
+
+        Only ever ADDS an approval requirement, never grants a bare ALLOW -
+        a LIGHT profile (human_review_required=False) and a non-HIGH risk
+        class simply return None here (no opinion), falling through to
+        whatever stage 8's backstop would have decided anyway. Since stage
+        6 already owns RUN_COMMAND unconditionally and stages 2/4/5/3
+        already own their own action types before this stage ever runs
+        (section 11's fixed order), this stage's real effect today is
+        narrow - a WRITE_FILE request that reached here without a
+        workspace_path, or a PUBLISH_ARTIFACT request - but is real and
+        directly testable against the ACTUAL ProcessProfile objects MA2
+        already uses (LIGHT_PROFILE/STANDARD_PROFILE/HEAVY_PROFILE), not a
+        hand-rolled stand-in, per section 35's "only remove duplicate logic
+        after tests prove parity" migration note."""
+        if request.process_profile is not None and request.process_profile.human_review_required:
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="PROCESS_PROFILE_REQUIRES_APPROVAL",
+                explanation="The resolved ProcessProfile for this request marks human_review_required=True.",
+                matched_rule="approval_rules.process_profile_requires_approval",
+                requires_approval=True,
+            )
+        if (
+            request.engineering_route is not None
+            and request.engineering_route.max_observed_risk_class == RiskClass.HIGH
+        ):
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="HIGH_RISK_REQUIRES_APPROVAL",
+                explanation="The request's EngineeringRoute has observed HIGH risk at some point this run.",
+                matched_rule="approval_rules.high_risk_requires_approval",
+                requires_approval=True,
+            )
         return None
 
     def _default_policy(self, request: ActionRequest) -> PolicyResult:

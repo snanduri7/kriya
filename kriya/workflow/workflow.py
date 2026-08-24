@@ -34,6 +34,8 @@ from kriya.workflow.checkpoint import (
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.triage import EngineeringRoute, EngineeringTriageService
 from kriya.workflow.control_context import WorkflowControlContext
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType
 
 from kriya.workflow.worktree import (
     _resolve_repo_head,
@@ -253,6 +255,59 @@ class WorkflowEngine:
         # (kriya/config/config.py::EngineeringTriageConfig) until MA2 lets its
         # result start influencing anything.
         self.engineering_triage = EngineeringTriageService(kernel=kernel)
+        # MA4.9 (control-plane implementation plan) - audit-only. See
+        # _audit_approval_rules below; never consulted for enforcement.
+        self.execution_policy = ExecutionPolicy()
+
+    def _audit_approval_rules(
+        self, files_written: Iterable[str], workspace_path: str,
+        control: Optional[WorkflowControlContext],
+    ) -> None:
+        """MA4.9 - audit-only ExecutionPolicy consultation, mirroring every
+        prior MA4 integration exactly: can never affect the real
+        need_human_approval decision computed right after this call (MA2's
+        own logic, completely untouched) - any exception raised here is
+        caught and logged, never propagated, and the decision is only
+        logged, never branched on.
+
+        This is the one real call site where a WorkflowControlContext
+        (pairing a real EngineeringRoute with its resolved ProcessProfile)
+        is already in scope, so kriya/policy/execution.py's stage 7
+        (_check_approval_rules) has real, non-None input to reason about -
+        every other real MA4 caller (validate.py, edit_safety.py, web.py,
+        worktree.py) constructs an ActionRequest with no engineering_route/
+        process_profile at all, so stage 7 is structurally inert for them.
+
+        Deliberately does NOT pass workspace_path on this ActionRequest,
+        even though it's available - stage 2 (_check_filesystem, MA4.5)
+        runs BEFORE stage 7 in the fixed order and would immediately ALLOW
+        any in-workspace WRITE_FILE via workspace-containment, starving
+        stage 7 of ever actually running for this call. Filesystem-
+        containment auditing is already covered independently at MA4.5's
+        own real call site (edit_safety.py's atomic_write_file); this call
+        exists specifically to give stage 7 real signal, not to duplicate
+        stage 2's.
+
+        One representative WRITE_FILE request per file actually written
+        this attempt (not the whole batch collapsed into one call) - keeps
+        the audit signal attributable per file, mirroring how MA2's own
+        sensitive-path check above already loops `state.all_files_written`
+        the same way."""
+        if control is None:
+            return
+        for filepath in files_written:
+            try:
+                full_path = os.path.join(workspace_path, filepath)
+                result = self.execution_policy.evaluate(ActionRequest(
+                    action_type=ActionType.WRITE_FILE, target=full_path,
+                    engineering_route=control.engineering_route, process_profile=control.process_profile,
+                ))
+                logger.debug(
+                    "MA4 policy audit (not enforced): WRITE_FILE (approval-rules pass) '%s' -> %s (%s)",
+                    filepath, result.decision.value, result.reason_code,
+                )
+            except Exception as e:
+                logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
     async def _approve_web_lookup(
         self, terms: List[str], base_url: str,
@@ -1727,6 +1782,9 @@ class WorkflowEngine:
                 # triage.enabled may be False, or MA1.3/MA2.4's classification may
                 # have failed and been caught/logged) - either gate missing means
                 # this new clause contributes nothing, same as before MA2.5 existed.
+                # MA4.9 - audit-only, does not affect need_human_approval below.
+                self._audit_approval_rules(state.all_files_written, workspace_path, control)
+
                 process_profiles_cfg = self.kernel.config.process_profiles
                 process_profile_requires_review = bool(
                     process_profiles_cfg.enabled
