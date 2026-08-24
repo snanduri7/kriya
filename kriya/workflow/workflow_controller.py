@@ -148,8 +148,22 @@ class WorkflowController:
                 )
                 if plan is not None:
                     control_state = control_state.with_updates(current_plan_hash=plan.content_hash())
+                # Always logged, even with zero notes - a clean run (every
+                # subtask COMPLETED, nothing to flag) is real, useful
+                # evidence the shadow path executed at all, not an absence
+                # of output. Discovered via live validation (MA7.1): the
+                # previous `if notes:` gate meant a fully successful shadow
+                # run left NO trace anywhere - the only way to confirm it
+                # happened was inferring it from LLM call timing in the raw
+                # log, which is not something a real operator should have
+                # to do.
+                summary = (
+                    f"plan={plan.plan_id if plan else None} subtasks={len(subtask_results)} "
+                    f"decisions={len(decisions)} verdict={verification_report.verdict.value if verification_report else None}"
+                )
                 if notes:
-                    logger.info(f"WorkflowController shadow run {run_id!r}: {'; '.join(notes)}")
+                    summary += f" notes={'; '.join(notes)}"
+                logger.info(f"WorkflowController shadow run {run_id!r}: {summary}")
             except Exception as e:
                 # The shadow path is strictly observational - see this
                 # module's own docstring. A bug in Stage A parsing, plan
