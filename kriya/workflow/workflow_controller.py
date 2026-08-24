@@ -130,6 +130,31 @@ class WorkflowControllerConfigurationError(ValueError):
     pass
 
 
+class _StructuredPlanUnavailable(Exception):
+    """MA7.8, fixed 2026-08-24 after a real live-validation finding: raised
+    ONLY by _run_structured_enforce's pre-execution steps (Stage A parse,
+    zero-subtask output, a TOOL-tagged subtask, plan validation) - every
+    one of those happens BEFORE any subtask has actually run, so zero real
+    side effects exist yet. execute() catches this specifically and falls
+    back to the legacy whole-goal path, restoring PlannerStructuredOutput's
+    own original design contract (kriya/workflow/plan_schema.py's own
+    docstring: "a malformed or missing structured block must never break
+    generation; every extraction failure degrades to 'no structured plan
+    available,' identical to today's prose-only behavior") - a contract
+    the very first version of enforce mode violated: a single malformed
+    subtask in an otherwise-fine Stage A JSON block (confirmed live,
+    2026-08-24, protocol_encoder_java: a subtask claimed
+    execution_method=tool with no tool_name, failing pydantic validation)
+    made the WHOLE run produce zero files, even though the SAME goal would
+    almost certainly have succeeded via the ordinary prose-based Planner/
+    Architect/Developer path. Once the per-subtask loop has actually
+    started (even one real run_generation_workflow() call has happened),
+    a failure is NOT this exception - it's a genuine outcome that must
+    stay a clean failure result, never silently retried via a different
+    execution model that could double-generate or conflict with whatever
+    was already applied to the real workspace."""
+
+
 def build_subtask_goal_text(subtask: Subtask, position: int, total: int) -> str:
     """MA7.8 - the per-subtask analogue of kriya/workflow/milestones.py's
     build_milestone_goal_text(): deterministic string assembly, no extra
@@ -224,17 +249,41 @@ class WorkflowController:
             # here has to surface loudly (this codebase's own "fail loud,
             # never silently do something unsafe" convention), not be
             # mistaken for a different outcome. _run_structured_enforce
-            # itself already degrades a genuine plan/validation/TOOL-subtask
-            # problem into a clean, normally-shaped failure result (same
-            # status/quality_gates_passed shape run_generation_workflow's
-            # own ordinary failures use) rather than raising for those -
-            # only a real bug in this orchestration code itself propagates
-            # as an exception.
-            legacy_result, plan, subtask_results, decisions, verification_report = (
-                await self._run_structured_enforce(
-                    goal, workspace_path, route, run_id, control_context, control_state, legacy_kwargs,
+            # itself already degrades a genuine SUBTASK-LOOP failure into a
+            # clean, normally-shaped failure result (same status/
+            # quality_gates_passed shape run_generation_workflow's own
+            # ordinary failures use) rather than raising for those - only a
+            # real bug in this orchestration code itself propagates as an
+            # uncaught exception.
+            #
+            # _StructuredPlanUnavailable IS caught here specifically (fixed
+            # 2026-08-24 after a real live-validation finding,
+            # protocol_encoder_java: a single malformed subtask in Stage
+            # A's JSON block made a whole run produce zero files) - a
+            # PRE-EXECUTION plan-build/validation problem has zero real
+            # side effects yet, so falling back to the legacy whole-goal
+            # path here restores PlannerStructuredOutput's own original
+            # "must never break generation" contract (see that exception's
+            # own docstring) instead of silently doing nothing.
+            plan: Optional[EngineeringPlan] = None
+            try:
+                legacy_result, plan, subtask_results, decisions, verification_report = (
+                    await self._run_structured_enforce(
+                        goal, workspace_path, route, run_id, control_context, control_state, legacy_kwargs,
+                    )
                 )
-            )
+            except _StructuredPlanUnavailable as e:
+                logger.warning(
+                    f"WorkflowController enforce run {run_id!r}: structured plan unavailable "
+                    f"({e}) - falling back to the legacy whole-goal path (zero side effects "
+                    "happened yet, so this is safe)."
+                )
+                legacy_result = await self._run_legacy_generation(
+                    goal, workspace_path,
+                    milestone_group_id=milestone_group_id, milestone_index=milestone_index,
+                    milestone_total=milestone_total, **legacy_kwargs,
+                )
+
             if plan is not None:
                 control_state = control_state.with_updates(current_plan_hash=plan.content_hash())
 
@@ -549,47 +598,39 @@ class WorkflowController:
           method's own docstring). Enforce mode does not inherit shadow's
           context-quality gap.
 
-        A structural problem (no parseable plan, zero subtasks, failed
-        validation, a TOOL-tagged subtask present) returns a normally-
-        shaped FAILURE result (same status/quality_gates_passed shape any
-        ordinary run_generation_workflow() failure already has) rather than
-        raising - this is what an "enforce mode isn't ready for this goal
-        shape yet" outcome should look like to a caller, not a stack trace.
-        Only a genuine bug in this method's own code propagates as a real
-        exception (see execute()'s own comment for why that's deliberate)."""
+A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
+        failed validation, a TOOL-tagged subtask present) raises
+        _StructuredPlanUnavailable - execute() catches this specifically and
+        falls back to the legacy whole-goal path (see that exception's own
+        docstring for why: this restores PlannerStructuredOutput's original
+        "must never break generation" contract, fixed 2026-08-24 after a
+        real live-validation finding where this wasn't yet true). A
+        subtask-loop failure (at least one real run_generation_workflow()
+        call has already happened) is NOT this exception - it stays a
+        clean, normally-shaped FAILURE result in the aggregated dict
+        (same status/quality_gates_passed shape any ordinary
+        run_generation_workflow() failure already has), never a legacy
+        fallback, since real side effects may already exist in the
+        workspace by that point. Only a genuine bug in this method's own
+        code propagates as a real (uncaught) exception."""
         ledger = DecisionLedger()
-
-        def _failure_result(reason: str) -> Dict[str, Any]:
-            logger.warning(f"WorkflowController enforce run {run_id!r}: {reason}")
-            return {
-                "status": "enforce_mode_plan_unavailable",
-                "quality_gates_passed": False,
-                "run_id": run_id,
-                "reason": reason,
-            }
 
         plan_text = await self.workflow_engine.planner.run(goal)
         structured_output, parse_issue = parse_planner_structured_output(plan_text)
         if structured_output is None:
-            return _failure_result(f"no structured plan: {parse_issue}"), None, (), ledger.all(), None
+            raise _StructuredPlanUnavailable(f"no structured plan: {parse_issue}")
 
         plan = build_engineering_plan_from_planner_output(structured_output, plan_id=run_id, kind=route.kind)
         if plan is None:
-            return (
-                _failure_result("structured output parsed but produced zero subtasks"),
-                None, (), ledger.all(), None,
-            )
+            raise _StructuredPlanUnavailable("structured output parsed but produced zero subtasks")
 
         record_plan_created(ledger, plan)
 
         tool_subtasks = [st.id for st in plan.subtasks if st.execution_method == ExecutionMethod.TOOL]
         if tool_subtasks:
-            return (
-                _failure_result(
-                    f"plan contains TOOL-tagged subtask(s) {tool_subtasks!r} - enforce mode does not "
-                    "yet execute TOOL subtasks for real (see this method's own docstring)"
-                ),
-                plan, (), ledger.all(), None,
+            raise _StructuredPlanUnavailable(
+                f"plan contains TOOL-tagged subtask(s) {tool_subtasks!r} - enforce mode does not "
+                "yet execute TOOL subtasks for real (see this method's own docstring)"
             )
 
         kernel = getattr(self.workflow_engine, "kernel", None)
@@ -605,7 +646,7 @@ class WorkflowController:
             route=route, triage_service=self.workflow_engine.engineering_triage,
         )
         if not validation.valid:
-            return _failure_result(f"plan failed validation: {validation.errors}"), plan, (), ledger.all(), None
+            raise _StructuredPlanUnavailable(f"plan failed validation: {validation.errors}")
 
         order = topological_subtask_order(plan)
         total = len(order)
