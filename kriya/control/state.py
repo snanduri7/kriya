@@ -72,6 +72,20 @@ class ControlState:
     # this is a denser, queryable summary alongside it, not a replacement.
     milestone_states: Dict[str, str] = field(default_factory=dict)
 
+    # subtask_id -> "completed"/"failed", the MA6/WorkflowController analog
+    # of milestone_states above - added 2026-08-24 to make MA5.9's resume-
+    # validation machinery (compute_control_plane_hashes/
+    # validate_resume_against_reality, kriya/workflow/checkpoint.py) real:
+    # those functions existed since MA5.9 but had zero callers anywhere
+    # until wired into WorkflowController._run_structured_enforce's own
+    # subtask-level resume. Unlike MA3's milestone flow, MA6's
+    # EngineeringPlan is rebuilt FRESH on every enforce() call (no separate
+    # plan-persistence sidecar) - current_plan_hash below is what lets a
+    # resumed run detect "the freshly-rebuilt plan doesn't match what these
+    # subtask_states were recorded against" and refuse to trust them,
+    # exactly the drift MA5.9 was designed to catch.
+    subtask_states: Dict[str, str] = field(default_factory=dict)
+
     current_plan_hash: Optional[str] = None
     current_contract_hash: Optional[str] = None
 
@@ -111,6 +125,7 @@ class ControlState:
             "milestone_group_id": self.milestone_group_id,
             "current_milestone_id": self.current_milestone_id,
             "milestone_states": dict(self.milestone_states),
+            "subtask_states": dict(self.subtask_states),
             "current_plan_hash": self.current_plan_hash,
             "current_contract_hash": self.current_contract_hash,
             "base_commit": self.base_commit,
@@ -138,6 +153,7 @@ class ControlState:
             milestone_group_id=data.get("milestone_group_id"),
             current_milestone_id=data.get("current_milestone_id"),
             milestone_states=dict(data.get("milestone_states", {})),
+            subtask_states=dict(data.get("subtask_states", {})),
             current_plan_hash=data.get("current_plan_hash"),
             current_contract_hash=data.get("current_contract_hash"),
             base_commit=data.get("base_commit"),

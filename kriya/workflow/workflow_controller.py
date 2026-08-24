@@ -80,12 +80,19 @@ from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.persistence import (
     load_artifact_registry,
     load_contract_registry,
+    load_control_state,
     save_artifact_registry,
     save_control_state,
 )
 from kriya.control.state import ControlState
 from kriya.workflow import subtask_executor
-from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash, new_run_id
+from kriya.workflow.checkpoint import (
+    ResumeStatus,
+    compute_base_commit,
+    compute_tree_hash,
+    new_run_id,
+    validate_resume_against_reality,
+)
 from kriya.workflow.context_orchestrator import ContextOrchestrator
 from kriya.workflow.context_package import (
     ContextPackage,
@@ -268,7 +275,7 @@ class WorkflowController:
             # own docstring) instead of silently doing nothing.
             plan: Optional[EngineeringPlan] = None
             try:
-                legacy_result, plan, subtask_results, decisions, verification_report = (
+                legacy_result, plan, subtask_results, decisions, verification_report, control_state = (
                     await self._run_structured_enforce(
                         goal, workspace_path, route, run_id, control_context, control_state, legacy_kwargs,
                     )
@@ -284,9 +291,9 @@ class WorkflowController:
                     milestone_group_id=milestone_group_id, milestone_index=milestone_index,
                     milestone_total=milestone_total, **legacy_kwargs,
                 )
-
-            if plan is not None:
-                control_state = control_state.with_updates(current_plan_hash=plan.content_hash())
+                # control_state stays exactly as built above (pre-plan) -
+                # _run_structured_enforce raised before returning anything,
+                # so there is no plan hash / subtask_states to fold in.
 
             try:
                 save_control_state(workspace_path, control_state)
@@ -533,7 +540,7 @@ class WorkflowController:
         legacy_kwargs: Dict[str, Any],
     ) -> Tuple[
         Dict[str, Any], Optional[EngineeringPlan], Tuple[SubtaskResult, ...],
-        Tuple[Decision, ...], Optional[VerificationReport],
+        Tuple[Decision, ...], Optional[VerificationReport], ControlState,
     ]:
         """MA7.8 - WorkflowController actually OWNING the real outcome for
         the first time. Deliberately does NOT reimplement edit-application/
@@ -563,13 +570,24 @@ class WorkflowController:
           string can't trivially defeat. Enforcing SAFELY requires either a
           real per-tool policy mapping or accepting a materially weaker
           guarantee - a separate, later decision, not bundled into this one.
-        - MA6.7's SubtaskCheckpoint/resolve_subtask_resume_point are NOT
-          wired in here - each subtask's own run_generation_workflow() call
-          already gets real resume-safety for free via ITS OWN existing
-          checkpoint mechanism (the actual correctness-load-bearing
-          property); a SEPARATE subtask-spanning checkpoint layer would add
-          efficient multi-subtask resume, a real enhancement, not a
-          correctness requirement for a first working version.
+        - Subtask-spanning resume (2026-08-24): when the CALLER passes
+          resume=True or resume_id=<id> (the same flags each subtask's own
+          run_generation_workflow() call already accepted), this method now
+          ALSO checks for a persisted ControlState from an earlier
+          interrupted enforce run of this workspace and, if the current
+          re-planned EngineeringPlan's content_hash() and the workspace's
+          real git tree_hash/base_commit still match what was recorded
+          (kriya/workflow/checkpoint.py's validate_resume_against_reality,
+          MA5.9 - genuinely wired to something for the first time), skips
+          already-COMPLETED subtasks rather than re-running them, restoring
+          their real on-disk file content into established_file_context.
+          Any drift in either check -> the resume is refused, exactly like
+          the legacy path's own workspace/config/goal drift check, and the
+          plan runs fresh from subtask 1. MA6.7's SubtaskCheckpoint/
+          resolve_subtask_resume_point (a plan-hash+tree-hash-keyed
+          per-subtask mechanism) remains a real, unused alternative for a
+          future, more granular resume signal - not needed now that
+          ControlState.subtask_states covers the same real gap.
         - Some duplication with _run_structured_shadow's own plan-build/
           validate prologue (Planner call, parse, validate_plan) is
           accepted here rather than refactoring that already-live,
@@ -649,6 +667,66 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         if not validation.valid:
             raise _StructuredPlanUnavailable(f"plan failed validation: {validation.errors}")
 
+        # Subtask-spanning resume (MA5.9 finally wired to something,
+        # 2026-08-24) - opt-in only, same convention as
+        # run_generation_workflow()'s own resume (no auto-detection from
+        # goal-text matching). MA6 has no separate plan-persistence sidecar
+        # the way MA3's milestone flow does (plan_text above is a FRESH
+        # Planner call every time), so trusting a persisted ControlState's
+        # subtask_states is only safe when the freshly-rebuilt plan and the
+        # real workspace both still match what was recorded - exactly the
+        # drift compute_control_plane_hashes/validate_resume_against_reality
+        # were built to catch. Any mismatch (or no prior state at all) ->
+        # resumed_subtask_states stays empty and the plan runs fresh from
+        # subtask 1, same as if resume had never been requested.
+        current_plan_hash = plan.content_hash()
+        resumed_subtask_states: Dict[str, str] = {}
+        if legacy_kwargs.get("resume") or legacy_kwargs.get("resume_id"):
+            prior_control_state = load_control_state(workspace_path)
+            if prior_control_state is None:
+                logger.info(
+                    f"WorkflowController enforce run {run_id!r}: resume requested but no prior "
+                    "ControlState found for this workspace - starting the plan fresh."
+                )
+            elif prior_control_state.current_plan_hash != current_plan_hash:
+                logger.warning(
+                    f"WorkflowController enforce run {run_id!r}: refusing subtask resume - the "
+                    "freshly re-planned goal no longer matches the plan these subtask states "
+                    "were recorded against. Starting the plan fresh."
+                )
+            else:
+                resume_check = validate_resume_against_reality(
+                    checkpoint_data={
+                        "base_commit": prior_control_state.base_commit,
+                        "tree_hash": prior_control_state.tree_hash,
+                    },
+                    workspace_path=workspace_path,
+                )
+                if resume_check.status != ResumeStatus.OK:
+                    logger.warning(
+                        f"WorkflowController enforce run {run_id!r}: refusing subtask resume - "
+                        f"workspace drift detected ({'; '.join(resume_check.mismatches)}). "
+                        "Starting the plan fresh."
+                    )
+                else:
+                    resumed_subtask_states = dict(prior_control_state.subtask_states)
+                    logger.info(
+                        f"WorkflowController enforce run {run_id!r}: resuming - "
+                        f"{sum(1 for v in resumed_subtask_states.values() if v == 'completed')} "
+                        "subtask(s) already completed will be skipped."
+                    )
+
+        # base_commit/tree_hash are refreshed here for EVERY route kind, not
+        # just REFACTOR (_attach_refactor_baseline above only sets them for
+        # that one kind) - subtask resume needs a real workspace-drift
+        # signal regardless of what kind of change this plan is, and these
+        # are the same real git-derived fields/functions that method
+        # already uses, just given a second, route-independent purpose.
+        control_state = control_state.with_updates(
+            current_plan_hash=current_plan_hash, subtask_states=dict(resumed_subtask_states),
+            base_commit=compute_base_commit(workspace_path), tree_hash=compute_tree_hash(workspace_path),
+        )
+
         order = topological_subtask_order(plan)
         total = len(order)
         established_file_context: Dict[str, str] = {}
@@ -658,6 +736,31 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         for position, subtask_id in enumerate(order, start=1):
             subtask = plan.subtask_by_id(subtask_id)
             if subtask is None:
+                continue
+
+            if resumed_subtask_states.get(subtask_id) == "completed":
+                logger.info(f"Subtask '{subtask.id}' ({position}/{total}) already completed (resume) - skipping.")
+                subtask_results.append(SubtaskResult(
+                    subtask_id=subtask.id, status=SubtaskStatus.COMPLETED,
+                    execution_method=ExecutionMethod.MODEL.value, error=None,
+                ))
+                for planned_file in subtask.planned_files:
+                    try:
+                        with open(
+                            os.path.join(workspace_path, planned_file.path), "r", encoding="utf-8", errors="replace",
+                        ) as fh:
+                            content = fh.read()
+                    except OSError as e:
+                        logger.warning(
+                            f"WorkflowController enforce run {run_id!r}: could not capture established "
+                            f"content for {planned_file.path!r} from resumed subtask {subtask_id!r}: {e}"
+                        )
+                        continue
+                    projection = project_implementation_source(
+                        content, planned_file.path, _ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+                        reason="established_by_earlier_subtask",
+                    )
+                    established_file_context[planned_file.path] = projection.content
                 continue
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
@@ -679,6 +782,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             )
             subtask_results.append(result)
             record_subtask_attempt(ledger, plan, result, attempt=1)
+
+            # Persisted incrementally (best-effort, non-fatal), not only at
+            # the end of the whole plan - a mid-plan crash must leave
+            # accurate resumable state behind, matching run_milestones()'s
+            # own completed_milestone_ids sidecar convention.
+            control_state = control_state.with_updates(
+                subtask_states={**control_state.subtask_states, subtask.id: result.status.value},
+            )
+            try:
+                save_control_state(workspace_path, control_state)
+            except Exception as e:
+                logger.warning(f"WorkflowController enforce run {run_id!r}: failed to persist ControlState (non-fatal): {e}")
 
             if not passed:
                 logger.warning(
@@ -762,7 +877,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 logger.warning(f"WorkflowController enforce run {run_id!r}: artifact derivation failed (non-fatal): {e}")
 
         report = build_verification_report(plan.acceptance_criteria)
-        return aggregated, plan, tuple(subtask_results), ledger.all(), report
+        return aggregated, plan, tuple(subtask_results), ledger.all(), report, control_state
 
     async def _build_context(
         self, goal: str, plan: EngineeringPlan, workspace_path: str, route: Any,

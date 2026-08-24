@@ -78,6 +78,27 @@ def test_from_dict_round_trips_control_metadata_fields():
     assert reconstructed.tree_hash == "def456"
 
 
+def test_subtask_states_defaults_empty_and_round_trips():
+    """subtask_states (added 2026-08-24) is the MA6/WorkflowController
+    analog of milestone_states, added to make MA5.9's resume-validation
+    machinery real - see this field's own docstring in kriya/control/state.py."""
+    fresh = ControlState.new(run_id="run-1")
+    assert fresh.subtask_states == {}
+
+    state = fresh.with_updates(subtask_states={"s1": "completed", "s2": "failed"})
+    reconstructed = ControlState.from_dict(state.to_dict())
+    assert reconstructed.subtask_states == {"s1": "completed", "s2": "failed"}
+
+
+def test_subtask_states_defaults_empty_when_loading_a_pre_existing_persisted_dict():
+    """A ControlState persisted before this field existed must load cleanly
+    with subtask_states={}, not KeyError."""
+    old_style_dict = ControlState.new(run_id="run-1").to_dict()
+    del old_style_dict["subtask_states"]
+    reconstructed = ControlState.from_dict(old_style_dict)
+    assert reconstructed.subtask_states == {}
+
+
 def test_from_dict_always_drops_live_route_and_profile_objects():
     """The documented asymmetry - a loaded ControlState never resurrects a
     live EngineeringRoute/ProcessProfile from its own to_dict() summary."""

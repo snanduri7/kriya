@@ -477,3 +477,239 @@ async def test_enforce_aggregated_status_is_failed_if_only_some_subtasks_ran(tmp
 
     assert result.legacy_result["quality_gates_passed"] is False
     assert len(result.legacy_result["subtask_results"]) == 1
+
+
+# --- subtask-spanning resume (MA5.9 finally wired to something, 2026-08-24) ---
+
+import subprocess
+
+from kriya.control.persistence import load_control_state
+
+
+def _init_git_repo(path):
+    subprocess.run(["git", "init"], cwd=path, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=path, capture_output=True)
+    (path / "README.md").write_text("seed")
+    subprocess.run(["git", "add", "README.md"], cwd=path, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=path, capture_output=True)
+
+
+@pytest.mark.asyncio
+async def test_enforce_persists_subtask_states_after_each_subtask(tmp_path):
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "a.py" if len(calls) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    persisted = load_control_state(str(tmp_path))
+    assert persisted is not None
+    assert persisted.subtask_states == {"s1": "completed", "s2": "completed"}
+    assert persisted.current_plan_hash == plan.content_hash()
+
+
+@pytest.mark.asyncio
+async def test_enforce_without_resume_flag_never_skips_even_with_prior_state(tmp_path):
+    """Resume is opt-in only, mirroring run_generation_workflow()'s own
+    convention - a persisted ControlState from an earlier run must NOT be
+    consulted at all unless resume/resume_id is explicitly passed."""
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "a.py" if len(calls) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+        # A second call, same workspace, NO resume flag - both subtasks must run again.
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert len(calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_skips_every_subtask_when_the_whole_plan_already_completed(tmp_path):
+    """Both subtasks genuinely completed on the first run - a resume must
+    make ZERO new real calls, restoring everything from disk."""
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "a.py" if len(calls) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        first = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+        assert len(calls) == 2
+
+        second = await controller.execute(
+            "goal", str(tmp_path), migration_mode="enforce", resume=True,
+        )
+
+    assert len(calls) == 2, "nothing new should have run - both subtasks were already completed"
+    assert second.legacy_result["quality_gates_passed"] is True
+    assert [r["subtask_id"] for r in second.legacy_result["subtask_results"]] == ["s1", "s2"]
+    assert second.legacy_result["subtask_results"][0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_skips_only_the_subtasks_already_completed(tmp_path):
+    """Subtask 2 failed on the first attempt (never got to run) - a resume
+    must skip s1 (real) and still execute s2 for real."""
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+
+    async def fake_run_first_attempt(**kwargs):
+        (tmp_path / "a.py").write_text("# a.py")
+        return {"status": "failed", "quality_gates_passed": False, "files": ["a.py"]} \
+            if "'s2'" in kwargs["goal"] else {"status": "success", "quality_gates_passed": True, "files": ["a.py"]}
+
+    async def fake_run_second_attempt(**kwargs):
+        (tmp_path / "b.py").write_text("# b.py")
+        return {"status": "success", "quality_gates_passed": True, "files": ["b.py"]}
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        we.run_generation_workflow = fake_run_first_attempt
+        first = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+        assert first.legacy_result["quality_gates_passed"] is False
+
+        we.run_generation_workflow = AsyncMock(side_effect=fake_run_second_attempt)
+        second = await controller.execute(
+            "goal", str(tmp_path), migration_mode="enforce", resume=True,
+        )
+
+    assert second.legacy_result["quality_gates_passed"] is True
+    we.run_generation_workflow.assert_awaited_once()
+    awaited_goal = we.run_generation_workflow.await_args.kwargs["goal"]
+    assert "'s2'" in awaited_goal, "the one real call on resume must be for s2, not a re-run of s1"
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_refused_when_plan_hash_differs(tmp_path):
+    _init_git_repo(tmp_path)
+    plan_a = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "a.py" if len(calls) in (1, 3) else "b.py"
+        (tmp_path / path).write_text(f"# {path} {len(calls)}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan_a)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+    assert len(calls) == 2
+
+    plan_b = EngineeringPlan(
+        plan_id="run2", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="write a DIFFERENT a.py", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="write b.py", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], planned_files=[PlannedFile(path="b.py", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    assert plan_b.content_hash() != plan_a.content_hash()
+
+    p1, p2, p3 = _patched(plan_b)
+    with p1, p2, p3:
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
+
+    # A different plan -> resume refused -> both subtasks run again for real.
+    assert len(calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_refused_when_workspace_has_drifted(tmp_path):
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "a.py" if len(calls) in (1, 3) else "b.py"
+        (tmp_path / path).write_text(f"# {path} {len(calls)}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+        assert len(calls) == 2
+
+        # Real drift: an unrelated commit lands in the workspace between runs.
+        (tmp_path / "unrelated.txt").write_text("someone else's change")
+        subprocess.run(["git", "add", "unrelated.txt"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "drift"], cwd=str(tmp_path), capture_output=True)
+
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
+
+    assert len(calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_with_no_prior_state_behaves_like_a_fresh_run(tmp_path):
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "a.py" if len(calls) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
+
+    assert result.legacy_result["quality_gates_passed"] is True
+    assert len(calls) == 2
