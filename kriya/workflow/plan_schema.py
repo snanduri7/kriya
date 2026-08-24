@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -137,12 +137,19 @@ class Subtask(BaseModel):
     whole plan. `depends_on` names other Subtask ids in the SAME plan;
     plan_validation.py (MA6.2) is what actually confirms those ids exist
     and the resulting dependency graph is acyclic - this class only
-    enforces that a subtask doesn't trivially depend on itself."""
+    enforces that a subtask doesn't trivially depend on itself.
+
+    tool_arguments is passed straight through as `tool.execute(**tool_arguments)`
+    (kriya/tools/tool.py::BaseTool.execute already validates kwargs against
+    the tool's own arguments_schema and raises ToolExecutionError on a
+    mismatch) - only meaningful, and only ever non-empty, when
+    execution_method=tool."""
 
     id: str
     description: str
     execution_method: ExecutionMethod
     tool_name: Optional[str] = None
+    tool_arguments: Dict[str, Any] = Field(default_factory=dict)
     depends_on: List[str] = Field(default_factory=list)
     planned_files: List[PlannedFile] = Field(default_factory=list)
     acceptance_criteria_ids: List[str] = Field(default_factory=list)
@@ -164,6 +171,11 @@ class Subtask(BaseModel):
             raise ValueError(
                 f"subtask {self.id!r} has execution_method=model but sets tool_name - "
                 "tool_name only applies to execution_method=tool"
+            )
+        if self.execution_method == ExecutionMethod.MODEL and self.tool_arguments:
+            raise ValueError(
+                f"subtask {self.id!r} has execution_method=model but sets tool_arguments - "
+                "tool_arguments only applies to execution_method=tool"
             )
         if self.id in self.depends_on:
             raise ValueError(f"subtask {self.id!r} cannot depend on itself")
