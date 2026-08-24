@@ -664,8 +664,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # 2026-08-24) - opt-in only, same convention as
         # run_generation_workflow()'s own resume (no auto-detection from
         # goal-text matching). Loaded BEFORE validate_plan (moved here
-        # 2026-08-24, see prior_control_state_has_own_progress below for
-        # why) - MA6 has no separate plan-persistence sidecar the way MA3's
+        # 2026-08-24, see has_own_established_progress below for why) -
+        # MA6 has no separate plan-persistence sidecar the way MA3's
         # milestone flow does (plan_text above is a FRESH Planner call
         # every time), so trusting a persisted ControlState's subtask_states
         # for the actual SKIP decision is only safe when the freshly-
