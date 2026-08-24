@@ -9,22 +9,25 @@ default-policy stage (8); stages 2-7 were deliberately stubbed (each
 returning None - no rule matched, fall through), one per later MA4 sub-task,
 so each lands as a pure addition to an already-tested pipeline rather than a
 rewrite of it. MA4.4 filled in stage 6 (command allowlist, RUN_COMMAND
-only). Stages 2-5 and 7 (filesystem, git-destructive, network/egress,
-package/supply-chain, risk/profile approval) remain stubs, owned by MA4.5
-through MA4.9 respectively.
+only). MA4.5 filled in stage 2 (filesystem, READ_FILE/WRITE_FILE only -
+sensitive-path denial always, workspace-containment ALLOW/DENY when a
+workspace_path is supplied). Stages 3, 4, 5, 7 (git-destructive,
+network/egress, package/supply-chain, risk/profile approval) remain stubs,
+owned by MA4.6 through MA4.9 respectively.
 
-MA4.4 also gave ExecutionPolicy its first real caller: kriya/tools/
-validate.py's PolymorphicValidator consults it in AUDIT mode before every
-ProcessController.run() (see that file's _run_cmd_with_timeout) - logged
-only, never gating, exactly like kriya/core/llm.py's MA4.3 integration. This
-module itself still takes no config (constructor takes no arguments; config
-wiring is MA4.15's job, added additively, not as a signature change - the
-same "additive, not a signature change" precedent kriya/workflow/
+MA4.4 gave ExecutionPolicy its first real caller (kriya/tools/validate.py's
+PolymorphicValidator, before every ProcessController.run()); MA4.5 added a
+second, kriya/workflow/edit_safety.py's atomic_write_file - both audit-only:
+logged, never gating, exactly like kriya/core/llm.py's MA4.3 integration.
+This module itself still takes no config (constructor takes no arguments;
+config wiring is MA4.15's job, added additively, not as a signature change -
+the same "additive, not a signature change" precedent kriya/workflow/
 process_profile.py's own docstring already established for MA2), and still
 consults no LLM to reach a decision.
 """
 
 import os
+import re
 from typing import Optional, Tuple
 
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
@@ -106,6 +109,35 @@ _DEFAULT_ALLOW_ACTION_TYPES = frozenset({ActionType.READ_FILE, ActionType.GIT_RE
 # (MA4.4) job, not this one's. A request that doesn't even carry the field
 # its own action_type requires is malformed on its face and fails closed
 # regardless of what any later stage would have decided.
+# MA4.5 - universal, context-free sensitive-path denials: these fire
+# regardless of whether an ActionRequest carries a workspace_path, since
+# "this is a credential/SSH-key/secrets path" doesn't depend on which repo
+# is in play. Deliberately a small, hardcoded list here, NOT a read of
+# kriya.config.config.AutonomyConfig.sensitive_paths - ExecutionPolicy still
+# takes no config dependency at all (MA4.2's own principle; config wiring is
+# MA4.15's job). This duplicates a few of that config's baseline patterns
+# for now; MA4.15 is expected to replace this hardcoded list with a real
+# config read rather than leaving two copies to drift.
+_SENSITIVE_PATH_PATTERNS: Tuple[re.Pattern, ...] = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"(^|/)\.ssh(/|$)",
+    r"(^|/)\.aws(/|$)",
+    r"(^|/)\.kube(/|$)",
+    r"(^|/)\.gnupg(/|$)",
+    r"\.env$",
+    r"credentials",
+    r"secrets",
+    r"password",
+))
+
+
+def _is_sensitive_path(normalized_path: str) -> bool:
+    return any(p.search(normalized_path) for p in _SENSITIVE_PATH_PATTERNS)
+
+
+def _normalize_path(path: str) -> str:
+    return os.path.abspath(os.path.expanduser(path))
+
+
 _REQUIRED_FIELDS_BY_ACTION_TYPE = {
     ActionType.READ_FILE: ("target",),
     ActionType.WRITE_FILE: ("target",),
@@ -150,10 +182,61 @@ class ExecutionPolicy:
         return None
 
     def _check_filesystem(self, request: ActionRequest) -> Optional[PolicyResult]:
-        """MA4.5 - not yet implemented. Deliberately returns None (no rule
-        matched) rather than a placeholder ALLOW/DENY, so this stage stays
-        an honest no-op until it has real path-scoped rules."""
-        return None
+        """MA4.5 - governs READ_FILE and WRITE_FILE only. Two independent
+        rules, per section 20:
+
+        1. A small set of universally sensitive paths (~/.ssh, ~/.aws,
+           ~/.kube, ~/.gnupg, .env, anything with credentials/secrets/
+           password in it) always denies, with or without workspace
+           context - reading or writing a credential file is never
+           legitimate regardless of which repo the request claims to be
+           for.
+        2. Workspace containment: when the request carries a
+           workspace_path (the real repo root or an active worktree root -
+           this stage doesn't need to know which), a target inside it is
+           explicitly ALLOWed (this already covers .kriya/ and any
+           worktree under it, since both are subpaths of whatever root the
+           caller passes) and a target outside it is explicitly DENYed.
+
+        Without a workspace_path, rule 2 cannot run (there is nothing to
+        check containment against) - this stage returns None for anything
+        that isn't a sensitive-path hit, falling through to the stage 8
+        default backstop (READ_FILE default-allows there; WRITE_FILE
+        default-denies). See kriya/workflow/edit_safety.py's own MA4.5
+        integration note for why its real call site can't supply
+        workspace_path today - a known, deliberately-flagged limitation of
+        this task's audit signal, not a silent gap."""
+        if request.action_type not in (ActionType.READ_FILE, ActionType.WRITE_FILE):
+            return None
+        if not request.target:
+            return None
+
+        normalized = _normalize_path(request.target)
+        if _is_sensitive_path(normalized):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="SENSITIVE_PATH_DENIED",
+                explanation=f"'{request.target}' matches a universally sensitive path pattern.",
+                matched_rule="filesystem.sensitive_path_denied",
+            )
+
+        if not request.workspace_path:
+            return None
+
+        workspace = _normalize_path(request.workspace_path)
+        if normalized == workspace or normalized.startswith(workspace + os.sep):
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="PATH_WITHIN_WORKSPACE_ALLOWED",
+                explanation=f"'{request.target}' is within workspace root '{request.workspace_path}'.",
+                matched_rule="filesystem.within_workspace_allowed",
+            )
+        return PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="PATH_OUTSIDE_WORKSPACE_DENIED",
+            explanation=f"'{request.target}' is outside workspace root '{request.workspace_path}'.",
+            matched_rule="filesystem.outside_workspace_denied",
+        )
 
     def _check_git_destructive(self, request: ActionRequest) -> Optional[PolicyResult]:
         """MA4.8 - not yet implemented. See _check_filesystem's docstring;

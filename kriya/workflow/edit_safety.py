@@ -8,7 +8,48 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType
+
 logger = logging.getLogger(__name__)
+
+# MA4.5 (control-plane implementation plan) - audit-only, module-level
+# since this file has no class/instance to hold it (unlike kriya/core/llm.py's
+# LLMClient or kriya/tools/validate.py's PolymorphicValidator). See
+# _audit_write_file below.
+_execution_policy = ExecutionPolicy()
+
+
+def _audit_write_file(full_path: str) -> None:
+    """MA4.5 - audit-only ExecutionPolicy consultation, mirroring
+    kriya/core/llm.py's _audit_llm_network_access (MA4.3) and kriya/tools/
+    validate.py's _audit_run_command (MA4.4) exactly: can never affect
+    whether atomic_write_file actually writes - any exception raised here is
+    caught and logged, never propagated, and the decision is only logged,
+    never branched on.
+
+    No workspace_path is available at this call site - atomic_write_file()
+    is a pure path-in/bytes-in primitive with no concept of "which repo/
+    worktree root is this write happening under" (see this module's own
+    docstring: it's shared by kriya/workflow/attempt.py and self_correction.py,
+    neither of which currently threads that context down to here). That means
+    kriya/policy/execution.py's ExecutionPolicy._check_filesystem's
+    workspace-containment rule cannot run for this real caller today - only
+    its context-free sensitive-path rule can. A known, deliberately-flagged
+    limitation of this task's audit signal (most real writes fall through to
+    the generic default-deny backstop rather than a specific filesystem-stage
+    reason code), not a silent gap - see kriya/policy/execution.py's own
+    _check_filesystem docstring."""
+    try:
+        result = _execution_policy.evaluate(
+            ActionRequest(action_type=ActionType.WRITE_FILE, target=full_path)
+        )
+        logger.debug(
+            "MA4 policy audit (not enforced): WRITE_FILE '%s' -> %s (%s)",
+            full_path, result.decision.value, result.reason_code,
+        )
+    except Exception as e:
+        logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
 
 class FileRevisionConflict(ValueError):
@@ -89,6 +130,7 @@ def atomic_write_file(full_path: str, content: str) -> None:
     system tmp dir) so os.replace() stays within one filesystem - crossing
     filesystems silently degrades to a non-atomic copy+delete on some
     platforms, defeating the whole point."""
+    _audit_write_file(full_path)
     tmp_path = f"{full_path}.kriya-tmp-{os.getpid()}"
     with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(content)
