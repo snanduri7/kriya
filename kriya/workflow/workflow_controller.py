@@ -76,7 +76,7 @@ from kriya.workflow.context_package import (
     make_context_item,
 )
 from kriya.workflow.control_context import WorkflowControlContext
-from kriya.workflow.plan_schema import EngineeringPlan, build_engineering_plan_from_planner_output
+from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, build_engineering_plan_from_planner_output
 from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.subtask_checkpoint import topological_subtask_order
 from kriya.workflow.subtask_context_projection import project_for_subtask
@@ -317,6 +317,54 @@ class WorkflowController:
             subtask = plan.subtask_by_id(subtask_id)
             if subtask is None:
                 continue
+
+            if subtask.execution_method == ExecutionMethod.TOOL:
+                # DELIBERATE, EXPLICITLY-AUTHORIZED HARD STOP (2026-08-24) -
+                # not an ExecutionPolicy audit/enforce question at all. A
+                # MODEL subtask is already safe to run for real here:
+                # DeveloperAgent.run_generation only returns file content,
+                # it never writes anything (SubtaskExecutor doesn't apply
+                # the result). A TOOL subtask is NOT safe: running a real
+                # tool (kernel.registry.get("tool", ...).execute(...)) IS
+                # the side effect, by definition - and "shell"/"git" are
+                # always-registered real tools (plugins/core_tools) capable
+                # of arbitrary command execution / real git mutation, with
+                # ZERO policy consultation anywhere in SubtaskExecutor's own
+                # TOOL dispatch. Since this shadow path's whole contract -
+                # this module's own docstring, and the MA7 hardening plan's
+                # own requirement - is "never mutating, purely
+                # observational," a TOOL-tagged subtask is never actually
+                # executed here, for ANY tool_name, not just a denylist of
+                # known-dangerous ones (a future registered tool could just
+                # as easily have real side effects, and this shouldn't
+                # depend on a maintained list staying complete). This is a
+                # structural guarantee, not a pattern-matched policy
+                # decision - deliberately NOT routed through
+                # ExecutionPolicy's command-allowlist stage, since that
+                # stage reasons about parsed argv shape and cannot reliably
+                # judge an arbitrary shell string's real effect (shell
+                # metacharacters - `;`, `&&`, `|`, `$(...)` - defeat a
+                # prefix/allowlist check trivially; a structural "shadow
+                # never runs tools" rule has no such bypass). If/when
+                # SubtaskExecutor becomes a real, authoritative execution
+                # path (a future enforce mode), TOOL subtasks running for
+                # real is the whole point of that mode - this restriction
+                # is specific to THIS shadow-observational caller, not a
+                # change to SubtaskExecutor itself.
+                result = SubtaskResult(
+                    subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW,
+                    execution_method=ExecutionMethod.TOOL.value,
+                    error=(
+                        "shadow mode does not execute TOOL subtasks for real - doing so would "
+                        "have real side effects on the workspace, violating shadow's non-mutating "
+                        "contract. This subtask needs a real (non-shadow) execution path."
+                    ),
+                )
+                results.append(result)
+                record_subtask_attempt(ledger, plan, result, attempt=1)
+                notes.append(f"stopped at subtask {subtask_id!r}: TOOL subtasks are never executed in shadow mode")
+                break
+
             projected = project_for_subtask(context, subtask)
             record_context_package_for_subtask(ledger, plan, subtask_id, projected)
             result = await subtask_executor.execute(

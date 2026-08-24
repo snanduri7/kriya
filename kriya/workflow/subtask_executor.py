@@ -23,6 +23,18 @@ rejected by plan_validation.py (MA6.2) before a plan reaches this module;
 if one somehow still shows up here (a stale plan, a validator bypassed by
 a caller error), execute() fails closed with NEEDS_REVIEW rather than
 crashing or silently skipping the subtask.
+
+CALLER RESPONSIBILITY, not enforced here: a TOOL subtask's execution IS a
+real side effect (unlike a MODEL subtask, which only returns content this
+module never itself applies) - "shell"/"git" are always-registered real
+tools (plugins/core_tools) capable of arbitrary command execution / real
+git mutation, and this module consults no policy engine before running
+one. Any caller that isn't itself an authoritative, real execution path
+(e.g. an observational/shadow context whose own contract requires no
+mutation) MUST decide not to route a TOOL-tagged subtask into this
+function's real dispatch at all - see kriya/workflow/workflow_controller.py's
+_run_structured_shadow for the real precedent (hard-stops on any
+TOOL-tagged subtask rather than letting shadow mode run one for real).
 """
 from __future__ import annotations
 

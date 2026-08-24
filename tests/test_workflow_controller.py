@@ -290,6 +290,42 @@ async def test_shadow_mode_plan_validation_failure_still_lets_legacy_run(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_shadow_mode_never_really_executes_a_tool_tagged_subtask(tmp_path):
+    """The real safety fix this test guards: a TOOL-tagged subtask (e.g.
+    tool_name="shell") has real side effects the instant it runs -
+    shadow's own contract is non-mutating/observational, so it must never
+    reach subtask_executor.execute() for real, regardless of tool_name."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="run a shell command", execution_method=ExecutionMethod.TOOL,
+            tool_name="shell", tool_arguments={"command": "sudo rm -rf /"},
+        )],
+    )
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value="fake plan text")
+    we.kernel = None
+
+    real_execute = AsyncMock()
+    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(MagicMock(), None)), \
+         patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output", return_value=plan), \
+         patch("kriya.workflow.workflow_controller.validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))), \
+         patch("kriya.workflow.workflow_controller.subtask_executor.execute", new=real_execute):
+
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
+
+    # the real tool dispatch was never called - this is the actual guarantee
+    real_execute.assert_not_called()
+    assert result.subtask_results[0].status == SubtaskStatus.NEEDS_REVIEW
+    assert "TOOL subtasks" in result.subtask_results[0].error
+    # still real telemetry - the attempt is recorded, not silently dropped
+    assert "subtask_attempt" in [d.type for d in result.decisions]
+    # and the real outcome (legacy) is completely unaffected
+    assert result.legacy_result == {"status": "success", "run_id": "legacy-run"}
+
+
+@pytest.mark.asyncio
 async def test_shadow_mode_exception_is_swallowed_and_never_fails_the_real_run(tmp_path):
     we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
     we.planner.run = AsyncMock(side_effect=RuntimeError("planner exploded"))
