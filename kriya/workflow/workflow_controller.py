@@ -76,9 +76,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import parse_planner_structured_output
 from kriya.control.decisions import Decision, DecisionLedger
+from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.persistence import (
     load_artifact_registry,
     load_contract_registry,
+    save_artifact_registry,
     save_control_state,
 )
 from kriya.control.state import ControlState
@@ -524,6 +526,28 @@ class WorkflowController:
           independently-tested method under time pressure - a real,
           flagged simplification opportunity, not something to silently
           leave undocumented.
+        - MA7.9 adds real subtask_retry_locality data to the aggregated
+          result (each subtask's own generation_metrics()["calls"], real
+          per-subtask retry counts, never spilling into another subtask's
+          count by construction) and MA7.10 adds real ArtifactRegistry
+          derivation (ArtifactRegistry.derive_from_workspace against the
+          final workspace state, only on full success, persisted alongside
+          whatever was already recorded) - see the code below for both.
+          ContractRegistry has NO equivalent hook: EngineeringPlan/Subtask
+          carry no contract-shaped metadata a real registration could key
+          off, so real contract invalidation through an actual workflow
+          remains open - a separate, later design decision (what should a
+          Subtask declare to make a contract registration meaningful),
+          not a shallow, invented schema addition bolted on here.
+        - Context quality, verified by construction rather than measured:
+          each subtask's Developer call goes through the UNMODIFIED
+          run_generation_workflow(), so it receives the full legacy Graph
+          RAG context (hybrid vector+dependency-graph retrieval) - the
+          SAME context quality any ordinary `kriya generate` call already
+          gets, strictly richer than _run_structured_shadow's own
+          deliberately narrower ContextOrchestrator-only context (see that
+          method's own docstring). Enforce mode does not inherit shadow's
+          context-quality gap.
 
         A structural problem (no parseable plan, zero subtasks, failed
         validation, a TOOL-tagged subtask present) returns a normally-
@@ -587,7 +611,7 @@ class WorkflowController:
         total = len(order)
         established_file_context: Dict[str, str] = {}
         subtask_results: List[SubtaskResult] = []
-        last_call_result: Optional[Dict[str, Any]] = None
+        subtask_call_results: List[Dict[str, Any]] = []
 
         for position, subtask_id in enumerate(order, start=1):
             subtask = plan.subtask_by_id(subtask_id)
@@ -602,7 +626,7 @@ class WorkflowController:
                 established_files=sorted(established_file_context.keys()),
                 **legacy_kwargs,
             )
-            last_call_result = call_result
+            subtask_call_results.append(call_result)
 
             passed = bool(call_result.get("quality_gates_passed"))
             result = SubtaskResult(
@@ -646,8 +670,53 @@ class WorkflowController:
             "subtask_results": [r.to_dict() for r in subtask_results],
             "files": sorted(established_file_context.keys()),
         }
-        if last_call_result is not None:
-            aggregated["last_subtask_result"] = last_call_result
+        if subtask_call_results:
+            aggregated["last_subtask_result"] = subtask_call_results[-1]
+            # MA7.9 - real subtask retry-locality data, not a guess: each
+            # entry's own generation_metrics()["calls"] (workflow.py's own
+            # GenerationState.generation_metrics) is that ONE subtask's
+            # OWN run_generation_workflow() invocation's real retry count -
+            # by construction (each subtask gets its own, fully separate
+            # call), a retry can never spill into a different subtask's
+            # count. This is what makes "most failures retry one subtask,
+            # not the whole goal" (MA7's own stated validation target)
+            # actually measurable now, rather than asserted.
+            aggregated["subtask_retry_locality"] = [
+                {
+                    "subtask_id": r.subtask_id,
+                    "generation_calls": cr.get("generation_metrics", {}).get("calls"),
+                    "quality_gates_passed": bool(cr.get("quality_gates_passed")),
+                }
+                for r, cr in zip(subtask_results, subtask_call_results)
+            ]
+
+        # MA7.10 - real ArtifactRegistry derivation through an actual
+        # workflow, not a direct constructor unit test: once every subtask
+        # has really applied its files to the real workspace (only on full
+        # success - a partial/failed run's workspace state is not a
+        # trustworthy basis for real build-artifact facts), derive
+        # whatever real artifacts now exist there and persist them
+        # alongside whatever was already recorded. ContractRegistry has no
+        # equivalent hook yet - EngineeringPlan/Subtask carry no
+        # contract-shaped metadata a real registration could key off, so
+        # real contract invalidation through an actual workflow remains a
+        # separate, unclosed gap (see this method's own module docstring
+        # for the honest scope note) rather than a shallow, invented
+        # schema addition here.
+        if all_completed:
+            try:
+                milestone_id = control_state.current_milestone_id or run_id
+                artifact_registry = load_artifact_registry(workspace_path)
+                derived = ArtifactRegistry.derive_from_workspace(
+                    artifact_registry, workspace_path, milestone_id,
+                )
+                for record in derived:
+                    artifact_registry.record(record)
+                if derived:
+                    save_artifact_registry(workspace_path, artifact_registry)
+                    aggregated["derived_artifacts"] = [r.to_dict() for r in derived]
+            except Exception as e:
+                logger.warning(f"WorkflowController enforce run {run_id!r}: artifact derivation failed (non-fatal): {e}")
 
         report = build_verification_report(plan.acceptance_criteria)
         return aggregated, plan, tuple(subtask_results), ledger.all(), report

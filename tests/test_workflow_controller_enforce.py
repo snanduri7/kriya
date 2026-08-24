@@ -258,6 +258,125 @@ async def test_enforce_persists_control_state(tmp_path):
     assert result.control_state.current_plan_hash == plan.content_hash()
 
 
+# --- MA7.9: real subtask retry-locality data ---
+
+@pytest.mark.asyncio
+async def test_enforce_aggregated_result_includes_real_subtask_retry_locality_data(tmp_path):
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        return {
+            "status": "success", "quality_gates_passed": True, "files": [],
+            "generation_metrics": {"calls": n},  # subtask 1 -> 1 call, subtask 2 -> 2 calls
+        }
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    locality = result.legacy_result["subtask_retry_locality"]
+    assert locality == [
+        {"subtask_id": "s1", "generation_calls": 1, "quality_gates_passed": True},
+        {"subtask_id": "s2", "generation_calls": 2, "quality_gates_passed": True},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_enforce_retry_locality_data_present_even_on_a_failed_subtask(tmp_path):
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "failed", "quality_gates_passed": False,
+        "generation_metrics": {"calls": 4},
+    })
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    locality = result.legacy_result["subtask_retry_locality"]
+    assert len(locality) == 1  # only s1 ran before the stop
+    assert locality[0]["subtask_id"] == "s1"
+    assert locality[0]["generation_calls"] == 4
+    assert locality[0]["quality_gates_passed"] is False
+
+
+# --- MA7.10: real ArtifactRegistry derivation through an actual enforce run ---
+
+@pytest.mark.asyncio
+async def test_enforce_derives_and_persists_real_artifacts_on_full_success(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "myproj"\nversion = "1.0.0"\n'
+    )
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    derived = result.legacy_result.get("derived_artifacts")
+    assert derived and derived[0]["ecosystem"] == "python"
+
+    registry_file = tmp_path / ".kriya" / "control" / "artifacts.json"
+    assert registry_file.is_file()
+
+
+@pytest.mark.asyncio
+async def test_enforce_does_not_derive_artifacts_when_a_subtask_fails(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "myproj"\n')
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={"status": "failed", "quality_gates_passed": False})
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert "derived_artifacts" not in result.legacy_result
+    assert not (tmp_path / ".kriya" / "control" / "artifacts.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_enforce_artifact_derivation_failure_is_non_fatal(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL)],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3, patch(
+        "kriya.workflow.workflow_controller.ArtifactRegistry.derive_from_workspace",
+        side_effect=RuntimeError("derivation exploded"),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    # the real run's own success is unaffected by a broken derivation step
+    assert result.legacy_result["status"] == "success"
+    assert "derived_artifacts" not in result.legacy_result
+
+
 @pytest.mark.asyncio
 async def test_enforce_aggregated_status_is_failed_if_only_some_subtasks_ran(tmp_path):
     """Belt-and-suspenders on the aggregation logic itself: if somehow
