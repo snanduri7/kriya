@@ -9,5 +9,5 @@ tags:
 - auto-generated
 verification_gap_acknowledged: false
 verified: true
-verified_at: '2026-08-24'
-verified_context: org.apache.ignite:ignite-core unspecified
+verified_at: '2026-08-17'
+verified_context: org.apache.ignite:ignite-core 2.18.0
