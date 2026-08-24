@@ -51,7 +51,7 @@ just one more retry cycle, not a hard block.
 import os
 import re
 import xml.etree.ElementTree as ET
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Tuple
 
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings
 
@@ -377,6 +377,99 @@ class MismatchedFileTypeContentCheck(StaticCheck):
                     "HTML document. Regenerate this file with actual HTML markup."
                 )
         return None
+
+
+# MA7.5 - real markers for each ecosystem PolymorphicValidator itself
+# already recognizes (kriya/tools/validate.py::_detect_stack, java/ruby/
+# python) plus npm/go - deliberately the SAME marker-file-existence
+# approach, not content parsing, so this stays cheap and has the same
+# false-positive profile as the compile-gate's own stack detection.
+# Ecosystem NAME here is purely a label for the violation message - the
+# check itself never branches on which two ecosystems are involved (no
+# "Django vs Spring"/"Python vs Maven" pairwise logic - MA6 spec section
+# 72's own two named examples are just instances of one general rule:
+# an ALREADY-ESTABLISHED build ecosystem shouldn't get a competing one
+# silently introduced).
+_ECOSYSTEM_MARKERS: Dict[str, Tuple[str, ...]] = {
+    "java (maven)": ("pom.xml",),
+    "java (gradle)": ("build.gradle", "build.gradle.kts"),
+    "ruby": ("Gemfile", "Rakefile"),
+    "python": ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile"),
+    "npm": ("package.json",),
+    "go": ("go.mod",),
+}
+
+
+def _ecosystem_for_marker(filepath: str) -> Optional[str]:
+    basename = os.path.basename(filepath)
+    for ecosystem, markers in _ECOSYSTEM_MARKERS.items():
+        if basename in markers:
+            return ecosystem
+    return None
+
+
+def find_established_stack_drift(worktree_path: str, all_files_written: Iterable[str]) -> Optional[str]:
+    """MA7.5 (MA6 spec section 72's "Django doesn't drift to Spring, Python
+    doesn't invent Maven layout" regression category) - generic, marker-
+    based, no per-framework-pair logic. Fires when this attempt's own
+    writes (`all_files_written`) introduce a NEW build-ecosystem marker
+    file (a fresh pom.xml, package.json, ...) into a worktree that ALREADY
+    has a DIFFERENT ecosystem's marker established from BEFORE this
+    attempt - the generated content has silently switched the project's
+    real build identity, not merely added files within it.
+
+    Deliberately does not look at goal text at all: for a workspace with
+    NOTHING established yet (a brand-new first milestone), there is no
+    established marker to contradict, so this check correctly never fires -
+    matching every other deterministic check in this module (best-effort,
+    real-evidence-only, never a guess). Catching a first-milestone
+    goal-vs-generated-language mismatch would need goal-text analysis,
+    which is a materially different, weaker signal (keyword-based, not
+    file-existence-based) - intentionally out of scope here rather than
+    forcing a fit; see this function's own caller for how that gap is
+    tracked.
+
+    Only ONE established/newly-written ecosystem pair is ever reported (the
+    first mismatch found, deterministically via sorted iteration) - matching
+    this module's "first violation wins" convention, not an exhaustive
+    report of every marker present."""
+    written = set(all_files_written)
+
+    # "Established" = a real top-level marker file physically on disk in
+    # the worktree that this attempt did NOT itself write - i.e. genuinely
+    # pre-existing, from an earlier milestone/attempt or the real workspace
+    # this worktree was synced from. Excluding `written` here is the whole
+    # point: without it, this attempt's OWN new marker would immediately
+    # count as "established" against itself the instant run_static_checks
+    # reads it back (this check runs AFTER all files are written).
+    established: Dict[str, str] = {}
+    for entry in sorted(os.listdir(worktree_path)) if os.path.isdir(worktree_path) else []:
+        if entry in written:
+            continue
+        full_path = os.path.join(worktree_path, entry)
+        if not os.path.isfile(full_path):
+            continue
+        ecosystem = _ecosystem_for_marker(entry)
+        if ecosystem:
+            established[ecosystem] = entry
+
+    if not established:
+        return None
+
+    for filepath in sorted(written):
+        new_ecosystem = _ecosystem_for_marker(filepath)
+        if new_ecosystem is None or new_ecosystem in established:
+            continue
+        existing_ecosystem, existing_marker = next(iter(established.items()))
+        return (
+            f"{filepath} introduces a new '{new_ecosystem}' build marker, but this "
+            f"workspace already has an established '{existing_ecosystem}' project "
+            f"({existing_marker} exists from before this attempt). Generated content "
+            "must not silently switch the project's real build ecosystem - if this "
+            "goal genuinely requires adding a second, different-ecosystem component, "
+            "say so explicitly rather than introducing it as an apparent replacement."
+        )
+    return None
 
 
 STATIC_CHECKS = [

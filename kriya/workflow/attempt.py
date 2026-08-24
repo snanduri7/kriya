@@ -55,7 +55,7 @@ from kriya.workflow.operations import (
     operation_for_file,
     validate_operation_result,
 )
-from kriya.workflow.static_checks import run_static_checks
+from kriya.workflow.static_checks import find_established_stack_drift, run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.banners import log_quality_gate_banner
 from kriya.workflow.acceptance import (
@@ -1848,6 +1848,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # can span an established file plus one this attempt just wrote.
         static_check_known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
         static_violation = run_static_checks(ctx.worktree_path, static_check_known_files)
+        if not static_violation:
+            # MA7.5 - MA6 spec section 72's "Django doesn't drift to Spring,
+            # Python doesn't invent Maven layout" permanent regression
+            # category. Deliberately checked against state.all_files_written
+            # ONLY (this attempt's own fresh writes), never the union with
+            # ctx.established_files used above - established_files are
+            # genuinely pre-existing (from an earlier milestone/attempt) and
+            # must count as the ESTABLISHED baseline this check compares
+            # against, not get counted as part of "what this attempt wrote."
+            static_violation = find_established_stack_drift(ctx.worktree_path, state.all_files_written)
         if static_violation:
             # _build_quality_gate_failure() (not a bare Failure(...)), matching the
             # SAME construction every other Quality Gate type already uses (compile/
