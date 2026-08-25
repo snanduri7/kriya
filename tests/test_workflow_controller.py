@@ -15,7 +15,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kriya.control.persistence import load_control_state
-from kriya.workflow.plan_schema import AcceptanceCriterion, EngineeringPlan, ExecutionMethod, Subtask
+from kriya.workflow.plan_schema import (
+    AcceptanceCriterion,
+    EngineeringPlan,
+    ExecutionMethod,
+    FileAction,
+    PlannedFile,
+    Subtask,
+)
 from kriya.workflow.plan_validation import PlanValidationResult
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import (
@@ -114,14 +121,31 @@ async def test_enforce_migration_mode_is_now_accepted_not_rejected(tmp_path):
     lives in tests/test_workflow_controller_enforce.py; this just confirms
     the mode string itself is no longer refused at the top of execute()."""
     we = _workflow_engine()
-    we.planner.run = AsyncMock(return_value="prose plan, no JSON block")
-    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(None, "no fenced JSON block found")):
+    we.planner.run = AsyncMock(return_value="valid structured plan")
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+        )],
+    )
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(return_value=PlanValidationResult(valid=True)),
+    ):
         controller = WorkflowController(we)
         result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
-    # reaches _run_structured_enforce's own pre-execution path (which then
-    # falls back to the real legacy call, per the 2026-08-24 fix - see
-    # test_workflow_controller_enforce.py for full fallback coverage), not
-    # the top-of-execute() migration_mode rejection
+    # Reaches real authoritative subtask execution, rather than relying on
+    # the obsolete prose-only legacy fallback that plan repair now rejects.
     assert result.legacy_result["status"] == "success"
     we.run_generation_workflow.assert_awaited_once()
 
