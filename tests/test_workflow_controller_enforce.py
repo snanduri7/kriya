@@ -542,7 +542,7 @@ async def test_enforce_does_not_derive_artifacts_when_a_subtask_fails(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_enforce_artifact_derivation_failure_is_non_fatal(tmp_path):
+async def test_enforce_artifact_derivation_failure_fails_closed(tmp_path):
     plan = EngineeringPlan(
         plan_id="run1", kind=ChangeKind.TASK,
         subtasks=[Subtask(id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL)],
@@ -558,8 +558,11 @@ async def test_enforce_artifact_derivation_failure_is_non_fatal(tmp_path):
         controller = WorkflowController(we)
         result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
 
-    # the real run's own success is unaffected by a broken derivation step
-    assert result.legacy_result["status"] == "success"
+    # ArtifactRegistry is authoritative in enforce mode: repository success
+    # without durable physical-linkage evidence requires review.
+    assert result.legacy_result["status"] == "needs_review"
+    assert result.legacy_result["quality_gates_passed"] is False
+    assert result.legacy_result["artifact_error"] == "derivation exploded"
     assert "derived_artifacts" not in result.legacy_result
 
 
