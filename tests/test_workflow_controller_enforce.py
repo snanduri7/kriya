@@ -553,7 +553,12 @@ async def test_enforce_does_not_derive_artifacts_when_a_subtask_fails(tmp_path):
 async def test_enforce_artifact_derivation_failure_fails_closed(tmp_path):
     plan = EngineeringPlan(
         plan_id="run1", kind=ChangeKind.TASK,
-        subtasks=[Subtask(id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL)],
+        subtasks=[Subtask(
+            id="s1",
+            description="write a.py",
+            execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+        )],
     )
     we = _workflow_engine()
     we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
@@ -570,7 +575,6 @@ async def test_enforce_artifact_derivation_failure_fails_closed(tmp_path):
     # without durable physical-linkage evidence requires review.
     assert result.legacy_result["status"] == "needs_review"
     assert result.legacy_result["quality_gates_passed"] is False
-    assert result.legacy_result["status"] == "needs_review"
     assert result.legacy_result["artifact_error"] == "derivation exploded"
     assert "derived_artifacts" not in result.legacy_result
 
