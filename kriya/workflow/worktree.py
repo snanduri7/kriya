@@ -155,6 +155,61 @@ def _resolve_repo_head(repo_path: str) -> Optional[str]:
     return None
 
 
+_SCOPED_SNAPSHOT_SENTINEL = ".kriya-scoped-snapshot"
+_SCOPED_SNAPSHOT_IGNORED = {".git", ".kriya"}
+
+
+def _resolved_git_toplevel(workspace_path: str) -> Optional[str]:
+    """Return Git's owning worktree root for ``workspace_path``, if any."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=workspace_path, capture_output=True, text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return os.path.realpath(result.stdout.strip())
+    except Exception as exc:
+        logger.debug("Failed to resolve Git top-level for '%s': %s", workspace_path, exc)
+    return None
+
+
+def _create_scoped_snapshot_sandbox(workspace_path: str) -> str:
+    """Isolate a requested directory that is merely nested inside another repo.
+
+    A Git worktree always checks out the owning repository's complete root. If
+    ``workspace_path`` is only an untracked/ordinary directory below that root,
+    using ``git worktree add`` silently imports the enclosing project's files
+    and build markers into Quality Gates. A filesystem snapshot preserves the
+    caller's explicit workspace boundary while retaining the same apply-back
+    contract used by the normal sandbox.
+    """
+    sandbox_path = os.path.join(workspace_path, ".kriya", "scoped-worktree")
+    if os.path.exists(sandbox_path):
+        shutil.rmtree(sandbox_path)
+    os.makedirs(sandbox_path, exist_ok=True)
+
+    for entry in os.listdir(workspace_path):
+        if entry in _SCOPED_SNAPSHOT_IGNORED:
+            continue
+        source = os.path.join(workspace_path, entry)
+        destination = os.path.join(sandbox_path, entry)
+        if os.path.isdir(source) and not os.path.islink(source):
+            shutil.copytree(source, destination, symlinks=True)
+        elif os.path.islink(source):
+            os.symlink(os.readlink(source), destination)
+        else:
+            shutil.copy2(source, destination)
+
+    # Stop Git commands issued from inside the snapshot from walking upward
+    # and rediscovering the enclosing repository we deliberately excluded.
+    # Existing helpers already fall back to filesystem behavior when the
+    # sandbox is not a usable Git worktree.
+    os.makedirs(os.path.join(sandbox_path, ".git"), exist_ok=True)
+    with open(os.path.join(sandbox_path, _SCOPED_SNAPSHOT_SENTINEL), "w", encoding="utf-8") as marker:
+        marker.write("workspace-scoped sandbox; not an enclosing-repository checkout\n")
+    return sandbox_path
+
+
 def create_git_worktree(repo_path: str) -> str:
     # 1. Quick pre-check: Is this a git repository?
     try:
@@ -163,6 +218,22 @@ def create_git_worktree(repo_path: str) -> str:
             raise ValueError("Not a git repository")
     except Exception as e:
         raise ValueError(f"Directory is not a git repository: {e}") from e
+
+    # `git rev-parse --is-inside-work-tree` is true for every ordinary
+    # directory nested below a repository. That does not make the directory
+    # itself the requested project's repository root. Checking out the owning
+    # repository here contaminated a from-scratch Maven workspace with Kriya's
+    # parent requirements.txt/pyproject.toml, causing the ecosystem invariant
+    # to reject pom.xml indefinitely. Preserve the explicit workspace boundary.
+    workspace_realpath = os.path.realpath(repo_path)
+    git_toplevel = _resolved_git_toplevel(repo_path)
+    if git_toplevel is not None and git_toplevel != workspace_realpath:
+        logger.info(
+            "Workspace '%s' is nested inside enclosing Git repository '%s'; "
+            "using a workspace-scoped snapshot sandbox.",
+            workspace_realpath, git_toplevel,
+        )
+        return _create_scoped_snapshot_sandbox(workspace_realpath)
 
     # 1b. `git worktree add --detach` needs a commit-ish to detach at - a repo
     # with zero commits has no HEAD and this fails with exit 128, silently
@@ -372,6 +443,17 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
     frozen at whatever commit existed the first time it was ever created,
     silently hiding every commit made since from any future run that doesn't
     itself rewrite the affected files."""
+    expected_scoped_path = os.path.realpath(os.path.join(repo_path, ".kriya", "scoped-worktree"))
+    if (
+        os.path.realpath(worktree_path) == expected_scoped_path
+        and os.path.exists(os.path.join(worktree_path, _SCOPED_SNAPSHOT_SENTINEL))
+    ):
+        try:
+            shutil.rmtree(worktree_path)
+        except OSError as e:
+            logger.debug(f"Failed to clean up scoped snapshot at '{worktree_path}' (non-fatal): {e}")
+        return
+
     if os.path.exists(worktree_path):
         try:
             target = _resolve_repo_head(repo_path)

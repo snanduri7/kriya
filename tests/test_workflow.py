@@ -13138,6 +13138,45 @@ def test_create_git_worktree_carries_over_uncommitted_changes(tmp_path):
     assert pom == "<project>uncommitted new file</project>\n"
 
 
+def test_create_git_worktree_scopes_nested_workspace_without_enclosing_repo_markers(tmp_path):
+    """A requested generation directory nested below another Git repository is
+    not the enclosing repository. Its sandbox must not inherit unrelated parent
+    build markers, which would make deterministic ecosystem checks reject the
+    ecosystem explicitly requested for the nested project."""
+    from kriya.workflow.workflow import create_git_worktree, remove_git_worktree
+    from kriya.workflow.static_checks import find_established_stack_drift
+
+    _init_git_repo(tmp_path)
+    (tmp_path / "requirements.txt").write_text("pytest\n")
+    subprocess.run(["git", "add", "requirements.txt"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "establish parent python project"], cwd=tmp_path, check=True)
+
+    nested_workspace = tmp_path / "tmp" / "demo2"
+    nested_workspace.mkdir(parents=True)
+    (nested_workspace / "goal.md").write_text("Create a Maven application.\n")
+
+    worktree_path = create_git_worktree(str(nested_workspace))
+
+    assert worktree_path != str(nested_workspace)
+    assert open(os.path.join(worktree_path, "goal.md")).read() == "Create a Maven application.\n"
+    assert not os.path.exists(os.path.join(worktree_path, "requirements.txt"))
+    assert os.path.exists(os.path.join(worktree_path, ".kriya-scoped-snapshot"))
+    sandbox_git_probe = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=worktree_path,
+        capture_output=True, text=True,
+    )
+    assert sandbox_git_probe.returncode != 0
+
+    generated_pom_path = os.path.join(worktree_path, "pom.xml")
+    with open(generated_pom_path, "w", encoding="utf-8") as pom:
+        pom.write("<project/>\n")
+    assert not os.path.exists(nested_workspace / "pom.xml")
+    assert find_established_stack_drift(worktree_path, ["pom.xml"]) is None
+
+    remove_git_worktree(str(nested_workspace), worktree_path)
+    assert not os.path.exists(worktree_path)
+
+
 def test_create_git_worktree_carries_over_a_wholly_untracked_directory(tmp_path):
     """Regression test for a real bug caught live: `git status --porcelain` in its
     default mode collapses an ENTIRELY untracked directory into a single line
