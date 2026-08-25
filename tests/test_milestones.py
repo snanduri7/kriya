@@ -852,6 +852,76 @@ async def test_run_milestones_capability_stays_proposed_when_its_milestone_fails
 
 
 @pytest.mark.asyncio
+async def test_run_milestones_derives_and_persists_real_artifacts_per_milestone():
+    """External review P1, 'ArtifactRegistry-for-milestones consolidation'
+    (2026-08-25): WorkflowController's own enforce-mode subtask loop already
+    had real ArtifactRegistry derivation (MA7.10) - run_milestones() had
+    zero equivalent wiring (confirmed via grep before this change, ZERO
+    references to ArtifactRegistry anywhere in this module). A milestone
+    that completes for real, in a workspace with a real ecosystem marker,
+    must end this run with a real, persisted ArtifactRecord keyed by that
+    milestone's own real id - deliberately per-milestone as each one
+    completes (not batched to the end like enforce mode does for its own,
+    different reason), matching this function's existing completed_
+    milestone_ids/established_file_context incremental-persistence
+    convention."""
+    milestones = [
+        mkv2("M1", goal="g1", success_criterion="c1"),
+        mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"]),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "pyproject.toml"), "w") as f:
+            f.write('[project]\nname = "myapp"\nversion = "0.1.0"\n')
+
+        state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+        we = MagicMock()
+        we.run_generation_workflow = AsyncMock(
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
+        )
+        we.run_verifier = MagicMock()
+        we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+
+        result = await run_milestones(we, state, tmp)
+
+        assert result["status"] == "success"
+        from kriya.control.persistence import load_artifact_registry
+        registry = load_artifact_registry(tmp)
+        m1_records = registry.resolve_for_milestone("M1")
+        assert len(m1_records) == 1
+        assert m1_records[0].ecosystem == "python"
+        assert m1_records[0].coordinates == {"name": "myapp", "version": "0.1.0"}
+        # Both milestones share the same real workspace-level pyproject.toml, so
+        # each one's own real derivation pass finds and records it too, keyed
+        # under its OWN milestone id - real per-milestone attribution, not a
+        # single global record.
+        assert len(registry.resolve_for_milestone("M2")) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_milestones_artifact_derivation_is_non_fatal_and_skips_an_unrecognized_ecosystem():
+    """No pom.xml/pyproject.toml/package.json in the workspace at all -
+    ArtifactRegistry.derive_from_workspace() correctly yields nothing
+    (honest absence, per its own docstring), and the run must still succeed
+    exactly as before this wiring existed."""
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
+    with tempfile.TemporaryDirectory() as tmp:
+        state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+        we = MagicMock()
+        we.run_generation_workflow = AsyncMock(
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
+        )
+        we.run_verifier = MagicMock()
+        we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+
+        result = await run_milestones(we, state, tmp)
+
+        assert result["status"] == "success"
+        from kriya.control.persistence import load_artifact_registry
+        registry = load_artifact_registry(tmp)
+        assert registry.resolve_for_milestone("M1") == ()
+
+
+@pytest.mark.asyncio
 async def test_run_milestones_grounds_later_milestones_on_earlier_ones_real_files():
     """Regression guard for a real, live-validation-confirmed finding
     (2026-08-21, protocol-encoder milestone run): milestone N's Architect

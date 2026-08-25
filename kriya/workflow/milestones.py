@@ -32,7 +32,12 @@ from kriya.control.contracts import (
     register_provided_capabilities,
     wire_contract_consumers,
 )
-from kriya.control.persistence import load_contract_registry, save_contract_registry
+from kriya.control.persistence import (
+    load_artifact_registry,
+    load_contract_registry,
+    save_artifact_registry,
+    save_contract_registry,
+)
 from kriya.workflow.context_projection import (
     project_implementation_source,
     render_established_file_context,  # MA5.8 - moved to context_projection.py, re-exported here for
@@ -648,6 +653,22 @@ async def run_milestones(
     # throughout: a bookkeeping failure must never break a real milestone
     # run, matching every other control-plane persistence call site.
     contract_registry = load_contract_registry(workspace_path)
+    # MA7.10 gave WorkflowController's own enforce-mode subtask loop real
+    # ArtifactRegistry derivation (derive_from_workspace against the real,
+    # post-apply workspace, only once a unit of work genuinely completes) -
+    # this milestone path had zero equivalent wiring (confirmed by grep
+    # before this change: ArtifactRegistry never referenced anywhere in this
+    # module). Extended here, 2026-08-25 (external review P1, "ArtifactRegistry-
+    # for-milestones consolidation") - keyed by the milestone's OWN real id
+    # (a real MilestoneV2, unlike enforce mode's synthetic run_id-as-
+    # milestone_id fallback for a bare Subtask that carries no id in that
+    # namespace), derived and persisted incrementally per milestone as it
+    # completes, below - never batched to the end of the whole run, matching
+    # this function's own existing completed_milestone_ids/established_
+    # file_context per-milestone persistence convention rather than the
+    # once-at-the-end pattern enforce mode uses for its own different reason
+    # (a subtask plan's "success" is only meaningful once ALL subtasks pass).
+    artifact_registry = load_artifact_registry(workspace_path)
     contract_changes: List[Any] = []
     for m in run_state.milestones:
         if m.provides:
@@ -834,6 +855,15 @@ async def run_milestones(
                 run_state.verification_commands[milestone.id] = judgment["run_commands"]
         except Exception as e:
             logger.warning(f"Could not capture milestone '{milestone.id}'s verification commands for later replay: {e}")
+
+        try:
+            derived = artifact_registry.derive_from_workspace(workspace_path, milestone.id)
+            for record in derived:
+                artifact_registry.record(record)
+            if derived:
+                save_artifact_registry(workspace_path, artifact_registry)
+        except Exception as e:
+            logger.warning(f"Could not derive/persist real artifacts for milestone '{milestone.id}' (non-fatal): {e}")
 
         run_state.completed_milestone_ids.append(milestone.id)
         save_milestone_run_state(workspace_path, run_state)
