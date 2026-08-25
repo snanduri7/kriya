@@ -157,6 +157,19 @@ workflow_controller:
   enabled: false
   mode: shadow
 
+# runtime_profile (2026-08-25, external review P2) - unset here on purpose
+# (None, the default - changes nothing). A project that wants the "all of
+# MA1-7's real, opt-in behavior at once" bundle instead of remembering
+# which combination of engineering_triage.shadow_mode/process_profiles.
+# enabled/workflow_controller.enabled+mode to hand-tune can set, in its
+# OWN kriya.yaml:
+#   runtime_profile: hardened
+# which unconditionally overrides those four fields to their most-real
+# settings (see kriya/config/config.py::AppConfig's own docstring for
+# exactly what it does and does NOT touch - execution_policy.mode stays
+# separately gated). Only "hardened" and unset (null) are valid values.
+# runtime_profile: null
+
 autonomy:
   mode: "human-in-the-loop"
   sensitive_paths:

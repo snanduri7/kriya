@@ -480,7 +480,32 @@ class WorkflowControllerConfig(BaseModel):
             raise ValueError(f"workflow_controller.mode must be 'shadow' or 'enforce', got {v!r}")
         return v
 
+_VALID_RUNTIME_PROFILES = (None, "hardened")
+
+
 class AppConfig(BaseModel):
+    """runtime_profile (2026-08-25, external review P2) - a single named
+    preset in place of remembering which combination of independent
+    toggles (engineering_triage.shadow_mode, process_profiles.enabled,
+    workflow_controller.enabled/mode) "hardened" actually means. Deliberately
+    NOT a new independent config surface of its own: load_config() applies
+    it as a straightforward, unconditional override of those existing
+    fields AFTER the normal default+user merge - pick the profile OR
+    hand-tune the individual fields, not a partial mix of both, so there's
+    never a question of which one "wins" for a given field. None (the
+    default) changes nothing - every field keeps behaving exactly as it
+    always has, matching every existing kriya.yaml unchanged.
+
+    Deliberately does NOT touch execution_policy.mode - that field's own
+    validator has always hard-rejected "enforce" as a distinct, separate,
+    later decision (kriya/config/config.py's own ExecutionPolicyConfig
+    docstring), and this preset does not silently reach around that
+    restriction. The narrow, always-on hard-invariant enforcement
+    (kriya/policy/enforcement.py, MA7.3) and control-plane persistence
+    already happen unconditionally whenever workflow_controller.enabled is
+    true - there is no separate, real toggle for either one to include
+    here, despite how the original review phrased the preset's contents."""
+
     llm: LLMConfig = Field(default_factory=LLMConfig)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
@@ -498,6 +523,14 @@ class AppConfig(BaseModel):
     process_profiles: ProcessProfilesConfig = Field(default_factory=ProcessProfilesConfig)
     execution_policy: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
     workflow_controller: WorkflowControllerConfig = Field(default_factory=WorkflowControllerConfig)
+    runtime_profile: Optional[str] = Field(default=None)
+
+    @field_validator("runtime_profile")
+    @classmethod
+    def _runtime_profile_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v not in _VALID_RUNTIME_PROFILES:
+            raise ValueError(f"runtime_profile must be one of {_VALID_RUNTIME_PROFILES!r}, got {v!r}")
+        return v
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""
@@ -575,7 +608,19 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             raise ValueError(f"Failed to load configuration at {config_path}: {e}") from e
             
     cfg = AppConfig(**config_dict)
-    
+
+    # runtime_profile="hardened" (2026-08-25, external review P2) - see
+    # AppConfig's own docstring for exactly what this does and does not
+    # cover. Applied AFTER the normal default+user merge/validation, as an
+    # unconditional override - deliberately not a config_dict-level merge
+    # trick, so it behaves identically regardless of how the user's own
+    # kriya.yaml happened to set these same fields.
+    if cfg.runtime_profile == "hardened":
+        cfg.engineering_triage.shadow_mode = False
+        cfg.process_profiles.enabled = True
+        cfg.workflow_controller.enabled = True
+        cfg.workflow_controller.mode = "enforce"
+
     # Enforce baseline sensitive paths inheritance
     baseline_sensitive = [
         r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile", 

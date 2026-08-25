@@ -59,6 +59,61 @@ def test_workflow_controller_stays_disabled_by_default():
     assert load_config().workflow_controller.mode == "shadow"
 
 
+def test_runtime_profile_defaults_to_none_and_changes_nothing():
+    """runtime_profile (2026-08-25, external review P2) - the default
+    (unset) must leave every underlying field exactly as it already
+    behaves, matching every existing kriya.yaml unchanged."""
+    assert AppConfig().runtime_profile is None
+    cfg = load_config()
+    assert cfg.runtime_profile is None
+    assert cfg.workflow_controller.enabled is False
+    assert cfg.engineering_triage.shadow_mode is True
+    assert cfg.process_profiles.enabled is False
+
+
+def test_runtime_profile_hardened_overrides_the_documented_fields(tmp_path):
+    config_file = tmp_path / "kriya.yaml"
+    with open(config_file, "w") as f:
+        yaml.dump({"runtime_profile": "hardened"}, f)
+
+    cfg = load_config(str(config_file))
+
+    assert cfg.workflow_controller.enabled is True
+    assert cfg.workflow_controller.mode == "enforce"
+    assert cfg.engineering_triage.shadow_mode is False
+    assert cfg.process_profiles.enabled is True
+
+
+def test_runtime_profile_hardened_does_not_touch_execution_policy_mode():
+    """execution_policy.mode="enforce" has always been a distinct, separately
+    authorized decision (its own validator hard-rejects it) - this preset
+    does not silently reach around that restriction."""
+    with pytest.raises(Exception):
+        AppConfig(runtime_profile="hardened", execution_policy={"mode": "enforce"})
+
+
+def test_runtime_profile_rejects_an_unknown_value():
+    with pytest.raises(Exception):
+        AppConfig(runtime_profile="turbo")
+
+
+def test_runtime_profile_hardened_overrides_even_if_the_user_config_set_the_fields_differently(tmp_path):
+    """A strict preset, not a partial merge - picking "hardened" wins over
+    whatever the user's own kriya.yaml happened to also set for these
+    specific fields, so there's never a question of which one applies."""
+    config_file = tmp_path / "kriya.yaml"
+    with open(config_file, "w") as f:
+        yaml.dump({
+            "runtime_profile": "hardened",
+            "workflow_controller": {"enabled": False, "mode": "shadow"},
+        }, f)
+
+    cfg = load_config(str(config_file))
+
+    assert cfg.workflow_controller.enabled is True
+    assert cfg.workflow_controller.mode == "enforce"
+
+
 def test_load_custom_config(tmp_path):
     custom_yaml = {
         "llm": {
