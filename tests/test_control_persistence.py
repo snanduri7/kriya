@@ -9,7 +9,14 @@ import tempfile
 
 import pytest
 
-from kriya.control.persistence import control_state_path, load_control_state, save_control_state
+from kriya.control.persistence import (
+    approved_plan_path,
+    control_state_path,
+    load_approved_plan,
+    load_control_state,
+    save_approved_plan,
+    save_control_state,
+)
 from kriya.control.state import ControlState
 from kriya.policy.errors import PolicyDeniedError
 
@@ -79,3 +86,28 @@ def test_persisted_state_is_stable_json(workspace):
         raw = json.load(f)
     assert raw["run_id"] == "run-1"
     assert raw["schema_version"] == state.schema_version
+
+
+def test_approved_plan_and_stage_states_round_trip_with_workspace_ownership(workspace):
+    payload = {
+        "schema_version": 1,
+        "plan_id": "run-1",
+        "approval_status": "approved",
+        "lifecycle_state": "in_progress",
+        "stage_order": ["s1", "s2"],
+        "stage_states": {"s1": "completed", "s2": "in_progress"},
+        "plan": {"plan_id": "run-1", "subtasks": []},
+    }
+    save_approved_plan(workspace, "run-1", payload)
+
+    loaded = load_approved_plan(workspace, "run-1")
+    assert loaded is not None
+    assert loaded["approval_status"] == "approved"
+    assert loaded["stage_states"] == {"s1": "completed", "s2": "in_progress"}
+    assert loaded["_workspace"]["workspace_id"]
+    assert os.path.isfile(approved_plan_path(workspace, "run-1"))
+
+
+def test_approved_plan_path_rejects_unsafe_plan_id(workspace):
+    with pytest.raises(ValueError):
+        approved_plan_path(workspace, "../outside")

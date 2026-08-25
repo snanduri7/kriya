@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from kriya.control.persistence import load_approved_plan
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
@@ -609,6 +610,38 @@ async def test_enforce_persists_subtask_states_after_each_subtask(tmp_path):
     assert persisted is not None
     assert persisted.subtask_states == {"s1": "completed", "s2": "completed"}
     assert persisted.current_plan_hash == plan.content_hash()
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    assert approved is not None
+    assert approved["plan_hash"] == plan.content_hash()
+    assert approved["approval_status"] == "approved"
+    assert approved["lifecycle_state"] == "completed"
+    assert approved["stage_order"] == ["s1", "s2"]
+    assert approved["stage_states"] == {"s1": "completed", "s2": "completed"}
+    assert approved["plan"]["subtasks"][0]["planned_files"][0]["path"] == "a.py"
+
+
+@pytest.mark.asyncio
+async def test_enforce_persists_in_progress_stage_before_generation_call(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(side_effect=RuntimeError("process interrupted"))
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3, pytest.raises(RuntimeError, match="process interrupted"):
+        await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    assert approved is not None
+    assert approved["lifecycle_state"] == "in_progress"
+    assert approved["stage_states"] == {"s1": "in_progress"}
 
 
 @pytest.mark.asyncio

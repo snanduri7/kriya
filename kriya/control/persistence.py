@@ -41,6 +41,7 @@ _STATE_FILENAME = "state.json"
 _CONTRACTS_FILENAME = "contracts.json"
 _ARTIFACTS_FILENAME = "artifacts.json"
 _DECISIONS_FILENAME = "decisions.jsonl"
+_APPROVED_PLANS_DIRNAME = "plans"
 
 
 def _control_dir(workspace_path: str) -> str:
@@ -61,6 +62,24 @@ def artifact_registry_path(workspace_path: str) -> str:
 
 def decision_ledger_path(workspace_path: str) -> str:
     return os.path.join(_control_dir(workspace_path), _DECISIONS_FILENAME)
+
+
+def approved_plan_path(workspace_path: str, plan_id: str) -> str:
+    """Owned durable path for one validated authoritative plan."""
+    safe_plan_id = "".join(ch for ch in plan_id if ch.isalnum() or ch in {"-", "_"})
+    if not safe_plan_id or safe_plan_id != plan_id:
+        raise ValueError("plan_id must contain only letters, digits, '-' or '_'")
+    return os.path.join(_control_dir(workspace_path), _APPROVED_PLANS_DIRNAME, f"{safe_plan_id}.json")
+
+
+def save_approved_plan(workspace_path: str, plan_id: str, payload: Dict[str, Any]) -> None:
+    """Atomically persist a validated plan and its execution-stage state."""
+    _save_json_document(workspace_path, approved_plan_path(workspace_path, plan_id), payload)
+
+
+def load_approved_plan(workspace_path: str, plan_id: str) -> Optional[Dict[str, Any]]:
+    """Load a validated plan document, enforcing workspace ownership."""
+    return _load_json_document(approved_plan_path(workspace_path, plan_id), workspace_path)
 
 
 def _save_json_document(workspace_path: str, path: str, payload: Dict[str, Any]) -> None:

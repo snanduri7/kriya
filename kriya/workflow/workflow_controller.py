@@ -93,6 +93,7 @@ from kriya.control.persistence import (
     contract_registry_path,
     control_state_path,
     save_artifact_registry,
+    save_approved_plan,
     save_contract_registry,
     save_control_state,
 )
@@ -308,6 +309,29 @@ def build_structured_plan_repair_prompt(
         f"Previous Planner response (repair attempt {repair_attempt}):\n"
         + previous_plan_text[-20000:]
     )
+
+
+def build_approved_plan_document(
+    plan: EngineeringPlan,
+    *,
+    plan_hash: str,
+    repair_attempts: int,
+    stage_states: Dict[str, str],
+    lifecycle_state: str,
+) -> Dict[str, Any]:
+    """Canonical durable representation of an authoritative approved plan."""
+    return {
+        "schema_version": 1,
+        "plan_id": plan.plan_id,
+        "plan_hash": plan_hash,
+        "approval_status": "approved",
+        "approval_basis": "authoritative_validation",
+        "repair_attempts": repair_attempts,
+        "lifecycle_state": lifecycle_state,
+        "stage_order": topological_subtask_order(plan),
+        "stage_states": dict(stage_states),
+        "plan": plan.model_dump(mode="json"),
+    }
 
 
 def compute_abandoned_plan_files(
@@ -1378,6 +1402,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
         order = topological_subtask_order(plan)
         total = len(order)
+        approved_stage_states = {
+            subtask_id: (
+                "completed" if resumed_subtask_states.get(subtask_id) == "completed" else "pending"
+            )
+            for subtask_id in order
+        }
+        control_state = control_state.with_updates(subtask_states=dict(approved_stage_states))
+        # Persist the complete validated plan before any implementation can
+        # begin. ControlState remains the compact resume index; this owned
+        # document is the durable source for what was approved and how each
+        # ordered execution stage progressed.
+        save_approved_plan(
+            workspace_path, plan.plan_id,
+            build_approved_plan_document(
+                plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                stage_states=approved_stage_states, lifecycle_state="approved",
+            ),
+        )
+        save_control_state(workspace_path, control_state)
         established_file_context: Dict[str, str] = {}
         subtask_results: List[SubtaskResult] = []
         subtask_call_results: List[Dict[str, Any]] = []
@@ -1412,6 +1455,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     )
                     established_file_context[planned_file.path] = projection.content
                 continue
+
+            approved_stage_states[subtask_id] = "in_progress"
+            control_state = control_state.with_updates(
+                subtask_states={**control_state.subtask_states, subtask_id: "in_progress"},
+            )
+            save_approved_plan(
+                workspace_path, plan.plan_id,
+                build_approved_plan_document(
+                    plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                    stage_states=approved_stage_states, lifecycle_state="in_progress",
+                ),
+            )
+            save_control_state(workspace_path, control_state)
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
             subtask_goal = build_subtask_goal_text(subtask, position, total)
@@ -1518,6 +1574,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     subtask.id: sorted(call_result.get("files", [])),
                 },
             )
+            approved_stage_states[subtask.id] = result.status.value
+            plan_lifecycle_state = (
+                "in_progress" if passed else
+                "needs_review" if result.status == SubtaskStatus.NEEDS_REVIEW else "failed"
+            )
+            save_approved_plan(
+                workspace_path, plan.plan_id,
+                build_approved_plan_document(
+                    plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                    stage_states=approved_stage_states, lifecycle_state=plan_lifecycle_state,
+                ),
+            )
             save_control_state(workspace_path, control_state)
 
             if not passed:
@@ -1568,6 +1636,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             r.status == SubtaskStatus.COMPLETED for r in subtask_results
         )
         needs_review = any(r.status == SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
+        final_plan_lifecycle = "completed" if all_completed else "needs_review" if needs_review else "failed"
+        save_approved_plan(
+            workspace_path, plan.plan_id,
+            build_approved_plan_document(
+                plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                stage_states=approved_stage_states, lifecycle_state=final_plan_lifecycle,
+            ),
+        )
         aggregated: Dict[str, Any] = {
             "status": "success" if all_completed else "needs_review" if needs_review else "failed",
             "quality_gates_passed": all_completed,
