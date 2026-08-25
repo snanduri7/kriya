@@ -34,6 +34,7 @@ from kriya.workflow.checkpoint import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_reporting import build_failure_report_entry
+from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.triage import EngineeringRoute, EngineeringTriageService
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.errors import PolicyDeniedError
@@ -191,7 +192,7 @@ def _build_required_verification_evidence(
     return evidence
 
 
-async def _ensure_repository_indexed(cfg: Any, workspace_path: str) -> None:
+async def _ensure_repository_indexed(cfg: Any, workspace_path: str) -> bool:
     """Runs a one-time index_repository() pass (dependency_graph.db's symbol
     tables + vector_index.db's code embeddings) for `workspace_path`, but only
     when it has never been indexed at all. Closes a real gap: index_repository()
@@ -225,18 +226,20 @@ async def _ensure_repository_indexed(cfg: Any, workspace_path: str) -> None:
         finally:
             probe.close()
         if already_indexed:
-            return
+            return True
         logger.info(
             f"No indexed dependency graph found for '{workspace_path}' - running a "
             "one-time repository index before generation starts (autonomy."
             "auto_index_missing_dependency_graph is enabled)."
         )
         await RepositoryAnalyzer(workspace_path).index_repository(cfg)
+        return True
     except Exception as index_ex:
         logger.warning(
             f"Auto-index of '{workspace_path}' failed, continuing without a populated "
             f"dependency graph (same as today's default behavior): {index_ex}"
         )
+        return False
 
 
 def _log_phase_banner(title: str) -> None:
@@ -531,6 +534,9 @@ class WorkflowEngine:
         protected_source_file: Optional[str] = None,
         allowed_write_relpaths: Optional[List[str]] = None,
         required_verification: Optional[List[Dict[str, Any]]] = None,
+        runtime_verification_required: Optional[bool] = None,
+        strict_spec_compliance: bool = False,
+        strict_dependency_index: bool = False,
         resolved_knowledge_coordinates: Optional[List[str]] = None,
         skill_engine_override: Optional[Any] = None,
     ) -> Dict[str, Any]:
@@ -672,8 +678,20 @@ class WorkflowEngine:
         # start eating the same budget a slow model's Planner/Architect/Developer
         # calls already exhaust on their own. See _ensure_repository_indexed's own
         # docstring (above) for the full gap this closes and why it's opt-in.
-        if self.kernel.config.autonomy.auto_index_missing_dependency_graph:
-            await _ensure_repository_indexed(self.kernel.config, workspace_path)
+        if (
+            self.kernel.config.autonomy.auto_index_missing_dependency_graph
+            or strict_dependency_index
+        ):
+            index_available = await _ensure_repository_indexed(self.kernel.config, workspace_path)
+            if strict_dependency_index and not index_available:
+                return {
+                    "status": "needs_review",
+                    "quality_gates_passed": False,
+                    "files": [],
+                    "failure_type": "VERIFICATION_INFRASTRUCTURE_FAILURE",
+                    "reason_codes": ["DEPENDENCY_INDEX_UNAVAILABLE"],
+                    "error": "Authoritative dependency-aware context could not be indexed.",
+                }
 
         # MA1.3 - engineering triage, shadow mode (kriya/workflow/triage.py).
         # Placed AFTER the optional auto-index above, same time-budget-exclusion
@@ -800,7 +818,8 @@ class WorkflowEngine:
             skills_dir=self.kernel.config.paths.skills,
             cutoff_date_str=cutoff,
             offline=knowledge_config.offline_mode,
-            memory_dir=self.kernel.config.paths.memory
+            memory_dir=self.kernel.config.paths.memory,
+            cache_ttl_days=knowledge_config.release_cache_ttl_days,
         )
 
         all_gap_report = guard.check_goal(goal, workspace_path)
@@ -1955,6 +1974,12 @@ class WorkflowEngine:
             established_files=established_files or [],
             protected_relpath=protected_relpath,
             allowed_write_relpaths=list(allowed_write_relpaths or []),
+            runtime_verification_required=(
+                goal_requires_runtime_behavior(goal)
+                if runtime_verification_required is None
+                else runtime_verification_required
+            ),
+            strict_spec_compliance=strict_spec_compliance,
         )
 
         from kriya.workflow.retry_policy import decide_for_state

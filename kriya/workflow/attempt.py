@@ -11,6 +11,7 @@ to-workspace, lesson extraction, the full regression suite) deliberately
 stays in workflow.py - out of scope for this slice.
 """
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -356,6 +357,8 @@ class AttemptContext:
     # protect, matches every existing call site's behavior unchanged.
     protected_relpath: Optional[str] = None
     allowed_write_relpaths: List[str] = field(default_factory=list)
+    runtime_verification_required: bool = False
+    strict_spec_compliance: bool = False
 
 
 def _extract_grounded_contract_verdict(
@@ -391,6 +394,37 @@ def _extract_grounded_contract_verdict(
         )
         return None
     return verdict
+
+
+def _record_self_correction_scope_conflict(
+    state: GenerationState, ctx: "AttemptContext", result: Any, failure_type: str,
+) -> None:
+    required = sorted(set(getattr(result, "scope_conflict_files", []) or []))
+    if not required:
+        return
+    state.plan_scope_conflict = {
+        "classification": "PLAN_SCOPE_INSUFFICIENT",
+        "failure_type": failure_type,
+        "required_files": required,
+        "allowed_files": sorted(ctx.allowed_write_relpaths),
+        "reason": "self-correction diagnosis requires a readable file outside approved write scope",
+    }
+
+
+def _run_verification_basis_hash(ctx: "AttemptContext", state: GenerationState) -> str:
+    """Fingerprint the real invocation-affecting basis for cached judgment."""
+    digest = hashlib.sha256()
+    digest.update(ctx.goal.encode("utf-8", errors="replace"))
+    digest.update(ctx.design.encode("utf-8", errors="replace"))
+    for filepath in sorted(set(state.all_files_written) | set(ctx.established_files)):
+        digest.update(filepath.encode("utf-8", errors="replace"))
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        try:
+            with open(full_path, "rb") as fh:
+                digest.update(fh.read())
+        except OSError:
+            digest.update(b"<missing>")
+    return digest.hexdigest()
 
 
 def _diagnosis_mismatch_bypass_reason(
@@ -2043,9 +2077,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     worktree_path=ctx.worktree_path,
                     validator=validator,
                     files_in_scope=compile_known_files,
+                    writable_files=(ctx.allowed_write_relpaths or compile_known_files),
                     compile_error_output=compile_res["output"],
                     active_code_context=active_code_context,
                     max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                )
+                _record_self_correction_scope_conflict(
+                    state, ctx, self_correction_result, "compile",
                 )
                 for incident in getattr(self_correction_result, "incidents", []):
                     state.record_event(RunEvent(
@@ -2232,11 +2270,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         worktree_path=ctx.worktree_path,
                         validator=validator,
                         files_in_scope=list(state.all_files_written),
+                        writable_files=(ctx.allowed_write_relpaths or list(state.all_files_written)),
                         compile_error_output=test_res["output"],
                         active_code_context=active_code_context,
                         max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
                         failure_type="targeted_test",
                         target_test=target_test,
+                    )
+                    _record_self_correction_scope_conflict(
+                        state, ctx, test_repair_result, "targeted_test",
                     )
                     for incident in getattr(test_repair_result, "incidents", []):
                         state.record_event(RunEvent(
@@ -2342,7 +2384,39 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # suite at all. Judgment decides per-attempt whether this goal describes
         # self-terminating runtime behavior worth actually running and checking.
         autonomy_cfg_rv = ctx.kernel.config.autonomy
+        if ctx.runtime_verification_required and not autonomy_cfg_rv.run_verification_enabled:
+            message = (
+                "REQUIRED_RUNTIME_VERIFICATION_DISABLED: the declared verification contract "
+                "requires observable execution, but runtime verification is disabled."
+            )
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if ctx.runtime_verification_required and state.run_verification_declined:
+            message = (
+                "REQUIRED_RUNTIME_VERIFICATION_DECLINED: the declared runtime check was not "
+                "authorized, so correctness remains unverified."
+            )
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
         if autonomy_cfg_rv.run_verification_enabled and not state.run_verification_declined:
+            current_judgment_basis = _run_verification_basis_hash(ctx, state)
+            if (
+                state.cached_run_verification_judgment is not None
+                and state.cached_run_verification_basis_hash != current_judgment_basis
+            ):
+                logger.info(
+                    "Invocation-affecting workspace content changed - invalidating cached "
+                    "runtime-verification judgment."
+                )
+                state.cached_run_verification_judgment = None
             if state.cached_run_verification_judgment is None:
                 pom_content_for_judge = None
                 try:
@@ -2375,6 +2449,20 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     files_written=sorted(set(state.all_files_written) | set(ctx.established_files)),
                     build_file_content=pom_content_for_judge,
                 )
+                if raw_judgment.get("infrastructure_error") and ctx.runtime_verification_required:
+                    message = (
+                        "VERIFICATION INFRASTRUCTURE FAILURE: runtime behavior is required, but "
+                        f"the runtime-verification judge was unavailable: "
+                        f"{raw_judgment['infrastructure_error']}"
+                    )
+                    failure = Failure(
+                        type="verification_infrastructure_failure",
+                        message=message,
+                        raw_output=message,
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
                 # Independent brutal review finding #2 (2026-08-15): don't trust
                 # command_source="goal_explicit" as self-reported - verify it's
                 # actually grounded in the goal text before it gets cached (and
@@ -2386,9 +2474,37 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state.cached_run_verification_judgment = downgrade_ungrounded_goal_explicit_commands(
                     raw_judgment, ctx.goal
                 )
+                state.cached_run_verification_basis_hash = current_judgment_basis
             else:
                 logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
             judgment = state.cached_run_verification_judgment
+            if ctx.runtime_verification_required and not judgment.get("should_run"):
+                message = (
+                    "REQUIRED_RUNTIME_VERIFICATION_MISSING: the declared verification contract "
+                    "requires observable runtime behavior, but no executable verification "
+                    "sequence was produced."
+                )
+                failure = Failure(
+                    type="verification_infrastructure_failure", message=message,
+                    raw_output=message, attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+            if (
+                ctx.runtime_verification_required
+                and judgment.get("should_run")
+                and deterministic_sequence_kind(judgment.get("run_commands") or []) == "build"
+            ):
+                message = (
+                    "BEHAVIORAL_GOAL_WITH_BUILD_ONLY_VERIFICATION: observable runtime behavior "
+                    "is required, but the inferred sequence contains only build commands."
+                )
+                failure = Failure(
+                    type="verification_infrastructure_failure", message=message,
+                    raw_output=message, attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
             # Deterministic Java entrypoint resolution - applied fresh every
             # attempt (never cached alongside judge()'s own should_run/
             # success_criteria decision above, unlike everything else on
@@ -2662,6 +2778,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 files_written=list(state.all_files_written),
                             )
 
+                        # Output semantics cannot erase a failed required
+                        # process step. The sequence schema currently has no
+                        # explicit expected-nonzero contract, so every step is
+                        # required to exit cleanly by default.
+                        if grade.get("passed"):
+                            grade["passed"] = False
+                            grade["reasoning"] = (
+                                "Observed output appeared semantically correct, but one or more "
+                                "required verification steps exited non-zero. "
+                                f"Semantic evidence: {grade.get('reasoning', '')}"
+                            )
+
                         # Bounded self-correction, widened 2026-08-22 from
                         # compile-only to also cover THIS specific run-
                         # verification shape - found live (ignite_qpid_protocol):
@@ -2696,6 +2824,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 worktree_path=ctx.worktree_path,
                                 validator=validator,
                                 files_in_scope=run_verification_known_files,
+                                writable_files=(
+                                    ctx.allowed_write_relpaths or list(state.all_files_written)
+                                ),
                                 compile_error_output=(
                                     f"RUNTIME VERIFICATION FAILURE (plain nonzero exit): {grade['reasoning']}"
                                     f"\n\nCaptured output:\n{run_res['output']}"
@@ -2703,6 +2834,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 active_code_context=active_code_context,
                                 max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
                                 failure_type="run_verification",
+                            )
+                            _record_self_correction_scope_conflict(
+                                state, ctx, self_correction_result, "run_verification",
                             )
                             for incident in getattr(self_correction_result, "incidents", []):
                                 state.record_event(RunEvent(
@@ -2947,6 +3081,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         spec_result = await ctx.spec_compliance.check(
             goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
         )
+        if spec_result.get("status") == "unknown" and ctx.strict_spec_compliance:
+            message = (
+                "SPEC COMPLIANCE INFRASTRUCTURE FAILURE: authoritative execution cannot "
+                f"treat an unavailable compliance judgment as satisfied: {spec_result['reasoning']}"
+            )
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
         if not spec_result["compliant"]:
             missing_desc = "; ".join(spec_result["missing_requirements"]) or spec_result["reasoning"]
             message = (

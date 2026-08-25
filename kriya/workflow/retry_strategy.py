@@ -36,6 +36,7 @@ from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_
 from kriya.workflow.state import GenerationState
 from kriya.workflow.worktree import remove_git_worktree
 from kriya.workflow.retry_policy import RetryAction, decide_for_state
+from kriya.workflow.checkpoint import compute_tree_hash
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,17 @@ _REPAIR_FEEDBACK_FAILURE_TYPES = {
     "structural_corruption",
     "unaddressed_error_location",
 }
+
+
+def record_workspace_progress(state: GenerationState, workspace_hash: str, limit: int) -> bool:
+    """Return False once repeated failures make no effective content progress."""
+    if workspace_hash == state.last_failed_workspace_hash:
+        state.consecutive_no_progress_attempts += 1
+    else:
+        state.consecutive_no_progress_attempts = 0
+    state.last_failed_workspace_hash = workspace_hash
+    state.no_progress_terminated = state.consecutive_no_progress_attempts >= limit
+    return not state.no_progress_terminated
 
 
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
@@ -122,7 +134,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # of the exact same failure would never compare equal.
     state.environment_failure = (
         failure.message
-        if failure.type == "time_budget_exhausted"
+        if failure.type in {"time_budget_exhausted", "verification_infrastructure_failure"}
         else classify_environment_failure(raw_error_context)
     )
 
@@ -190,6 +202,17 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             ctx.kernel.config.search.base_url, ctx.kernel.config.search.top_k
         )
     state.budgets.last_failure_signature = current_failure_signature
+    # Failure-family churn is not progress when the effective workspace is
+    # unchanged. Bound repeated model calls using content ground truth while
+    # preserving the existing global attempt ceiling.
+    current_workspace_hash = compute_tree_hash(ctx.worktree_path)
+    no_progress_limit = ctx.kernel.config.autonomy.max_consecutive_no_progress_attempts
+    if not record_workspace_progress(state, current_workspace_hash, no_progress_limit):
+        logger.error(
+            "Quality Gates stopped after %s consecutive retries produced no effective "
+            "workspace change, regardless of failure-family churn.",
+            no_progress_limit,
+        )
 
     # Re-evaluate which file(s) THIS failure implicates/is missing -
     # independent of whether this attempt was itself targeted, missing-
@@ -384,12 +407,13 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
         state.gate_outcomes.append(failure.to_gate_outcome())
 
-    if state.plan_scope_conflict is not None:
-        logger.error(
-            "Quality Gates stopped early - grounded repair requires file(s) outside the "
-            "validated write scope; authoritative plan revision is required (%s).",
-            state.plan_scope_conflict["required_files"],
-        )
+    if state.plan_scope_conflict is not None or state.no_progress_terminated:
+        if state.plan_scope_conflict is not None:
+            logger.error(
+                "Quality Gates stopped early - grounded repair requires file(s) outside the "
+                "validated write scope; authoritative plan revision is required (%s).",
+                state.plan_scope_conflict["required_files"],
+            )
         if ctx.worktree_path != ctx.workspace_path:
             for filepath in state.all_files_written:
                 worktree_file = os.path.join(ctx.worktree_path, filepath)

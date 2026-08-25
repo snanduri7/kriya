@@ -95,6 +95,9 @@ class VerificationMethod(BaseModel):
     type: VerificationMethodType
     description: str
     tool_name: Optional[str] = None
+    # Explicit semantic contract; avoids inferring runtime authority from a
+    # technology, filename, or wording heuristic.
+    requires_runtime_execution: bool = False
 
     @model_validator(mode="after")
     def _tool_name_matches_type(self) -> "VerificationMethod":

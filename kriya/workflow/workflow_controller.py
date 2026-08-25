@@ -325,6 +325,9 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
         "upstream_contracts": upstream,
         "downstream_requirements": downstream,
         "verification_targets": [vm.description for vm in subtask.verification],
+        "runtime_execution_required": any(
+            vm.requires_runtime_execution for vm in subtask.verification
+        ),
     }
     return "--- bounded subtask semantic context ---\n" + json.dumps(payload, indent=2, sort_keys=True)
 
@@ -409,7 +412,8 @@ def build_authoritative_planner_request(goal: str) -> str:
         "provides, requires, and complete depends_on edges.\n"
         "- Build/config stages may use compile or test verification. Any original-request "
         "requirement for observable application behavior must also be verified by an entrypoint-owning "
-        "stage that actually runs the application, observes the required result, and confirms clean exit.\n"
+        "stage that actually runs the application, observes the required result, and confirms clean exit; "
+        "set requires_runtime_execution=true on that verification method and false on build-only checks.\n"
         "- Do not copy these protocol rules into global_invariants; derive those only from the "
         "original product request above."
     )
@@ -705,6 +709,7 @@ class WorkflowController:
                     cutoff_date_str=cutoff,
                     offline=knowledge_config.offline_mode,
                     memory_dir=kernel.config.paths.memory,
+                    cache_ttl_days=knowledge_config.release_cache_ttl_days,
                 )
                 goal_gap_report = guard.check_goal(goal, workspace_path)
                 resolved_coordinates = [gap["library"] for gap in goal_gap_report.gaps]
@@ -768,15 +773,11 @@ class WorkflowController:
             # real bug in this orchestration code itself propagates as an
             # uncaught exception.
             #
-            # _StructuredPlanUnavailable IS caught here specifically (fixed
-            # 2026-08-24 after a real live-validation finding,
-            # protocol_encoder_java: a single malformed subtask in Stage
-            # A's JSON block made a whole run produce zero files) - a
-            # PRE-EXECUTION plan-build/validation problem has zero real
-            # side effects yet, so falling back to the legacy whole-goal
-            # path here restores PlannerStructuredOutput's own original
-            # "must never break generation" contract (see that exception's
-            # own docstring) instead of silently doing nothing.
+            # _StructuredPlanUnavailable remains a distinct pre-execution
+            # outcome, but authoritative mode must never discard its safety
+            # model by degrading to whole-goal legacy execution. Bounded
+            # repair handles correctable structure; true unavailability is
+            # surfaced for review below.
             plan: Optional[EngineeringPlan] = None
             try:
                 legacy_result, plan, subtask_results, decisions, verification_report, control_state = (
@@ -799,19 +800,20 @@ class WorkflowController:
                     "run_id": run_id,
                 }
             except _StructuredPlanUnavailable as e:
-                logger.warning(
+                logger.error(
                     f"WorkflowController enforce run {run_id!r}: structured plan unavailable "
-                    f"({e}) - falling back to the legacy whole-goal path (zero side effects "
-                    "happened yet, so this is safe)."
+                    f"({e}); authoritative mode will not degrade to legacy execution."
                 )
-                legacy_result = await self._run_legacy_generation(
-                    goal, workspace_path,
-                    milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                    milestone_total=milestone_total, **legacy_kwargs,
-                )
-                # control_state stays exactly as built above (pre-plan) -
-                # _run_structured_enforce raised before returning anything,
-                # so there is no plan hash / subtask_states to fold in.
+                legacy_result = {
+                    "status": "needs_review",
+                    "quality_gates_passed": False,
+                    "files": [],
+                    "failure_type": "PLANNING_ERROR",
+                    "recovery": "PLAN_REPAIR",
+                    "reason_codes": ["STRUCTURED_PLAN_UNAVAILABLE"],
+                    "error": str(e),
+                    "run_id": run_id,
+                }
 
             # Enforce mode is authoritative: repository progress without a
             # durable matching ControlState must stop before another unit
@@ -1665,6 +1667,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 predetermined_architect_files=target_files,
                 allowed_write_relpaths=target_files,
                 required_verification=[vm.model_dump(mode="json") for vm in target.verification],
+                runtime_verification_required=any(
+                    vm.requires_runtime_execution for vm in target.verification
+                ),
+                strict_spec_compliance=True,
+                strict_dependency_index=bool(
+                    self.workflow_engine.kernel.config.process_profiles.enabled
+                    and self.workflow_engine.kernel.config.process_profiles.enforce_context_depth
+                ),
                 **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )
 

@@ -3,7 +3,7 @@ import logging
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -36,8 +36,10 @@ def parse_iso_datetime(date_str: str) -> Optional[datetime]:
 
 class KnowledgeCache:
     """SQLite-based cache for package release dates."""
-    def __init__(self, memory_dir: str) -> None:
+    def __init__(self, memory_dir: str, ttl_days: int = 30) -> None:
         self.db_path = os.path.join(os.path.abspath(memory_dir), "knowledge_cache.db")
+        self.ttl = timedelta(days=ttl_days)
+        self.last_lookup_metadata: Dict[str, Any] = {}
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
@@ -50,9 +52,16 @@ class KnowledgeCache:
                         package TEXT,
                         version TEXT,
                         release_date TEXT,
+                        retrieved_at TEXT,
+                        source TEXT,
                         PRIMARY KEY (ecosystem, package, version)
                     )
                 """)
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(release_cache)")}
+                if "retrieved_at" not in columns:
+                    conn.execute("ALTER TABLE release_cache ADD COLUMN retrieved_at TEXT")
+                if "source" not in columns:
+                    conn.execute("ALTER TABLE release_cache ADD COLUMN source TEXT")
                 conn.commit()
         except Exception as e:
             logger.warning(f"Failed to initialize KnowledgeCache DB: {e}")
@@ -62,27 +71,49 @@ class KnowledgeCache:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT release_date FROM release_cache WHERE ecosystem = ? AND package = ? AND version = ?",
+                    "SELECT release_date, retrieved_at, source FROM release_cache WHERE ecosystem = ? AND package = ? AND version = ?",
                     (ecosystem.lower(), package.lower(), version.lower())
                 )
                 row = cursor.fetchone()
                 if row and row[0]:
+                    retrieved_at = parse_iso_datetime(row[1] or "")
+                    if retrieved_at is not None and retrieved_at.tzinfo is None:
+                        retrieved_at = retrieved_at.replace(tzinfo=timezone.utc)
+                    if retrieved_at is None or datetime.now(timezone.utc) - retrieved_at > self.ttl:
+                        self.last_lookup_metadata = {"cache_status": "expired"}
+                        return None
+                    self.last_lookup_metadata = {
+                        "cache_status": "hit", "cached_at": retrieved_at.isoformat(),
+                        "source": row[2] or "unknown",
+                    }
                     return parse_iso_datetime(row[0])
         except Exception as e:
             logger.debug(f"Failed to read from KnowledgeCache: {e}")
         return None
 
-    def set_release_date(self, ecosystem: str, package: str, version: str, release_date: datetime) -> None:
+    def set_release_date(self, ecosystem: str, package: str, version: str, release_date: datetime, source: str = "registry") -> None:
         try:
             date_str = release_date.isoformat()
+            retrieved_at = datetime.now(timezone.utc).isoformat()
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
-                    "INSERT OR REPLACE INTO release_cache (ecosystem, package, version, release_date) VALUES (?, ?, ?, ?)",
-                    (ecosystem.lower(), package.lower(), version.lower(), date_str)
+                    "INSERT OR REPLACE INTO release_cache (ecosystem, package, version, release_date, retrieved_at, source) VALUES (?, ?, ?, ?, ?, ?)",
+                    (ecosystem.lower(), package.lower(), version.lower(), date_str,
+                     retrieved_at, source)
                 )
                 conn.commit()
+            self.last_lookup_metadata = {
+                "cache_status": "refreshed", "cached_at": retrieved_at, "source": source,
+            }
         except Exception as e:
             logger.debug(f"Failed to write to KnowledgeCache: {e}")
+
+    def invalidate(self, ecosystem: str, package: str, version: str) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "DELETE FROM release_cache WHERE ecosystem = ? AND package = ? AND version = ?",
+                (ecosystem.lower(), package.lower(), version.lower()),
+            )
 
 class RegistryAdapter(abc.ABC):
     """Abstract base class for ecosystem registries."""
@@ -117,7 +148,7 @@ class MavenCentralAdapter(RegistryAdapter):
                         if ts:
                             dt = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
                             if cache:
-                                cache.set_release_date("java", package, version, dt)
+                                cache.set_release_date("java", package, version, dt, "MavenCentral")
                             return dt
         except Exception as e:
             logger.warning(f"MavenCentral query failed for {package}:{version} - {e}")
@@ -141,7 +172,7 @@ class PyPIAdapter(RegistryAdapter):
                     if urls and "upload_time" in urls[0]:
                         dt = parse_iso_datetime(urls[0]["upload_time"])
                         if dt and cache:
-                            cache.set_release_date("python", package, version, dt)
+                            cache.set_release_date("python", package, version, dt, "PyPI")
                         return dt
         except Exception as e:
             logger.warning(f"PyPI query failed for {package}=={version} - {e}")
@@ -165,7 +196,7 @@ class NpmAdapter(RegistryAdapter):
                     if version in times:
                         dt = parse_iso_datetime(times[version])
                         if dt and cache:
-                            cache.set_release_date("javascript", package, version, dt)
+                            cache.set_release_date("javascript", package, version, dt, "npm")
                         return dt
         except Exception as e:
             logger.warning(f"npm query failed for {package}@{version} - {e}")
@@ -192,7 +223,7 @@ class RubyGemsAdapter(RegistryAdapter):
                             if created_at:
                                 dt = parse_iso_datetime(created_at)
                                 if dt and cache:
-                                    cache.set_release_date("ruby", package, version, dt)
+                                    cache.set_release_date("ruby", package, version, dt, "RubyGems")
                                 return dt
         except Exception as e:
             logger.warning(f"RubyGems query failed for {package}:{version} - {e}")
@@ -217,7 +248,7 @@ class GoModulesAdapter(RegistryAdapter):
                     if time_str:
                         dt = parse_iso_datetime(time_str)
                         if dt and cache:
-                            cache.set_release_date("go", package, version, dt)
+                            cache.set_release_date("go", package, version, dt, "GoProxy")
                         return dt
         except Exception as e:
             logger.warning(f"Go proxy query failed for {package}@{version} - {e}")
@@ -242,7 +273,7 @@ class CargoAdapter(RegistryAdapter):
                     if created_at:
                         dt = parse_iso_datetime(created_at)
                         if dt and cache:
-                            cache.set_release_date("rust", package, version, dt)
+                            cache.set_release_date("rust", package, version, dt, "crates.io")
                         return dt
         except Exception as e:
             logger.warning(f"crates.io query failed for {package}:{version} - {e}")
@@ -268,7 +299,7 @@ class NuGetAdapter(RegistryAdapter):
                     if published:
                         dt = parse_iso_datetime(published)
                         if dt and cache:
-                            cache.set_release_date("dotnet", package, version, dt)
+                            cache.set_release_date("dotnet", package, version, dt, "NuGet")
                         return dt
         except Exception as e:
             logger.warning(f"NuGet query failed for {package}:{version} - {e}")
@@ -406,14 +437,17 @@ class GapReport:
     def has_gaps(self) -> bool:
         return len(self.gaps) > 0
 
-    def add_gap(self, library: str, version: str, release_date: Optional[datetime], risk_level: str, reason: str) -> None:
-        self.gaps.append({
+    def add_gap(self, library: str, version: str, release_date: Optional[datetime], risk_level: str, reason: str, provenance: Optional[Dict[str, Any]] = None) -> None:
+        gap = {
             "library": library,
             "version": version,
             "release_date": release_date.isoformat() if release_date else None,
             "risk_level": risk_level,
             "reason": reason
-        })
+        }
+        if provenance:
+            gap["release_date_provenance"] = provenance
+        self.gaps.append(gap)
 
     def format_report(self) -> str:
         if not self.has_gaps:
@@ -444,13 +478,13 @@ class GapReport:
 
 class KnowledgeGuard:
     """Subsystem checking for missing skills and model cutoff temporal mismatches."""
-    def __init__(self, skills_dir: str, cutoff_date_str: str, offline: bool = False, memory_dir: Optional[str] = None) -> None:
+    def __init__(self, skills_dir: str, cutoff_date_str: str, offline: bool = False, memory_dir: Optional[str] = None, cache_ttl_days: int = 30) -> None:
         self.skills_dir = os.path.abspath(skills_dir)
         self.cutoff_date = parse_iso_datetime(cutoff_date_str) or datetime(2023, 12, 1, tzinfo=timezone.utc)
         self.offline = offline
         self.cache = None
         if memory_dir:
-            self.cache = KnowledgeCache(memory_dir)
+            self.cache = KnowledgeCache(memory_dir, ttl_days=cache_ttl_days)
 
     def check_goal(self, goal: str, workspace_path: str = "") -> GapReport:
         report = GapReport()
@@ -504,7 +538,10 @@ class KnowledgeGuard:
                 if rel_utc > cutoff_utc:
                     reason = f"Released on {rel_utc.date().isoformat()}, which is after the model cutoff of {cutoff_utc.date().isoformat()}."
                     risk = "HIGH" if not skill_found else "MEDIUM"
-                    report.add_gap(lib, ver, rel_date, risk, reason)
+                    report.add_gap(
+                        lib, ver, rel_date, risk, reason,
+                        provenance=(dict(self.cache.last_lookup_metadata) if self.cache else None),
+                    )
                     continue
 
             # If no release date is found or temporal check passes, check structural

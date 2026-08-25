@@ -24,6 +24,7 @@ from kriya.workflow.plan_schema import (
 from kriya.workflow.plan_validation import PlanValidationResult
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import (
+    _StructuredPlanUnavailable,
     WorkflowController,
     build_authoritative_planner_request,
     build_subtask_constraint_context,
@@ -122,6 +123,7 @@ def test_subtask_semantic_context_projects_invariants_upstream_and_downstream_co
                 requires=["config.ready"], relevant_global_invariants=[invariant],
                 verification=[VerificationMethod(
                     type=VerificationMethodType.JUDGMENT, description="application consumes config",
+                    requires_runtime_execution=True,
                 )],
             ),
         ],
@@ -134,6 +136,7 @@ def test_subtask_semantic_context_projects_invariants_upstream_and_downstream_co
     assert '"provider": "config"' in consumer_context
     assert invariant in consumer_context
     assert "application consumes config" in consumer_context
+    assert '"runtime_execution_required": true' in consumer_context
 
 
 def test_plan_repair_prompt_is_json_only_and_gives_exact_unscoped_check_correction():
@@ -508,6 +511,22 @@ async def test_enforce_repairs_late_unscoped_model_subtask_before_execution(tmp_
     assert "MODEL_SUBTASK_MISSING_PLANNED_FILES" in repair_prompt
     assert "s6" in repair_prompt
     we.run_generation_workflow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_enforce_structured_plan_unavailable_never_degrades_to_legacy(tmp_path):
+    we = _workflow_engine()
+    controller = WorkflowController(we)
+    controller._run_structured_enforce = AsyncMock(
+        side_effect=_StructuredPlanUnavailable("planner transport unavailable")
+    )
+    controller._run_legacy_generation = AsyncMock(
+        side_effect=AssertionError("authoritative mode must not invoke legacy generation")
+    )
+    result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+    assert result.legacy_result["status"] == "needs_review"
+    assert result.legacy_result["reason_codes"] == ["STRUCTURED_PLAN_UNAVAILABLE"]
+    controller._run_legacy_generation.assert_not_called()
 
 
 @pytest.mark.asyncio

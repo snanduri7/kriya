@@ -127,6 +127,7 @@ class AutonomyConfig(BaseModel):
     # until proven" default already used for web_lookup_enabled and
     # self_correction_loop_enabled above.
     spec_compliance_enabled: bool = Field(default=False)
+    max_consecutive_no_progress_attempts: int = Field(default=2, ge=1)
     web_lookup_enabled: bool = Field(default=False)
     # A live-lookup query's CONTENT is already hard-restricted (bare technology-name
     # strings only, enforced in code, never goal/design/code/error text) - this is a
@@ -308,6 +309,7 @@ class KnowledgeConfig(BaseModel):
     training_cutoff: str = Field(default="2023-12-01")  # ISO date
     check_enabled: bool = Field(default=True)
     offline_mode: bool = Field(default=False)
+    release_cache_ttl_days: int = Field(default=30, ge=1)
 
 class EngineeringTriageConfig(BaseModel):
     """MA1 of the control-plane implementation plan (kriya/workflow/triage.py) -

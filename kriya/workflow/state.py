@@ -216,6 +216,10 @@ class GenerationState:
     # change between retries, so repeating the LLM call only bought wasted
     # latency, not a different answer.
     cached_run_verification_judgment: Optional[Dict[str, Any]] = None
+    cached_run_verification_basis_hash: Optional[str] = None
+    last_failed_workspace_hash: Optional[str] = None
+    consecutive_no_progress_attempts: int = 0
+    no_progress_terminated: bool = False
     # Set True only right before the success-path `break` - retry_count alone
     # can no longer indicate success/failure now that a run can succeed via a
     # targeted attempt after the full-set budget was already exhausted.

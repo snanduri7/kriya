@@ -2260,15 +2260,15 @@ class RunVerifierAgent(BaseAgent):
             )
         except Exception as e:
             logger.warning(f"Run Verifier judge() call failed entirely, skipping run verification: {e}")
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": ""}
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "infrastructure_error": str(e)}
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
             logger.warning(f"Run Verifier judge() returned unparseable JSON, skipping run verification: {e}")
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": ""}
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "infrastructure_error": f"unparseable response: {e}"}
 
         if not isinstance(parsed, dict):
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": ""}
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "infrastructure_error": "response was not a JSON object"}
 
         raw_commands = parsed.get("run_commands")
         # Tolerate a model still returning the old single-command shape
@@ -2487,7 +2487,9 @@ class SpecComplianceAgent(BaseAgent):
             "Does this code satisfy every concrete, literally-named requirement in the "
             "goal, per the rules above?"
         )
-        # Fail OPEN (compliant=True), not closed like grade() - this check runs
+        # Return UNKNOWN while preserving compliant=True for compatibility.
+        # Legacy/validated callers keep advisory fail-open behavior; the
+        # authoritative caller treats status=unknown as NEEDS_REVIEW. This check runs
         # unconditionally on every otherwise-already-passing attempt (compile, tests,
         # and run-verification all already succeeded by the time this fires), so a
         # transient infra/parse glitch here must never convert a genuinely correct,
@@ -2505,15 +2507,15 @@ class SpecComplianceAgent(BaseAgent):
             )
         except Exception as e:
             logger.warning(f"Spec Compliance check() call failed entirely, skipping check: {e}")
-            return {"compliant": True, "reasoning": f"Check call failed: {e}", "missing_requirements": [], "likely_files": []}
+            return {"compliant": True, "status": "unknown", "reasoning": f"Check call failed: {e}", "missing_requirements": [], "likely_files": []}
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
             logger.warning(f"Spec Compliance check() returned unparseable JSON, skipping check: {e}")
-            return {"compliant": True, "reasoning": f"Response could not be parsed: {e}", "missing_requirements": [], "likely_files": []}
+            return {"compliant": True, "status": "unknown", "reasoning": f"Response could not be parsed: {e}", "missing_requirements": [], "likely_files": []}
 
         if not isinstance(parsed, dict):
-            return {"compliant": True, "reasoning": "Response was not a JSON object.", "missing_requirements": [], "likely_files": []}
+            return {"compliant": True, "status": "unknown", "reasoning": "Response was not a JSON object.", "missing_requirements": [], "likely_files": []}
 
         # Same trust boundary as RunVerifierAgent.grade()'s likely_files: never let a
         # hallucinated/malformed entry reach the retry loop's file-scoping logic.

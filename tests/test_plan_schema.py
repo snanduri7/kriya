@@ -71,6 +71,15 @@ def test_verification_method_tool_with_tool_name_is_valid():
     assert vm.tool_name == "compile_check"
 
 
+def test_verification_method_explicitly_declares_runtime_execution_requirement():
+    vm = VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="observe the assembled behavior",
+        requires_runtime_execution=True,
+    )
+    assert vm.requires_runtime_execution is True
+
+
 # --- AcceptanceCriterion ---
 
 def test_acceptance_criterion_blank_id_rejected():

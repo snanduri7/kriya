@@ -204,6 +204,9 @@ autonomy:
   # caught all 4 missing fields when given the real goal and the real wrong
   # code. Set to false to opt out.
   spec_compliance_enabled: true
+  # Stop after this many consecutive failed retries leave the effective
+  # workspace content unchanged, even if failure-family labels churn.
+  max_consecutive_no_progress_attempts: 2
   # Auto-runs a one-time index_repository() pass (dependency_graph.db +
   # vector_index.db) before generation starts, only when this workspace has
   # never been indexed - see kriya/config/config.py's own comment for the

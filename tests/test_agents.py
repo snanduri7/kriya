@@ -2447,6 +2447,7 @@ async def test_run_verifier_judge_unparseable_response_defaults_to_no_run():
 
     assert judgment["should_run"] is False
     assert judgment["run_commands"] is None
+    assert "infrastructure_error" in judgment
 
 @pytest.mark.asyncio
 async def test_run_verifier_judge_call_failure_defaults_to_no_run():
@@ -2467,6 +2468,7 @@ async def test_run_verifier_judge_call_failure_defaults_to_no_run():
 
     assert judgment["should_run"] is False
     assert judgment["run_commands"] is None
+    assert "infrastructure_error" in judgment
 
 @pytest.mark.asyncio
 async def test_run_verifier_grade_passed():
@@ -2820,6 +2822,7 @@ async def test_spec_compliance_check_call_failure_fails_open():
     result = await checker.check(goal="Goal", files_written=[], file_contents={})
 
     assert result["compliant"] is True
+    assert result["status"] == "unknown"
 
 @pytest.mark.asyncio
 async def test_spec_compliance_check_unparseable_response_fails_open():
@@ -2831,6 +2834,7 @@ async def test_spec_compliance_check_unparseable_response_fails_open():
     result = await checker.check(goal="Goal", files_written=[], file_contents={})
 
     assert result["compliant"] is True
+    assert result["status"] == "unknown"
 
 @pytest.mark.asyncio
 async def test_skill_gap_agent_extracts_rules_and_examples():

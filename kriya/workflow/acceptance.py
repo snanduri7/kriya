@@ -70,10 +70,20 @@ _MISSING_ENTRYPOINT_PATTERNS = (
     re.compile(r"\bcannot load such file\b", re.IGNORECASE),
     re.compile(r"\bLoadError\b"),
 )
+_RUNTIME_BEHAVIOR_RE = re.compile(
+    r"\b(?:run|start|launch|execute|print|connect|send|receive|publish|consume|"
+    r"put|get|read\s+back|round[- ]trip|exit\s+(?:normally|cleanly)|shut\s*down)\b",
+    re.IGNORECASE,
+)
 
 
 def goal_explicitly_requires_tests(goal: str) -> bool:
     return bool(_EXPLICIT_TEST_REQUEST_RE.search(goal or ""))
+
+
+def goal_requires_runtime_behavior(goal: str) -> bool:
+    """Conservative deterministic signal that observable execution is required."""
+    return bool(_RUNTIME_BEHAVIOR_RE.search(goal or ""))
 
 
 def output_confirms_nonzero_test_execution(output: str) -> bool:

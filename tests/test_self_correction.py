@@ -81,6 +81,36 @@ async def test_self_correction_exhausts_budget(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_self_correction_can_read_but_cannot_patch_outside_writable_scope(tmp_path):
+    _write(str(tmp_path), "owned.py", "value = 1\n")
+    _write(str(tmp_path), "upstream.cfg", "setting=old\n")
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(return_value={
+        "content": "",
+        "tool_calls": [{
+            "id": "1", "name": "apply_patch",
+            "arguments": {
+                "filepath": "upstream.cfg",
+                "edits": [{"search": "setting=old", "replace": "setting=new"}],
+            },
+        }],
+    })
+    result = await run_self_correction_loop(
+        llm=llm,
+        worktree_path=str(tmp_path),
+        validator=MagicMock(),
+        files_in_scope=["owned.py", "upstream.cfg"],
+        writable_files=["owned.py"],
+        compile_error_output="repair requires upstream.cfg",
+        active_code_context="",
+    )
+    assert result.resolved is False
+    assert result.scope_conflict_files == ["upstream.cfg"]
+    assert "PLAN_SCOPE_INSUFFICIENT" in result.transcript[0]["result"]
+    assert (tmp_path / "upstream.cfg").read_text() == "setting=old\n"
+
+
+@pytest.mark.asyncio
 async def test_self_correction_llm_exception_preserves_original_compile_error(tmp_path):
     """Regression test for a real bug found live, 2026-08-17
     (ignite_qpid_person, run b-10l): llm.complete_with_tools() had NO

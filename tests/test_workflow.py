@@ -14,7 +14,12 @@ from kriya.agents.agent import DeveloperAgent
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.workflow.attempt import AttemptContext, run_attempt
+from kriya.workflow.attempt import (
+    AttemptContext,
+    _record_self_correction_scope_conflict,
+    _run_verification_basis_hash,
+    run_attempt,
+)
 from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
@@ -34,7 +39,7 @@ from kriya.workflow.edit_safety import (
     content_revision,
     find_cross_file_type_conflict,
 )
-from kriya.workflow.retry_strategy import handle_attempt_failure
+from kriya.workflow.retry_strategy import handle_attempt_failure, record_workspace_progress
 from kriya.workflow.state import GenerationState
 from kriya.workflow.checkpoint import (
     checkpoint_path,
@@ -3679,6 +3684,55 @@ async def test_workflow_verification_contract_marker_used_on_plain_nonzero_exit(
 
 
 @pytest.mark.asyncio
+async def test_semantic_grade_cannot_override_failed_required_sequence_step(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code", "Design: Write app.py", "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py", "content": "print('expected-looking output')\n",
+    }])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py", "create"], [sys.executable, "app.py", "read"]],
+        "command_source": "inferred",
+        "success_criteria": "The read step prints expected-looking output.",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={
+        "passed": True, "reasoning": "The final output looks correct.", "likely_files": [],
+    })
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={
+            "success": False, "timed_out": False, "returncode": 0,
+            "output": "step 1 exited 1\nstep 2: expected-looking output",
+            "steps": [
+                {"command": [sys.executable, "app.py", "create"], "exit_code": 1,
+                 "stdout": "", "stderr": "failed", "timed_out": False},
+                {"command": [sys.executable, "app.py", "read"], "exit_code": 0,
+                 "stdout": "expected-looking output", "stderr": "", "timed_out": False},
+            ],
+        },
+    ):
+        result = await we.run_generation_workflow(
+            goal="Execute both operations and display the resulting value.",
+            workspace_path=str(tmp_path),
+        )
+    assert result["quality_gates_passed"] is False
+    assert we.run_verifier.grade.await_count >= 1
+
+
+@pytest.mark.asyncio
 async def test_workflow_self_correction_resolves_run_verification_infrastructure_failure(tmp_path):
     """End-to-end regression test for the real live incident, 2026-08-22
     (ignite_qpid_protocol milestone 3/4): a Maven project's sourceDirectory
@@ -3767,6 +3821,41 @@ async def test_workflow_self_correction_resolves_run_verification_infrastructure
     # escalation nor 2+ full-set retries - this resolved within attempt 1)
     # must still trigger lesson extraction on its own.
     assert llm.complete.call_count == 4
+
+
+def test_progress_gate_stops_failure_family_churn_without_content_change():
+    state = GenerationState()
+    assert record_workspace_progress(state, "same-content", 2) is True
+    assert record_workspace_progress(state, "same-content", 2) is True
+    assert record_workspace_progress(state, "same-content", 2) is False
+    assert state.no_progress_terminated is True
+    assert record_workspace_progress(state, "changed-content", 2) is True
+    assert state.consecutive_no_progress_attempts == 0
+
+
+def test_runtime_judgment_basis_hash_changes_with_known_file_content(tmp_path):
+    (tmp_path / "app.py").write_text("print('first')\n")
+    state = GenerationState()
+    state.all_files_written = {"app.py"}
+    ctx = _minimal_attempt_ctx(tmp_path)
+    first = _run_verification_basis_hash(ctx, state)
+    (tmp_path / "app.py").write_text("print('second')\n")
+    second = _run_verification_basis_hash(ctx, state)
+    assert first != second
+
+
+def test_self_correction_scope_conflict_enters_existing_plan_recovery_contract(tmp_path):
+    state = GenerationState()
+    ctx = _minimal_attempt_ctx(tmp_path, allowed_write_relpaths=["owned.py"])
+    result = MagicMock(scope_conflict_files=["upstream.cfg"])
+    _record_self_correction_scope_conflict(state, ctx, result, "run_verification")
+    assert state.plan_scope_conflict == {
+        "classification": "PLAN_SCOPE_INSUFFICIENT",
+        "failure_type": "run_verification",
+        "required_files": ["upstream.cfg"],
+        "allowed_files": ["owned.py"],
+        "reason": "self-correction diagnosis requires a readable file outside approved write scope",
+    }
 
 
 def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
@@ -4052,6 +4141,98 @@ async def test_run_attempt_passes_when_spec_compliant(tmp_path):
 
     spec_compliance.check.assert_called_once()
     assert any(g.get("type") == "goal_spec_compliance" and g.get("success") for g in state.gate_outcomes)
+
+
+@pytest.mark.asyncio
+async def test_authoritative_spec_compliance_unknown_requires_review(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py", "content": "print('ok')\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": True, "status": "unknown",
+        "reasoning": "grader transport failed", "missing_requirements": [],
+        "likely_files": [],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, spec_compliance=spec_compliance,
+        strict_spec_compliance=True, kernel=Kernel(config=cfg),
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
+
+
+@pytest.mark.asyncio
+async def test_required_runtime_judge_infrastructure_failure_cannot_pass(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py", "content": "print('ok')\n",
+    }])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": False, "run_commands": None, "command_source": "inferred",
+        "success_criteria": "", "infrastructure_error": "transport failed",
+    })
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        runtime_verification_required=True,
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
+    assert "runtime behavior is required" in exc_info.value.failure.message
+
+
+@pytest.mark.asyncio
+async def test_behavioral_contract_rejects_build_only_verification_sequence(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py", "content": "print('ok')\n",
+    }])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["python", "-m", "pytest"]],
+        "command_source": "inferred", "success_criteria": "The application runs.",
+    })
+    # A test command is allowed to prove behavior when deliberately selected;
+    # a build-only command is not. Use a compile fixture for this rejection.
+    run_verifier.judge.return_value["run_commands"] = [["javac", "app.py"]]
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        runtime_verification_required=True,
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence") as run_sequence:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+    assert "BEHAVIORAL_GOAL_WITH_BUILD_ONLY_VERIFICATION" in exc_info.value.failure.message
+    run_sequence.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -14036,7 +14217,8 @@ async def test_ensure_repository_indexed_skips_when_already_indexed(tmp_path):
         "kriya.workflow.workflow.RepositoryAnalyzer.index_repository",
         new_callable=AsyncMock,
     ) as mock_index:
-        await _ensure_repository_indexed(cfg, str(tmp_path))
+        indexed = await _ensure_repository_indexed(cfg, str(tmp_path))
+    assert indexed is True
     mock_index.assert_not_called()
 
 
@@ -14049,7 +14231,8 @@ async def test_ensure_repository_indexed_runs_once_when_graph_empty(tmp_path):
         "kriya.workflow.workflow.RepositoryAnalyzer.index_repository",
         new_callable=AsyncMock,
     ) as mock_index:
-        await _ensure_repository_indexed(cfg, str(tmp_path))
+        indexed = await _ensure_repository_indexed(cfg, str(tmp_path))
+    assert indexed is True
     mock_index.assert_called_once()
     # Never changed=True - see _ensure_repository_indexed's own docstring for
     # why (it would silently index nothing for a fully-committed repo).
@@ -14071,7 +14254,8 @@ async def test_ensure_repository_indexed_swallows_index_failure(tmp_path):
         new_callable=AsyncMock,
         side_effect=RuntimeError("embedding endpoint unreachable"),
     ):
-        await _ensure_repository_indexed(cfg, str(tmp_path))  # must not raise
+        indexed = await _ensure_repository_indexed(cfg, str(tmp_path))  # must not raise
+    assert indexed is False
 
 
 @pytest.mark.asyncio

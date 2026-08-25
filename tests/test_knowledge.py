@@ -1,5 +1,6 @@
 import os
-from datetime import datetime, timezone
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -180,6 +181,24 @@ def test_knowledge_cache(tmp_path):
     # 3. Cache read should return the datetime
     cached_dt = cache.get_release_date("java", "org.apache.ignite:ignite-core", "2.18.0")
     assert cached_dt == dt
+
+
+def test_knowledge_cache_expires_stale_entries_and_supports_invalidation(tmp_path):
+    from kriya.tools.knowledge import KnowledgeCache
+    cache = KnowledgeCache(str(tmp_path), ttl_days=1)
+    dt = datetime(2024, 3, 15, 12, 0, tzinfo=timezone.utc)
+    cache.set_release_date("java", "example:library", "1.0", dt, "RegistryFixture")
+    with sqlite3.connect(cache.db_path) as conn:
+        conn.execute(
+            "UPDATE release_cache SET retrieved_at = ?",
+            ((datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),),
+        )
+    assert cache.get_release_date("java", "example:library", "1.0") is None
+    assert cache.last_lookup_metadata["cache_status"] == "expired"
+    cache.set_release_date("java", "example:library", "1.0", dt, "RegistryFixture")
+    assert cache.last_lookup_metadata["source"] == "RegistryFixture"
+    cache.invalidate("java", "example:library", "1.0")
+    assert cache.get_release_date("java", "example:library", "1.0") is None
 
 def test_knowledge_guard_with_cache(tmp_path):
     skills_dir = tmp_path / "skills"

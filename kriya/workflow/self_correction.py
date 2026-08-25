@@ -273,6 +273,10 @@ class SelfCorrectionResult:
     # Optional-loop failures are returned as secondary incidents. They are
     # never raised over the authoritative compile failure.
     incidents: List[Dict[str, str]] = field(default_factory=list)
+    # Readable-but-not-writable files the model attempted to patch. The
+    # caller converts this deterministic ownership conflict into plan-level
+    # recovery instead of allowing a micro-loop to bypass subtask scope.
+    scope_conflict_files: List[str] = field(default_factory=list)
 
 
 def _to_openai_tool_call_dicts(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -298,19 +302,21 @@ def _dispatch_tool_call(
     worktree_path: str,
     validator: PolymorphicValidator,
     files_in_scope: List[str],
+    writable_files: Set[str],
     active_code_context: str,
     modified_files: Dict[str, str],
     read_files: Set[str],
     observed_revisions: Dict[str, str],
+    scope_conflict_files: Set[str],
     validation_tool_name: str = "recompile",
     target_test: Optional[str] = None,
 ) -> str:
     """Executes one tool call and returns the string fed back to the model as
     the tool result. Every branch is small-argument-in, small-string-out -
     read_file/apply_patch never return/accept more than one file's worth of
-    content, and every filepath is checked against files_in_scope/
-    modified_files (a strict allowlist, not a sanitized arbitrary path) before
-    touching disk.
+    content. Reads are checked against files_in_scope/modified_files; writes
+    are separately checked against writable_files (strict allowlists, not
+    sanitized arbitrary paths) before touching disk.
 
     read_files (mutated in place, owned by the caller's per-loop scope) tracks
     which files this conversation has genuinely seen the real content of via
@@ -358,8 +364,9 @@ def _dispatch_tool_call(
         if len(workspace_matches) == 1:
             return _dispatch_tool_call(
                 {"name": "read_file", "arguments": {"filepath": workspace_matches[0]}},
-                worktree_path, validator, files_in_scope, active_code_context,
-                modified_files, read_files, observed_revisions, validation_tool_name, target_test,
+                worktree_path, validator, files_in_scope, writable_files, active_code_context,
+                modified_files, read_files, observed_revisions, scope_conflict_files,
+                validation_tool_name, target_test,
             )
         if len(workspace_matches) > 1:
             return (
@@ -412,6 +419,12 @@ def _dispatch_tool_call(
         edits = args.get("edits")
         if not filepath or filepath not in known_files:
             return f"ERROR: '{filepath}' is not a file in this attempt's sandbox - cannot patch a file that doesn't exist here. Known files: {sorted(known_files)}"
+        if filepath not in writable_files:
+            scope_conflict_files.add(filepath)
+            return (
+                f"PLAN_SCOPE_INSUFFICIENT: '{filepath}' is readable for diagnosis but is not "
+                f"inside this subtask's approved writable scope: {sorted(writable_files)}"
+            )
         if not isinstance(edits, list) or not edits:
             return "ERROR: apply_patch requires a non-empty 'edits' list, each with 'search' and 'replace'."
 
@@ -509,6 +522,7 @@ async def run_self_correction_loop(
     files_in_scope: List[str],
     compile_error_output: str,
     active_code_context: str,
+    writable_files: Optional[List[str]] = None,
     max_turns: int = 4,
     model_override: Optional[str] = None,
     base_url_override: Optional[str] = None,
@@ -547,6 +561,7 @@ async def run_self_correction_loop(
     (wrong classpath, missing class, wrong sourceDirectory) that made the
     run fail for a reason that was never really about application logic."""
     validation_tool_name = "retest" if target_test else "recompile"
+    writable_file_set = set(files_in_scope if writable_files is None else writable_files)
     if target_test:
         failure_label = "targeted test failure"
     elif failure_type == "run_verification":
@@ -566,6 +581,7 @@ async def run_self_correction_loop(
     modified_files: Dict[str, str] = {}
     read_files: Set[str] = set()
     observed_revisions: Dict[str, str] = {}
+    scope_conflict_files: Set[str] = set()
     for filepath in files_in_scope:
         full_path = os.path.join(worktree_path, filepath)
         if os.path.exists(full_path):
@@ -659,14 +675,25 @@ async def run_self_correction_loop(
 
         for call in tool_calls:
             tool_result_text = _dispatch_tool_call(
-                call, worktree_path, validator, files_in_scope, active_code_context, modified_files, read_files,
-                observed_revisions,
+                call, worktree_path, validator, files_in_scope, writable_file_set,
+                active_code_context, modified_files, read_files, observed_revisions,
+                scope_conflict_files,
                 validation_tool_name=validation_tool_name, target_test=target_test,
             )
             transcript.append(
                 {"turn": turn, "tool": call["name"], "arguments": call["arguments"], "result": tool_result_text}
             )
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": tool_result_text})
+
+            if scope_conflict_files:
+                return SelfCorrectionResult(
+                    resolved=False,
+                    turns_used=turns_used,
+                    final_compile_output=last_compile_output,
+                    modified_files=modified_files,
+                    transcript=transcript,
+                    scope_conflict_files=sorted(scope_conflict_files),
+                )
 
             if call["name"] == validation_tool_name:
                 last_compile_output = tool_result_text
