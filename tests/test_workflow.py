@@ -3483,6 +3483,78 @@ async def test_workflow_run_verification_gate_outcome_records_graded_by_llm(tmp_
     rv_outcome = next(g for g in gate_outcomes if g["type"] == "run_verification")
     assert rv_outcome["graded_by"] == "llm"
 
+
+@pytest.mark.asyncio
+async def test_quiet_successful_maven_compile_uses_process_authority(tmp_path):
+    """A quiet build success must not become a speculative behavioral failure."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: configure Maven",
+        "Design: Write pom.xml",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "pom.xml",
+        "content": (
+            '<project xmlns="http://maven.apache.org/POM/4.0.0">'
+            "<modelVersion>4.0.0</modelVersion><groupId>example</groupId>"
+            "<artifactId>demo</artifactId><version>1.0.0</version></project>\n"
+        ),
+    }])
+    # Reproduce the live bad judgment. The execution layer must still honor
+    # the build tool's deterministic zero exit rather than ask the grader to
+    # invent missing runtime evidence or likely repair files.
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["mvn", "-e", "-q", "compile"]],
+        "command_source": "inferred",
+        "success_criteria": "The Maven project compiles.",
+    })
+    we.run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("a successful deterministic build must not be LLM-graded")
+    )
+    step = {
+        "command": ["mvn", "-e", "-q", "compile"],
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": False,
+    }
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={
+            "success": True, "timed_out": False, "returncode": 0,
+            "output": "=== Step 1/1: mvn -e -q compile ===\n\n", "steps": [step],
+        },
+    ):
+        res = await we.run_generation_workflow(
+            goal="Create a valid Maven build configuration.",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    we.run_verifier.grade.assert_not_called()
+    conn = sqlite3.connect(os.path.join(cfg.paths.logs, "traces.db"))
+    row = conn.execute("SELECT gate_outcomes FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    outcomes = json.loads(row[0])
+    outcome = next(g for g in outcomes if g["type"] == "run_verification")
+    assert outcome["graded_by"] == "process_exit"
+    assert outcome["deterministic_result"] == "PASS"
+    assert outcome["steps"] == [step]
+
+
 @pytest.mark.asyncio
 async def test_workflow_verification_contract_marker_skips_llm_grade_on_fail(tmp_path):
     """Same deterministic short-circuit for a FAIL marker: the run_verification gate

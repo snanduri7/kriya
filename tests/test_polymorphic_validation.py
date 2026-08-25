@@ -6,6 +6,10 @@ from unittest.mock import MagicMock, patch
 
 from kriya.config import AppConfig
 from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies, get_pom_own_coordinate
+from kriya.workflow.verification_authority import (
+    deterministic_sequence_kind,
+    deterministic_verification_kind,
+)
 
 
 def test_polymorphic_stack_detection(tmp_path):
@@ -174,6 +178,21 @@ def test_run_app_no_command():
     res = validator.run_app([])
     assert res["success"] is False
 
+def test_deterministic_verification_classifier_separates_builds_from_runtime():
+    assert deterministic_verification_kind(["mvn", "-e", "-q", "compile"]) == "build"
+    assert deterministic_verification_kind(["mvn", "-f", "sub/pom.xml", "verify"]) == "test"
+    assert deterministic_verification_kind(["./mvnw", "test"]) == "test"
+    assert deterministic_verification_kind(["python", "-m", "pytest", "-q"]) == "test"
+    assert deterministic_verification_kind(["mvn", "spring-boot:run"]) is None
+    assert deterministic_verification_kind(["mvn", "exec:java"]) is None
+    assert deterministic_verification_kind(["gradle", "run"]) is None
+
+
+def test_deterministic_verification_sequence_requires_every_step_to_be_authoritative():
+    assert deterministic_sequence_kind([["mvn", "compile"], ["mvn", "test"]]) == "test"
+    assert deterministic_sequence_kind([["mvn", "compile"], ["java", "App"]]) is None
+
+
 def test_run_app_sequence_multi_step_success(tmp_path):
     """Regression test for a real bug caught live: a goal like "add an item, then
     list items" needs TWO sequential invocations to demonstrate correctness - a
@@ -198,6 +217,22 @@ def test_run_app_sequence_multi_step_success(tmp_path):
         [[sys.executable, "app.py", "add", "Task 1"], [sys.executable, "app.py", "list"]],
         timeout=10,
     )
+    assert res["steps"] == [
+        {
+            "command": [sys.executable, "app.py", "add", "Task 1"],
+            "exit_code": 0,
+            "stdout": "Added Task 1\n",
+            "stderr": "",
+            "timed_out": False,
+        },
+        {
+            "command": [sys.executable, "app.py", "list"],
+            "exit_code": 0,
+            "stdout": "Task 1\n",
+            "stderr": "",
+            "timed_out": False,
+        },
+    ]
 
     assert res["success"] is True
     assert res["timed_out"] is False
@@ -1219,4 +1254,3 @@ def test_java_home_override_also_applies_under_sandbox_execution(tmp_path):
         _, kwargs = mock_popen.call_args
         assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
         assert kwargs["preexec_fn"] is not None  # sandboxing still applied too
-

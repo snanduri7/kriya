@@ -1305,6 +1305,26 @@ def test_replay_no_marker_is_not_treated_as_failure():
     assert failures == []
 
 
+def test_replay_uses_process_status_for_deterministic_build_command():
+    with tempfile.TemporaryDirectory() as tmp:
+        state = MilestoneRunState(
+            group_id="grp", original_goal="orig",
+            milestones=[mkv2("M1", goal="g1", success_criterion="c1")],
+            verification_commands={"M1": [["mvn", "-q", "compile"]]},
+        )
+        mock_validator = MagicMock()
+        mock_validator.run_app_sequence.return_value = {
+            "timed_out": False, "success": False, "output": "",
+        }
+        with patch("kriya.tools.validate.PolymorphicValidator", return_value=mock_validator), \
+             patch("kriya.workflow.milestones._resolve_run_command", side_effect=lambda c, w: c):
+            failures = replay_prior_milestone_verifications(tmp, state)
+    assert failures == [{
+        "milestone_id": "M1",
+        "reason": "replayed deterministic build verification returned a non-zero process status",
+    }]
+
+
 def test_replay_timeout_is_reported_as_a_failure():
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(

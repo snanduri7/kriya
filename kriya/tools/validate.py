@@ -897,6 +897,7 @@ class PolymorphicValidator:
             return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
 
         output_parts = []
+        steps = []
         overall_success = True
         any_timed_out = False
         last_returncode = None
@@ -906,10 +907,19 @@ class PolymorphicValidator:
                 res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
             except Exception as e:
                 output_parts.append(f"{step_label}\nFailed to execute: {e}")
+                steps.append({
+                    "command": list(command), "exit_code": None, "stdout": "",
+                    "stderr": f"Failed to execute: {e}", "timed_out": False,
+                })
                 overall_success = False
                 last_returncode = None
                 break
             output_parts.append(f"{step_label}\n{res['stdout']}\n{res['stderr']}")
+            steps.append({
+                "command": list(command), "exit_code": res["returncode"],
+                "stdout": res["stdout"], "stderr": res["stderr"],
+                "timed_out": res["timeout"],
+            })
             last_returncode = res["returncode"]
             if res["timeout"]:
                 any_timed_out = True
@@ -923,6 +933,7 @@ class PolymorphicValidator:
             "timed_out": any_timed_out,
             "returncode": last_returncode,
             "output": "\n\n".join(output_parts),
+            "steps": steps,
         }
 
 

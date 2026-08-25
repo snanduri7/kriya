@@ -706,6 +706,7 @@ def replay_prior_milestone_verifications(
     silent, and the integration call's own full regression suite still runs
     regardless of what this function finds."""
     from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.verification_authority import deterministic_sequence_kind
 
     failures: List[Dict[str, Any]] = []
     validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path)
@@ -720,6 +721,17 @@ def replay_prior_milestone_verifications(
                 "milestone_id": milestone_id,
                 "reason": "replay timed out - possible resource-lifecycle regression",
             })
+            continue
+        deterministic_kind = deterministic_sequence_kind(resolved_commands)
+        if deterministic_kind is not None:
+            if not run_res["success"]:
+                failures.append({
+                    "milestone_id": milestone_id,
+                    "reason": (
+                        f"replayed deterministic {deterministic_kind} verification "
+                        "returned a non-zero process status"
+                    ),
+                })
             continue
         verdict = extract_contract_verdict(run_res["output"])
         if verdict is None:

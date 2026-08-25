@@ -159,6 +159,8 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     assert "not product requirements" in request
     assert "return ONLY one complete fenced ```json block" in request
     assert "Emit no prose" in request
+    assert "observable application behavior" in request
+    assert "actually runs the application" in request
 
 
 @pytest.mark.asyncio

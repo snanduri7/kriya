@@ -407,6 +407,9 @@ def build_authoritative_planner_request(goal: str) -> str:
         "- Every MODEL subtask must own at least one exact planned_files path.\n"
         "- Include goal-derived global_invariants and per-subtask relevant_global_invariants, "
         "provides, requires, and complete depends_on edges.\n"
+        "- Build/config stages may use compile or test verification. Any original-request "
+        "requirement for observable application behavior must also be verified by an entrypoint-owning "
+        "stage that actually runs the application, observes the required result, and confirms clean exit.\n"
         "- Do not copy these protocol rules into global_invariants; derive those only from the "
         "original product request above."
     )
