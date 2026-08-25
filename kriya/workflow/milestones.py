@@ -52,6 +52,7 @@ from kriya.workflow.context_projection import (
                                         # any other existing consumer of kriya.workflow.milestones.render_established_file_context).
 )
 from kriya.workflow.checkpoint import delete_checkpoint, list_checkpoints
+from kriya.workflow.checkpoint import compute_registry_hash
 from kriya.workflow.file_resolution import _resolve_run_command
 from kriya.workflow.milestone_normalization import normalize_legacy_milestones
 from kriya.workflow.milestone_validation import (
@@ -65,6 +66,115 @@ from kriya.workflow.verification_contract import extract_contract_verdict
 from kriya.workflow.workflow import _log_phase_banner
 
 logger = logging.getLogger(__name__)
+
+
+class MilestonePersistenceError(RuntimeError):
+    """Authoritative milestone state could not be made durable."""
+
+    def __init__(self, reason_code: str, store: str, detail: str, milestone_id: Optional[str] = None):
+        super().__init__(detail)
+        self.reason_code = reason_code
+        self.store = store
+        self.milestone_id = milestone_id
+
+    def to_result(self, group_id: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "status": "needs_review",
+            "group_id": group_id,
+            "quality_gates_passed": False,
+            "reason_codes": [self.reason_code],
+            "persistence_store": self.store,
+            "persistence_error": str(self),
+        }
+        if self.milestone_id is not None:
+            result["milestone_id"] = self.milestone_id
+        return result
+
+
+def _persist_contract_registry(
+    workspace_path: str, registry: Any, *, authoritative: bool, milestone_id: Optional[str] = None,
+) -> None:
+    try:
+        save_contract_registry(workspace_path, registry)
+    except Exception as exc:
+        if authoritative:
+            raise MilestonePersistenceError(
+                "CONTRACT_REGISTRY_PERSISTENCE_FAILED", "contract_registry", str(exc), milestone_id,
+            ) from exc
+        logger.warning(f"Failed to persist ContractRegistry (non-fatal legacy path): {exc}")
+
+
+def _persist_milestone_control_state(
+    workspace_path: str, state: Any, *, authoritative: bool, milestone_id: Optional[str] = None,
+) -> None:
+    try:
+        save_control_state(workspace_path, state)
+    except Exception as exc:
+        if authoritative:
+            raise MilestonePersistenceError(
+                "CONTROL_STATE_PERSISTENCE_FAILED", "control_state", str(exc), milestone_id,
+            ) from exc
+        logger.warning(f"Failed to persist milestone ControlState (non-fatal legacy path): {exc}")
+
+
+def _update_milestone_control_state(
+    workspace_path: str,
+    group_id: str,
+    milestone_id: str,
+    milestone_status: str,
+    contract_registry: Any,
+    artifact_registry: Any,
+    *,
+    authoritative: bool,
+) -> None:
+    state = load_control_state(workspace_path)
+    if state is None or state.milestone_group_id != group_id:
+        if authoritative:
+            raise MilestonePersistenceError(
+                "CONTROL_STATE_PERSISTENCE_FAILED",
+                "control_state",
+                "matching milestone ControlState was not durably initialized before execution",
+                milestone_id,
+            )
+        return
+    updated = state.with_updates(
+        current_milestone_id=milestone_id,
+        milestone_states={**state.milestone_states, milestone_id: milestone_status},
+        current_contract_hash=compute_registry_hash(contract_registry.to_dict()),
+        current_artifact_registry_hash=compute_registry_hash(artifact_registry.to_dict()),
+    )
+    _persist_milestone_control_state(
+        workspace_path, updated, authoritative=authoritative, milestone_id=milestone_id,
+    )
+
+
+def render_consumed_contract_context(milestone: MilestoneV2, registry: Any) -> str:
+    """Render current local registry facts for only this consumer's contracts."""
+    if not milestone.consumes:
+        return ""
+    entries = [
+        {
+            "id": record.id,
+            "name": record.name,
+            "provider_milestone_id": record.provider_milestone_id,
+            "revision": record.revision,
+            "shape": record.shape,
+            "state": record.state.value,
+            "content_hash": record.content_hash,
+        }
+        for record in registry.all_records()
+        if record.name in milestone.consumes and milestone.id in record.consumers
+    ]
+    entries.sort(key=lambda entry: entry["id"])
+    if len(entries) != len(set(milestone.consumes)):
+        raise ValueError(
+            f"milestone {milestone.id!r} could not resolve one current contract record per "
+            f"consumed capability: {sorted(milestone.consumes)!r}"
+        )
+    return (
+        "Authoritative consumed contracts (local ContractRegistry facts; do not infer or override):\n"
+        + json.dumps(entries, indent=2, sort_keys=True)
+    )
 
 
 def _transitive_downstream_milestones(
@@ -636,6 +746,7 @@ async def run_milestones(
     knowledge_risk_confirmed: bool = False,
     resume: bool = False,
     resume_id: Optional[str] = None,
+    authoritative: bool = False,
 ) -> Dict[str, Any]:
     """Executes a (possibly hand-edited) milestone plan: calls the EXISTING,
     unmodified we.run_generation_workflow() once per milestone against the
@@ -832,16 +943,27 @@ async def run_milestones(
                 current_plan_hash=replacement_plan_hash,
                 last_verified_checkpoint=None,
             )
-            save_control_state(workspace_path, control_state)
-    try:
-        save_contract_registry(workspace_path, contract_registry)
-    except Exception as e:
-        logger.warning(f"Failed to persist ContractRegistry (non-fatal): {e}")
+            _persist_milestone_control_state(
+                workspace_path, control_state, authoritative=authoritative,
+            )
+    _persist_contract_registry(
+        workspace_path, contract_registry, authoritative=authoritative,
+    )
 
     for position, milestone in enumerate(ordered, start=1):
         if milestone.id in run_state.completed_milestone_ids:
             logger.info(f"Milestone '{milestone.id}' ({position}/{total}) already completed (resume) - skipping.")
             continue
+
+        _update_milestone_control_state(
+            workspace_path,
+            run_state.group_id,
+            milestone.id,
+            "in_progress",
+            contract_registry,
+            artifact_registry,
+            authoritative=authoritative,
+        )
 
         _log_phase_banner(f"MILESTONE '{milestone.id}' ({position}/{total}): {milestone.goal[:40]}")
         # A consumer may only execute against artifact coordinates that
@@ -877,6 +999,7 @@ async def run_milestones(
         milestone_goal = build_milestone_goal_text(
             milestone, position, total, run_state.established_dependencies
         )
+        consumed_contract_context = render_consumed_contract_context(milestone, contract_registry)
 
         while True:
             result = await we.run_generation_workflow(
@@ -894,7 +1017,10 @@ async def run_milestones(
                 knowledge_risk_confirmed=knowledge_risk_confirmed,
                 resume=resume,
                 resume_id=resume_id,
-                supplementary_context=render_established_file_context(run_state.established_file_context),
+                supplementary_context="\n\n".join(filter(None, (
+                    render_established_file_context(run_state.established_file_context),
+                    consumed_contract_context,
+                ))),
                 established_files=sorted(run_state.established_file_context.keys()),
             )
 
@@ -919,10 +1045,12 @@ async def run_milestones(
                 else:
                     if milestone.provides:
                         mark_capabilities_implemented(contract_registry, milestone)
-                        try:
-                            save_contract_registry(workspace_path, contract_registry)
-                        except Exception as e:
-                            logger.warning(f"Failed to persist ContractRegistry (non-fatal): {e}")
+                        _persist_contract_registry(
+                            workspace_path,
+                            contract_registry,
+                            authoritative=authoritative,
+                            milestone_id=milestone.id,
+                        )
                     break
 
             decision = "abandon"
@@ -1008,15 +1136,15 @@ async def run_milestones(
         if milestone.id in run_state.stale_milestone_ids:
             run_state.stale_milestone_ids.remove(milestone.id)
         save_milestone_run_state(workspace_path, run_state)
-        control_state = load_control_state(workspace_path)
-        if control_state is not None and control_state.milestone_group_id == run_state.group_id:
-            save_control_state(
-                workspace_path,
-                control_state.with_updates(
-                    current_milestone_id=milestone.id,
-                    milestone_states={**control_state.milestone_states, milestone.id: "done"},
-                ),
-            )
+        _update_milestone_control_state(
+            workspace_path,
+            run_state.group_id,
+            milestone.id,
+            "done",
+            contract_registry,
+            artifact_registry,
+            authoritative=authoritative,
+        )
 
     replay_failures = replay_prior_milestone_verifications(workspace_path, run_state)
     if replay_failures:

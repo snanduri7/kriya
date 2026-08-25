@@ -69,6 +69,8 @@ def test_from_dict_round_trips_control_metadata_fields():
         milestone_states={"M1": "done", "M2": "in_progress"},
         base_commit="abc123",
         tree_hash="def456",
+        current_contract_hash="contracts-hash",
+        current_artifact_registry_hash="artifacts-hash",
     )
     reconstructed = ControlState.from_dict(state.to_dict())
     assert reconstructed.run_id == state.run_id
@@ -76,6 +78,14 @@ def test_from_dict_round_trips_control_metadata_fields():
     assert reconstructed.milestone_states == {"M1": "done", "M2": "in_progress"}
     assert reconstructed.base_commit == "abc123"
     assert reconstructed.tree_hash == "def456"
+    assert reconstructed.current_contract_hash == "contracts-hash"
+    assert reconstructed.current_artifact_registry_hash == "artifacts-hash"
+
+
+def test_from_dict_defaults_artifact_registry_hash_for_legacy_state():
+    payload = ControlState.new(run_id="run-1").to_dict()
+    del payload["current_artifact_registry_hash"]
+    assert ControlState.from_dict(payload).current_artifact_registry_hash is None
 
 
 def test_subtask_states_defaults_empty_and_round_trips():

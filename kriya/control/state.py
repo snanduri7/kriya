@@ -106,6 +106,7 @@ class ControlState:
 
     current_plan_hash: Optional[str] = None
     current_contract_hash: Optional[str] = None
+    current_artifact_registry_hash: Optional[str] = None
 
     base_commit: Optional[str] = None
     tree_hash: Optional[str] = None
@@ -147,6 +148,7 @@ class ControlState:
             "subtask_written_files": {k: list(v) for k, v in self.subtask_written_files.items()},
             "current_plan_hash": self.current_plan_hash,
             "current_contract_hash": self.current_contract_hash,
+            "current_artifact_registry_hash": self.current_artifact_registry_hash,
             "base_commit": self.base_commit,
             "tree_hash": self.tree_hash,
             "patch_hash": self.patch_hash,
@@ -176,6 +178,7 @@ class ControlState:
             subtask_written_files={k: list(v) for k, v in data.get("subtask_written_files", {}).items()},
             current_plan_hash=data.get("current_plan_hash"),
             current_contract_hash=data.get("current_contract_hash"),
+            current_artifact_registry_hash=data.get("current_artifact_registry_hash"),
             base_commit=data.get("base_commit"),
             tree_hash=data.get("tree_hash"),
             patch_hash=data.get("patch_hash"),

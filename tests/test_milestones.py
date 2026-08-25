@@ -22,6 +22,7 @@ from kriya.control.persistence import (
 from kriya.control.state import CURRENT_SCHEMA_VERSION, ControlState
 from kriya.workflow.checkpoint import checkpoint_path, save_checkpoint
 from kriya.workflow.milestones import (
+    MilestonePersistenceError,
     MilestoneRunState,
     build_integration_goal_text,
     build_milestone_goal_text,
@@ -859,8 +860,71 @@ async def test_run_milestones_invalidates_a_completed_consumer_when_its_provider
         assert control_state.milestone_states["M3"] == "done"
         assert control_state.current_plan_hash == evidence["replacement_plan_hash"]
         assert control_state.last_verified_checkpoint is None
+        first_consumer_context = we.run_generation_workflow.await_args_list[0].kwargs[
+            "supplementary_context"
+        ]
+        assert "Authoritative consumed contracts" in first_consumer_context
+        assert '"revision": "v2"' in first_consumer_context
+        assert "NEW shape: encode/decode with 6 fields" in first_consumer_context
         registry = load_contract_registry(tmp)
         assert registry.get("M1:ProtocolCodec").shape == "NEW shape: encode/decode with 6 fields"
+
+
+@pytest.mark.asyncio
+async def test_authoritative_milestones_stop_when_contract_registry_cannot_persist(tmp_path):
+    milestones = [mkv2(
+        "M1", goal="g1", success_criterion="c1", provides=[{"name": "ProtocolCodec"}],
+    )]
+    state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+    save_control_state(str(tmp_path), ControlState(
+        schema_version=CURRENT_SCHEMA_VERSION,
+        run_id="grp",
+        milestone_group_id="grp",
+        milestone_states={"M1": "pending"},
+    ))
+    we = MagicMock()
+    we.run_generation_workflow = AsyncMock()
+
+    with patch(
+        "kriya.workflow.milestones.save_contract_registry",
+        side_effect=RuntimeError("disk full"),
+    ), pytest.raises(MilestonePersistenceError) as raised:
+        await run_milestones(we, state, str(tmp_path), authoritative=True)
+
+    assert raised.value.reason_code == "CONTRACT_REGISTRY_PERSISTENCE_FAILED"
+    we.run_generation_workflow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_authoritative_milestone_crash_leaves_m1_done_and_m2_current(tmp_path):
+    milestones = [
+        mkv2("M1", goal="g1", success_criterion="c1"),
+        mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"]),
+    ]
+    state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+    save_control_state(str(tmp_path), ControlState(
+        schema_version=CURRENT_SCHEMA_VERSION,
+        run_id="grp",
+        milestone_group_id="grp",
+        milestone_states={"M1": "pending", "M2": "pending"},
+    ))
+    we = MagicMock()
+    we.run_generation_workflow = AsyncMock(side_effect=[
+        {"quality_gates_passed": True, "design": "d", "files": []},
+        RuntimeError("process interrupted during M2"),
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": False, "run_commands": None,
+    })
+
+    with pytest.raises(RuntimeError, match="interrupted during M2"):
+        await run_milestones(we, state, str(tmp_path), authoritative=True)
+
+    persisted = load_control_state(str(tmp_path))
+    assert persisted.milestone_states == {"M1": "done", "M2": "in_progress"}
+    assert persisted.current_milestone_id == "M2"
+    assert persisted.current_contract_hash
+    assert persisted.current_artifact_registry_hash
 
 
 @pytest.mark.asyncio

@@ -78,23 +78,36 @@ import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import parse_planner_structured_output
-from kriya.control.decisions import Decision, DecisionLedger
+from kriya.control.decisions import (
+    Decision,
+    DecisionLedger,
+    stamp_legacy_decision_ledger_ownership,
+)
 from kriya.control.artifacts import ArtifactRegistry
+from kriya.control.contracts import ContractRegistry
 from kriya.control.persistence import (
     load_artifact_registry,
     load_contract_registry,
     load_control_state,
+    artifact_registry_path,
+    contract_registry_path,
+    control_state_path,
     save_artifact_registry,
+    save_contract_registry,
     save_control_state,
 )
 from kriya.control.state import ControlState
+from kriya.control.workspace_identity import json_document_is_ownerless
 from kriya.workflow import subtask_executor
 from kriya.workflow.checkpoint import (
     ResumeStatus,
     compute_base_commit,
+    compute_registry_hash,
     compute_tree_hash,
     new_run_id,
     validate_resume_against_reality,
+    list_checkpoints,
+    save_checkpoint,
 )
 from kriya.workflow.context_orchestrator import ContextOrchestrator
 from kriya.workflow.context_package import (
@@ -318,6 +331,110 @@ def quarantine_abandoned_plan_files(
     return moved
 
 
+def _migrate_legacy_milestone_ownership(
+    workspace_path: str,
+    run_state: Any,
+    contract_registry: Any,
+    artifact_registry: Any,
+    *,
+    prior_control_state_ownerless: bool,
+) -> Tuple[str, ...]:
+    """One-time ownership migration for authoritative milestone state."""
+    migrated: List[str] = []
+    contracts_path = contract_registry_path(workspace_path)
+    if json_document_is_ownerless(contracts_path):
+        with open(contracts_path, "r", encoding="utf-8") as handle:
+            ContractRegistry.from_dict(json.load(handle))
+        save_contract_registry(workspace_path, contract_registry)
+        migrated.append("contract_registry")
+    artifacts_path = artifact_registry_path(workspace_path)
+    if json_document_is_ownerless(artifacts_path):
+        with open(artifacts_path, "r", encoding="utf-8") as handle:
+            ArtifactRegistry.from_dict(json.load(handle))
+        save_artifact_registry(workspace_path, artifact_registry)
+        migrated.append("artifact_registry")
+    if prior_control_state_ownerless:
+        migrated.append("control_state")
+
+    sidecar_path = os.path.join(
+        workspace_path, ".kriya", "milestones", f"{run_state.group_id}.json",
+    )
+    if json_document_is_ownerless(sidecar_path):
+        from kriya.workflow.milestones import MilestoneRunState, save_milestone_run_state
+        with open(sidecar_path, "r", encoding="utf-8") as handle:
+            MilestoneRunState.from_dict(json.load(handle))
+        save_milestone_run_state(workspace_path, run_state)
+        migrated.append("milestone_run_state")
+
+    migrated_checkpoints = 0
+    for checkpoint in list_checkpoints(workspace_path):
+        if checkpoint.get("_workspace") is not None:
+            continue
+        run_id = checkpoint.get("run_id")
+        if run_id:
+            save_checkpoint(workspace_path, run_id, checkpoint)
+            migrated_checkpoints += 1
+    if migrated_checkpoints:
+        migrated.append(f"checkpoints:{migrated_checkpoints}")
+
+    migrated_decisions = stamp_legacy_decision_ledger_ownership(workspace_path)
+    if migrated_decisions:
+        migrated.append(f"decision_ledger_entries:{migrated_decisions}")
+
+    if migrated:
+        DecisionLedger().record_and_persist(
+            workspace_path,
+            "legacy_workspace_ownership_migrated",
+            stores=sorted(migrated),
+            milestone_group_id=run_state.group_id,
+        )
+    return tuple(sorted(migrated))
+
+
+def _migrate_legacy_controller_ownership(workspace_path: str, run_id: str) -> Tuple[str, ...]:
+    """Stamp ownerless control documents before authoritative plain execution."""
+    migrated: List[str] = []
+    state_path = control_state_path(workspace_path)
+    if json_document_is_ownerless(state_path):
+        with open(state_path, "r", encoding="utf-8") as handle:
+            prior_state = ControlState.from_dict(json.load(handle))
+        save_control_state(workspace_path, prior_state)
+        migrated.append("control_state")
+    contracts_path = contract_registry_path(workspace_path)
+    if json_document_is_ownerless(contracts_path):
+        with open(contracts_path, "r", encoding="utf-8") as handle:
+            contracts = ContractRegistry.from_dict(json.load(handle))
+        save_contract_registry(workspace_path, contracts)
+        migrated.append("contract_registry")
+    artifacts_path = artifact_registry_path(workspace_path)
+    if json_document_is_ownerless(artifacts_path):
+        with open(artifacts_path, "r", encoding="utf-8") as handle:
+            artifacts = ArtifactRegistry.from_dict(json.load(handle))
+        save_artifact_registry(workspace_path, artifacts)
+        migrated.append("artifact_registry")
+    migrated_decisions = stamp_legacy_decision_ledger_ownership(workspace_path)
+    if migrated_decisions:
+        migrated.append(f"decision_ledger_entries:{migrated_decisions}")
+    migrated_checkpoints = 0
+    for checkpoint in list_checkpoints(workspace_path):
+        if checkpoint.get("_workspace") is not None:
+            continue
+        checkpoint_run_id = checkpoint.get("run_id")
+        if checkpoint_run_id:
+            save_checkpoint(workspace_path, checkpoint_run_id, checkpoint)
+            migrated_checkpoints += 1
+    if migrated_checkpoints:
+        migrated.append(f"checkpoints:{migrated_checkpoints}")
+    if migrated:
+        DecisionLedger().record_and_persist(
+            workspace_path,
+            "legacy_workspace_ownership_migrated",
+            stores=sorted(migrated),
+            run_id=run_id,
+        )
+    return tuple(sorted(migrated))
+
+
 class WorkflowController:
     """Wraps an existing WorkflowEngine (kriya/workflow/workflow.py) -
     never constructs its own agents/LLM client, and deliberately reuses
@@ -374,6 +491,23 @@ class WorkflowController:
         verification_report: Optional[VerificationReport] = None
 
         if migration_mode == "enforce":
+            try:
+                _migrate_legacy_controller_ownership(workspace_path, run_id)
+            except Exception as exc:
+                legacy_result = {
+                    "status": "needs_review",
+                    "quality_gates_passed": False,
+                    "files": [],
+                    "reason_codes": ["LEGACY_STATE_MIGRATION_FAILED"],
+                    "error": str(exc),
+                    "run_id": run_id,
+                }
+                return WorkflowResult(
+                    run_id=run_id,
+                    control_state=control_state,
+                    route=route,
+                    legacy_result=legacy_result,
+                )
             # MA7.8 - deliberately NOT wrapped in the shadow path's own
             # broad try/except. Shadow must never take down the real run
             # because shadow ISN'T the real run - enforce mode IS, so a bug
@@ -537,15 +671,108 @@ class WorkflowController:
             run_id=run_state.group_id, engineering_route=route,
             process_profile=control_context.process_profile, milestone_group_id=run_state.group_id,
         )
-        control_state = control_state.with_updates(current_milestone_id=run_state.group_id)
-
-        from kriya.workflow.milestones import run_milestones
-        legacy_result = await run_milestones(self.workflow_engine, run_state, workspace_path, **milestone_kwargs)
-
+        milestones = list(run_state.milestones)
         plan_blob = json.dumps(
-            [milestone.model_dump(mode="json") for milestone in run_state.milestones],
+            [milestone.model_dump(mode="json") for milestone in milestones],
             sort_keys=True,
+            separators=(",", ":"),
         )
+        prior_control_state_ownerless = json_document_is_ownerless(
+            control_state_path(workspace_path),
+        )
+        if prior_control_state_ownerless:
+            with open(control_state_path(workspace_path), "r", encoding="utf-8") as handle:
+                ControlState.from_dict(json.load(handle))
+        contract_registry = load_contract_registry(workspace_path)
+        artifact_registry = load_artifact_registry(workspace_path)
+        next_milestone_id = next(
+            (
+                milestone.id for milestone in milestones
+                if milestone.id not in run_state.completed_milestone_ids
+            ),
+            None,
+        )
+        durable_control_state = load_control_state(workspace_path)
+        if (
+            durable_control_state is not None
+            and durable_control_state.milestone_group_id == run_state.group_id
+        ):
+            control_state = durable_control_state
+        control_state = control_state.with_updates(
+            current_milestone_id=next_milestone_id,
+            milestone_states={
+                milestone.id: (
+                    "stale" if milestone.id in run_state.stale_milestone_ids
+                    else "done" if milestone.id in run_state.completed_milestone_ids
+                    else "pending"
+                )
+                for milestone in milestones
+            },
+            current_plan_hash=hashlib.sha256(plan_blob.encode("utf-8")).hexdigest(),
+            current_contract_hash=compute_registry_hash(contract_registry.to_dict()),
+            current_artifact_registry_hash=compute_registry_hash(artifact_registry.to_dict()),
+        )
+
+        try:
+            save_control_state(workspace_path, control_state)
+        except Exception as exc:
+            legacy_result = {
+                "status": "needs_review",
+                "group_id": run_state.group_id,
+                "quality_gates_passed": False,
+                "reason_codes": ["CONTROL_STATE_PERSISTENCE_FAILED"],
+                "persistence_store": "control_state",
+                "persistence_error": str(exc),
+            }
+            return WorkflowResult(
+                run_id=run_state.group_id,
+                control_state=control_state,
+                route=route,
+                legacy_result=legacy_result,
+            )
+
+        try:
+            _migrate_legacy_milestone_ownership(
+                workspace_path,
+                run_state,
+                contract_registry,
+                artifact_registry,
+                prior_control_state_ownerless=prior_control_state_ownerless,
+            )
+        except Exception as exc:
+            legacy_result = {
+                "status": "needs_review",
+                "group_id": run_state.group_id,
+                "quality_gates_passed": False,
+                "reason_codes": ["LEGACY_STATE_MIGRATION_FAILED"],
+                "persistence_store": "legacy_workspace_state",
+                "persistence_error": str(exc),
+            }
+            return WorkflowResult(
+                run_id=run_state.group_id,
+                control_state=control_state,
+                route=route,
+                legacy_result=legacy_result,
+            )
+
+        from kriya.workflow.milestones import MilestonePersistenceError, run_milestones
+        try:
+            legacy_result = await run_milestones(
+                self.workflow_engine,
+                run_state,
+                workspace_path,
+                authoritative=True,
+                **milestone_kwargs,
+            )
+        except MilestonePersistenceError as exc:
+            legacy_result = exc.to_result(run_state.group_id)
+
+        durable_control_state = load_control_state(workspace_path)
+        if (
+            durable_control_state is not None
+            and durable_control_state.milestone_group_id == run_state.group_id
+        ):
+            control_state = durable_control_state
         control_state = control_state.with_updates(
             milestone_states={
                 milestone.id: (
@@ -553,15 +780,23 @@ class WorkflowController:
                     else "done" if milestone.id in run_state.completed_milestone_ids
                     else "pending"
                 )
-                for milestone in run_state.milestones
+                for milestone in milestones
             },
-            current_plan_hash=hashlib.sha256(plan_blob.encode("utf-8")).hexdigest(),
+            current_contract_hash=compute_registry_hash(load_contract_registry(workspace_path).to_dict()),
+            current_artifact_registry_hash=compute_registry_hash(load_artifact_registry(workspace_path).to_dict()),
         )
 
         try:
             save_control_state(workspace_path, control_state)
-        except Exception as e:
-            logger.warning(f"WorkflowController milestones run {run_state.group_id!r}: failed to persist ControlState (non-fatal): {e}")
+        except Exception as exc:
+            legacy_result = {
+                "status": "needs_review",
+                "group_id": run_state.group_id,
+                "quality_gates_passed": False,
+                "reason_codes": ["CONTROL_STATE_PERSISTENCE_FAILED"],
+                "persistence_store": "control_state",
+                "persistence_error": str(exc),
+            }
 
         return WorkflowResult(
             run_id=run_state.group_id, control_state=control_state, route=route, legacy_result=legacy_result,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from typing import Any, Dict
 
@@ -18,6 +19,17 @@ def workspace_identity(workspace_path: str) -> str:
 
 def ownership_metadata(workspace_path: str) -> Dict[str, str]:
     return {"workspace_id": workspace_identity(workspace_path), "version": "1"}
+
+
+def json_document_is_ownerless(path: str) -> bool:
+    """True only for an existing, valid legacy JSON document without ownership."""
+    if not os.path.isfile(path):
+        return False
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError(f"persistent state at {path!r} is not a JSON object")
+    return payload.get("_workspace") is None
 
 
 def validate_ownership(workspace_path: str, payload: Dict[str, Any], source: str) -> None:

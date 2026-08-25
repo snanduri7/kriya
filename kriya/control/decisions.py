@@ -136,6 +136,45 @@ class DecisionLedger:
         return decision
 
 
+def stamp_legacy_decision_ledger_ownership(workspace_path: str) -> int:
+    """Stamp valid ownerless legacy decision lines during authoritative migration."""
+    path = decision_ledger_path(workspace_path)
+    if not os.path.isfile(path):
+        return 0
+    expected_owner = workspace_identity(workspace_path)
+    migrated = 0
+    serialized_lines: List[str] = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except Exception:
+                logger.warning(
+                    "Preserving malformed decision-ledger line %d during ownership migration: %s",
+                    line_number,
+                    path,
+                )
+                serialized_lines.append(line.rstrip("\n"))
+                continue
+            actual_owner = payload.get("_workspace_id")
+            if actual_owner is not None and actual_owner != expected_owner:
+                raise WorkspaceOwnershipError(
+                    f"decision ledger at {path!r} line {line_number} belongs to workspace {actual_owner!r}"
+                )
+            if actual_owner is None:
+                payload["_workspace_id"] = expected_owner
+                migrated += 1
+            serialized_lines.append(json.dumps(payload, sort_keys=True))
+    if migrated:
+        content = "\n".join(serialized_lines) + "\n"
+        AuthorizedFileWriter(workspace_path).commit_file(
+            path, content, expected_revision=read_file_revision(path),
+        )
+    return migrated
+
+
 def load_decision_ledger(workspace_path: str) -> DecisionLedger:
     """Tolerant line-by-line load: a malformed trailing line (e.g. from a
     process killed mid-append before commit_file's own atomic replace could
