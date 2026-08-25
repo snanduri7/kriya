@@ -453,3 +453,81 @@ async def test_shadow_context_empty_registries_are_honest_not_an_error(tmp_path)
 
     # ran cleanly through to completion despite empty registries
     assert result.subtask_results[0].status == SubtaskStatus.COMPLETED
+
+
+# --- execute_milestones (MA7-C4, 2026-08-25 external review) ---
+
+def _milestone_run_state(group_id="grp-1", original_goal="build a thing"):
+    return MagicMock(group_id=group_id, original_goal=original_goal)
+
+
+@pytest.mark.asyncio
+async def test_execute_milestones_calls_run_milestones_with_the_real_run_state_and_kwargs(tmp_path):
+    we = _workflow_engine()
+    run_state = _milestone_run_state()
+    fake_run_milestones = AsyncMock(return_value={"status": "success"})
+
+    with patch("kriya.workflow.milestones.run_milestones", fake_run_milestones):
+        controller = WorkflowController(we)
+        result = await controller.execute_milestones(
+            run_state, str(tmp_path), knowledge_risk_confirmed=True, resume=False,
+        )
+
+    fake_run_milestones.assert_awaited_once_with(
+        we, run_state, str(tmp_path), knowledge_risk_confirmed=True, resume=False,
+    )
+    assert result.legacy_result == {"status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_execute_milestones_persists_control_state_keyed_by_group_id(tmp_path):
+    we = _workflow_engine()
+    run_state = _milestone_run_state(group_id="grp-real")
+    fake_run_milestones = AsyncMock(return_value={"status": "success"})
+
+    with patch("kriya.workflow.milestones.run_milestones", fake_run_milestones):
+        controller = WorkflowController(we)
+        result = await controller.execute_milestones(run_state, str(tmp_path))
+
+    assert result.run_id == "grp-real"
+    assert result.control_state.run_id == "grp-real"
+    assert result.control_state.milestone_group_id == "grp-real"
+
+    from kriya.control.persistence import load_control_state
+    persisted = load_control_state(str(tmp_path))
+    assert persisted is not None
+    assert persisted.milestone_group_id == "grp-real"
+
+
+@pytest.mark.asyncio
+async def test_execute_milestones_persist_failure_is_non_fatal(tmp_path):
+    we = _workflow_engine()
+    run_state = _milestone_run_state()
+    fake_run_milestones = AsyncMock(return_value={"status": "success"})
+
+    with patch("kriya.workflow.milestones.run_milestones", fake_run_milestones), \
+         patch("kriya.workflow.workflow_controller.save_control_state", side_effect=RuntimeError("disk full")):
+        controller = WorkflowController(we)
+        result = await controller.execute_milestones(run_state, str(tmp_path))
+
+    # the real run's own success is unaffected by a broken persistence step
+    assert result.legacy_result == {"status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_execute_milestones_propagates_a_real_run_milestones_failure_result(tmp_path):
+    """Not swallowed/reshaped - run_milestones()'s own rich failure shape
+    (status=milestone_failed, etc.) passes through as-is via legacy_result,
+    same as _run_legacy_generation's own passthrough for ordinary goals."""
+    we = _workflow_engine()
+    run_state = _milestone_run_state()
+    fake_run_milestones = AsyncMock(return_value={
+        "status": "milestone_failed", "milestone_id": "M2", "milestone_index": 2,
+    })
+
+    with patch("kriya.workflow.milestones.run_milestones", fake_run_milestones):
+        controller = WorkflowController(we)
+        result = await controller.execute_milestones(run_state, str(tmp_path))
+
+    assert result.legacy_result["status"] == "milestone_failed"
+    assert result.legacy_result["milestone_id"] == "M2"

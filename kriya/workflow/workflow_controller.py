@@ -379,6 +379,60 @@ class WorkflowController:
             decisions=decisions, verification_report=verification_report,
         )
 
+    async def execute_milestones(self, run_state: Any, workspace_path: str, **milestone_kwargs: Any) -> WorkflowResult:
+        """MA7-C4 (2026-08-25 external review) - the milestone-DAG
+        counterpart to execute() above: makes WorkflowController the
+        single real composition root for ALL FOUR route kinds (TASK/
+        ENHANCEMENT/REFACTOR via execute(), MILESTONE via this method),
+        closing the architectural split where kriya/cli.py's
+        `generate --from-milestones` called kriya/workflow/milestones.py::
+        run_milestones() directly, bypassing WorkflowController - and
+        therefore ControlState/the rest of the control plane - entirely.
+
+        Deliberately does NOT reimplement or duplicate run_milestones()'s
+        own topological DAG execution, dependency-regression checks, or
+        established-file threading - same "reuse the mature mechanism,
+        don't duplicate it" principle as execute()'s own
+        migration_mode="enforce" path (MA7.8). Unlike execute(), there is
+        no shadow/legacy distinction here: run_milestones() already IS the
+        real, mature mechanism this wraps, not a new implementation being
+        compared against an old one, so there is nothing to "observe only"
+        or fall back to - this method is only ever called when
+        workflow_controller.enabled is true (kriya/cli.py's own gate,
+        mirroring _dispatch_generation's identical convention for the
+        plain-goal path); when disabled, the CLI still calls
+        run_milestones() directly, completely unaffected by this method's
+        existence.
+
+        run_state.group_id becomes both run_id and milestone_group_id on
+        the resulting ControlState - a milestone sequence's real identity
+        already IS its group_id (MilestoneRunState's own field), not
+        something this method should mint independently. engineering_
+        triage classification here is for the SEQUENCE as a whole (real
+        observability parity with execute()'s own always-classify
+        behavior) - each individual milestone's own run_generation_
+        workflow() call already does its own per-milestone classification
+        internally, unaffected either way."""
+        route = await self.workflow_engine.engineering_triage.classify(run_state.original_goal, workspace_path)
+        control_context = WorkflowControlContext.for_route(route)
+        control_state = ControlState.new(
+            run_id=run_state.group_id, engineering_route=route,
+            process_profile=control_context.process_profile, milestone_group_id=run_state.group_id,
+        )
+        control_state = control_state.with_updates(current_milestone_id=run_state.group_id)
+
+        from kriya.workflow.milestones import run_milestones
+        legacy_result = await run_milestones(self.workflow_engine, run_state, workspace_path, **milestone_kwargs)
+
+        try:
+            save_control_state(workspace_path, control_state)
+        except Exception as e:
+            logger.warning(f"WorkflowController milestones run {run_state.group_id!r}: failed to persist ControlState (non-fatal): {e}")
+
+        return WorkflowResult(
+            run_id=run_state.group_id, control_state=control_state, route=route, legacy_result=legacy_result,
+        )
+
     def _attach_milestone_metadata(
         self, control_state: ControlState, milestone_group_id: Optional[str], milestone_index: Optional[int],
     ) -> ControlState:

@@ -1102,6 +1102,25 @@ async def _dispatch_generation(we: "WorkflowEngine", cfg: AppConfig, **kwargs: A
     return await we.run_generation_workflow(**kwargs)
 
 
+async def _dispatch_milestones(we: "WorkflowEngine", cfg: AppConfig, run_state: Any, workspace_path: str, **kwargs: Any) -> Dict[str, Any]:
+    """MA7-C4 (2026-08-25 external review) - the milestone-DAG counterpart
+    to _dispatch_generation above, closing the architectural split its own
+    docstring didn't yet cover: `generate --from-milestones` previously
+    called kriya.workflow.milestones.run_milestones() directly, bypassing
+    WorkflowController (and therefore ControlState/the rest of the control
+    plane) entirely, even when workflow_controller.enabled was true for
+    every OTHER generate call. Same exact gate/shape as
+    _dispatch_generation: with the packaged default (enabled=False) this
+    is a pure passthrough to run_milestones(), identical to every call
+    site before this change. Module-level, independently unit-testable,
+    same reasoning as _dispatch_generation."""
+    if cfg.workflow_controller.enabled:
+        result = await WorkflowController(we).execute_milestones(run_state, workspace_path, **kwargs)
+        return result.legacy_result
+    from kriya.workflow.milestones import run_milestones
+    return await run_milestones(we, run_state, workspace_path, **kwargs)
+
+
 def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> None:
     """Overwrites a transient `knowledge_gap` trace row with an honest `in_progress`
     marker the instant a knowledge-gap retry actually starts executing the real
@@ -1326,7 +1345,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             )
 
         async def run_milestone_sequence():
-            from kriya.workflow.milestones import load_or_resume_milestone_run_state, run_milestones
+            from kriya.workflow.milestones import load_or_resume_milestone_run_state
             with open(from_milestones, "r", encoding="utf-8") as fh:
                 plan_data = json.load(fh)
             workspace_path = os.getcwd()
@@ -1338,8 +1357,12 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             # see load_or_resume_milestone_run_state's own docstring.
             run_state = load_or_resume_milestone_run_state(workspace_path, plan_data)
             await kernel.start()
-            result = await run_milestones(
-                we, run_state, workspace_path,
+            # MA7-C4: routes through WorkflowController when
+            # workflow_controller.enabled (same gate/shape as plain
+            # generate's own _dispatch_generation) - pure passthrough to
+            # run_milestones() with the packaged default.
+            result = await _dispatch_milestones(
+                we, cfg, run_state, workspace_path,
                 approval_callback=on_approval,
                 stream_callback=on_stream,
                 skill_gap_callback=on_skill_gap,
