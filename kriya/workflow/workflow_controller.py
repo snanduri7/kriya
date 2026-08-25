@@ -372,10 +372,10 @@ class WorkflowController:
                 # _run_structured_enforce raised before returning anything,
                 # so there is no plan hash / subtask_states to fold in.
 
-            try:
-                save_control_state(workspace_path, control_state)
-            except Exception as e:
-                logger.warning(f"WorkflowController run {run_id!r}: failed to persist ControlState (non-fatal): {e}")
+            # Enforce mode is authoritative: repository progress without a
+            # durable matching ControlState must stop before another unit
+            # can execute.
+            save_control_state(workspace_path, control_state)
 
             return WorkflowResult(
                 run_id=run_id, control_state=control_state, route=route,
@@ -870,6 +870,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         if not validation.valid:
             raise _StructuredPlanUnavailable(f"plan failed validation: {validation.errors}")
 
+        execution_context = await self._build_context(
+            goal, plan, workspace_path, route, control_context, control_state,
+        )
+
         resumed_subtask_states: Dict[str, str] = {}
         if prior_control_state is not None:
             if prior_control_state.current_plan_hash != current_plan_hash:
@@ -996,14 +1000,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # own docstring for the full account of what is and isn't
             # skipped.
             predetermined_files = [pf.path for pf in subtask.planned_files]
+            projected_context = project_for_subtask(execution_context, subtask)
+            projected_context_text = subtask_executor._render_context_package(projected_context)
             call_result = await self.workflow_engine.run_generation_workflow(
                 goal=subtask_goal,
                 workspace_path=workspace_path,
-                supplementary_context=render_established_file_context(established_file_context),
+                supplementary_context="\n\n".join(filter(None, (
+                    render_established_file_context(established_file_context),
+                    projected_context_text,
+                ))),
                 established_files=sorted(established_file_context.keys()),
                 predetermined_plan=build_subtask_plan_text(subtask),
                 predetermined_design=subtask_goal,
                 predetermined_architect_files=predetermined_files,
+                allowed_write_relpaths=predetermined_files,
                 # trace_id_override is deliberately EXCLUDED (kriya/cli.py's own
                 # docstring for it: overwrite the ONE transient knowledge_gap
                 # trace row a single whole-goal retry produces) - forwarding it
@@ -1049,7 +1059,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             subtask_results.append(result)
             record_subtask_attempt(ledger, plan, result, attempt=1)
 
-            # Persisted incrementally (best-effort, non-fatal), not only at
+            # Persisted incrementally and fail-closed, not only at
             # the end of the whole plan - a mid-plan crash must leave
             # accurate resumable state behind, matching run_milestones()'s
             # own completed_milestone_ids sidecar convention.
@@ -1064,10 +1074,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     subtask.id: sorted(call_result.get("files", [])),
                 },
             )
-            try:
-                save_control_state(workspace_path, control_state)
-            except Exception as e:
-                logger.warning(f"WorkflowController enforce run {run_id!r}: failed to persist ControlState (non-fatal): {e}")
+            save_control_state(workspace_path, control_state)
 
             if not passed:
                 logger.warning(
@@ -1150,7 +1157,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     "generation_calls": cr.get("generation_metrics", {}).get("calls"),
                     "quality_gates_passed": bool(cr.get("quality_gates_passed")),
                 }
-                for r, cr in zip(subtask_results, subtask_call_results)
+                for r, cr in zip(subtask_results, subtask_call_results, strict=False)
             ]
 
         # MA7.10 - real ArtifactRegistry derivation through an actual
@@ -1179,7 +1186,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     save_artifact_registry(workspace_path, artifact_registry)
                     aggregated["derived_artifacts"] = [r.to_dict() for r in derived]
             except Exception as e:
-                logger.warning(f"WorkflowController enforce run {run_id!r}: artifact derivation failed (non-fatal): {e}")
+                logger.error(f"WorkflowController enforce run {run_id!r}: artifact derivation failed: {e}")
+                aggregated["status"] = "needs_review"
+                aggregated["quality_gates_passed"] = False
+                aggregated["artifact_error"] = str(e)
 
         report = build_verification_report(plan.acceptance_criteria)
         return aggregated, plan, tuple(subtask_results), ledger.all(), report, control_state

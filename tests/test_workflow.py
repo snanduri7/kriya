@@ -5,6 +5,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,6 +59,7 @@ from kriya.workflow.workflow import (
     _detect_missing_build_manifest,
     _ensure_repository_indexed,
     _filter_misattributed_extraction,
+    _resolve_protected_relpath,
     _get_or_start_jdtls_client,
     _goal_or_repo_targets_java,
     _is_near_duplicate_rule,
@@ -2234,6 +2236,80 @@ async def test_reviewer_prompt_includes_already_verified_evidence_after_a_passin
     assert "Already Verified" in captured["prompt"]
     assert "ACTUALLY RAN" in captured["prompt"]
     assert "hi" in captured["prompt"]
+
+
+def test_resolve_protected_relpath_returns_the_workspace_relative_form(tmp_path):
+    """Regression test for a real live bug, 2026-08-25 (ignite_qpid_protocol):
+    a generated subtask overwrote the real goal file (--file <path> for the
+    run) with Kriya's own JSON planning-artifact shape - nothing about the
+    content itself was invalid, so no compile/spec-compliance gate could
+    have caught it."""
+    goal_file = tmp_path / "goal.md"
+    goal_file.write_text("# real goal\n")
+    result = _resolve_protected_relpath(str(tmp_path), str(goal_file))
+    assert result == "goal.md"
+
+
+def test_resolve_protected_relpath_handles_a_subdirectory_goal_file(tmp_path):
+    (tmp_path / "docs").mkdir()
+    goal_file = tmp_path / "docs" / "goal.md"
+    goal_file.write_text("# real goal\n")
+    result = _resolve_protected_relpath(str(tmp_path), str(goal_file))
+    assert result == os.path.join("docs", "goal.md")
+
+
+def test_resolve_protected_relpath_returns_none_when_no_file_was_supplied(tmp_path):
+    assert _resolve_protected_relpath(str(tmp_path), None) is None
+    assert _resolve_protected_relpath(str(tmp_path), "") is None
+
+
+def test_resolve_protected_relpath_returns_none_when_the_file_is_outside_the_workspace(tmp_path):
+    with tempfile.TemporaryDirectory() as other_dir:
+        outside_file = os.path.join(other_dir, "goal.md")
+        with open(outside_file, "w") as f:
+            f.write("# real goal\n")
+        assert _resolve_protected_relpath(str(tmp_path), outside_file) is None
+
+
+@pytest.mark.asyncio
+async def test_run_generation_workflow_refuses_to_overwrite_the_protected_goal_file(tmp_path):
+    """End-to-end regression test for the real live bug above: confirms
+    protected_source_file reaches AuthorizedFileWriter (via AttemptContext)
+    and the write is genuinely refused - not just that the pure relpath
+    helper resolves correctly in isolation."""
+    goal_file = tmp_path / "goal.md"
+    goal_file.write_text("# The real Ignite/Qpid goal\n")
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: create goal.md with basic content",
+        "Design: write goal.md",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "goal.md", "content": '{"subtasks": [{"id": "s1"}]}'}
+    ])
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        res = await we.run_generation_workflow(
+            goal="goal.md",
+            workspace_path=str(tmp_path),
+            protected_source_file=str(goal_file),
+        )
+
+    assert res["quality_gates_passed"] is False
+    assert goal_file.read_text() == "# The real Ignite/Qpid goal\n"
 
 @pytest.mark.asyncio
 async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_path):

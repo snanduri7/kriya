@@ -235,7 +235,7 @@ A separate, deliberately excluded tier (`tests/test_live_smoke.py`, marked `live
 ```bash
 .venv/bin/pytest -m live_model
 ```
-CI runs this tier in a separate, non-blocking job (`.github/workflows/ci.yml`'s `live-model-smoke`) that installs Ollama and pulls a small model fresh - it exists to catch integration/regression bugs in Kriya's own request/response handling that only a real model response can trigger, not to grade generation quality.
+CI runs the supported primary model in a blocking job and runs a scheduled three-model matrix (`.github/workflows/ci.yml`). These jobs catch integration/regression bugs in Kriya's request/response handling; they do not grade generated-code quality.
 
 ---
 

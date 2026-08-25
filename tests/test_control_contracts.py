@@ -359,18 +359,20 @@ def test_wire_contract_consumers_populates_from_real_consumes():
     assert reg.get("M1:ProtocolCodec").consumers == ("M2", "M4")
 
 
-def test_wire_contract_consumers_ignores_a_consumed_name_nobody_provides():
+def test_wire_contract_consumers_rejects_a_consumed_name_nobody_provides():
     """Should never happen for a plan that already passed
     MilestonePlanValidator's reachability check, but must not raise even
     if it somehow does - this function trusts, never re-validates,
     reachability."""
     reg = ContractRegistry()
     milestones = [_milestone(id="M2", consumes=["NeverProvided"])]
-    wire_contract_consumers(reg, milestones)  # must not raise
+    from kriya.control.contracts import ContractProviderResolutionError
+    with pytest.raises(ContractProviderResolutionError):
+        wire_contract_consumers(reg, milestones)
     assert reg.all_records() == ()
 
 
-def test_wire_contract_consumers_refuses_to_guess_an_ambiguous_provider(caplog):
+def test_wire_contract_consumers_rejects_an_ambiguous_provider():
     """2026-08-25 follow-up (action-item review): an earlier version of
     this function attached the consumer to EVERY candidate provider when a
     capability name had more than one - silently guessing. Fixed: an
@@ -379,7 +381,7 @@ def test_wire_contract_consumers_refuses_to_guess_an_ambiguous_provider(caplog):
     relationship it isn't actually sure of, even though
     milestone_validation.py's own reachability check still tolerates the
     same ambiguity at plan-validation time (a separate question)."""
-    import logging
+    from kriya.control.contracts import ContractProviderResolutionError
 
     reg = ContractRegistry()
     milestones = [
@@ -390,12 +392,11 @@ def test_wire_contract_consumers_refuses_to_guess_an_ambiguous_provider(caplog):
     for m in milestones:
         contract_records_from_provided_capabilities(reg, m)
 
-    with caplog.at_level(logging.WARNING, logger="kriya.control.contracts"):
+    with pytest.raises(ContractProviderResolutionError):
         wire_contract_consumers(reg, milestones)
 
     assert reg.get("M1:ProtocolCodec").consumers == ()
     assert reg.get("M2:ProtocolCodec").consumers == ()
-    assert any("ambiguous" in r.message for r in caplog.records)
 
 
 def test_wire_contract_consumers_is_idempotent():

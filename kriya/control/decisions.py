@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 from kriya.control.persistence import decision_ledger_path
+from kriya.control.workspace_identity import WorkspaceOwnershipError, workspace_identity
 from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.edit_safety import read_file_revision
 
@@ -66,6 +67,7 @@ class Decision:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Decision":
         data = dict(data)
+        data.pop("_workspace_id", None)
         decision_type = data.pop("type")
         timestamp = data.pop("timestamp", _now_iso())
         return cls(type=decision_type, fields=data, timestamp=timestamp)
@@ -111,7 +113,17 @@ class DecisionLedger:
         if os.path.isfile(path):
             with open(path, "r", encoding="utf-8") as f:
                 existing_lines = [line.rstrip("\n") for line in f if line.strip()]
-        existing_lines.append(json.dumps(decision.to_dict(), sort_keys=True))
+            expected_owner = workspace_identity(workspace_path)
+            for line in existing_lines:
+                payload = json.loads(line)
+                actual_owner = payload.get("_workspace_id")
+                if actual_owner is not None and actual_owner != expected_owner:
+                    raise WorkspaceOwnershipError(
+                        f"decision ledger at {path!r} belongs to workspace {actual_owner!r}"
+                    )
+        serialized = decision.to_dict()
+        serialized["_workspace_id"] = workspace_identity(workspace_path)
+        existing_lines.append(json.dumps(serialized, sort_keys=True))
         content = "\n".join(existing_lines) + "\n"
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -136,12 +148,21 @@ def load_decision_ledger(workspace_path: str) -> DecisionLedger:
     if not os.path.isfile(path):
         return ledger
     with open(path, "r", encoding="utf-8") as f:
+        expected_owner = workspace_identity(workspace_path)
         for line_number, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
                 continue
             try:
-                ledger._decisions.append(Decision.from_dict(json.loads(line)))
+                payload = json.loads(line)
+                actual_owner = payload.get("_workspace_id")
+                if actual_owner is not None and actual_owner != expected_owner:
+                    raise WorkspaceOwnershipError(
+                        f"decision ledger at {path!r} belongs to workspace {actual_owner!r}"
+                    )
+                ledger._decisions.append(Decision.from_dict(payload))
+            except WorkspaceOwnershipError:
+                raise
             except Exception:
                 logger.warning("Skipping malformed decision-ledger line %d in %s", line_number, path, exc_info=True)
     return ledger

@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
+
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_DIR = os.path.join(".kriya", "checkpoints")
@@ -73,6 +75,7 @@ def save_checkpoint(workspace_path: str, run_id: str, data: Dict[str, Any]) -> N
         payload = dict(data)
         payload["run_id"] = run_id
         payload["saved_at"] = time.time()
+        payload["_workspace"] = ownership_metadata(workspace_path)
         with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2)
         os.replace(tmp_path, path)
@@ -87,7 +90,11 @@ def load_checkpoint(workspace_path: str, run_id: str) -> Optional[Dict[str, Any]
         return None
     try:
         with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
+            payload = json.load(fh)
+        validate_ownership(workspace_path, payload, path)
+        return payload
+    except WorkspaceOwnershipError:
+        raise
     except Exception as e:
         logger.warning(f"Failed to load checkpoint '{path}': {e}")
         return None

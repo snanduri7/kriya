@@ -228,6 +228,27 @@ def _log_phase_banner(title: str) -> None:
     logger.info(f"\n{bar}\n{title.center(_PHASE_BANNER_WIDTH)}\n{bar}")
 
 
+def _resolve_protected_relpath(workspace_path: str, protected_source_file: Optional[str]) -> Optional[str]:
+    """Workspace-relative form of the goal-source file supplied via `kriya
+    generate --file <path>`, for AuthorizedFileWriter's protected_relpaths
+    (kriya/policy/filesystem.py) to deny a generated write against - see that
+    class's own docstring for the real live incident (ignite_qpid_protocol,
+    2026-08-25) this exists to prevent. Returns None when there's nothing to
+    protect: no file was supplied, or it resolves outside workspace_path
+    entirely (a write can never land there via a workspace-relative path
+    anyway, so there's nothing this specific mechanism needs to guard)."""
+    if not protected_source_file:
+        return None
+    try:
+        abs_target = os.path.realpath(os.path.expanduser(protected_source_file))
+        abs_workspace = os.path.realpath(os.path.expanduser(workspace_path))
+    except Exception:
+        return None
+    if abs_target != abs_workspace and not abs_target.startswith(abs_workspace + os.sep):
+        return None
+    return os.path.normpath(os.path.relpath(abs_target, abs_workspace))
+
+
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
 
@@ -467,6 +488,8 @@ class WorkflowEngine:
         predetermined_plan: Optional[str] = None,
         predetermined_design: Optional[str] = None,
         predetermined_architect_files: Optional[List[str]] = None,
+        protected_source_file: Optional[str] = None,
+        allowed_write_relpaths: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -710,6 +733,8 @@ class WorkflowEngine:
         import uuid
         trace_id = trace_id_override or str(uuid.uuid4())[:8]
         start_time = time.time()
+
+        protected_relpath = _resolve_protected_relpath(workspace_path, protected_source_file)
 
         # 0. KnowledgeGuard Stage 0 Check
         from kriya.tools.knowledge import KnowledgeGuard
@@ -1857,6 +1882,8 @@ class WorkflowEngine:
                 for entry in generation_manifest.entries
             },
             established_files=established_files or [],
+            protected_relpath=protected_relpath,
+            allowed_write_relpaths=list(allowed_write_relpaths or []),
         )
 
         from kriya.workflow.retry_policy import decide_for_state

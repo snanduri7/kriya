@@ -83,6 +83,10 @@ class ContractChangeConflictError(ValueError):
     changed it first. Never silently applied on top of a stale base."""
 
 
+class ContractProviderResolutionError(ValueError):
+    """A consumed capability has no unique provider; execution must not guess."""
+
+
 @dataclass(frozen=True)
 class ContractRecord:
     """One revision of one contract. Frozen - every lifecycle transition
@@ -487,14 +491,10 @@ def wire_contract_consumers(registry: "ContractRegistry", milestones: Any) -> No
         for capability_name in m.consumes:
             providers = provider_ids_by_capability.get(capability_name, [])
             if len(providers) != 1:
-                if len(providers) > 1:
-                    logger.warning(
-                        f"wire_contract_consumers: capability {capability_name!r} has "
-                        f"{len(providers)} providers {sorted(providers)!r} - ambiguous, "
-                        f"refusing to guess which one milestone {m.id!r} actually consumes. "
-                        "No consumer link recorded for this capability."
-                    )
-                continue
+                detail = "no provider" if not providers else f"ambiguous providers {sorted(providers)!r}"
+                raise ContractProviderResolutionError(
+                    f"milestone {m.id!r} consumes capability {capability_name!r} with {detail}"
+                )
             contract_id = f"{providers[0]}:{capability_name}"
             if registry.try_get(contract_id) is not None:
                 registry.add_consumer(contract_id, m.id)

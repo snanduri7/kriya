@@ -480,19 +480,19 @@ class WorkflowControllerConfig(BaseModel):
             raise ValueError(f"workflow_controller.mode must be 'shadow' or 'enforce', got {v!r}")
         return v
 
-_VALID_RUNTIME_PROFILES = (None, "hardened")
+_VALID_RUNTIME_PROFILES = (None, "legacy", "validated", "hardened")
 
 
 class AppConfig(BaseModel):
-    """runtime_profile (2026-08-25, external review P2) - a single named
+    """runtime_profile (2026-08-25, external review P2) - a named
     preset in place of remembering which combination of independent
     toggles (engineering_triage.shadow_mode, process_profiles.enabled,
     workflow_controller.enabled/mode) "hardened" actually means. Deliberately
     NOT a new independent config surface of its own: load_config() applies
     it as a straightforward, unconditional override of those existing
-    fields AFTER the normal default+user merge - pick the profile OR
-    hand-tune the individual fields, not a partial mix of both, so there's
-    never a question of which one "wins" for a given field. None (the
+    fields AFTER the normal default+user merge. `legacy`, `validated`, and
+    `hardened` are coherent presets; a user config must pick a profile OR
+    hand-tune the individual fields, never mix both. None (the
     default) changes nothing - every field keeps behaving exactly as it
     always has, matching every existing kriya.yaml unchanged.
 
@@ -535,6 +535,7 @@ class AppConfig(BaseModel):
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """Load configuration from a YAML file, merging with default configs."""
     config_dict = {}
+    user_data: Dict[str, Any] = {}
     
     # Determine Kriya Installation Directory
     KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -586,7 +587,7 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
     if config_path and os.path.exists(config_path):
         try:
             with open(config_path, "r") as f:
-                user_data = yaml.safe_load(f)
+                user_data = yaml.safe_load(f) or {}
                 if user_data:
                     # Resolve relative paths in user config to config_dir
                     if "paths" in user_data:
@@ -609,13 +610,34 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             
     cfg = AppConfig(**config_dict)
 
+    if cfg.runtime_profile is not None:
+        conflicting = sorted(
+            key for key in ("engineering_triage", "process_profiles", "workflow_controller")
+            if key in user_data
+        )
+        if conflicting:
+            raise ValueError(
+                f"runtime_profile cannot be combined with explicit {conflicting!r}; choose the preset "
+                "or configure the individual subsystems"
+            )
+
     # runtime_profile="hardened" (2026-08-25, external review P2) - see
     # AppConfig's own docstring for exactly what this does and does not
     # cover. Applied AFTER the normal default+user merge/validation, as an
     # unconditional override - deliberately not a config_dict-level merge
     # trick, so it behaves identically regardless of how the user's own
     # kriya.yaml happened to set these same fields.
-    if cfg.runtime_profile == "hardened":
+    if cfg.runtime_profile == "legacy":
+        cfg.engineering_triage.shadow_mode = True
+        cfg.process_profiles.enabled = False
+        cfg.workflow_controller.enabled = False
+        cfg.workflow_controller.mode = "shadow"
+    elif cfg.runtime_profile == "validated":
+        cfg.engineering_triage.shadow_mode = False
+        cfg.process_profiles.enabled = True
+        cfg.workflow_controller.enabled = True
+        cfg.workflow_controller.mode = "shadow"
+    elif cfg.runtime_profile == "hardened":
         cfg.engineering_triage.shadow_mode = False
         cfg.process_profiles.enabled = True
         cfg.workflow_controller.enabled = True

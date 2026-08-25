@@ -122,6 +122,70 @@ def test_authorize_never_flags_a_legitimate_generated_file_with_a_sensitive_look
         assert result.decision != PolicyDecision.DENY, target
 
 
+# --- protected_relpaths: the goal-source-file guard (2026-08-25 live incident) ---
+
+def test_authorize_denies_the_protected_goal_source_file(workspace):
+    """Regression test for a real live bug, 2026-08-25 (ignite_qpid_protocol):
+    a generated subtask targeted the literal goal file supplied via `kriya
+    generate --file <path>`, and its content (Kriya's own JSON planning-
+    artifact shape) silently overwrote the real goal text - nothing about the
+    content itself was invalid, so no existing check could have caught it."""
+    writer = AuthorizedFileWriter(workspace, protected_relpaths=["goal.md"])
+    result = writer.authorize(os.path.join(workspace, "goal.md"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "GOAL_SOURCE_FILE_PROTECTED"
+
+
+def test_authorize_denies_a_protected_file_in_a_subdirectory(workspace):
+    writer = AuthorizedFileWriter(workspace, protected_relpaths=[os.path.join("docs", "goal.md")])
+    result = writer.authorize(os.path.join(workspace, "docs", "goal.md"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "GOAL_SOURCE_FILE_PROTECTED"
+
+
+def test_authorize_allows_every_other_file_when_a_path_is_protected(workspace):
+    """The protection is scoped to exactly the one path - it must never
+    become a blanket deny for the rest of a legitimate multi-file change."""
+    writer = AuthorizedFileWriter(workspace, protected_relpaths=["goal.md"])
+    result = writer.authorize(os.path.join(workspace, "app.py"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_authorize_allows_goal_source_file_when_nothing_is_protected(workspace):
+    """No protected_relpaths given (the default) - unchanged, ordinary
+    behavior for every existing caller."""
+    writer = AuthorizedFileWriter(workspace)
+    result = writer.authorize(os.path.join(workspace, "goal.md"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_authorize_denies_file_outside_validated_subtask_scope(workspace):
+    writer = AuthorizedFileWriter(workspace, allowed_relpaths=["declared.py"])
+    result = writer.authorize(os.path.join(workspace, "undeclared.py"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+
+
+def test_authorize_allows_file_inside_validated_subtask_scope(workspace):
+    writer = AuthorizedFileWriter(workspace, allowed_relpaths=["src/declared.py"])
+    result = writer.authorize(os.path.join(workspace, "src", "declared.py"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_commit_batch_raises_and_writes_nothing_when_the_goal_source_file_is_targeted(workspace):
+    writer = AuthorizedFileWriter(workspace, protected_relpaths=["goal.md"])
+    target = os.path.join(workspace, "goal.md")
+    with open(target, "w") as f:
+        f.write("# The real goal\n")
+    with pytest.raises(PolicyDeniedError) as exc_info:
+        writer.commit_file(
+            target, '{"subtasks": [...]}', expected_revision=content_revision("# The real goal\n"),
+        )
+    assert exc_info.value.result.reason_code == "GOAL_SOURCE_FILE_PROTECTED"
+    with open(target) as f:
+        assert f.read() == "# The real goal\n"
+
+
 # --- AuthorizedFileWriter.commit_file / commit_batch: real enforcement ---
 
 def test_commit_file_writes_when_authorized(workspace):

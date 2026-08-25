@@ -1,5 +1,6 @@
 from kriya.agents.contracts import AcceptanceCriterion, MilestoneMode, MilestoneV2, ProvidedCapability
 from kriya.workflow.milestone_validation import (
+    AMBIGUOUS_PROVIDER,
     DUPLICATE_ACCEPTANCE_ID,
     DUPLICATE_MILESTONE_ID,
     EMPTY_ACCEPTANCE,
@@ -70,6 +71,16 @@ def test_missing_dependency_rejected():
     r = MilestonePlanValidator().validate([mk("M1"), mk("M2", depends_on=["M99"])])
     assert not r.valid
     assert any(e.code == UNKNOWN_DEPENDENCY and e.milestone_id == "M2" for e in r.errors)
+
+
+def test_ambiguous_reachable_capability_provider_rejected():
+    r = MilestonePlanValidator().validate([
+        mk("M1", provides=["Codec"]),
+        mk("M2", provides=["Codec"]),
+        mk("M3", depends_on=["M1", "M2"], consumes=["Codec"]),
+    ])
+    assert not r.valid
+    assert any(e.code == AMBIGUOUS_PROVIDER and e.milestone_id == "M3" for e in r.errors)
 
 
 def test_self_dependency_rejected():

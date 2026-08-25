@@ -164,10 +164,13 @@ workflow_controller:
 # enabled/workflow_controller.enabled+mode to hand-tune can set, in its
 # OWN kriya.yaml:
 #   runtime_profile: hardened
-# which unconditionally overrides those four fields to their most-real
+# Supported presets are legacy, validated, and hardened. They cannot be
+# combined with explicit engineering_triage/process_profiles/
+# workflow_controller settings in the same user configuration. Hardened
+# sets those four fields to their most-real
 # settings (see kriya/config/config.py::AppConfig's own docstring for
 # exactly what it does and does NOT touch - execution_policy.mode stays
-# separately gated). Only "hardened" and unset (null) are valid values.
+# separately gated).
 # runtime_profile: null
 
 autonomy:

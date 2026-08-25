@@ -978,7 +978,9 @@ async def test_enforce_passes_predetermined_plan_design_and_files_from_the_subta
     assert calls[0]["predetermined_plan"] == "Implement: write a.py"
     assert calls[0]["predetermined_architect_files"] == ["a.py"]
     assert calls[0]["predetermined_design"]  # non-empty, real content
+    assert calls[0]["allowed_write_relpaths"] == ["a.py"]
     assert calls[1]["predetermined_architect_files"] == ["b.py"]
+    assert calls[1]["allowed_write_relpaths"] == ["b.py"]
 
 
 @pytest.mark.asyncio

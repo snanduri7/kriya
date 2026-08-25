@@ -38,6 +38,9 @@ from kriya.control.persistence import (
     save_artifact_registry,
     save_contract_registry,
 )
+from kriya.control.workspace_identity import ownership_metadata, validate_ownership
+from kriya.policy.filesystem import AuthorizedFileWriter
+from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.context_projection import (
     project_implementation_source,
     render_established_file_context,  # MA5.8 - moved to context_projection.py, re-exported here for
@@ -125,6 +128,8 @@ class MilestoneRunState:
     # supplementary_context, so Planner/Architect/Developer are grounded on
     # the REAL API of already-built dependencies instead of guessing one.
     established_file_context: Dict[str, str] = field(default_factory=dict)
+    stale_milestone_ids: List[str] = field(default_factory=list)
+    invalidation_evidence: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -135,6 +140,8 @@ class MilestoneRunState:
             "established_dependencies": self.established_dependencies,
             "verification_commands": {str(k): v for k, v in self.verification_commands.items()},
             "established_file_context": self.established_file_context,
+            "stale_milestone_ids": self.stale_milestone_ids,
+            "invalidation_evidence": self.invalidation_evidence,
         }
 
     @classmethod
@@ -171,6 +178,8 @@ class MilestoneRunState:
             established_dependencies=list(data.get("established_dependencies", [])),
             verification_commands=verification_commands,
             established_file_context=dict(data.get("established_file_context", {})),
+            stale_milestone_ids=list(data.get("stale_milestone_ids", [])),
+            invalidation_evidence=list(data.get("invalidation_evidence", [])),
         )
 
 
@@ -181,8 +190,11 @@ def _sidecar_path(workspace_path: str, group_id: str) -> str:
 def save_milestone_run_state(workspace_path: str, run_state: MilestoneRunState) -> None:
     path = _sidecar_path(workspace_path, run_state.group_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(run_state.to_dict(), fh, indent=2)
+    payload = run_state.to_dict()
+    payload["_workspace"] = ownership_metadata(workspace_path)
+    AuthorizedFileWriter(workspace_path).commit_file(
+        path, json.dumps(payload, indent=2, sort_keys=True), expected_revision=read_file_revision(path),
+    )
 
 
 def load_milestone_run_state(workspace_path: str, group_id: str) -> Optional[MilestoneRunState]:
@@ -190,7 +202,9 @@ def load_milestone_run_state(workspace_path: str, group_id: str) -> Optional[Mil
     if not os.path.exists(path):
         return None
     with open(path, "r", encoding="utf-8") as fh:
-        return MilestoneRunState.from_dict(json.load(fh))
+        payload = json.load(fh)
+    validate_ownership(workspace_path, payload, path)
+    return MilestoneRunState.from_dict(payload)
 
 
 def load_or_resume_milestone_run_state(workspace_path: str, plan_data: Dict[str, Any]) -> MilestoneRunState:
@@ -212,6 +226,8 @@ def load_or_resume_milestone_run_state(workspace_path: str, plan_data: Dict[str,
         fresh_state.established_dependencies = sidecar_state.established_dependencies
         fresh_state.verification_commands = sidecar_state.verification_commands
         fresh_state.established_file_context = sidecar_state.established_file_context
+        fresh_state.stale_milestone_ids = sidecar_state.stale_milestone_ids
+        fresh_state.invalidation_evidence = sidecar_state.invalidation_evidence
     return fresh_state
 
 
@@ -724,6 +740,17 @@ async def run_milestones(
             )
             invalidated_ids.update(stale_consumers)
     if invalidated_ids:
+        run_state.stale_milestone_ids = sorted(set(run_state.stale_milestone_ids) | invalidated_ids)
+        run_state.invalidation_evidence.extend(
+            {
+                "contract_id": change.contract_id,
+                "old_revision": change.old_revision,
+                "affected_consumers": list(change.affected_consumers),
+                "reason": change.reason,
+            }
+            for change in contract_changes
+            if set(change.affected_consumers) & invalidated_ids
+        )
         run_state.completed_milestone_ids = [
             mid for mid in run_state.completed_milestone_ids if mid not in invalidated_ids
         ]
@@ -742,6 +769,36 @@ async def run_milestones(
             continue
 
         _log_phase_banner(f"MILESTONE '{milestone.id}' ({position}/{total}): {milestone.goal[:40]}")
+        # A consumer may only execute against artifact coordinates that
+        # still match the provider's current build metadata. Providers with
+        # no recorded physical artifact remain valid logical contracts.
+        provider_ids = {
+            provider.id
+            for capability_name in milestone.consumes
+            for provider in run_state.milestones
+            if any(cap.name == capability_name for cap in provider.provides)
+        }
+        artifact_drift = [
+            validation
+            for provider_id in sorted(provider_ids)
+            for validation in artifact_registry.validate(workspace_path, provider_id)
+            if validation.drifted
+        ]
+        if artifact_drift:
+            return {
+                "status": "artifact_drift",
+                "group_id": run_state.group_id,
+                "milestone_id": milestone.id,
+                "quality_gates_passed": False,
+                "artifact_drift": [
+                    {
+                        "reason_code": item.reason_code,
+                        "recorded": item.recorded.to_dict(),
+                        "current": item.current.to_dict() if item.current else None,
+                    }
+                    for item in artifact_drift
+                ],
+            }
         milestone_goal = build_milestone_goal_text(
             milestone, position, total, run_state.established_dependencies
         )
@@ -863,9 +920,18 @@ async def run_milestones(
             if derived:
                 save_artifact_registry(workspace_path, artifact_registry)
         except Exception as e:
-            logger.warning(f"Could not derive/persist real artifacts for milestone '{milestone.id}' (non-fatal): {e}")
+            logger.error(f"Could not derive/persist real artifacts for milestone '{milestone.id}': {e}")
+            return {
+                "status": "artifact_registry_failed",
+                "group_id": run_state.group_id,
+                "milestone_id": milestone.id,
+                "quality_gates_passed": False,
+                "artifact_error": str(e),
+            }
 
         run_state.completed_milestone_ids.append(milestone.id)
+        if milestone.id in run_state.stale_milestone_ids:
+            run_state.stale_milestone_ids.remove(milestone.id)
         save_milestone_run_state(workspace_path, run_state)
 
     replay_failures = replay_prior_milestone_verifications(workspace_path, run_state)

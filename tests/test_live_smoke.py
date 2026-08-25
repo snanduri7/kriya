@@ -1,9 +1,9 @@
 """Live-model smoke tests: run the real CLI against an actual local LLM/
 embedding endpoint, not mocks. Excluded from the default test run
 (pyproject.toml's addopts is `-m "not live_model"`) since they need a real
-Ollama instance - run explicitly with `pytest -m live_model`. CI runs them in
-a dedicated, non-blocking job that installs Ollama and pulls a small model
-fresh (see .github/workflows/ci.yml's `live-model-smoke` job).
+Ollama instance - run explicitly with `pytest -m live_model`. CI runs the
+primary model as a blocking job and a scheduled multi-model matrix (see
+.github/workflows/ci.yml).
 
 The bar here is deliberately narrow: "did the real pipeline run end to end
 without crashing, on a real API response shape", not "is the generated code

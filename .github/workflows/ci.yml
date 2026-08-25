@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 2 * * *"
 
 jobs:
   test:
@@ -75,18 +77,20 @@ jobs:
         run: pytest -q
 
   live-model-smoke:
-    name: Live model smoke test (non-blocking)
+    name: Primary live model regression (blocking)
     runs-on: ubuntu-latest
     # Every other job here runs entirely against mocks - zero live LLM calls.
-    # This job is deliberately separate and non-blocking: it installs Ollama
-    # fresh and pulls a small model, so it's slower and has more moving parts
+    # This job is deliberately separate and blocking for the supported
+    # primary model. It installs pinned Ollama and pulls a small model, so it
+    # is slower and has more moving parts
     # (network, model pull, a real inference server) than the rest of CI. Its
     # job is catching integration/regression bugs in Kriya's own code (a
     # prompt/response contract change, a JSON-parsing edge case) that only a
     # real model response can trigger - not grading code-generation quality,
     # which a small CI-pulled model isn't representative of. See
     # tests/test_live_smoke.py for what's actually asserted.
-    continue-on-error: true
+    env:
+      OLLAMA_VERSION: "0.11.4"
     steps:
       - uses: actions/checkout@v4
 
@@ -117,4 +121,35 @@ jobs:
           ollama pull all-minilm
 
       - name: Run live-model smoke tests
+        run: pytest -q -m live_model
+
+  nightly-live-model-matrix:
+    name: Nightly live model (${{ matrix.model }})
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ["qwen2.5-coder:1.5b", "qwen2.5-coder:3b", "llama3.2:3b"]
+    env:
+      OLLAMA_VERSION: "0.11.4"
+      KRIYA_LIVE_LLM_MODEL: ${{ matrix.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Kriya
+        run: pip install -e ".[dev]"
+      - name: Install and start pinned Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:11434/api/tags >/dev/null && break
+            sleep 1
+          done
+          ollama pull "${KRIYA_LIVE_LLM_MODEL}"
+          ollama pull all-minilm
+      - name: Run live-model regression
         run: pytest -q -m live_model

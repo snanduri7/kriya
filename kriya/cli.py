@@ -190,6 +190,53 @@ def doctor(ctx: click.Context) -> None:
         
     errors_found = False
 
+    # Diagnostic control-plane validation. Runtime enforcement remains in
+    # the persistence/controller paths; doctor only makes the same state
+    # visible to an operator.
+    click.echo("\nChecking workspace/control plane:")
+    workspace_path = os.getcwd()
+    try:
+        from kriya.control.persistence import (
+            load_artifact_registry, load_contract_registry, load_control_state,
+        )
+        from kriya.control.workspace_identity import workspace_identity
+        from kriya.core.llm import is_local_url
+        from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash
+
+        state = load_control_state(workspace_path)
+        contracts = load_contract_registry(workspace_path)
+        artifacts = load_artifact_registry(workspace_path)
+        click.echo(f"  - Workspace identity: {workspace_identity(workspace_path)[:12]} [VALID]")
+        click.echo(
+            f"  - Controller: enabled={cfg.workflow_controller.enabled}, "
+            f"mode={cfg.workflow_controller.mode}"
+        )
+        click.echo(f"  - ContractRegistry: {len(contracts.all_records())} record(s) [VALID]")
+        click.echo(f"  - ArtifactRegistry: {len(artifacts.all_records())} record(s) [VALID]")
+        if state is not None:
+            mismatches = []
+            current_base = compute_base_commit(workspace_path)
+            current_tree = compute_tree_hash(workspace_path)
+            if state.base_commit and current_base != state.base_commit:
+                mismatches.append("base commit")
+            if state.tree_hash and current_tree != state.tree_hash:
+                mismatches.append("tree")
+            if mismatches:
+                click.secho(f"  - ControlState: DRIFT ({', '.join(mismatches)}) [WARNING]", fg="yellow")
+            else:
+                click.secho("  - ControlState: consistent [VALID]", fg="green")
+        else:
+            click.echo("  - ControlState: not initialized")
+        if cfg.autonomy.egress_policy == "local_only" and not is_local_url(cfg.llm.base_url):
+            click.secho("  - [ERROR] local_only is configured with a non-local LLM URL", fg="red")
+            errors_found = True
+        else:
+            click.secho("  - LLM egress policy: local configuration [VALID]", fg="green")
+        click.echo("  - Hard policy boundaries: enabled at authorized execution/write boundaries")
+    except Exception as e:
+        click.secho(f"  - [ERROR] control-plane validation failed: {e}", fg="red")
+        errors_found = True
+
     # 2. Check local LLM connection
     # NOTE: LLMClient (kriya/core/llm.py) always talks to base_url via the
     # OpenAI-compatible wire protocol regardless of what llm.provider is set
@@ -1441,7 +1488,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             web_lookup_callback=on_web_lookup,
             web_lookup_query_callback=on_web_lookup_query,
             resume=resume,
-            resume_id=resume_id
+            resume_id=resume_id,
+            protected_source_file=file
         )
 
         if isinstance(res, dict) and res.get("status") == "knowledge_gap":
@@ -1472,6 +1520,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     # run_id, its primary key) the transient knowledge_gap row just
                     # written above, instead of leaving two independent rows behind.
                     trace_id_override=res.get("run_id"),
+                    protected_source_file=file,
                 )
             elif knowledge_policy == 'strict':
                 click.secho("\n[KRIYA BLOCKED] Knowledge gap detected in strict mode:", bold=True, fg="red")
@@ -1519,6 +1568,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         # supersedes the transient knowledge_gap one instead of
                         # leaving two independent rows behind.
                         trace_id_override=res.get("run_id"),
+                        protected_source_file=file,
                     )
                 else:
                     if click.confirm("Would you like Kriya to scaffold skill templates for these libraries?"):

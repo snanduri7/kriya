@@ -79,6 +79,7 @@ UNKNOWN_DEPENDENCY = "UNKNOWN_DEPENDENCY"
 MILESTONE_DAG_CYCLE = "MILESTONE_DAG_CYCLE"
 INVALID_EXTENSION = "INVALID_EXTENSION"
 UNKNOWN_PROVIDER = "UNKNOWN_PROVIDER"
+AMBIGUOUS_PROVIDER = "AMBIGUOUS_PROVIDER"
 EMPTY_ACCEPTANCE = "EMPTY_ACCEPTANCE"
 DUPLICATE_ACCEPTANCE_ID = "DUPLICATE_ACCEPTANCE_ID"
 EXTENSION_DEPENDENCY_NORMALIZED = "EXTENSION_DEPENDENCY_NORMALIZED"
@@ -185,11 +186,18 @@ class MilestonePlanValidator:
             ancestors = self._ancestors(m.id, effective_depends_on)
             for capability in m.consumes:
                 providers = provider_map.get(capability, set())
-                if not (providers & ancestors):
+                reachable_providers = providers & ancestors
+                if not reachable_providers:
                     errors.append(MilestoneValidationIssue(
                         UNKNOWN_PROVIDER, m.id,
                         f"milestone '{m.id}' consumes '{capability}', which no reachable "
                         "upstream milestone (via depends_on) provides",
+                    ))
+                elif len(reachable_providers) > 1:
+                    errors.append(MilestoneValidationIssue(
+                        AMBIGUOUS_PROVIDER, m.id,
+                        f"milestone '{m.id}' consumes '{capability}', which has multiple reachable "
+                        f"providers {sorted(reachable_providers)!r}; capability providers must be unique",
                     ))
 
         for m in normalized_milestones:

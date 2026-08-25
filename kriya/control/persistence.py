@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry
 from kriya.control.state import ControlState
+from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.edit_safety import read_file_revision
 
@@ -64,12 +65,14 @@ def decision_ledger_path(workspace_path: str) -> str:
 
 def _save_json_document(workspace_path: str, path: str, payload: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    content = json.dumps(payload, indent=2, sort_keys=True)
+    owned_payload = dict(payload)
+    owned_payload["_workspace"] = ownership_metadata(workspace_path)
+    content = json.dumps(owned_payload, indent=2, sort_keys=True)
     expected_revision = read_file_revision(path)
     AuthorizedFileWriter(workspace_path).commit_file(path, content, expected_revision=expected_revision)
 
 
-def _load_json_document(path: str) -> Optional[Dict[str, Any]]:
+def _load_json_document(path: str, workspace_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """None if the file has never been saved, or if it exists but can't be
     parsed (fails closed - a corrupt store file must never crash the
     caller or silently be treated as an empty-but-valid store)."""
@@ -78,7 +81,12 @@ def _load_json_document(path: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            payload = json.load(f)
+            if workspace_path is not None:
+                validate_ownership(workspace_path, payload, path)
+            return payload
+    except WorkspaceOwnershipError:
+        raise
     except Exception:
         logger.warning("Failed to load control-plane document at %s - treating as absent", path, exc_info=True)
         return None
@@ -89,7 +97,7 @@ def save_control_state(workspace_path: str, state: ControlState) -> None:
 
 
 def load_control_state(workspace_path: str) -> Optional[ControlState]:
-    data = _load_json_document(control_state_path(workspace_path))
+    data = _load_json_document(control_state_path(workspace_path), workspace_path)
     if data is None:
         return None
     try:
@@ -110,7 +118,7 @@ def load_contract_registry(workspace_path: str) -> ContractRegistry:
     closed to empty, logged, exactly like _load_json_document's own
     contract."""
 
-    data = _load_json_document(contract_registry_path(workspace_path))
+    data = _load_json_document(contract_registry_path(workspace_path), workspace_path)
     if data is None:
         return ContractRegistry()
     try:
@@ -125,7 +133,7 @@ def save_artifact_registry(workspace_path: str, registry: ArtifactRegistry) -> N
 
 
 def load_artifact_registry(workspace_path: str) -> ArtifactRegistry:
-    data = _load_json_document(artifact_registry_path(workspace_path))
+    data = _load_json_document(artifact_registry_path(workspace_path), workspace_path)
     if data is None:
         return ArtifactRegistry()
     try:

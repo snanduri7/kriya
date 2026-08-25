@@ -346,6 +346,15 @@ class AttemptContext:
     # straight. Default empty list keeps plain (non-milestone) generate/fix
     # calls, and any old checkpoint, unaffected.
     established_files: List[str] = field(default_factory=list)
+    # Workspace-relative path of the goal-source file supplied via `kriya
+    # generate --file <path>` for this run, if any - see AuthorizedFileWriter's
+    # own protected_relpaths docstring (kriya/policy/filesystem.py) for the
+    # real live incident this exists to prevent. None (the default) means no
+    # goal file was supplied this run (goal came from a positional arg,
+    # stdin, or a milestone/subtask's own synthesized text) - nothing to
+    # protect, matches every existing call site's behavior unchanged.
+    protected_relpath: Optional[str] = None
+    allowed_write_relpaths: List[str] = field(default_factory=list)
 
 
 def _extract_grounded_contract_verdict(
@@ -1762,7 +1771,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # BEFORE any write in the batch, using the real ctx.worktree_path this
     # call site has always had in scope - propagates uncaught, same as
     # FileRevisionConflict/BatchCommitError already do from this call.
-    AuthorizedFileWriter(ctx.worktree_path).commit_batch(staged_writes)
+    AuthorizedFileWriter(
+        ctx.worktree_path,
+        protected_relpaths=(ctx.protected_relpath,) if ctx.protected_relpath else (),
+        allowed_relpaths=ctx.allowed_write_relpaths,
+    ).commit_batch(staged_writes)
     changed_files = [
         os.path.relpath(staged.target_path, ctx.worktree_path)
         for staged in staged_writes

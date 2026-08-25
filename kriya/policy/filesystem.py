@@ -122,7 +122,11 @@ class AuthorizedFileWriter:
     module docstring for why this really enforces rather than just
     auditing."""
 
-    def __init__(self, workspace_root: str, extra_writable_roots: Sequence[str] = ()) -> None:
+    def __init__(
+        self, workspace_root: str, extra_writable_roots: Sequence[str] = (),
+        protected_relpaths: Sequence[str] = (),
+        allowed_relpaths: Sequence[str] = (),
+    ) -> None:
         self._scope = make_workspace_scope(workspace_root, extra_writable_roots)
         # A dedicated ExecutionPolicy instance with the NARROWER
         # enforcement-only sensitive-path pattern set (see module
@@ -132,6 +136,27 @@ class AuthorizedFileWriter:
         # this instance's verdicts are real, so its patterns must be
         # precise, not just a useful logged signal.
         self._execution_policy = ExecutionPolicy(sensitive_path_patterns=_ENFORCEMENT_SENSITIVE_PATH_PATTERNS)
+        # protected_relpaths (2026-08-25): per-run dynamic denials, distinct
+        # from the fixed regex patterns above - a real, live-confirmed
+        # incident (ignite_qpid_protocol) showed a generated subtask can
+        # target the literal goal-source file (the path given via `kriya
+        # generate --file <path>`) as an ordinary output file. That subtask's
+        # content happened to be Kriya's own JSON planning-artifact shape
+        # (the model, asked to "create the goal file", drafted content that
+        # looked like its own planning format) - Quality Gates has no way to
+        # catch this (a markdown/text file has no compile gate, and nothing
+        # about the content itself is invalid), and it got applied straight
+        # to the real workspace, silently destroying the real goal text that
+        # drives this AND every future run against the same workspace/file.
+        # No fixed regex could have caught this in advance - the protected
+        # path is only known at call time, from the actual CLI invocation.
+        self._workspace_root = _canonical(workspace_root)
+        self._protected_relpaths = tuple(
+            os.path.normpath(p) for p in protected_relpaths if p
+        )
+        self._allowed_relpaths = frozenset(
+            os.path.normpath(p) for p in allowed_relpaths if p
+        )
 
     def authorize(self, target_path: str) -> PolicyResult:
         if not is_within_scope(self._scope, target_path):
@@ -144,6 +169,35 @@ class AuthorizedFileWriter:
                 ),
                 matched_rule="filesystem.authorized_writer.outside_scope",
             )
+        target_relpath = None
+        if self._protected_relpaths or self._allowed_relpaths:
+            try:
+                target_relpath = os.path.normpath(os.path.relpath(_canonical(target_path), self._workspace_root))
+            except ValueError:
+                target_relpath = None
+        if self._allowed_relpaths and target_relpath not in self._allowed_relpaths:
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE",
+                explanation=(
+                    f"'{target_path}' is outside the validated subtask's allowed modification "
+                    f"scope: {sorted(self._allowed_relpaths)!r}."
+                ),
+                matched_rule="filesystem.authorized_writer.validated_subtask_scope",
+            )
+        if self._protected_relpaths:
+            if target_relpath in self._protected_relpaths:
+                return PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="GOAL_SOURCE_FILE_PROTECTED",
+                    explanation=(
+                        f"'{target_path}' is the goal file supplied via --file for this run - a "
+                        "generated subtask targeting Kriya's own goal-source file is never "
+                        "intentional and would silently corrupt the instructions driving this "
+                        "and every future run against this workspace."
+                    ),
+                    matched_rule="filesystem.authorized_writer.protected_goal_source_file",
+                )
         return self._execution_policy.evaluate(ActionRequest(
             action_type=ActionType.WRITE_FILE, target=target_path, workspace_path=self._scope.writable_roots[0],
         ))

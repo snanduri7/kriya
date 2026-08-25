@@ -97,10 +97,7 @@ def test_runtime_profile_rejects_an_unknown_value():
         AppConfig(runtime_profile="turbo")
 
 
-def test_runtime_profile_hardened_overrides_even_if_the_user_config_set_the_fields_differently(tmp_path):
-    """A strict preset, not a partial merge - picking "hardened" wins over
-    whatever the user's own kriya.yaml happened to also set for these
-    specific fields, so there's never a question of which one applies."""
+def test_runtime_profile_rejects_conflicting_individual_settings(tmp_path):
     config_file = tmp_path / "kriya.yaml"
     with open(config_file, "w") as f:
         yaml.dump({
@@ -108,10 +105,13 @@ def test_runtime_profile_hardened_overrides_even_if_the_user_config_set_the_fiel
             "workflow_controller": {"enabled": False, "mode": "shadow"},
         }, f)
 
-    cfg = load_config(str(config_file))
+    with pytest.raises(ValueError, match="cannot be combined"):
+        load_config(str(config_file))
 
-    assert cfg.workflow_controller.enabled is True
-    assert cfg.workflow_controller.mode == "enforce"
+
+@pytest.mark.parametrize("profile", ["legacy", "validated", "hardened"])
+def test_runtime_profile_accepts_supported_presets(profile):
+    assert AppConfig(runtime_profile=profile).runtime_profile == profile
 
 
 def test_load_custom_config(tmp_path):
