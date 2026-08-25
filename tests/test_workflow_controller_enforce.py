@@ -25,9 +25,11 @@ from kriya.workflow.plan_validation import PlanValidationResult
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import (
     WorkflowController,
+    build_authoritative_planner_request,
     build_subtask_constraint_context,
     build_subtask_goal_text,
     build_subtask_semantic_context,
+    build_structured_plan_repair_prompt,
 )
 from kriya.workflow.workflow_types import SubtaskStatus
 
@@ -132,6 +134,29 @@ def test_subtask_semantic_context_projects_invariants_upstream_and_downstream_co
     assert '"provider": "config"' in consumer_context
     assert invariant in consumer_context
     assert "application consumes config" in consumer_context
+
+
+def test_plan_repair_prompt_is_json_only_and_gives_exact_unscoped_check_correction():
+    prompt = build_structured_plan_repair_prompt(
+        "build the requested application",
+        "previous response",
+        ["MODEL subtask(s) ['verify'] declare no planned_files"],
+        ["MODEL_SUBTASK_MISSING_PLANNED_FILES"],
+        2,
+    )
+    assert "return ONLY one complete fenced ```json block" in prompt
+    assert "OVERRIDE the normal Markdown-plan instruction" in prompt
+    assert "REMOVE it from subtasks" in prompt
+    assert "redirect any downstream depends_on edges" in prompt
+    assert "Never invent a fake file" in prompt
+
+
+def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():
+    request = build_authoritative_planner_request("Build one runnable application.")
+    assert "Original product request:\nBuild one runnable application." in request
+    assert "Do not emit execution_method=tool subtasks" in request
+    assert "Represent non-editing checks as verification" in request
+    assert "not product requirements" in request
 
 
 # --- core per-subtask orchestration ---

@@ -352,8 +352,26 @@ def build_structured_plan_repair_prompt(
     repair_attempt: int,
 ) -> str:
     """Build a bounded local-only correction request for the complete plan."""
+    targeted_correction = ""
+    if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes:
+        targeted_correction += (
+            "- A TOOL subtask with no tool_name is not executable. If it is a non-editing check, "
+            "REMOVE it from subtasks and move its acceptance_criteria_ids plus an equivalent "
+            "verification entry onto its nearest declared implementation dependency. Do not relabel "
+            "it MODEL.\n"
+        )
+    if "MODEL_SUBTASK_MISSING_PLANNED_FILES" in reason_codes:
+        targeted_correction += (
+            "- For each named unscoped MODEL subtask: if it is a non-editing build/test/run/output "
+            "check, REMOVE it from subtasks, redirect any downstream depends_on edges to its own "
+            "dependencies, and move its acceptance criteria plus an equivalent verification entry "
+            "onto the nearest implementation dependency. If it genuinely edits files, retain it only "
+            "with the exact real planned_files it owns. Never invent a fake file for a check.\n"
+        )
     return (
-        "Repair the previous structured engineering plan. This is PLAN_REPAIR, not implementation.\n\n"
+        "Repair the previous structured engineering plan. This is PLAN_REPAIR, not implementation.\n"
+        "For this correction response, OVERRIDE the normal Markdown-plan instruction: return ONLY one "
+        "complete fenced ```json block and nothing else. Start with ```json and end with ```.\n\n"
         f"Original request:\n{goal}\n\n"
         f"Deterministic reason codes: {json.dumps(reason_codes)}\n"
         "Deterministic validation errors:\n"
@@ -368,10 +386,27 @@ def build_structured_plan_repair_prompt(
         "- Every execution_method=model subtask MUST declare every file it may modify in planned_files.\n"
         "- Verification-only build/test/run/output checks belong in verification or acceptance_criteria, "
         "not in a MODEL subtask with no files.\n"
-        "- Do not emit TOOL subtasks: authoritative enforce mode has no policy-mediated TOOL router yet.\n"
-        "- The LAST item in your response must be the complete corrected fenced ```json plan block.\n\n"
+        + targeted_correction
+        + "- Do not emit TOOL subtasks: authoritative enforce mode has no policy-mediated TOOL router yet.\n"
+        "- Output the complete corrected JSON object, not a patch, explanation, or Markdown plan.\n\n"
         f"Previous Planner response (repair attempt {repair_attempt}):\n"
         + previous_plan_text[-20000:]
+    )
+
+
+def build_authoritative_planner_request(goal: str) -> str:
+    """Add enforce-only protocol constraints without changing the product goal."""
+    return (
+        "Original product request:\n"
+        f"{goal}\n\n"
+        "Authoritative structured-plan protocol (planning metadata, not product requirements):\n"
+        "- Do not emit execution_method=tool subtasks; this execution path has no policy-mediated "
+        "TOOL router. Represent non-editing checks as verification or acceptance criteria.\n"
+        "- Every MODEL subtask must own at least one exact planned_files path.\n"
+        "- Include goal-derived global_invariants and per-subtask relevant_global_invariants, "
+        "provides, requires, and complete depends_on edges.\n"
+        "- Do not copy these protocol rules into global_invariants; derive those only from the "
+        "original product request above."
     )
 
 
@@ -1313,7 +1348,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # structurally invalid late verification step. Exhaustion never
         # falls back to whole-goal legacy generation, because that would
         # discard the boundary we are trying to establish.
-        plan_text = await self.workflow_engine.planner.run(goal)
+        plan_text = await self.workflow_engine.planner.run(
+            build_authoritative_planner_request(goal),
+        )
         repair_attempts = 0
         while True:
             errors: List[str] = []
