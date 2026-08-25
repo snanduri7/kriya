@@ -13163,9 +13163,10 @@ def test_create_git_worktree_scopes_nested_workspace_without_enclosing_repo_mark
     assert os.path.exists(os.path.join(worktree_path, ".kriya-scoped-snapshot"))
     sandbox_git_probe = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"], cwd=worktree_path,
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=True,
     )
-    assert sandbox_git_probe.returncode != 0
+    assert os.path.realpath(sandbox_git_probe.stdout.strip()) == os.path.realpath(worktree_path)
+    assert os.path.realpath(sandbox_git_probe.stdout.strip()) != os.path.realpath(tmp_path)
 
     generated_pom_path = os.path.join(worktree_path, "pom.xml")
     with open(generated_pom_path, "w", encoding="utf-8") as pom:

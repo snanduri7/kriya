@@ -202,9 +202,12 @@ def _create_scoped_snapshot_sandbox(workspace_path: str) -> str:
 
     # Stop Git commands issued from inside the snapshot from walking upward
     # and rediscovering the enclosing repository we deliberately excluded.
-    # Existing helpers already fall back to filesystem behavior when the
-    # sandbox is not a usable Git worktree.
-    os.makedirs(os.path.join(sandbox_path, ".git"), exist_ok=True)
+    # An empty .git directory is not a boundary: Git ignores it and continues
+    # discovery upward. A real, ephemeral repository makes every Git-aware
+    # helper resolve this exact sandbox while remaining wholly disposable.
+    subprocess.run(
+        ["git", "init", "-q"], cwd=sandbox_path, check=True, capture_output=True,
+    )
     with open(os.path.join(sandbox_path, _SCOPED_SNAPSHOT_SENTINEL), "w", encoding="utf-8") as marker:
         marker.write("workspace-scoped sandbox; not an enclosing-repository checkout\n")
     return sandbox_path
