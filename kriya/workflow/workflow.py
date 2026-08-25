@@ -158,7 +158,7 @@ from kriya.workflow.retry_prompts import (
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
-from kriya.workflow.review_context import build_review_batches
+from kriya.workflow.review_context import build_review_batches, build_reviewer_verified_evidence
 from kriya.workflow.state import GenerationState
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
@@ -2041,9 +2041,10 @@ class WorkflowEngine:
                             stream_callback(
                                 "Review", "Preparing automated code review for approval...\n",
                             )
+                        verified_evidence = build_reviewer_verified_evidence(state.gate_outcomes)
                         review_parts = []
                         for i, batch in enumerate(review_batches, 1):
-                            batch_prompt = f"Goal: {goal}\n\nFiles generated:\n{batch}"
+                            batch_prompt = f"Goal: {goal}\n{verified_evidence}\nFiles generated:\n{batch}"
                             label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
                             review_parts.append(label + await self.reviewer.run(
                                 batch_prompt, stream_callback=None,
@@ -2461,7 +2462,7 @@ class WorkflowEngine:
                     f"Last quality gate error:\n{state.error_context}\n\nFiles from the failing attempt:\n"
                 )
             else:
-                goal_header = f"Goal: {goal}\n\nFiles generated:\n"
+                goal_header = f"Goal: {goal}\n{build_reviewer_verified_evidence(state.gate_outcomes)}\nFiles generated:\n"
 
             file_contents_for_review: List[Tuple[str, str]] = []
             for filepath in sorted(state.all_files_written):

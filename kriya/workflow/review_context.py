@@ -10,9 +10,62 @@ review anything, produces a confused non-review response, and the caller has no 
 anything went wrong. Confirmed live as a real, severe bug for the CLI path; the
 workflow.py Reviewer stage(s) had no equivalent protection at all until this fix.
 """
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from kriya.analyzer.analyzer import chunk_file_syntactically
+
+
+def build_reviewer_verified_evidence(gate_outcomes: List[Dict[str, Any]]) -> str:
+    """Real, already-proven evidence Quality Gates established for this
+    attempt, formatted for injection into ReviewerAgent's own prompt -
+    closes a real, confirmed live incident (2026-08-25, ignite_qpid_protocol,
+    a real Ignite+Qpid Java app): with ZERO visibility into what already
+    passed, ReviewerAgent's own prompt is just goal text + raw file content
+    (see workflow.py's Reviewer call sites) - nothing tells it the code
+    ALREADY compiled and ACTUALLY RAN successfully moments earlier in the
+    same run. The model confidently fabricated several SPECIFIC, plausible-
+    sounding runtime exceptions (an IgniteException "instance already
+    started", a NoClassDefFoundError for a management plugin class) for code
+    that had, in the very same run, already been proven not to hit them -
+    directly contradicting real evidence Kriya already had on hand
+    (state.gate_outcomes) but never showed the Reviewer. ReviewerAgent's own
+    system_prompt guideline #2 already warns against exactly this class of
+    hallucination ("do not claim parameters/dependencies are missing unless
+    absolutely certain") - the model simply doesn't reliably follow a prose
+    instruction with no grounding evidence behind it, the same "instruction
+    alone isn't enough, give it deterministic grounding" lesson this
+    codebase has applied to several other agents already (see
+    ground_java_entrypoint_in_no_build_file_projects, _self_heal_structured_
+    plan_dict).
+
+    Only run_verification and goal_spec_compliance are surfaced (not
+    compile/test) - those two are exactly the gates whose real, SPECIFIC
+    captured evidence (actual stdout, a deterministic PASS marker, or the
+    spec-compliance agent's own real reasoning) can directly refute a
+    plausible-sounding but wrong runtime-failure guess; a bare compile/test
+    pass is already implied by "Files generated" reaching Review at all and
+    adds no comparably falsifiable evidence. Returns "" when neither gate
+    ran/passed (e.g. a goal with no runtime-observable behavior) - nothing
+    to inject, never a fabricated claim of its own."""
+    lines: List[str] = []
+    for outcome in gate_outcomes:
+        if outcome.get("type") == "run_verification" and outcome.get("success"):
+            lines.append(
+                "- Runtime verification ACTUALLY RAN the generated application and it PASSED. "
+                f"Real captured output:\n{outcome.get('output', '')}"
+            )
+        elif outcome.get("type") == "goal_spec_compliance" and outcome.get("success"):
+            lines.append(f"- Goal spec compliance check PASSED: {outcome.get('output', '')}")
+    if not lines:
+        return ""
+    return (
+        "\n=== Already Verified (real evidence, not a claim to take on faith) ===\n"
+        "The following already happened for real, moments ago, before you were asked to "
+        "review this code - do not contradict it with a hypothetical or speculative runtime "
+        "failure (a specific exception you believe would be thrown, a class you believe is "
+        "missing, etc.) unless you can point to something in the actual files above that this "
+        "verification evidence does not cover.\n" + "\n".join(lines) + "\n\n"
+    )
 
 
 def build_review_batches(files: List[Tuple[str, str]], budget: int) -> Tuple[List[str], List[str]]:

@@ -2175,6 +2175,67 @@ async def test_workflow_persists_intermediate_trace_checkpoint_before_reviewer(t
     assert final_row["run_id"] == checkpoint_row["run_id"]
 
 @pytest.mark.asyncio
+async def test_reviewer_prompt_includes_already_verified_evidence_after_a_passing_run_verification(tmp_path):
+    """Regression test for a real live bug, 2026-08-25 (ignite_qpid_protocol,
+    a real Ignite+Qpid Java app): ReviewerAgent had zero visibility into what
+    Quality Gates already proved for real, and confidently fabricated
+    several specific runtime exceptions (an IgniteException, a
+    NoClassDefFoundError) for code that had, moments earlier in the SAME
+    run, actually compiled and RUN successfully - directly contradicted by
+    real evidence Kriya already had on hand (state.gate_outcomes) but never
+    showed the Reviewer. Confirms the Reviewer's own prompt now includes
+    that real evidence end-to-end, not just the pure build_reviewer_
+    verified_evidence() unit (see tests/test_review_context.py)."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+    we.run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "app.py"]],
+        "command_source": "goal_explicit",
+        "success_criteria": "Prints hi",
+    })
+    we.run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "Printed hi as expected."})
+
+    captured = {}
+
+    async def reviewer_run(prompt, **kwargs):
+        captured["prompt"] = prompt
+        return "Review: Approved"
+
+    we.reviewer.run = AsyncMock(side_effect=reviewer_run)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "hi\n"},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Run with python app.py; it should print hi",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert "Already Verified" in captured["prompt"]
+    assert "ACTUALLY RAN" in captured["prompt"]
+    assert "hi" in captured["prompt"]
+
+@pytest.mark.asyncio
 async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_path):
     """Regression test: a JVM crashing during its own startup (e.g. a startup
     flag unsupported by the actually-resolved JDK) is not a code defect - no
