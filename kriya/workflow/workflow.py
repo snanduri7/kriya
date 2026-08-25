@@ -2563,7 +2563,11 @@ class WorkflowEngine:
         # log their own failure_category directly at their own return site.
         failure_category: Optional[str] = None
         if not quality_passed:
-            failure_category = "environment_failure" if state.environment_failure else "quality_gates_exhausted"
+            failure_category = (
+                "plan_scope_revision_required" if state.plan_scope_conflict
+                else "environment_failure" if state.environment_failure
+                else "quality_gates_exhausted"
+            )
 
         # MA7.6 (kriya/workflow/failure_reporting.py) - additive, NOT a
         # replacement for failure_category above: that field answers "why
@@ -2656,6 +2660,7 @@ class WorkflowEngine:
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
             "failure_report": failure_report_dicts,
+            "plan_scope_conflict": state.plan_scope_conflict,
             "toolchain_warning": state.toolchain_warning,
             "lsp_warning": state.lsp_warning,
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,

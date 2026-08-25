@@ -6035,6 +6035,33 @@ async def test_handle_attempt_failure_stops_immediately_on_environment_failure(t
     assert state.environment_failure is not None
     assert state.budgets.retry_count == 1
 
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_authorized_scope(tmp_path):
+    state = GenerationState()
+    state.attempt_number = 2
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"src/App.java"}
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    ctx.allowed_write_relpaths = ["src/App.java"]
+    ctx.established_files = ["pom.xml"]
+    exc = QualityGateFailure(Failure(
+        type="misdirected_edit",
+        message="diagnosed build change belongs in pom.xml",
+        likely_files=["src/App.java", "pom.xml"],
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.environment_failure is None
+    assert state.plan_scope_conflict == {
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+        "failure_type": "misdirected_edit",
+        "required_files": ["pom.xml"],
+        "allowed_files": ["src/App.java"],
+    }
+
 @pytest.mark.asyncio
 async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path):
     """Workflow-level regression test: the forbidden flag must actually be

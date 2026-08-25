@@ -12,6 +12,7 @@ import pytest
 
 from kriya.control.persistence import load_approved_plan
 from kriya.workflow.plan_schema import (
+    AcceptanceCriterion,
     EngineeringPlan,
     ExecutionMethod,
     FileAction,
@@ -22,7 +23,11 @@ from kriya.workflow.plan_schema import (
 )
 from kriya.workflow.plan_validation import PlanValidationResult
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
-from kriya.workflow.workflow_controller import WorkflowController
+from kriya.workflow.workflow_controller import (
+    WorkflowController,
+    build_subtask_constraint_context,
+    build_subtask_goal_text,
+)
 from kriya.workflow.workflow_types import SubtaskStatus
 
 
@@ -67,6 +72,34 @@ def _patched(plan, validation_result=None):
             new=AsyncMock(return_value=validation_result or PlanValidationResult(valid=True)),
         ),
     )
+
+
+def test_subtask_goal_preserves_overall_constraints_and_mapped_acceptance_without_expanding_scope():
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="Create the build manifest", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+            acceptance_criteria_ids=["ac1"],
+        )],
+        acceptance_criteria=[AcceptanceCriterion(
+            id="ac1", description="All libraries required by the requested application are resolved",
+        )],
+    )
+
+    rendered = build_subtask_goal_text(
+        plan.subtasks[0], 1, 1,
+        plan=plan,
+    )
+    constraints = build_subtask_constraint_context(
+        "Build an application using framework X and integration Y.",
+    )
+
+    assert "All libraries required" in rendered
+    assert "pom.xml (create)" in rendered
+    assert "framework X and integration Y" in constraints
+    assert "only its approved files" in constraints
+    assert "not this stage's completion scope" in constraints
 
 
 # --- core per-subtask orchestration ---
@@ -381,6 +414,39 @@ async def test_enforce_plan_repair_exhaustion_fails_closed_without_legacy_execut
     assert "MODEL_SUBTASK_MISSING_PLANNED_FILES" in result.legacy_result["reason_codes"]
     assert we.planner.run.await_count == 3
     we.run_generation_workflow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_enforce_surfaces_grounded_out_of_scope_repair_as_plan_revision(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="implement application", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="src/App.java", action=FileAction.CREATE)],
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "failed", "quality_gates_passed": False, "files": [],
+        "plan_scope_conflict": {
+            "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+            "failure_type": "misdirected_edit",
+            "required_files": ["pom.xml"],
+            "allowed_files": ["src/App.java"],
+        },
+    })
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "needs_review"
+    assert result.legacy_result["failure_type"] == "PLANNING_ERROR"
+    assert result.legacy_result["recovery"] == "PLAN_REPAIR"
+    assert result.legacy_result["reason_codes"] == ["PLAN_SCOPE_REVISION_REQUIRED"]
+    assert result.subtask_results[0].status == SubtaskStatus.NEEDS_REVIEW
+    assert result.subtask_results[0].reason_codes == ("PLAN_SCOPE_REVISION_REQUIRED",)
 
 
 # --- enforce mode fully replaces legacy, never runs it too ---

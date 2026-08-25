@@ -392,7 +392,11 @@ class PlannerAgent(BaseAgent):
             "acceptance_criteria, NOT in a fake MODEL subtask. A subtask may instead be \"tool\" (a "
             "deterministic check like a test/lint run - must set "
             "tool_name; only use \"tool\" for a check you are certain is a real, already-registered tool, "
-            "never invent one). depends_on lists other subtask ids that must complete first. If you "
+            "never invent one). depends_on lists other subtask ids that must complete first. Every "
+            "subtask that consumes a build manifest, configuration, source API, generated artifact, "
+            "or other output from another subtask MUST declare that producer in depends_on. Keep all "
+            "overall request constraints relevant to each subtask explicit in that subtask's description "
+            "and mapped acceptance criteria; later bounded execution cannot safely infer omitted requirements. If you "
             "cannot confidently produce this breakdown, still include your best-effort attempt rather "
             "than omitting the block."
         )

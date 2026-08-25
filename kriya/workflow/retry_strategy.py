@@ -260,6 +260,20 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         failure.attribution_tier = attribution.tier
         failure.attribution_confidence = attribution.confidence
         failure.attribution_reasoning = attribution.reasoning
+        scope_conflict_is_grounded = (
+            attribution.confidence == "high"
+            or fail_type == "misdirected_edit"
+        )
+        if ctx.allowed_write_relpaths and scope_conflict_is_grounded:
+            allowed_scope = set(ctx.allowed_write_relpaths)
+            outside_scope = sorted(set(implicated) - allowed_scope)
+            if outside_scope:
+                state.plan_scope_conflict = {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": fail_type,
+                    "required_files": outside_scope,
+                    "allowed_files": sorted(allowed_scope),
+                }
         # For a QualityGateFailure type that appends its own gate_outcome at
         # the RAISE SITE (compile/test/regression_test/run_verification/
         # anchored_edit, all inside attempt.py) - that append already
@@ -367,6 +381,26 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # defensive path.
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
         state.gate_outcomes.append(failure.to_gate_outcome())
+
+    if state.plan_scope_conflict is not None:
+        logger.error(
+            "Quality Gates stopped early - grounded repair requires file(s) outside the "
+            "validated write scope; authoritative plan revision is required (%s).",
+            state.plan_scope_conflict["required_files"],
+        )
+        if ctx.worktree_path != ctx.workspace_path:
+            for filepath in state.all_files_written:
+                worktree_file = os.path.join(ctx.worktree_path, filepath)
+                try:
+                    with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
+                        state.final_attempt_contents[filepath] = fh.read()
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to capture final content of %r before scope-conflict cleanup: %s",
+                        worktree_file, exc,
+                    )
+            remove_git_worktree(ctx.workspace_path, ctx.worktree_path)
+        return True
 
     retry_decision = decide_for_state(
         state, max_retries=ctx.max_retries,

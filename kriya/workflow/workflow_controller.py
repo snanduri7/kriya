@@ -237,7 +237,13 @@ class _UnsafeStructuredPlan(Exception):
         self.repair_attempts = repair_attempts
 
 
-def build_subtask_goal_text(subtask: Subtask, position: int, total: int) -> str:
+def build_subtask_goal_text(
+    subtask: Subtask,
+    position: int,
+    total: int,
+    *,
+    plan: Optional[EngineeringPlan] = None,
+) -> str:
     """MA7.8 - the per-subtask analogue of kriya/workflow/milestones.py's
     build_milestone_goal_text(): deterministic string assembly, no extra
     LLM call, same reasoning (run_generation_workflow's own repo-analysis
@@ -263,10 +269,35 @@ def build_subtask_goal_text(subtask: Subtask, position: int, total: int) -> str:
             f"- {pf.path} ({pf.action.value})" + (f" - {pf.reason}" if pf.reason else "")
             for pf in subtask.planned_files
         )
+    acceptance = ""
+    if plan is not None and subtask.acceptance_criteria_ids:
+        criteria_by_id = {criterion.id: criterion for criterion in plan.acceptance_criteria}
+        mapped = [
+            criteria_by_id[criterion_id].description
+            for criterion_id in subtask.acceptance_criteria_ids
+            if criterion_id in criteria_by_id
+        ]
+        if mapped:
+            acceptance = "\n\nAcceptance criteria assigned to this subtask:\n" + "\n".join(
+                f"- {description}" for description in mapped
+            )
     verification = ""
     if subtask.verification:
         verification = "\n\nVerification: " + "; ".join(v.description for v in subtask.verification)
-    return header + subtask.description + planned + verification
+    return header + subtask.description + acceptance + planned + verification
+
+
+def build_subtask_constraint_context(original_goal: str) -> str:
+    """Retain global constraints without redefining the bounded stage's goal."""
+    if not original_goal:
+        return ""
+    return (
+        "Overall request constraints (context only; not this stage's completion scope):\n"
+        f"{original_goal}\n\n"
+        "Implement only the current subtask and only its approved files, but preserve every "
+        "overall constraint relevant to those files. Do not implement later stages early, and "
+        "do not judge this bounded stage as responsible for completing the entire overall request."
+    )
 
 
 def build_subtask_plan_text(subtask: Subtask) -> str:
@@ -301,6 +332,8 @@ def build_structured_plan_repair_prompt(
         + "\n\nCorrection rules:\n"
         "- Return a complete corrected plan, preserving every valid subtask and dependency.\n"
         "- Correct only invalid plan structure; do not broaden scope or invent modules/entrypoints.\n"
+        "- Declare depends_on for every stage that consumes files, configuration, contracts, or "
+        "build setup produced by another stage.\n"
         "- Every execution_method=model subtask MUST declare every file it may modify in planned_files.\n"
         "- Verification-only build/test/run/output checks belong in verification or acceptance_criteria, "
         "not in a MODEL subtask with no files.\n"
@@ -1470,7 +1503,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             save_control_state(workspace_path, control_state)
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
-            subtask_goal = build_subtask_goal_text(subtask, position, total)
+            subtask_goal = build_subtask_goal_text(
+                subtask, position, total, plan=plan,
+            )
             # MA7-C1 (2026-08-25 external review): the validated Subtask is
             # now authoritative - predetermined_plan/predetermined_design/
             # predetermined_architect_files (kriya/workflow/workflow.py)
@@ -1490,6 +1525,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 goal=subtask_goal,
                 workspace_path=workspace_path,
                 supplementary_context="\n\n".join(filter(None, (
+                    build_subtask_constraint_context(goal),
                     render_established_file_context(established_file_context),
                     projected_context_text,
                 ))),
@@ -1534,7 +1570,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 and verification_status == SubtaskStatus.COMPLETED
             )
             if not quality_gates_passed:
-                error = f"subtask did not pass Quality Gates (status={call_result.get('status')!r})"
+                scope_conflict = call_result.get("plan_scope_conflict")
+                if scope_conflict:
+                    error = (
+                        "subtask repair requires approved-plan scope revision; grounded required "
+                        f"files {scope_conflict.get('required_files', [])!r} are outside this stage's "
+                        f"allowed files {scope_conflict.get('allowed_files', [])!r}"
+                    )
+                else:
+                    error = f"subtask did not pass Quality Gates (status={call_result.get('status')!r})"
             elif undeclared_files:
                 error = (
                     f"subtask wrote file(s) outside its own declared planned_files scope: "
@@ -1549,12 +1593,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 subtask_id=subtask.id,
                 status=(
                     SubtaskStatus.COMPLETED if passed
+                    else SubtaskStatus.NEEDS_REVIEW if call_result.get("plan_scope_conflict")
                     else SubtaskStatus.FAILED if not quality_gates_passed or undeclared_files
                     else verification_status
                 ),
                 execution_method=ExecutionMethod.MODEL.value,
                 undeclared_files=tuple(undeclared_files), error=error,
-                reason_codes=verification_reason_codes,
+                reason_codes=(
+                    ("PLAN_SCOPE_REVISION_REQUIRED",)
+                    if call_result.get("plan_scope_conflict") else verification_reason_codes
+                ),
             )
             subtask_results.append(result)
             record_subtask_attempt(ledger, plan, result, attempt=1)
@@ -1661,6 +1709,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["status"] = knowledge_gap_break["status"]
             aggregated["gap_report"] = knowledge_gap_break["gap_report"]
             aggregated["run_id"] = knowledge_gap_break["run_id"]
+        scope_conflict_result = next(
+            (result.get("plan_scope_conflict") for result in subtask_call_results
+             if result.get("plan_scope_conflict")),
+            None,
+        )
+        if scope_conflict_result is not None:
+            aggregated["failure_type"] = "PLANNING_ERROR"
+            aggregated["recovery"] = "PLAN_REPAIR"
+            aggregated["reason_codes"] = ["PLAN_SCOPE_REVISION_REQUIRED"]
+            aggregated["plan_scope_conflict"] = scope_conflict_result
         if subtask_call_results:
             aggregated["last_subtask_result"] = subtask_call_results[-1]
             # MA7.9 - real subtask retry-locality data, not a guess: each

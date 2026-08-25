@@ -260,6 +260,10 @@ class GenerationState:
     # whenever no human-approval escalation happened this run (the common
     # autonomous-mode path), or the run never reached that gate at all.
     pre_approval_review: Optional[str] = None
+    # Set when grounded failure attribution identifies a required repair
+    # file outside an authoritative caller-provided write allowlist. This
+    # is a plan/scope conflict, not another code-generation retry target.
+    plan_scope_conflict: Optional[Dict[str, Any]] = None
 
     def record_event(self, event: RunEvent) -> None:
         self.run_events.append(event)
