@@ -2,6 +2,10 @@
 
 This log records the commits created locally while completing the MA7 authority and attribution work on `codex/fix-demo1-attribution`. It intentionally excludes commits imported from the read-only `milestone-decomposition` source branch. Nothing described here was pushed by Codex.
 
+## Imported committed source
+
+The committed `milestone-decomposition` tip merged into this branch was `fead434f6059a8ae556b229fa137b8ffe5d4a772` (`Give ReviewerAgent real Quality Gate evidence instead of a blind second guess`). The integration was a fast-forward from the prior local tip `65faf16`; imported history is not reproduced in this log.
+
 ## `7ed2ee6` — Complete MA7 authority and production hardening
 
 ### What changed
