@@ -25,6 +25,9 @@ class LLMConfig(BaseModel):
     base_url: str = Field(default="http://localhost:11434/v1")
     temperature: float = Field(default=0.2)
     max_tokens: int = Field(default=4096)
+    # Planner responses are execution metadata, not implementation bodies.
+    # Keep their output budget independent from Developer generation.
+    planner_max_tokens: int = Field(default=1600, ge=256)
     extra_body: Dict[str, Any] = Field(default_factory=dict)
     reasoning: bool = Field(default=False)
     context_window: int = Field(default=32768)

@@ -252,6 +252,22 @@ def _log_phase_banner(title: str) -> None:
     logger.info(f"\n{bar}\n{title.center(_PHASE_BANNER_WIDTH)}\n{bar}")
 
 
+def unresolved_knowledge_report(report: Any, resolved_coordinates: Optional[List[str]]) -> Any:
+    """Remove only run-level acknowledged coordinates from a subtask report.
+
+    ``None`` preserves the legacy boolean-confirmation contract. An explicit
+    list, including an empty list, activates coordinate-scoped resolution so a
+    dependency first introduced by a bounded subtask remains a real gap.
+    """
+    if resolved_coordinates is None:
+        return report
+    from kriya.tools.knowledge import GapReport
+    resolved = set(resolved_coordinates)
+    unresolved = GapReport()
+    unresolved.gaps = [gap for gap in report.gaps if gap["library"] not in resolved]
+    return unresolved
+
+
 def _resolve_protected_relpath(workspace_path: str, protected_source_file: Optional[str]) -> Optional[str]:
     """Workspace-relative form of the goal-source file supplied via `kriya
     generate --file <path>`, for AuthorizedFileWriter's protected_relpaths
@@ -515,6 +531,8 @@ class WorkflowEngine:
         protected_source_file: Optional[str] = None,
         allowed_write_relpaths: Optional[List[str]] = None,
         required_verification: Optional[List[Dict[str, Any]]] = None,
+        resolved_knowledge_coordinates: Optional[List[str]] = None,
+        skill_engine_override: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -572,6 +590,13 @@ class WorkflowEngine:
         file was never a valid redirect target, since only files THIS attempt
         itself wrote were ever considered "known". None (the default)
         preserves today's exact behavior for every other caller.
+
+        resolved_knowledge_coordinates carries a run-level, coordinate-scoped
+        KnowledgeGuard acknowledgement into bounded execution. Only matching
+        libraries are suppressed; a new dependency remains a real gap.
+
+        skill_engine_override lets an authoritative controller reuse one loaded
+        registry across its bounded subtasks. None preserves per-call discovery.
 
         web_lookup_query_callback gates every outbound live-lookup search (goal-
         stage, design-stage, and the retry loop's repeated-failure lookup alike)
@@ -675,8 +700,11 @@ class WorkflowEngine:
                     goal, workspace_path, known_files=established_files,
                 )
                 control = WorkflowControlContext.for_route(engineering_route)
+                triage_label = (
+                    "[Subtask Triage]" if predetermined_plan is not None else "[Engineering Triage]"
+                )
                 logger.info(
-                    "[Engineering Triage] "
+                    f"{triage_label} "
                     f"kind={engineering_route.kind.value} "
                     f"risk={engineering_route.max_observed_risk_class.name} "
                     f"weight={engineering_route.execution_weight.value} "
@@ -775,12 +803,20 @@ class WorkflowEngine:
             memory_dir=self.kernel.config.paths.memory
         )
 
-        gap_report = guard.check_goal(goal, workspace_path)
+        all_gap_report = guard.check_goal(goal, workspace_path)
+        gap_report = unresolved_knowledge_report(
+            all_gap_report, resolved_knowledge_coordinates,
+        )
         # A resumed checkpoint proves this gate was already cleared earlier in the
         # same run (goal is drift-checked identical), so it shouldn't re-block here.
         if resume_state:
             knowledge_risk_confirmed = True
-        if gap_report.has_gaps and not knowledge_risk_confirmed:
+        knowledge_gate_confirmed = (
+            knowledge_risk_confirmed
+            if resolved_knowledge_coordinates is None
+            else not gap_report.has_gaps
+        )
+        if gap_report.has_gaps and not knowledge_gate_confirmed:
             if step_callback:
                 step_callback("knowledge_gap", gap_report.format_report())
             try:
@@ -843,8 +879,11 @@ class WorkflowEngine:
                 f"them. If that's not intended, stop this run and set paths.skills in this "
                 f"project's kriya.yaml, e.g. \"./skills\"."
             )
-        se = SkillEngine.from_config(self.kernel.config, workspace_path=workspace_path)
-        se.discover_and_load()
+        if skill_engine_override is None:
+            se = SkillEngine.from_config(self.kernel.config, workspace_path=workspace_path)
+            se.discover_and_load()
+        else:
+            se = skill_engine_override
         
         convention_prompt = ""
         if supplementary_context:
@@ -852,9 +891,9 @@ class WorkflowEngine:
         java_toolchain_fact = _java_toolchain_fact(goal, workspace_path)
         if java_toolchain_fact:
             convention_prompt += f"\n\n=== Environment Fact ===\n{java_toolchain_fact}\n"
-        if gap_report.has_gaps:
+        if all_gap_report.has_gaps:
             convention_prompt += "\n\n=== KNOWLEDGE GUARD SAFETY CONSTRAINTS ===\n"
-            for g in gap_report.gaps:
+            for g in all_gap_report.gaps:
                 date_str = g["release_date"][:10] if g["release_date"] else "Unknown"
                 convention_prompt += (
                     f"- WARNING: You are writing code using library '{g['library']}' version '{g['version']}'.\n"
@@ -1518,8 +1557,12 @@ class WorkflowEngine:
                     planned_files=list(architect_files or []),
                 )
                 if recomputed_route.max_observed_risk_class > control.engineering_route.max_observed_risk_class:
+                    revalidation_label = (
+                        "post-plan impact revalidation"
+                        if predetermined_design is not None else "post-Architect escalation"
+                    )
                     logger.info(
-                        "[Engineering Triage] post-Architect escalation: "
+                        f"[Engineering Triage] {revalidation_label}: "
                         f"{control.engineering_route.max_observed_risk_class.name}->"
                         f"{recomputed_route.max_observed_risk_class.name} "
                         f"weight={control.process_profile.execution_weight.value}->"
@@ -1537,7 +1580,7 @@ class WorkflowEngine:
         if knowledge_config.check_enabled:
             from kriya.tools.knowledge import extract_library_versions
             post_report = guard.check_goal(design, workspace_path)
-            initial_libs = {g["library"] for g in gap_report.gaps}
+            initial_libs = {g["library"] for g in all_gap_report.gaps}
             new_gaps = [g for g in post_report.gaps if g["library"] not in initial_libs]
 
             if new_gaps:
@@ -1746,7 +1789,8 @@ class WorkflowEngine:
         # rules.txt without refreshing SkillEngine's in-memory cache for skills that
         # already existed (only brand-new skills get an explicit reload when
         # bootstrapped), so the cache could otherwise be missing rules just written.
-        se.discover_and_load()
+        if skill_engine_override is None:
+            se.discover_and_load()
         active_skill_rules_snapshot: Dict[str, List[str]] = {}
         for active_skill_name in active_skills:
             try:

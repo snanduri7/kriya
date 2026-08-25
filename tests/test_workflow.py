@@ -88,6 +88,7 @@ from kriya.workflow.workflow import (
     pass_verdict_is_grounded,
     extract_error_source_locations,
     extract_expected_files,
+    unresolved_knowledge_report,
     extract_implicated_files,
     find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
@@ -2466,6 +2467,20 @@ async def test_workflow_failure_report_wires_real_failures_through_categorize_fa
     assert trace_row is not None
     persisted = json.loads(trace_row["failure_report"])
     assert persisted == res["failure_report"]
+
+
+def test_run_level_knowledge_resolution_does_not_acknowledge_a_new_subtask_dependency():
+    from kriya.tools.knowledge import GapReport
+
+    report = GapReport()
+    report.add_gap("org.apache.ignite:ignite-core", "2.18.0", None, "high", "after cutoff")
+    report.add_gap("org.example:new-subtask-lib", "9.0.0", None, "high", "after cutoff")
+
+    unresolved = unresolved_knowledge_report(
+        report, ["org.apache.ignite:ignite-core"],
+    )
+
+    assert [gap["library"] for gap in unresolved.gaps] == ["org.example:new-subtask-lib"]
 
 
 @pytest.mark.asyncio

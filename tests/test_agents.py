@@ -35,6 +35,19 @@ async def test_base_agent_complete():
         temperature_override=None,
     )
 
+
+@pytest.mark.asyncio
+async def test_planner_output_cap_is_independent_and_clamps_fallback_candidates():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[ConnectionError("primary down"), "compact plan"])
+    fallback = FallbackModelConfig(model="fallback-model", max_tokens=4096)
+    planner = PlannerAgent("planner", llm, role_chain=[fallback])
+
+    assert await planner.run("Plan compactly", max_tokens_override=1600) == "compact plan"
+    assert llm.complete.await_args_list[0].kwargs["max_tokens_override"] == 1600
+    assert llm.complete.await_args_list[1].kwargs["max_tokens_override"] == 1600
+
 @pytest.mark.asyncio
 async def test_call_with_escalation_no_role_config_preserves_default_call_shape():
     """A None candidate (the common case: a role with no dedicated agent_llms config)

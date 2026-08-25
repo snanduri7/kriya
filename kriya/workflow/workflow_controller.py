@@ -399,6 +399,8 @@ def build_authoritative_planner_request(goal: str) -> str:
     return (
         "Original product request:\n"
         f"{goal}\n\n"
+        "Response contract override: return ONLY one complete fenced ```json block containing the "
+        "execution-relevant structured plan. Emit no prose, Markdown plan, rationale, or architecture essay.\n"
         "Authoritative structured-plan protocol (planning metadata, not product requirements):\n"
         "- Do not emit execution_method=tool subtasks; this execution path has no policy-mediated "
         "TOOL router. Represent non-editing checks as verification or acceptance criteria.\n"
@@ -653,8 +655,9 @@ class WorkflowController:
                 f"migration_mode must be one of {_VALID_MIGRATION_MODES!r}, got {migration_mode!r}."
             )
 
-        run_id = run_id or new_run_id()
+        run_id = run_id or legacy_kwargs.get("trace_id_override") or new_run_id()
 
+        _log_phase_banner("REQUEST ANALYSIS")
         route = await self.workflow_engine.engineering_triage.classify(
             goal, workspace_path, known_files=known_files,
         )
@@ -664,6 +667,11 @@ class WorkflowController:
             engineering_route=route,
             process_profile=control_context.process_profile,
             milestone_group_id=milestone_group_id,
+        )
+        logger.info(
+            "Run route: kind=%s risk=%s weight=%s",
+            route.kind.value.upper(), route.max_observed_risk_class.name,
+            route.execution_weight.value.upper(),
         )
 
         if route.kind == ChangeKind.MILESTONE:
@@ -681,6 +689,52 @@ class WorkflowController:
         verification_report: Optional[VerificationReport] = None
 
         if migration_mode == "enforce":
+            kernel = getattr(self.workflow_engine, "kernel", None)
+            if kernel is not None:
+                _log_phase_banner("KNOWLEDGE GUARD")
+                from kriya.tools.knowledge import KnowledgeGuard
+                knowledge_config = kernel.config.knowledge
+                cutoff = kernel.config.llm.knowledge_cutoff
+                if knowledge_config.training_cutoff != "2023-12-01":
+                    cutoff = knowledge_config.training_cutoff
+                guard = KnowledgeGuard(
+                    skills_dir=kernel.config.paths.skills,
+                    cutoff_date_str=cutoff,
+                    offline=knowledge_config.offline_mode,
+                    memory_dir=kernel.config.paths.memory,
+                )
+                goal_gap_report = guard.check_goal(goal, workspace_path)
+                resolved_coordinates = [gap["library"] for gap in goal_gap_report.gaps]
+                if goal_gap_report.has_gaps and not legacy_kwargs.get("knowledge_risk_confirmed", False):
+                    logger.warning(
+                        "KnowledgeGuard requires resolution before structured planning: %s",
+                        resolved_coordinates,
+                    )
+                    return WorkflowResult(
+                        run_id=run_id, control_state=control_state, route=route,
+                        legacy_result={
+                            "status": "knowledge_gap",
+                            "gap_report": goal_gap_report.to_dict(),
+                            "goal": goal,
+                            "workspace_path": workspace_path,
+                            "run_id": run_id,
+                        },
+                    )
+                logger.info(
+                    "Knowledge resolution: %s",
+                    "cleared" if not resolved_coordinates else f"acknowledged {resolved_coordinates}",
+                )
+                legacy_kwargs["resolved_knowledge_coordinates"] = resolved_coordinates
+
+                # One registry load for the authoritative run. Individual
+                # subtasks project relevant skills from this shared engine;
+                # genuine skill writes still trigger their existing reloads.
+                from kriya.skills.skill import SkillEngine
+                shared_skill_engine = SkillEngine.from_config(
+                    kernel.config, workspace_path=workspace_path,
+                )
+                shared_skill_engine.discover_and_load()
+                legacy_kwargs["skill_engine_override"] = shared_skill_engine
             try:
                 _migrate_legacy_controller_ownership(workspace_path, run_id)
             except Exception as exc:
@@ -1348,9 +1402,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # structurally invalid late verification step. Exhaustion never
         # falls back to whole-goal legacy generation, because that would
         # discard the boundary we are trying to establish.
+        _log_phase_banner("STRUCTURED PLANNING")
+        planner_model = getattr(
+            getattr(self.workflow_engine.planner, "role_llm", None), "model", None,
+        ) or getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None), "llm", None)
+        if planner_model is not None and not isinstance(planner_model, str):
+            planner_model = getattr(planner_model, "model", None)
+        planner_token_cap = getattr(
+            getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None), "llm", None),
+            "planner_max_tokens", None,
+        )
+        logger.info("Generating validated EngineeringPlan (planner_model=%s)...", planner_model or "default")
         plan_text = await self.workflow_engine.planner.run(
             build_authoritative_planner_request(goal),
+            max_tokens_override=planner_token_cap,
         )
+        _log_phase_banner("PLAN VALIDATION")
         repair_attempts = 0
         while True:
             errors: List[str] = []
@@ -1445,9 +1512,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 repair_attempt=repair_attempts, reason_codes=reason_codes,
                 invalid_subtask_ids=invalid_subtask_ids,
             )
-            plan_text = await self.workflow_engine.planner.run(repair_prompt)
+            plan_text = await self.workflow_engine.planner.run(
+                repair_prompt, max_tokens_override=planner_token_cap,
+            )
 
         assert plan is not None
+        logger.info(
+            "Plan validation: PASSED (%d subtasks, %d dependency edges, %d planned files, %d global invariants)",
+            len(plan.subtasks), sum(len(st.depends_on) for st in plan.subtasks),
+            sum(len(st.planned_files) for st in plan.subtasks), len(plan.global_invariants),
+        )
+        for stage in plan.subtasks:
+            logger.info(
+                "  %s files=%s depends_on=%s",
+                stage.id.upper(), [pf.path for pf in stage.planned_files], stage.depends_on,
+            )
         record_plan_created(ledger, plan)
         current_plan_hash = plan.content_hash()
 
@@ -1630,6 +1709,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             save_control_state(workspace_path, control_state)
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
+            logger.info(
+                "Current subtask: %s/%s id=%s files=%s depends_on=%s relevant_invariants=%s",
+                position, total, subtask.id, [pf.path for pf in subtask.planned_files],
+                subtask.depends_on, subtask.relevant_global_invariants,
+            )
             # MA7-C1 (2026-08-25 external review): the validated Subtask is
             # now authoritative - predetermined_plan/predetermined_design/
             # predetermined_architect_files (kriya/workflow/workflow.py)

@@ -157,6 +157,32 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     assert "Do not emit execution_method=tool subtasks" in request
     assert "Represent non-editing checks as verification" in request
     assert "not product requirements" in request
+    assert "return ONLY one complete fenced ```json block" in request
+    assert "Emit no prose" in request
+
+
+@pytest.mark.asyncio
+async def test_enforce_knowledge_guard_stops_before_structured_planning(tmp_path):
+    from kriya.config import AppConfig
+    from kriya.tools.knowledge import GapReport
+
+    report = GapReport()
+    report.add_gap("org.example:new-lib", "9.0.0", None, "high", "after cutoff")
+    we = _workflow_engine()
+    config = AppConfig()
+    config.paths.memory = str(tmp_path / "memory")
+    config.paths.skills = str(tmp_path / "skills")
+    we.kernel = MagicMock(config=config)
+
+    with patch(
+        "kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=report,
+    ):
+        result = await WorkflowController(we).execute(
+            "Use new-lib 9.0.0", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "knowledge_gap"
+    we.planner.run.assert_not_awaited()
 
 
 # --- core per-subtask orchestration ---
@@ -184,6 +210,45 @@ async def test_enforce_calls_run_generation_workflow_once_per_subtask(tmp_path):
     assert result.legacy_result["status"] == "success"
     assert [r.subtask_id for r in result.subtask_results] == ["s1", "s2"]
     assert all(r.status == SubtaskStatus.COMPLETED for r in result.subtask_results)
+
+
+@pytest.mark.asyncio
+async def test_enforce_reuses_one_skill_registry_and_projects_resolved_knowledge(tmp_path):
+    from kriya.config import AppConfig
+    from kriya.tools.knowledge import GapReport
+
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    config = AppConfig()
+    config.paths.memory = str(tmp_path / "memory")
+    config.paths.skills = str(tmp_path / "skills")
+    we.kernel = MagicMock(config=config)
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        path = "a.py" if len(calls) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+    shared_engine = MagicMock()
+    p1, p2, p3 = _patched(plan)
+    with patch(
+        "kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=GapReport(),
+    ), patch(
+        "kriya.skills.skill.SkillEngine.from_config", return_value=shared_engine,
+    ), p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    shared_engine.discover_and_load.assert_called_once_with()
+    assert calls[0]["skill_engine_override"] is shared_engine
+    assert calls[1]["skill_engine_override"] is shared_engine
+    assert calls[0]["resolved_knowledge_coordinates"] == []
+    assert calls[1]["resolved_knowledge_coordinates"] == []
 
 
 @pytest.mark.asyncio

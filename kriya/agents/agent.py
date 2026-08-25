@@ -207,6 +207,7 @@ async def call_with_escalation(
     stream_callback: Optional[Callable[[str], None]] = None,
     is_failure: Optional[Callable[[str], bool]] = None,
     temperature_override: Optional[float] = None,
+    max_tokens_override: Optional[int] = None,
 ) -> str:
     """Tries each candidate in order - a role's own configured model, then its own
     escalation chain (kriya/config/config.py::AgentModelConfig) - via llm.complete(),
@@ -223,7 +224,9 @@ async def call_with_escalation(
 
     temperature_override, if given, only applies to a None candidate (the common
     "no dedicated agent_llms config for this role" case) - an explicit candidate's
-    own cand.temperature is a more specific setting and always wins."""
+    own cand.temperature is a more specific setting and always wins. A role-level
+    max_tokens_override is a ceiling: it applies to the primary and clamps an
+    explicit fallback's own larger budget without ever increasing a smaller one."""
     last_exc: Optional[Exception] = None
     last_response: Optional[str] = None
     for i, cand in enumerate(candidates):
@@ -232,15 +235,20 @@ async def call_with_escalation(
                 response = await llm.complete(
                     system_prompt, prompt, stream_callback=stream_callback, json_mode=json_mode,
                     temperature_override=temperature_override,
+                    **({"max_tokens_override": max_tokens_override} if max_tokens_override is not None else {}),
                 )
             else:
+                candidate_max_tokens = (
+                    min(cand.max_tokens, max_tokens_override)
+                    if max_tokens_override is not None else cand.max_tokens
+                )
                 response = await llm.complete(
                     system_prompt, prompt, stream_callback=stream_callback, json_mode=json_mode,
                     model_override=cand.model,
                     base_url_override=cand.base_url,
                     api_key_override=cand.api_key,
                     temperature_override=cand.temperature,
-                    max_tokens_override=cand.max_tokens,
+                    max_tokens_override=candidate_max_tokens,
                     reasoning_override=cand.reasoning,
                     extra_body_override=cand.extra_body,
                 )
@@ -317,6 +325,7 @@ class BaseAgent(ABC):
         llm_client: LLMClient,
         role_llm: Optional[LLMConfig] = None,
         role_chain: Optional[List[FallbackModelConfig]] = None,
+        max_output_tokens: Optional[int] = None,
     ) -> None:
         self.name = name
         self.llm = llm_client
@@ -326,6 +335,7 @@ class BaseAgent(ABC):
         # default) fails - independent of Developer's quality-gate-driven retry loop.
         self.role_llm = role_llm
         self.role_chain = role_chain or []
+        self.max_output_tokens = max_output_tokens
 
     @property
     def system_prompt(self) -> str:
@@ -339,6 +349,7 @@ class BaseAgent(ABC):
         prompt: str,
         stream_callback: Optional[Callable[[str], None]] = None,
         temperature_override: Optional[float] = None,
+        max_tokens_override: Optional[int] = None,
     ) -> str:
         """Execute a text completion request, escalating through this role's chain
         only on a hard call failure (connection/timeout/HTTP/egress error) - a
@@ -347,6 +358,9 @@ class BaseAgent(ABC):
         return await call_with_escalation(
             self.llm, self.system_prompt, prompt, self._candidates(), stream_callback=stream_callback,
             temperature_override=temperature_override,
+            max_tokens_override=(
+                max_tokens_override if max_tokens_override is not None else self.max_output_tokens
+            ),
         )
 
 
