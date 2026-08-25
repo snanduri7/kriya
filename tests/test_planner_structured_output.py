@@ -31,7 +31,7 @@ def test_empty_text_returns_none_with_a_reason():
 def test_no_fenced_json_block_returns_none_with_a_reason():
     output, err = parse_planner_structured_output("just prose, no JSON block anywhere")
     assert output is None
-    assert "no structured plan JSON block" in err
+    assert "no complete structured plan JSON object" in err
 
 
 def test_malformed_json_returns_none_with_a_reason():
@@ -54,6 +54,21 @@ def test_a_well_formed_plan_parses_cleanly():
     assert output is not None
     assert len(output.subtasks) == 1
     assert output.subtasks[0].execution_method == ExecutionMethod.MODEL
+
+
+def test_a_raw_json_plan_parses_without_markdown_fences():
+    raw = json.dumps({
+        "subtasks": [{
+            "id": "s1", "description": "write a", "execution_method": "model",
+            "planned_files": [{"path": "a.py", "action": "create"}],
+            "acceptance_criteria_ids": [],
+        }],
+        "acceptance_criteria": [],
+    })
+    output, err = parse_planner_structured_output(raw)
+    assert err is None
+    assert output is not None
+    assert output.subtasks[0].planned_files[0].path == "a.py"
 
 
 def test_a_genuinely_unfixable_shape_still_fails_cleanly():

@@ -350,13 +350,16 @@ class BaseAgent(ABC):
         stream_callback: Optional[Callable[[str], None]] = None,
         temperature_override: Optional[float] = None,
         max_tokens_override: Optional[int] = None,
+        system_prompt_override: Optional[str] = None,
+        json_mode: bool = False,
     ) -> str:
         """Execute a text completion request, escalating through this role's chain
         only on a hard call failure (connection/timeout/HTTP/egress error) - a
         legitimately short-but-correct response is never wrongly retried just for
         being brief."""
         return await call_with_escalation(
-            self.llm, self.system_prompt, prompt, self._candidates(), stream_callback=stream_callback,
+            self.llm, system_prompt_override or self.system_prompt, prompt, self._candidates(),
+            json_mode=json_mode, stream_callback=stream_callback,
             temperature_override=temperature_override,
             max_tokens_override=(
                 max_tokens_override if max_tokens_override is not None else self.max_output_tokens

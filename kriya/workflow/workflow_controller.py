@@ -347,6 +347,23 @@ def build_subtask_plan_text(subtask: Subtask) -> str:
     return f"Implement: {subtask.description}"
 
 
+AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
+    "You are Kriya's authoritative structured Planner. Return exactly one valid JSON object and "
+    "nothing else: no Markdown, code fences, prose, or rationale. Decompose the request into the "
+    "smallest safe set of bounded implementation subtasks. Use this top-level shape: "
+    '{"global_invariants": ["..."], "subtasks": [{"id": "s1", "description": "...", '
+    '"execution_method": "model", "depends_on": [], "planned_files": '
+    '[{"path": "...", "action": "create|modify|delete"}], "provides": ["..."], '
+    '"requires": [], "relevant_global_invariants": ["..."], "verification": [], '
+    '"acceptance_criteria_ids": ["ac1"]}], "acceptance_criteria": '
+    '[{"id": "ac1", "description": "...", "method": "judgment"}], '
+    '"extension_points": [], "refactor_baseline": null}. '
+    "Every model subtask must own every file it may change. Verification-only work belongs in "
+    "verification or acceptance_criteria. Preserve explicit producer/consumer dependencies and "
+    "goal-derived invariants. Never invent product requirements."
+)
+
+
 def build_structured_plan_repair_prompt(
     goal: str,
     previous_plan_text: str,
@@ -373,8 +390,7 @@ def build_structured_plan_repair_prompt(
         )
     return (
         "Repair the previous structured engineering plan. This is PLAN_REPAIR, not implementation.\n"
-        "For this correction response, OVERRIDE the normal Markdown-plan instruction: return ONLY one "
-        "complete fenced ```json block and nothing else. Start with ```json and end with ```.\n\n"
+        "Return only one complete JSON object and nothing else. Do not use Markdown or code fences.\n\n"
         f"Original request:\n{goal}\n\n"
         f"Deterministic reason codes: {json.dumps(reason_codes)}\n"
         "Deterministic validation errors:\n"
@@ -402,8 +418,8 @@ def build_authoritative_planner_request(goal: str) -> str:
     return (
         "Original product request:\n"
         f"{goal}\n\n"
-        "Response contract override: return ONLY one complete fenced ```json block containing the "
-        "execution-relevant structured plan. Emit no prose, Markdown plan, rationale, or architecture essay.\n"
+        "Return only one complete JSON object containing the execution-relevant structured plan. "
+        "Emit no prose, Markdown, code fences, rationale, or architecture essay.\n"
         "Authoritative structured-plan protocol (planning metadata, not product requirements):\n"
         "- Do not emit execution_method=tool subtasks; this execution path has no policy-mediated "
         "TOOL router. Represent non-editing checks as verification or acceptance criteria.\n"
@@ -1421,6 +1437,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         plan_text = await self.workflow_engine.planner.run(
             build_authoritative_planner_request(goal),
             max_tokens_override=planner_token_cap,
+            system_prompt_override=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
+            json_mode=True,
         )
         _log_phase_banner("PLAN VALIDATION")
         repair_attempts = 0
@@ -1518,7 +1536,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 invalid_subtask_ids=invalid_subtask_ids,
             )
             plan_text = await self.workflow_engine.planner.run(
-                repair_prompt, max_tokens_override=planner_token_cap,
+                repair_prompt,
+                max_tokens_override=planner_token_cap,
+                system_prompt_override=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
+                json_mode=True,
             )
 
         assert plan is not None

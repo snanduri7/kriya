@@ -517,9 +517,10 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
 
 
 def parse_planner_structured_output(text: str) -> Tuple[Optional[PlannerStructuredOutput], Optional[str]]:
-    """MA6.3 Stage A extraction for PlannerAgent's trailing structured-plan
-    JSON block (kriya/workflow/plan_schema.py::PlannerStructuredOutput).
-    Mirrors parse_file_list's own contract exactly - never raises, returns
+    """MA6.3 Stage A extraction for PlannerAgent structured-plan JSON.
+    Accepts the legacy trailing fenced block and authoritative mode's raw JSON
+    object (kriya/workflow/plan_schema.py::PlannerStructuredOutput). Mirrors
+    parse_file_list's own contract exactly - never raises, returns
     (None, reason) on any failure so a caller degrades cleanly to "keep
     using the prose plan as-is," identical to every other extraction step
     in this module. Stage A callers are expected to only LOG/telemetry
@@ -533,13 +534,14 @@ def parse_planner_structured_output(text: str) -> Tuple[Optional[PlannerStructur
         return None, "text is empty"
 
     candidates = _FENCED_JSON_BLOCK.findall(text)
-    if not candidates:
-        return None, "no structured plan JSON block found in the text"
+    candidate = candidates[-1] if candidates else text.strip()
+    if not candidates and not (candidate.startswith("{") and candidate.endswith("}")):
+        return None, "no complete structured plan JSON object found in the text"
 
     try:
-        parsed = json.loads(candidates[-1])
+        parsed = json.loads(candidate)
     except json.JSONDecodeError as e:
-        return None, f"structured plan JSON block did not parse: {e}"
+        return None, f"structured plan JSON object did not parse: {e}"
 
     parsed = _self_heal_structured_plan_dict(parsed)
 

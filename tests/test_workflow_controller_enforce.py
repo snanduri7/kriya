@@ -147,8 +147,8 @@ def test_plan_repair_prompt_is_json_only_and_gives_exact_unscoped_check_correcti
         ["MODEL_SUBTASK_MISSING_PLANNED_FILES"],
         2,
     )
-    assert "return ONLY one complete fenced ```json block" in prompt
-    assert "OVERRIDE the normal Markdown-plan instruction" in prompt
+    assert "Return only one complete JSON object" in prompt
+    assert "Do not use Markdown or code fences" in prompt
     assert "REMOVE it from subtasks" in prompt
     assert "redirect any downstream depends_on edges" in prompt
     assert "Never invent a fake file" in prompt
@@ -160,10 +160,33 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     assert "Do not emit execution_method=tool subtasks" in request
     assert "Represent non-editing checks as verification" in request
     assert "not product requirements" in request
-    assert "return ONLY one complete fenced ```json block" in request
+    assert "Return only one complete JSON object" in request
     assert "Emit no prose" in request
     assert "observable application behavior" in request
     assert "actually runs the application" in request
+
+
+@pytest.mark.asyncio
+async def test_enforce_planner_calls_use_json_only_system_contract(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": ["a.py"],
+    })
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    planner_kwargs = we.planner.run.await_args.kwargs
+    assert planner_kwargs["json_mode"] is True
+    assert "Return exactly one valid JSON object" in planner_kwargs["system_prompt_override"]
+    assert "no Markdown" in planner_kwargs["system_prompt_override"]
 
 
 @pytest.mark.asyncio
