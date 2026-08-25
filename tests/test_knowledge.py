@@ -200,6 +200,13 @@ def test_knowledge_cache_expires_stale_entries_and_supports_invalidation(tmp_pat
     cache.invalidate("java", "example:library", "1.0")
     assert cache.get_release_date("java", "example:library", "1.0") is None
 
+
+def test_knowledge_cache_uses_default_ttl_for_non_numeric_legacy_config(tmp_path):
+    from kriya.tools.knowledge import KnowledgeCache
+    cache = KnowledgeCache(str(tmp_path), ttl_days=MagicMock())
+    assert cache.ttl == timedelta(days=30)
+
+
 def test_knowledge_guard_with_cache(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()

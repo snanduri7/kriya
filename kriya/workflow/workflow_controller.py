@@ -1651,6 +1651,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             target_files = [pf.path for pf in target.planned_files]
             target_context = project_for_subtask(execution_context, target)
             target_context_text = subtask_executor._render_context_package(target_context)
+            kernel = getattr(self.workflow_engine, "kernel", None)
+            config = getattr(kernel, "config", None)
+            process_profiles = getattr(config, "process_profiles", None)
             return await self.workflow_engine.run_generation_workflow(
                 goal=target_goal,
                 workspace_path=workspace_path,
@@ -1672,8 +1675,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 ),
                 strict_spec_compliance=True,
                 strict_dependency_index=bool(
-                    self.workflow_engine.kernel.config.process_profiles.enabled
-                    and self.workflow_engine.kernel.config.process_profiles.enforce_context_depth
+                    process_profiles is not None
+                    and getattr(process_profiles, "enabled", False) is True
+                    and getattr(process_profiles, "enforce_context_depth", False) is True
                 ),
                 **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )

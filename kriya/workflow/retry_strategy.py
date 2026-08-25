@@ -18,6 +18,7 @@ one cohesive, thoroughly-tested unit was the safer call once the actual
 shape of the code was read in full, not assumed from an earlier line-range
 estimate.
 """
+import hashlib
 import logging
 import os
 
@@ -36,7 +37,6 @@ from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_
 from kriya.workflow.state import GenerationState
 from kriya.workflow.worktree import remove_git_worktree
 from kriya.workflow.retry_policy import RetryAction, decide_for_state
-from kriya.workflow.checkpoint import compute_tree_hash
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,50 @@ def record_workspace_progress(state: GenerationState, workspace_hash: str, limit
     state.last_failed_workspace_hash = workspace_hash
     state.no_progress_terminated = state.consecutive_no_progress_attempts >= limit
     return not state.no_progress_terminated
+
+
+def compute_effective_workspace_hash(workspace_path: str, known_files=None) -> str:
+    """Hash the live workspace content that a retry can actually change.
+
+    A git ``HEAD`` tree is intentionally unsuitable here: Developer writes are
+    uncommitted until the workflow succeeds, so every failed attempt otherwise
+    appears identical.  Keep the retry signal local and stack-neutral by
+    hashing regular workspace files while excluding Kriya/Git control data.
+    """
+    digest = hashlib.sha256()
+    if known_files:
+        for relative_path in sorted(set(known_files)):
+            full_path = os.path.join(workspace_path, relative_path)
+            digest.update(relative_path.encode("utf-8", errors="surrogateescape"))
+            try:
+                with open(full_path, "rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            except OSError:
+                digest.update(b"<missing>")
+        return digest.hexdigest()
+
+    excluded_dirs = {
+        ".git", ".kriya", ".pytest_cache", "__pycache__", "node_modules",
+        "target", "build", "dist",
+    }
+    for root, dirs, files in os.walk(workspace_path):
+        dirs[:] = sorted(name for name in dirs if name not in excluded_dirs)
+        for name in sorted(files):
+            full_path = os.path.join(root, name)
+            relative_path = os.path.relpath(full_path, workspace_path)
+            try:
+                if not os.path.isfile(full_path) or os.path.islink(full_path):
+                    continue
+                digest.update(relative_path.encode("utf-8", errors="surrogateescape"))
+                with open(full_path, "rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            except OSError:
+                # A concurrently removed transient file should not turn failure
+                # recovery itself into a new workflow failure.
+                continue
+    return digest.hexdigest()
 
 
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
@@ -205,14 +249,25 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # Failure-family churn is not progress when the effective workspace is
     # unchanged. Bound repeated model calls using content ground truth while
     # preserving the existing global attempt ceiling.
-    current_workspace_hash = compute_tree_hash(ctx.worktree_path)
-    no_progress_limit = ctx.kernel.config.autonomy.max_consecutive_no_progress_attempts
-    if not record_workspace_progress(state, current_workspace_hash, no_progress_limit):
-        logger.error(
-            "Quality Gates stopped after %s consecutive retries produced no effective "
-            "workspace change, regardless of failure-family churn.",
-            no_progress_limit,
+    if failure_family_changed:
+        current_workspace_hash = compute_effective_workspace_hash(
+            ctx.worktree_path,
+            set(state.all_files_written) | set(ctx.established_files),
         )
+        no_progress_limit = ctx.kernel.config.autonomy.max_consecutive_no_progress_attempts
+        if not record_workspace_progress(state, current_workspace_hash, no_progress_limit):
+            logger.error(
+                "Quality Gates stopped after %s consecutive failure-family changes "
+                "produced no effective workspace change.",
+                no_progress_limit,
+            )
+    else:
+        # Repeated failures already consume the existing scoped/full-set/model
+        # budgets.  They are not "failure churn" and must retain the bounded
+        # escalation path those budgets deliberately provide.
+        state.consecutive_no_progress_attempts = 0
+        state.last_failed_workspace_hash = None
+        state.no_progress_terminated = False
 
     # Re-evaluate which file(s) THIS failure implicates/is missing -
     # independent of whether this attempt was itself targeted, missing-

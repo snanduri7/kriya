@@ -421,7 +421,12 @@ def _run_verification_basis_hash(ctx: "AttemptContext", state: GenerationState) 
         full_path = os.path.join(ctx.worktree_path, filepath)
         try:
             with open(full_path, "rb") as fh:
-                digest.update(fh.read())
+                # Repair-envelope parsing may add or remove only terminal
+                # whitespace while preserving the executable file.  Do not
+                # spend another judgment call for that serialization detail;
+                # substantive source/config changes still alter this basis.
+                content = fh.read().replace(b"\r\n", b"\n").rstrip()
+                digest.update(content)
         except OSError:
             digest.update(b"<missing>")
     return digest.hexdigest()

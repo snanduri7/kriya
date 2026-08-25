@@ -39,7 +39,11 @@ from kriya.workflow.edit_safety import (
     content_revision,
     find_cross_file_type_conflict,
 )
-from kriya.workflow.retry_strategy import handle_attempt_failure, record_workspace_progress
+from kriya.workflow.retry_strategy import (
+    compute_effective_workspace_hash,
+    handle_attempt_failure,
+    record_workspace_progress,
+)
 from kriya.workflow.state import GenerationState
 from kriya.workflow.checkpoint import (
     checkpoint_path,
@@ -3831,6 +3835,15 @@ def test_progress_gate_stops_failure_family_churn_without_content_change():
     assert state.no_progress_terminated is True
     assert record_workspace_progress(state, "changed-content", 2) is True
     assert state.consecutive_no_progress_attempts == 0
+
+
+def test_effective_workspace_hash_tracks_uncommitted_known_file_content(tmp_path):
+    tracked = tmp_path / "app.py"
+    tracked.write_text("print('first')\n")
+    first = compute_effective_workspace_hash(str(tmp_path), ["app.py"])
+    tracked.write_text("print('second')\n")
+    second = compute_effective_workspace_hash(str(tmp_path), ["app.py"])
+    assert first != second
 
 
 def test_runtime_judgment_basis_hash_changes_with_known_file_content(tmp_path):

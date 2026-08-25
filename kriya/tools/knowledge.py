@@ -38,6 +38,9 @@ class KnowledgeCache:
     """SQLite-based cache for package release dates."""
     def __init__(self, memory_dir: str, ttl_days: int = 30) -> None:
         self.db_path = os.path.join(os.path.abspath(memory_dir), "knowledge_cache.db")
+        if isinstance(ttl_days, bool) or not isinstance(ttl_days, (int, float)) or ttl_days <= 0:
+            logger.warning("Invalid knowledge-cache TTL %r; using the 30-day default.", ttl_days)
+            ttl_days = 30
         self.ttl = timedelta(days=ttl_days)
         self.last_lookup_metadata: Dict[str, Any] = {}
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
