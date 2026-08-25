@@ -480,8 +480,17 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
         if not isinstance(obj, dict):
             return
         if obj.get(kind_field) == tool_value and not obj.get("tool_name"):
-            obj[kind_field] = other_value
-            obj.pop("tool_arguments", None)
+            # A TOOL subtask can only be safely downgraded to MODEL when it
+            # already carries an explicit non-empty write scope. A late
+            # verification-only TOOL with no files must remain invalid and
+            # enter authoritative plan repair; turning it into an unbounded
+            # MODEL task recreates the exact live hardened-path failure this
+            # guard exists to prevent. Verification/acceptance method pairs
+            # have no planned_files concept and retain their safe downgrade
+            # to judgment.
+            if kind_field != "execution_method" or obj.get("planned_files"):
+                obj[kind_field] = other_value
+                obj.pop("tool_arguments", None)
         elif obj.get(kind_field) == other_value:
             obj.pop("tool_name", None)
             obj.pop("tool_arguments", None)

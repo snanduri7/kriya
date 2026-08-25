@@ -222,6 +222,19 @@ class _StructuredPlanUnavailable(Exception):
 class _UnsafeStructuredPlan(Exception):
     """A parsed plan violates an authoritative safety boundary."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_codes: Optional[List[str]] = None,
+        invalid_subtask_ids: Optional[List[str]] = None,
+        repair_attempts: int = 0,
+    ) -> None:
+        super().__init__(message)
+        self.reason_codes = tuple(reason_codes or ["PLAN_VALIDATION_FAILED"])
+        self.invalid_subtask_ids = tuple(invalid_subtask_ids or ())
+        self.repair_attempts = repair_attempts
+
 
 def build_subtask_goal_text(subtask: Subtask, position: int, total: int) -> str:
     """MA7.8 - the per-subtask analogue of kriya/workflow/milestones.py's
@@ -268,6 +281,33 @@ def build_subtask_plan_text(subtask: Subtask) -> str:
     gracefully to an ordinary fresh Developer generation call when it finds
     nothing - exactly the behavior a bounded subtask needs."""
     return f"Implement: {subtask.description}"
+
+
+def build_structured_plan_repair_prompt(
+    goal: str,
+    previous_plan_text: str,
+    errors: List[str],
+    reason_codes: List[str],
+    repair_attempt: int,
+) -> str:
+    """Build a bounded local-only correction request for the complete plan."""
+    return (
+        "Repair the previous structured engineering plan. This is PLAN_REPAIR, not implementation.\n\n"
+        f"Original request:\n{goal}\n\n"
+        f"Deterministic reason codes: {json.dumps(reason_codes)}\n"
+        "Deterministic validation errors:\n"
+        + "\n".join(f"- {error}" for error in errors)
+        + "\n\nCorrection rules:\n"
+        "- Return a complete corrected plan, preserving every valid subtask and dependency.\n"
+        "- Correct only invalid plan structure; do not broaden scope or invent modules/entrypoints.\n"
+        "- Every execution_method=model subtask MUST declare every file it may modify in planned_files.\n"
+        "- Verification-only build/test/run/output checks belong in verification or acceptance_criteria, "
+        "not in a MODEL subtask with no files.\n"
+        "- Do not emit TOOL subtasks: authoritative enforce mode has no policy-mediated TOOL router yet.\n"
+        "- The LAST item in your response must be the complete corrected fenced ```json plan block.\n\n"
+        f"Previous Planner response (repair attempt {repair_attempt}):\n"
+        + previous_plan_text[-20000:]
+    )
 
 
 def compute_abandoned_plan_files(
@@ -543,7 +583,11 @@ class WorkflowController:
                     "status": "needs_review",
                     "quality_gates_passed": False,
                     "files": [],
-                    "reason_codes": ["UNBOUNDED_MODEL_SUBTASK"],
+                    "failure_type": "PLANNING_ERROR",
+                    "recovery": "PLAN_REPAIR",
+                    "reason_codes": list(e.reason_codes),
+                    "invalid_subtask_ids": list(e.invalid_subtask_ids),
+                    "plan_repair_attempts": e.repair_attempts,
                     "error": str(e),
                     "run_id": run_id,
                 }
@@ -1078,12 +1122,10 @@ class WorkflowController:
           context-quality gap.
 
 A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
-        failed validation, a TOOL-tagged subtask present) raises
-        _StructuredPlanUnavailable - execute() catches this specifically and
-        falls back to the legacy whole-goal path (see that exception's own
-        docstring for why: this restores PlannerStructuredOutput's original
-        "must never break generation" contract, fixed 2026-08-24 after a
-        real live-validation finding where this wasn't yet true). A
+        failed validation, a TOOL-tagged subtask present) enters a bounded
+        local PLAN_REPAIR loop. Two unsuccessful corrections raise
+        _UnsafeStructuredPlan and fail closed without a legacy fallback,
+        preserving the authoritative write-scope boundary. A
         subtask-loop failure (at least one real run_generation_workflow()
         call has already happened) is NOT this exception - it stays a
         clean, normally-shaped FAILURE result in the aggregated dict
@@ -1093,34 +1135,6 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         workspace by that point. Only a genuine bug in this method's own
         code propagates as a real (uncaught) exception."""
         ledger = DecisionLedger()
-
-        plan_text = await self.workflow_engine.planner.run(goal)
-        structured_output, parse_issue = parse_planner_structured_output(plan_text)
-        if structured_output is None:
-            raise _StructuredPlanUnavailable(f"no structured plan: {parse_issue}")
-
-        plan = build_engineering_plan_from_planner_output(structured_output, plan_id=run_id, kind=route.kind)
-        if plan is None:
-            raise _StructuredPlanUnavailable("structured output parsed but produced zero subtasks")
-
-        record_plan_created(ledger, plan)
-
-        tool_subtasks = [st.id for st in plan.subtasks if st.execution_method == ExecutionMethod.TOOL]
-        if tool_subtasks:
-            raise _StructuredPlanUnavailable(
-                f"plan contains TOOL-tagged subtask(s) {tool_subtasks!r} - enforce mode does not "
-                "yet execute TOOL subtasks for real (see this method's own docstring)"
-            )
-
-        unbounded_model_subtasks = [
-            st.id for st in plan.subtasks
-            if st.execution_method == ExecutionMethod.MODEL and not st.planned_files
-        ]
-        if unbounded_model_subtasks:
-            raise _UnsafeStructuredPlan(
-                f"MODEL subtask(s) {unbounded_model_subtasks!r} declare no planned_files; "
-                "refusing legacy fallback because it would discard the validated scope boundary"
-            )
 
         kernel = getattr(self.workflow_engine, "kernel", None)
         available_tool_names = None
@@ -1145,7 +1159,6 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # (or no prior state at all) -> resumed_subtask_states stays empty
         # and the plan runs fresh from subtask 1, same as if resume had
         # never been requested.
-        current_plan_hash = plan.content_hash()
         prior_control_state: Optional[ControlState] = None
         if legacy_kwargs.get("resume") or legacy_kwargs.get("resume_id"):
             prior_control_state = load_control_state(workspace_path)
@@ -1179,14 +1192,111 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             prior_control_state and any(v == "completed" for v in prior_control_state.subtask_states.values())
         )
 
-        validation = await validate_plan(
-            plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
-            route=route, triage_service=self.workflow_engine.engineering_triage,
-            resuming_own_established_progress=has_own_established_progress,
-            require_model_planned_files=True,
-        )
-        if not validation.valid:
-            raise _StructuredPlanUnavailable(f"plan failed validation: {validation.errors}")
+        # Authoritative plan correction is bounded and happens before any
+        # implementation subtask can run. This keeps planned_files as a
+        # hard write boundary while allowing a local Planner to correct a
+        # structurally invalid late verification step. Exhaustion never
+        # falls back to whole-goal legacy generation, because that would
+        # discard the boundary we are trying to establish.
+        plan_text = await self.workflow_engine.planner.run(goal)
+        repair_attempts = 0
+        while True:
+            errors: List[str] = []
+            reason_codes: List[str] = []
+            invalid_subtask_ids: List[str] = []
+            plan: Optional[EngineeringPlan] = None
+
+            structured_output, parse_issue = parse_planner_structured_output(plan_text)
+            if structured_output is None:
+                errors.append(f"structured plan parse failed: {parse_issue}")
+                if parse_issue and "execution_method=tool but no tool_name" in parse_issue:
+                    reason_codes.append("TOOL_SUBTASK_MISSING_TOOL_NAME")
+                else:
+                    reason_codes.append("STRUCTURED_PLAN_PARSE_FAILED")
+            else:
+                plan = build_engineering_plan_from_planner_output(
+                    structured_output, plan_id=run_id, kind=route.kind,
+                )
+                if plan is None:
+                    errors.append("structured output parsed but produced zero subtasks")
+                    reason_codes.append("STRUCTURED_PLAN_EMPTY")
+                else:
+                    tool_subtasks = [
+                        st.id for st in plan.subtasks
+                        if st.execution_method == ExecutionMethod.TOOL
+                    ]
+                    if tool_subtasks:
+                        invalid_subtask_ids.extend(tool_subtasks)
+                        errors.append(
+                            f"TOOL-tagged subtask(s) {tool_subtasks!r} are unsupported in enforce mode"
+                        )
+                        reason_codes.append("TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE")
+
+                    validation = await validate_plan(
+                        plan, workspace_path=workspace_path,
+                        available_tool_names=available_tool_names,
+                        route=route, triage_service=self.workflow_engine.engineering_triage,
+                        resuming_own_established_progress=has_own_established_progress,
+                        require_model_planned_files=True,
+                    )
+                    errors.extend(validation.errors)
+                    reason_codes.extend(validation.reason_codes)
+                    unbounded_model_subtasks = [
+                        st.id for st in plan.subtasks
+                        if st.execution_method == ExecutionMethod.MODEL and not st.planned_files
+                    ]
+                    invalid_subtask_ids.extend(unbounded_model_subtasks)
+                    if unbounded_model_subtasks and not any(
+                        "declares no planned_files" in error for error in errors
+                    ):
+                        errors.append(
+                            f"MODEL subtask(s) {unbounded_model_subtasks!r} declare no planned_files"
+                        )
+                        reason_codes.append("MODEL_SUBTASK_MISSING_PLANNED_FILES")
+
+            reason_codes = list(dict.fromkeys(reason_codes))
+            invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
+            if plan is not None and not errors:
+                ledger.record_and_persist(
+                    workspace_path, "structured_plan_validation", run_id=run_id,
+                    valid=True, repair_attempts=repair_attempts,
+                )
+                break
+
+            ledger.record_and_persist(
+                workspace_path, "structured_plan_validation", run_id=run_id,
+                valid=False, repair_attempts=repair_attempts,
+                reason_codes=reason_codes, invalid_subtask_ids=invalid_subtask_ids,
+                error_count=len(errors),
+            )
+            logger.warning(
+                "WorkflowController enforce run %r: structured plan validation failed "
+                "(attempt=%d, reason_codes=%s, invalid_subtask_ids=%s)",
+                run_id, repair_attempts, reason_codes, invalid_subtask_ids,
+            )
+            if repair_attempts >= 2:
+                reason_codes.append("STRUCTURED_PLAN_REPAIR_EXHAUSTED")
+                raise _UnsafeStructuredPlan(
+                    "structured plan remained unsafe after two bounded repair attempts",
+                    reason_codes=list(dict.fromkeys(reason_codes)),
+                    invalid_subtask_ids=invalid_subtask_ids,
+                    repair_attempts=repair_attempts,
+                )
+
+            repair_attempts += 1
+            repair_prompt = build_structured_plan_repair_prompt(
+                goal, plan_text, errors, reason_codes, repair_attempts,
+            )
+            ledger.record_and_persist(
+                workspace_path, "structured_plan_repair_requested", run_id=run_id,
+                repair_attempt=repair_attempts, reason_codes=reason_codes,
+                invalid_subtask_ids=invalid_subtask_ids,
+            )
+            plan_text = await self.workflow_engine.planner.run(repair_prompt)
+
+        assert plan is not None
+        record_plan_created(ledger, plan)
+        current_plan_hash = plan.content_hash()
 
         execution_context = await self._build_context(
             goal, plan, workspace_path, route, control_context, control_state,

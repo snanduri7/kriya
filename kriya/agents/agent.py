@@ -386,7 +386,11 @@ class PlannerAgent(BaseAgent):
             '"acceptance_criteria": [{"id": "ac1", "description": "...", "method": "judgment"}], '
             '"extension_points": [], "refactor_baseline": null}\n'
             "Each subtask is either execution_method \"model\" (normal code generation - never set "
-            "tool_name/tool_arguments) or \"tool\" (a deterministic check like a test/lint run - must set "
+            "tool_name/tool_arguments, and MUST declare at least one planned_files entry covering every "
+            "file it may create, modify, or delete; never emit a MODEL subtask with planned_files=[]). "
+            "A build, test, run, or output check that does not edit files belongs in verification or "
+            "acceptance_criteria, NOT in a fake MODEL subtask. A subtask may instead be \"tool\" (a "
+            "deterministic check like a test/lint run - must set "
             "tool_name; only use \"tool\" for a check you are certain is a real, already-registered tool, "
             "never invent one). depends_on lists other subtask ids that must complete first. If you "
             "cannot confidently produce this breakdown, still include your best-effort attempt rather "

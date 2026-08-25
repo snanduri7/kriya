@@ -304,109 +304,82 @@ async def test_enforce_never_forwards_trace_id_override_to_a_subtask_call(tmp_pa
         assert kwargs["knowledge_risk_confirmed"] is True
 
 
-# --- honest, explicit refusal cases (clean failure, not a crash) ---
-
-# --- MA7.8 fix (2026-08-24, real live-validation finding, protocol_encoder_java):
-# a PRE-EXECUTION structural problem (no plan, zero subtasks, a TOOL
-# subtask, failed validation) must fall back to the legacy whole-goal
-# path, not produce zero files. Real live run: a single malformed subtask
-# in Stage A's JSON block (execution_method=tool with no tool_name, a
-# pydantic validation error) made the very first enforce-mode run produce
-# nothing, even though the same goal would almost certainly have
-# succeeded via the ordinary prose-based path - see
-# _StructuredPlanUnavailable's own docstring for the full story.
+# --- bounded authoritative plan repair (before any implementation) ---
 
 @pytest.mark.asyncio
-async def test_enforce_falls_back_to_legacy_when_plan_contains_a_tool_subtask(tmp_path):
-    plan = EngineeringPlan(
+async def test_enforce_repairs_late_unscoped_model_subtask_before_execution(tmp_path):
+    bad_plan = EngineeringPlan(
         plan_id="run1", kind=ChangeKind.TASK,
-        subtasks=[Subtask(id="s1", description="lint", execution_method=ExecutionMethod.TOOL, tool_name="lint")],
+        subtasks=[Subtask(id="s6", description="run tests", execution_method=ExecutionMethod.MODEL)],
+    )
+    good_plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s6", description="write report", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="report.txt", action=FileAction.CREATE)],
+        )],
     )
     we = _workflow_engine()
-    we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": ["a.py"]})
-
-    p1, p2, p3 = _patched(plan)
-    with p1, p2, p3:
-        controller = WorkflowController(we)
-        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
-
-    we.run_generation_workflow.assert_awaited_once()
-    assert result.legacy_result["status"] == "success"
-    assert result.legacy_result["files"] == ["a.py"]
-    # no structured subtask machinery ran - the fallback is the ordinary
-    # whole-goal legacy call, not a partial structured attempt
-    assert result.subtask_results == ()
-
-
-@pytest.mark.asyncio
-async def test_enforce_falls_back_to_legacy_reproducing_the_real_live_validation_finding(tmp_path):
-    """Reproduces the actual real-world failure verbatim (protocol_encoder_java,
-    2026-08-24): parse_planner_structured_output returns a pydantic
-    validation error, not a clean 'missing JSON block' message."""
-    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["initial plan", "corrected plan"])
     we.run_generation_workflow = AsyncMock(return_value={
-        "status": "success", "quality_gates_passed": True, "files": ["Protocol.java", "App.java"],
+        "status": "success", "quality_gates_passed": True, "files": ["report.txt"],
     })
-
-    real_error = (
-        "structured plan JSON block failed schema validation: 1 validation error for "
-        "PlannerStructuredOutput\nsubtasks.2\n  Value error, subtask 's3' has "
-        "execution_method=tool but no tool_name"
-    )
-    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(None, real_error)):
-        controller = WorkflowController(we)
-        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
-
-    we.run_generation_workflow.assert_awaited_once()
-    assert result.legacy_result["status"] == "success"
-    assert result.legacy_result["files"] == ["Protocol.java", "App.java"]
-
-
-@pytest.mark.asyncio
-async def test_enforce_falls_back_to_legacy_when_no_structured_plan(tmp_path):
-    we = _workflow_engine()
-    we.planner.run = AsyncMock(return_value="prose only, no JSON block")
-    we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
-
-    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(None, "no fenced JSON block found")):
-        controller = WorkflowController(we)
-        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
-
-    we.run_generation_workflow.assert_awaited_once()
-    assert result.legacy_result["status"] == "success"
-
-
-@pytest.mark.asyncio
-async def test_enforce_falls_back_to_legacy_when_plan_validation_fails(tmp_path):
-    plan = _two_subtask_plan()
-    we = _workflow_engine()
-    we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
-
-    p1, p2, p3 = _patched(plan, validation_result=PlanValidationResult(valid=False, errors=["bad plan"]))
-    with p1, p2, p3:
-        controller = WorkflowController(we)
-        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
-
-    we.run_generation_workflow.assert_awaited_once()
-    assert result.legacy_result["status"] == "success"
-
-
-@pytest.mark.asyncio
-async def test_enforce_legacy_fallback_forwards_legacy_kwargs(tmp_path):
-    """The fallback call must be a real, correctly-parameterized legacy
-    call - not a stub - so approval callbacks etc. still work."""
-    we = _workflow_engine()
-    we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
-    approval_cb = MagicMock()
-
-    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(None, "no json")):
-        controller = WorkflowController(we)
-        await controller.execute(
-            "goal", str(tmp_path), migration_mode="enforce", approval_callback=approval_cb,
+    validations = [
+        PlanValidationResult(
+            valid=False,
+            errors=["subtask 's6' uses execution_method=model but declares no planned_files"],
+            reason_codes=["MODEL_SUBTASK_MISSING_PLANNED_FILES"],
+        ),
+        PlanValidationResult(valid=True),
+    ]
+    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(MagicMock(), None)), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        side_effect=[bad_plan, good_plan],
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=validations),
+    ):
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
         )
 
-    _, kwargs = we.run_generation_workflow.call_args
-    assert kwargs["approval_callback"] is approval_cb
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2
+    repair_prompt = we.planner.run.await_args_list[1].args[0]
+    assert "PLAN_REPAIR" in repair_prompt
+    assert "MODEL_SUBTASK_MISSING_PLANNED_FILES" in repair_prompt
+    assert "s6" in repair_prompt
+    we.run_generation_workflow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_enforce_plan_repair_exhaustion_fails_closed_without_legacy_execution(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(id="s1", description="do something", execution_method=ExecutionMethod.MODEL)],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock()
+    p1, p2, p3 = _patched(
+        plan,
+        validation_result=PlanValidationResult(
+            valid=False, errors=["missing scope"],
+            reason_codes=["MODEL_SUBTASK_MISSING_PLANNED_FILES"],
+        ),
+    )
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "needs_review"
+    assert result.legacy_result["failure_type"] == "PLANNING_ERROR"
+    assert result.legacy_result["recovery"] == "PLAN_REPAIR"
+    assert result.legacy_result["plan_repair_attempts"] == 2
+    assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in result.legacy_result["reason_codes"]
+    assert "MODEL_SUBTASK_MISSING_PLANNED_FILES" in result.legacy_result["reason_codes"]
+    assert we.planner.run.await_count == 3
+    we.run_generation_workflow.assert_not_awaited()
 
 
 # --- enforce mode fully replaces legacy, never runs it too ---
@@ -1130,5 +1103,11 @@ async def test_enforce_rejects_model_subtask_without_planned_files(tmp_path):
 
     assert result.legacy_result["status"] == "needs_review"
     assert result.legacy_result["quality_gates_passed"] is False
-    assert result.legacy_result["reason_codes"] == ["UNBOUNDED_MODEL_SUBTASK"]
+    assert result.legacy_result["reason_codes"] == [
+        "MODEL_SUBTASK_MISSING_PLANNED_FILES",
+        "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+    ]
+    assert result.legacy_result["plan_repair_attempts"] == 2
+    assert result.legacy_result["invalid_subtask_ids"] == ["s1"]
+    assert we.planner.run.await_count == 3
     we.run_generation_workflow.assert_not_awaited()

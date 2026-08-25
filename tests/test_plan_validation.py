@@ -47,6 +47,7 @@ async def test_authoritative_validation_rejects_model_subtask_without_planned_fi
     )
     assert result.valid is False
     assert any("declares no planned_files" in error for error in result.errors)
+    assert result.reason_codes == ["MODEL_SUBTASK_MISSING_PLANNED_FILES"]
 
 
 @pytest.mark.asyncio

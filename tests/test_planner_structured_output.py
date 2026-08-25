@@ -67,7 +67,7 @@ def test_a_genuinely_unfixable_shape_still_fails_cleanly():
 
 # --- MA7.8 self-healing: the real live incident, reproduced verbatim ---
 
-def test_tool_subtask_with_no_tool_name_is_downgraded_to_model():
+def test_tool_subtask_with_no_tool_name_and_no_scope_remains_invalid_for_plan_repair():
     output, err = parse_planner_structured_output(_plan_text({
         "subtasks": [
             {"id": "s1", "description": "write Protocol.java", "execution_method": "model", "acceptance_criteria_ids": ["ac1"]},
@@ -80,13 +80,23 @@ def test_tool_subtask_with_no_tool_name_is_downgraded_to_model():
             {"id": "ac1", "description": "x"}, {"id": "ac2", "description": "y"}, {"id": "ac3", "description": "z"},
         ],
     }))
+    assert output is None
+    assert "execution_method=tool but no tool_name" in err
+
+
+def test_tool_subtask_with_no_tool_name_but_explicit_scope_can_downgrade_to_model():
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "write scoped file", "execution_method": "tool",
+            "planned_files": [{"path": "a.py", "action": "create"}],
+            "acceptance_criteria_ids": [],
+        }],
+        "acceptance_criteria": [],
+    }))
     assert err is None
     assert output is not None
-    assert len(output.subtasks) == 3  # nothing dropped
-    s3 = next(st for st in output.subtasks if st.id == "s3")
-    assert s3.execution_method == ExecutionMethod.MODEL
-    assert s3.tool_name is None
-    assert s3.depends_on == ["s2"]  # real dependency preserved
+    assert output.subtasks[0].execution_method == ExecutionMethod.MODEL
+    assert output.subtasks[0].planned_files[0].path == "a.py"
 
 
 def test_model_subtask_with_a_stray_tool_name_has_it_cleared():

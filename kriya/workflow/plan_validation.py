@@ -59,6 +59,7 @@ class PlanValidationResult:
 
     valid: bool
     errors: List[str] = field(default_factory=list)
+    reason_codes: List[str] = field(default_factory=list)
     escalated_route: Optional[EngineeringRoute] = None
 
 
@@ -128,6 +129,7 @@ async def validate_plan(
     judgment (a persisted ControlState showing at least one completed
     subtask); this function only trusts the flag it's given."""
     errors: List[str] = []
+    reason_codes: List[str] = []
 
     ids = [st.id for st in plan.subtasks]
     duplicate_ids = sorted({sid for sid in ids if ids.count(sid) > 1})
@@ -149,6 +151,7 @@ async def validate_plan(
                 f"subtask {st.id!r} uses execution_method=model but declares no planned_files; "
                 "authoritative execution requires a non-empty modification scope"
             )
+            reason_codes.append("MODEL_SUBTASK_MISSING_PLANNED_FILES")
         for pf in st.planned_files:
             full_path = os.path.join(workspace_path, pf.path)
             if not os.path.exists(full_path) and pf.action != FileAction.CREATE:
@@ -236,4 +239,11 @@ async def validate_plan(
             route=route, workspace_path=workspace_path, planned_files=all_planned_files
         )
 
-    return PlanValidationResult(valid=not errors, errors=errors, escalated_route=escalated_route)
+    if errors and not reason_codes:
+        reason_codes.append("PLAN_VALIDATION_FAILED")
+    return PlanValidationResult(
+        valid=not errors,
+        errors=errors,
+        reason_codes=list(dict.fromkeys(reason_codes)),
+        escalated_route=escalated_route,
+    )
