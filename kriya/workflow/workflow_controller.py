@@ -949,6 +949,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         established_file_context: Dict[str, str] = {}
         subtask_results: List[SubtaskResult] = []
         subtask_call_results: List[Dict[str, Any]] = []
+        knowledge_gap_break: Optional[Dict[str, Any]] = None
 
         for position, subtask_id in enumerate(order, start=1):
             subtask = plan.subtask_by_id(subtask_id)
@@ -1003,7 +1004,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 predetermined_plan=build_subtask_plan_text(subtask),
                 predetermined_design=subtask_goal,
                 predetermined_architect_files=predetermined_files,
-                **legacy_kwargs,
+                # trace_id_override is deliberately EXCLUDED (kriya/cli.py's own
+                # docstring for it: overwrite the ONE transient knowledge_gap
+                # trace row a single whole-goal retry produces) - forwarding it
+                # unfiltered here would give every subtask in this loop the SAME
+                # trace id, and since traces.db's own schema does INSERT OR
+                # REPLACE keyed by run_id, each subtask's own real trace row
+                # would silently overwrite the previous subtask's, not just the
+                # transient knowledge_gap placeholder it was meant to supersede.
+                # Each subtask call gets its OWN fresh trace id instead, same as
+                # every other real call this loop makes.
+                **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )
             subtask_call_results.append(call_result)
 
@@ -1063,6 +1074,27 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} "
                     f"({position}/{total}) - did not pass Quality Gates."
                 )
+                # Found live, 2026-08-25 (ignite_qpid_protocol): a subtask's own
+                # internal run_generation_workflow() call can hit KnowledgeGuard's
+                # stage-0 gap check (kriya/workflow/workflow.py) and return
+                # status="knowledge_gap" - previously this got flattened into an
+                # ordinary "did not pass Quality Gates" failure with the real
+                # gap_report silently discarded, so the CLI's own already-built
+                # confirmation UX (interactive prompt / --knowledge-policy / -y,
+                # kriya/cli.py's `res.get("status") == "knowledge_gap"` check)
+                # could never fire for enforce mode at all - the run just produced
+                # zero files with zero visible explanation. Scoped to the SAME
+                # safety boundary _StructuredPlanUnavailable already uses (only
+                # when literally nothing has been established yet - a knowledge
+                # gap on a LATER subtask, after real prior work exists, stays the
+                # ordinary generic failure rather than inviting a fresh top-level
+                # retry that would silently re-run already-completed subtasks).
+                if call_result.get("status") == "knowledge_gap" and not established_file_context:
+                    knowledge_gap_break = {
+                        "status": "knowledge_gap",
+                        "gap_report": call_result.get("gap_report"),
+                        "run_id": call_result.get("run_id", run_id),
+                    }
                 break
 
             for path in call_result.get("files", []):
@@ -1091,6 +1123,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "subtask_results": [r.to_dict() for r in subtask_results],
             "files": sorted(established_file_context.keys()),
         }
+        if knowledge_gap_break is not None:
+            # Overrides status/run_id above (not quality_gates_passed/subtask_
+            # results/files - those stay honest) so the CLI's real, already-built
+            # knowledge_gap confirmation flow (kriya/cli.py) can engage exactly
+            # as it already does for the legacy/shadow paths, instead of a silent
+            # generic failure - see the knowledge_gap_break assignment above for
+            # the full incident this closes.
+            aggregated["status"] = knowledge_gap_break["status"]
+            aggregated["gap_report"] = knowledge_gap_break["gap_report"]
+            aggregated["run_id"] = knowledge_gap_break["run_id"]
         if subtask_call_results:
             aggregated["last_subtask_result"] = subtask_call_results[-1]
             # MA7.9 - real subtask retry-locality data, not a guess: each

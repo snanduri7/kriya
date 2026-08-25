@@ -1607,6 +1607,20 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 click.echo(res.get("review"))
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
+            # Found live, 2026-08-25 (ignite_qpid_protocol, workflow_controller.enabled
+            # enforce mode): when the very FIRST subtask of a structured plan fails,
+            # `files` above stays empty (nothing was ever established) - the message
+            # above alone left the user with zero indication of what actually went
+            # wrong, unlike the legacy path's own detailed "Quality Gates: FAILED" +
+            # failure_category + checkpoint-resume block a few lines up, which only
+            # ever fires when `files` is non-empty. Reusing that same real per-
+            # subtask detail (SubtaskResult.error, already computed and returned by
+            # WorkflowController - see kriya/workflow/workflow_controller.py) rather
+            # than leaving this branch a black box.
+            for sr in res.get("subtask_results") or []:
+                if sr.get("status") == "failed" and sr.get("error"):
+                    click.secho(f"Subtask '{sr.get('subtask_id')}' failed: {sr['error']}", fg="red")
+                    break
 
         return res
 

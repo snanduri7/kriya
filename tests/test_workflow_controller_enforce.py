@@ -194,6 +194,108 @@ async def test_enforce_stops_at_first_failing_subtask_never_calls_the_dependent(
     assert result.subtask_results[0].status == SubtaskStatus.FAILED
 
 
+# --- knowledge_gap surfacing (2026-08-25, real live finding: ignite_qpid_protocol) ---
+
+@pytest.mark.asyncio
+async def test_enforce_surfaces_knowledge_gap_from_the_first_subtask_to_the_top_level(tmp_path):
+    """Regression test for a real live bug, 2026-08-25 (ignite_qpid_protocol):
+    subtask s1's own internal run_generation_workflow() call hit
+    KnowledgeGuard's stage-0 gap check and returned status='knowledge_gap' -
+    previously flattened into a generic 'did not pass Quality Gates' failure
+    with the real gap_report silently discarded, so the CLI's own already-
+    built confirmation UX (kriya/cli.py's `res.get('status') ==
+    'knowledge_gap'` check) could never fire for enforce mode at all. The run
+    produced zero files with zero visible explanation - the actual real-world
+    symptom. Scoped to the SAME safety boundary _StructuredPlanUnavailable
+    already uses (only when literally nothing has been established yet)."""
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+
+    async def fake_run(**kwargs):
+        return {
+            "status": "knowledge_gap",
+            "gap_report": {"gaps": [{"library": "org.apache.ignite:ignite-core", "version": "2.18.0"}]},
+            "run_id": "gap-run-1",
+        }
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "knowledge_gap"
+    assert result.legacy_result["gap_report"] == {
+        "gaps": [{"library": "org.apache.ignite:ignite-core", "version": "2.18.0"}]
+    }
+    assert result.legacy_result["run_id"] == "gap-run-1"
+    # The real per-subtask diagnostic detail must still be there too (used by
+    # the CLI's "No files written" fallback branch for any OTHER failure kind).
+    assert result.legacy_result["subtask_results"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_enforce_does_not_surface_knowledge_gap_from_a_later_subtask(tmp_path):
+    """A knowledge gap on a LATER subtask, after real prior work already
+    exists, must NOT promote to the top-level knowledge_gap status - that
+    would invite the CLI's retry flow to silently re-run already-completed
+    subtasks from scratch. Stays the ordinary generic failure instead."""
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+
+    async def fake_run(**kwargs):
+        if "'s2'" in kwargs["goal"]:
+            return {"status": "knowledge_gap", "gap_report": {"gaps": []}, "run_id": "gap-run-2"}
+        (tmp_path / "a.py").write_text("# a.py")
+        return {"status": "success", "quality_gates_passed": True, "files": ["a.py"]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "failed"
+    assert "gap_report" not in result.legacy_result
+
+
+@pytest.mark.asyncio
+async def test_enforce_never_forwards_trace_id_override_to_a_subtask_call(tmp_path):
+    """trace_id_override (kriya/cli.py) is meant to overwrite the ONE
+    transient knowledge_gap trace row a single whole-goal retry produces -
+    forwarding it unfiltered to every subtask call in this loop would give
+    them all the SAME trace id, and since traces.db does INSERT OR REPLACE
+    keyed by run_id, each subtask's own real trace row would silently
+    overwrite the previous subtask's. Every OTHER legacy kwarg must still
+    pass through untouched."""
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    captured = []
+
+    async def fake_run(**kwargs):
+        captured.append(kwargs)
+        path = "a.py" if len(captured) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        await controller.execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+            trace_id_override="should-never-appear", knowledge_risk_confirmed=True,
+        )
+
+    assert len(captured) == 2
+    for kwargs in captured:
+        assert "trace_id_override" not in kwargs
+        assert kwargs["knowledge_risk_confirmed"] is True
+
+
 # --- honest, explicit refusal cases (clean failure, not a crash) ---
 
 # --- MA7.8 fix (2026-08-24, real live-validation finding, protocol_encoder_java):
