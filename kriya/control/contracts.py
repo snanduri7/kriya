@@ -30,10 +30,13 @@ just the current one.
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 Shape = Union[Dict[str, Any], str]
 
@@ -434,12 +437,22 @@ def wire_contract_consumers(registry: "ContractRegistry", milestones: Any) -> No
     ancestry-aware reachability check - by the time run_milestones() calls
     this, the plan has ALREADY passed MilestonePlanValidator's reachability
     validation, so every name in some milestone's consumes[] is guaranteed
-    to have exactly the provider(s) that check already confirmed reachable;
-    re-deriving that here would duplicate, not add, safety). A capability
-    name provided by more than one milestone registers the consumer against
-    ALL of them - ambiguous by construction (the same ambiguity
-    milestone_validation.py's own _capability_providers already tolerates),
-    not this function's problem to resolve.
+    to have at least one provider that check already confirmed reachable;
+    re-deriving that here would duplicate, not add, safety).
+
+    A capability name with exactly one provider wires normally. A
+    capability name provided by MORE THAN ONE milestone is ambiguous - this
+    function does not guess which provider a consumer actually meant, so it
+    logs a warning and wires NO consumer link for that name at all, rather
+    than (as an earlier version of this function did, 2026-08-25 external
+    review follow-up) silently attaching the consumer to every candidate
+    provider. milestone_validation.py's own reachability check still
+    tolerates the same ambiguity at plan-validation time (a real, separate
+    design question about whether planning should allow it at all, out of
+    scope here) - this function's own job is narrower: never record a
+    consumer relationship it isn't actually sure of. A missing provider
+    (already-invalid per the plan validator, defensive-only here) is
+    likewise skipped, not guessed at.
 
     `milestones` is typed Any (an Iterable of MilestoneV2-shaped objects),
     matching contract_records_from_provided_capabilities()'s own reasoning
@@ -452,10 +465,19 @@ def wire_contract_consumers(registry: "ContractRegistry", milestones: Any) -> No
 
     for m in milestones:
         for capability_name in m.consumes:
-            for provider_id in provider_ids_by_capability.get(capability_name, []):
-                contract_id = f"{provider_id}:{capability_name}"
-                if registry.try_get(contract_id) is not None:
-                    registry.add_consumer(contract_id, m.id)
+            providers = provider_ids_by_capability.get(capability_name, [])
+            if len(providers) != 1:
+                if len(providers) > 1:
+                    logger.warning(
+                        f"wire_contract_consumers: capability {capability_name!r} has "
+                        f"{len(providers)} providers {sorted(providers)!r} - ambiguous, "
+                        f"refusing to guess which one milestone {m.id!r} actually consumes. "
+                        "No consumer link recorded for this capability."
+                    )
+                continue
+            contract_id = f"{providers[0]}:{capability_name}"
+            if registry.try_get(contract_id) is not None:
+                registry.add_consumer(contract_id, m.id)
 
 
 def mark_capabilities_implemented(registry: "ContractRegistry", milestone: Any) -> None:

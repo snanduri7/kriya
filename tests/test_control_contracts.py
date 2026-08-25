@@ -370,6 +370,34 @@ def test_wire_contract_consumers_ignores_a_consumed_name_nobody_provides():
     assert reg.all_records() == ()
 
 
+def test_wire_contract_consumers_refuses_to_guess_an_ambiguous_provider(caplog):
+    """2026-08-25 follow-up (action-item review): an earlier version of
+    this function attached the consumer to EVERY candidate provider when a
+    capability name had more than one - silently guessing. Fixed: an
+    ambiguous capability name gets NO consumer link recorded for it at
+    all, and a warning is logged - the registry must never record a
+    relationship it isn't actually sure of, even though
+    milestone_validation.py's own reachability check still tolerates the
+    same ambiguity at plan-validation time (a separate question)."""
+    import logging
+
+    reg = ContractRegistry()
+    milestones = [
+        _milestone(id="M1", provides=[{"name": "ProtocolCodec"}]),
+        _milestone(id="M2", provides=[{"name": "ProtocolCodec"}]),  # same name, a DIFFERENT provider
+        _milestone(id="M3", consumes=["ProtocolCodec"], depends_on=["M1", "M2"]),
+    ]
+    for m in milestones:
+        contract_records_from_provided_capabilities(reg, m)
+
+    with caplog.at_level(logging.WARNING, logger="kriya.control.contracts"):
+        wire_contract_consumers(reg, milestones)
+
+    assert reg.get("M1:ProtocolCodec").consumers == ()
+    assert reg.get("M2:ProtocolCodec").consumers == ()
+    assert any("ambiguous" in r.message for r in caplog.records)
+
+
 def test_wire_contract_consumers_is_idempotent():
     reg = ContractRegistry()
     milestones = [
