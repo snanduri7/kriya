@@ -355,9 +355,9 @@ class ContractRegistry:
         return registry
 
 
-def contract_records_from_provided_capabilities(
+def register_provided_capabilities(
     registry: "ContractRegistry", milestone: Any,
-) -> Tuple[ContractRecord, ...]:
+) -> Tuple[Tuple[ContractRecord, ...], Tuple[ContractChange, ...]]:
     """The one-way bridge this module's own docstring promised since MA5.2
     but was never built (confirmed dead - zero callers anywhere - until
     2026-08-24): registers one PROPOSED ContractRecord per entry in
@@ -393,8 +393,16 @@ def contract_records_from_provided_capabilities(
     (MA5.3) instead of being silently overwritten or silently ignored -
     2026-08-25, external review: this bridge previously always took the
     "already registered" branch unconditionally, meaning a real shape
-    change could never be detected or recorded at all."""
-    records = []
+    change could never be detected or recorded at all.
+
+    Returns (records, changes) - `changes` is only ever non-empty for a
+    genuine shape change just applied in THIS call (never for a first-time
+    registration or a no-op re-registration), each carrying the real
+    ContractChange.affected_consumers a caller (kriya/workflow/milestones.py
+    ::run_milestones(), MA7-C3) can act on - e.g. invalidating a consumer
+    milestone that already ran against the now-stale shape."""
+    records: List[ContractRecord] = []
+    changes: List[ContractChange] = []
     for capability in milestone.provides:
         contract_id = f"{milestone.id}:{capability.name}"
         new_shape = capability.description or capability.name
@@ -415,9 +423,21 @@ def contract_records_from_provided_capabilities(
                 ),
             )
             records.append(registry.apply_change(change))
+            changes.append(change)
         else:
             records.append(existing)
-    return tuple(records)
+    return tuple(records), tuple(changes)
+
+
+def contract_records_from_provided_capabilities(
+    registry: "ContractRegistry", milestone: Any,
+) -> Tuple[ContractRecord, ...]:
+    """Thin, backward-compatible wrapper over register_provided_capabilities()
+    above, for any caller that only needs the records (not real-time
+    change detection) - kept so the pre-2026-08-25 call signature/contract
+    (and every test written against it) stays valid unchanged."""
+    records, _changes = register_provided_capabilities(registry, milestone)
+    return records
 
 
 def wire_contract_consumers(registry: "ContractRegistry", milestones: Any) -> None:

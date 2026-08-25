@@ -28,8 +28,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
 from kriya.control.contracts import (
-    contract_records_from_provided_capabilities,
     mark_capabilities_implemented,
+    register_provided_capabilities,
     wire_contract_consumers,
 )
 from kriya.control.persistence import load_contract_registry, save_contract_registry
@@ -648,9 +648,11 @@ async def run_milestones(
     # throughout: a bookkeeping failure must never break a real milestone
     # run, matching every other control-plane persistence call site.
     contract_registry = load_contract_registry(workspace_path)
+    contract_changes: List[Any] = []
     for m in run_state.milestones:
         if m.provides:
-            contract_records_from_provided_capabilities(contract_registry, m)
+            _, changes = register_provided_capabilities(contract_registry, m)
+            contract_changes.extend(changes)
     # 2026-08-25 external review, P0 finding: the bridge above only ever
     # registered the PROVIDER side - ContractRecord.consumers was always
     # empty, so ContractChange.affected_consumers (propose_change()'s own
@@ -659,7 +661,55 @@ async def run_milestones(
     # execution loop starts, using the plan's own already-validated
     # provides[]/consumes[] - MilestonePlanValidator already confirmed
     # every consumed name is reachable before run_milestones() ever runs.
+    #
+    # NOTE on ordering: this call happens AFTER the registration loop above
+    # (not before), so `affected_consumers` captured by register_provided_
+    # capabilities() during that loop reflects whatever consumers were
+    # ALREADY wired from a PRIOR run's persisted contracts.json (real for a
+    # resumed multi-milestone sequence), not this run's own not-yet-wired
+    # state - the invalidation check right below depends on exactly that.
     wire_contract_consumers(contract_registry, run_state.milestones)
+
+    # MA7-C3 (2026-08-25 external review): real contract-change
+    # invalidation through the actual workflow, not just a unit-tested
+    # ContractChange object nobody acts on. The one scenario this
+    # architecture can genuinely produce: a hand-edited/re-planned
+    # milestone file (run_milestones()'s own docstring already documents
+    # "a possibly hand-edited milestone plan file") changes a provider
+    # milestone's declared capability shape between two separate
+    # plan-milestones/generate --from-milestones invocations for the SAME
+    # workspace, while a consumer milestone ALREADY completed - in an
+    # EARLIER partial run - against the now-stale shape. Milestones
+    # execute sequentially from a fixed, already-validated list (no
+    # separate per-milestone persisted "plan" the way MA6 subtasks have),
+    # so "invalidate M2's plan" concretely means: stop treating M2 as
+    # already done. Removing it from completed_milestone_ids is exactly
+    # the resume/skip lever this module already has and already trusts
+    # (the same field the ordinary `if milestone.id in
+    # completed_milestone_ids: skip` check reads) - reusing it here is
+    # honest re-use, not a new "stale plan" concept invented from nothing.
+    # Deliberately ONE level only (a change's own affected_consumers), not
+    # transitive/cascading invalidation of a consumer's own consumers -
+    # the action item's own example is one level deep; going further is
+    # real, additional scope not asked for here.
+    invalidated_ids = set()
+    for change in contract_changes:
+        stale_consumers = [c for c in change.affected_consumers if c in run_state.completed_milestone_ids]
+        if stale_consumers:
+            logger.warning(
+                f"Contract '{change.contract_id}' changed shape ({change.reason}) - consumer "
+                f"milestone(s) {stale_consumers!r} already completed against the now-stale shape "
+                "in an earlier run and are invalidated: they will be re-executed, not skipped."
+            )
+            invalidated_ids.update(stale_consumers)
+    if invalidated_ids:
+        run_state.completed_milestone_ids = [
+            mid for mid in run_state.completed_milestone_ids if mid not in invalidated_ids
+        ]
+        try:
+            save_milestone_run_state(workspace_path, run_state)
+        except Exception as e:
+            logger.warning(f"Failed to persist invalidated completed_milestone_ids (non-fatal): {e}")
     try:
         save_contract_registry(workspace_path, contract_registry)
     except Exception as e:

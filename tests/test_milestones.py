@@ -768,6 +768,69 @@ async def test_run_milestones_populates_real_contract_consumers_from_consumes():
 
 
 @pytest.mark.asyncio
+async def test_run_milestones_invalidates_a_completed_consumer_when_its_providers_contract_changes():
+    """MA7-C3 (2026-08-25 external review): the real end-to-end scenario
+    this architecture can actually produce - a hand-edited/re-planned
+    milestone file changes M1's declared capability shape between two
+    separate run_milestones() invocations for the SAME workspace, while M2
+    (a real consumer, wired via MA7-C2) already completed in an EARLIER
+    partial run against the now-stale shape. M2 must be treated as
+    invalidated - removed from completed_milestone_ids and genuinely
+    re-executed - not silently skipped as if nothing changed. M1 itself
+    (the provider) is NOT re-executed by this mechanism - only its
+    consumer is, matching the review's own one-level example exactly."""
+    with tempfile.TemporaryDirectory() as tmp:
+        # Simulate a PRIOR, completed run: M1's contract registered+
+        # IMPLEMENTED with its OLD shape, M2 wired as a real consumer.
+        from kriya.control.contracts import ContractRegistry
+        from kriya.control.persistence import save_contract_registry
+
+        prior_registry = ContractRegistry()
+        prior_registry.register(
+            contract_id="M1:ProtocolCodec", name="ProtocolCodec", provider_milestone_id="M1",
+            shape="OLD shape: encode/decode with 4 fields", consumers=("M2",),
+        )
+        prior_registry.approve("M1:ProtocolCodec")
+        prior_registry.freeze("M1:ProtocolCodec")
+        prior_registry.mark_implemented("M1:ProtocolCodec")
+        save_contract_registry(tmp, prior_registry)
+
+        # A re-plan (hand-edited or freshly re-planned) changes M1's
+        # declared shape - M2 stays otherwise identical.
+        milestones = [
+            mkv2("M1", goal="g1", success_criterion="c1", provides=[
+                {"name": "ProtocolCodec", "description": "NEW shape: encode/decode with 6 fields"},
+            ]),
+            mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"], consumes=["ProtocolCodec"]),
+        ]
+        state = MilestoneRunState(
+            group_id="grp", original_goal="orig", milestones=milestones,
+            completed_milestone_ids=["M1", "M2"],  # both already done, per the prior run
+        )
+        we = MagicMock()
+        we.run_generation_workflow = AsyncMock(
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["b.py"]}
+        )
+        we.run_verifier = MagicMock()
+        we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+
+        result = await run_milestones(we, state, tmp)
+
+        assert result["status"] == "success"
+        # M1 stays skipped (the provider itself isn't re-executed by this
+        # mechanism) - only M2 (the invalidated consumer) gets a real call,
+        # plus the final integration pass every successful run makes
+        # (see test_run_milestones_success_path_through_all_milestones_and_
+        # integration's own "2 milestones + integration" precedent) - 2
+        # calls total, not 1, since M1 stays correctly skipped.
+        assert we.run_generation_workflow.await_count == 2
+        assert "M1" in state.completed_milestone_ids
+        assert "M2" in state.completed_milestone_ids  # re-added once it completes again, for real
+        registry = load_contract_registry(tmp)
+        assert registry.get("M1:ProtocolCodec").shape == "NEW shape: encode/decode with 6 fields"
+
+
+@pytest.mark.asyncio
 async def test_run_milestones_capability_stays_proposed_when_its_milestone_fails():
     """The providing milestone never actually completing must leave its
     declared capability at PROPOSED, not silently advanced - an honest
