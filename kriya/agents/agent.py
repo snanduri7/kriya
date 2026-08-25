@@ -380,8 +380,11 @@ class PlannerAgent(BaseAgent):
             "After your Markdown plan, ALSO include a fenced ```json code block (the LAST thing in your "
             "response) with this exact shape - a structured breakdown of your plan into independent "
             "subtasks, used for tooling, in ADDITION TO (never instead of) the Markdown plan above:\n"
-            '{"subtasks": [{"id": "s1", "description": "...", "execution_method": "model", '
+            '{"global_invariants": ["one concise goal-wide invariant"], '
+            '"subtasks": [{"id": "s1", "description": "...", "execution_method": "model", '
             '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete"}], '
+            '"provides": ["capability.stable.name"], "requires": [], '
+            '"relevant_global_invariants": ["exact invariant text from global_invariants"], '
             '"acceptance_criteria_ids": ["ac1"]}], '
             '"acceptance_criteria": [{"id": "ac1", "description": "...", "method": "judgment"}], '
             '"extension_points": [], "refactor_baseline": null}\n'
@@ -395,7 +398,12 @@ class PlannerAgent(BaseAgent):
             "never invent one). depends_on lists other subtask ids that must complete first. Every "
             "subtask that consumes a build manifest, configuration, source API, generated artifact, "
             "or other output from another subtask MUST declare that producer in depends_on. Keep all "
-            "overall request constraints relevant to each subtask explicit in that subtask's description "
+            "semantic producer/consumer relationships explicit with stable provides/requires names; "
+            "a requires entry MUST have exactly one provider and that provider MUST be in depends_on. "
+            "Derive concise global_invariants from the original request (runtime, platform, architecture, "
+            "integration, entrypoint, and packaging constraints) and copy the relevant exact strings into "
+            "each subtask's relevant_global_invariants. Keep all overall request constraints relevant "
+            "to each subtask explicit in that subtask's description "
             "and mapped acceptance criteria; later bounded execution cannot safely infer omitted requirements. If you "
             "cannot confidently produce this breakdown, still include your best-effort attempt rather "
             "than omitting the block."

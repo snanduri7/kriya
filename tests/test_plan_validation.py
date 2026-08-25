@@ -58,6 +58,70 @@ async def test_legacy_validation_keeps_empty_model_scope_backward_compatible(tmp
 
 
 @pytest.mark.asyncio
+async def test_semantic_requirement_requires_provider_dependency_edge(tmp_path):
+    provider = _model_subtask(
+        id="build", planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+    ).model_copy(update={
+        "provides": ["build.dependencies.ready"],
+        "relevant_global_invariants": ["required platform dependencies are resolved"],
+    })
+    consumer = _model_subtask(
+        id="app", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
+    ).model_copy(update={
+        "requires": ["build.dependencies.ready"],
+        "relevant_global_invariants": ["required platform dependencies are resolved"],
+    })
+    plan = _plan([provider, consumer]).model_copy(update={
+        "global_invariants": ["required platform dependencies are resolved"],
+    })
+
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), require_semantic_contracts=True,
+    )
+
+    assert result.valid is False
+    assert "SEMANTIC_DEPENDENCY_EDGE_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_semantic_requirement_accepts_unique_provider_with_dependency_edge(tmp_path):
+    provider = _model_subtask(
+        id="config", planned_files=[PlannedFile(path="config.xml", action=FileAction.CREATE)],
+    ).model_copy(update={
+        "provides": ["runtime.config.ready"],
+        "relevant_global_invariants": ["runtime configuration is externally defined"],
+    })
+    consumer = _model_subtask(
+        id="app", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
+    ).model_copy(update={
+        "requires": ["runtime.config.ready"], "depends_on": ["config"],
+        "relevant_global_invariants": ["runtime configuration is externally defined"],
+    })
+    plan = _plan([provider, consumer]).model_copy(update={
+        "global_invariants": ["runtime configuration is externally defined"],
+    })
+
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), require_semantic_contracts=True,
+    )
+
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
+async def test_planned_file_has_exactly_one_owner(tmp_path):
+    first = _model_subtask(
+        id="s1", planned_files=[PlannedFile(path="shared.json", action=FileAction.CREATE)],
+    )
+    second = _model_subtask(
+        id="s2", planned_files=[PlannedFile(path="shared.json", action=FileAction.CREATE)],
+    )
+    result = await validate_plan(_plan([first, second]), workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert "AMBIGUOUS_PLANNED_FILE_OWNERSHIP" in result.reason_codes
+
+
+@pytest.mark.asyncio
 async def test_unknown_depends_on_reference_is_an_error(tmp_path):
     plan = _plan([_model_subtask(id="s1", depends_on=["ghost"])])
     result = await validate_plan(plan, workspace_path=str(tmp_path))

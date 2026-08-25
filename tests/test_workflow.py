@@ -6055,12 +6055,12 @@ async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_auth
 
     assert should_break is True
     assert state.environment_failure is None
-    assert state.plan_scope_conflict == {
-        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
-        "failure_type": "misdirected_edit",
-        "required_files": ["pom.xml"],
-        "allowed_files": ["src/App.java"],
-    }
+    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_INSUFFICIENT"
+    assert state.plan_scope_conflict["reason_code"] == "PLAN_SCOPE_REVISION_REQUIRED"
+    assert state.plan_scope_conflict["failure_type"] == "misdirected_edit"
+    assert state.plan_scope_conflict["required_files"] == ["pom.xml"]
+    assert state.plan_scope_conflict["allowed_files"] == ["src/App.java"]
+    assert state.plan_scope_conflict["reason"]
 
 @pytest.mark.asyncio
 async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path):

@@ -159,6 +159,9 @@ class Subtask(BaseModel):
     planned_files: List[PlannedFile] = Field(default_factory=list)
     acceptance_criteria_ids: List[str] = Field(default_factory=list)
     verification: List[VerificationMethod] = Field(default_factory=list)
+    provides: List[str] = Field(default_factory=list)
+    requires: List[str] = Field(default_factory=list)
+    relevant_global_invariants: List[str] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -167,6 +170,11 @@ class Subtask(BaseModel):
         if not v:
             raise ValueError("subtask id must not be blank")
         return v
+
+    @field_validator("provides", "requires", "relevant_global_invariants")
+    @classmethod
+    def _normalize_semantic_entries(cls, values: List[str]) -> List[str]:
+        return [(value or "").strip() for value in values]
 
     @model_validator(mode="after")
     def _execution_method_invariants(self) -> "Subtask":
@@ -186,6 +194,15 @@ class Subtask(BaseModel):
             raise ValueError(f"subtask {self.id!r} cannot depend on itself")
         if len(set(self.depends_on)) != len(self.depends_on):
             raise ValueError(f"subtask {self.id!r} lists a duplicate dependency in depends_on")
+        for field_name in ("provides", "requires", "relevant_global_invariants"):
+            values = getattr(self, field_name)
+            if any(not (value or "").strip() for value in values):
+                raise ValueError(f"subtask {self.id!r} has a blank {field_name} entry")
+            if len(set(values)) != len(values):
+                raise ValueError(f"subtask {self.id!r} has duplicate {field_name} entries")
+        overlap = sorted(set(self.provides) & set(self.requires))
+        if overlap:
+            raise ValueError(f"subtask {self.id!r} both provides and requires {overlap}")
         return self
 
 
@@ -202,6 +219,7 @@ class EngineeringPlan(BaseModel):
     acceptance_criteria: List[AcceptanceCriterion] = Field(default_factory=list)
     extension_points: List[str] = Field(default_factory=list)
     refactor_baseline: Optional[str] = None
+    global_invariants: List[str] = Field(default_factory=list)
 
     @field_validator("plan_id")
     @classmethod
@@ -218,11 +236,25 @@ class EngineeringPlan(BaseModel):
             raise ValueError("plan must contain at least one subtask")
         return v
 
+    @field_validator("global_invariants")
+    @classmethod
+    def _valid_global_invariants(cls, values: List[str]) -> List[str]:
+        cleaned = [(value or "").strip() for value in values]
+        if any(not value for value in cleaned):
+            raise ValueError("global_invariants must not contain blank entries")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("global_invariants must not contain duplicates")
+        return cleaned
+
     def subtask_by_id(self, subtask_id: str) -> Optional[Subtask]:
         for subtask in self.subtasks:
             if subtask.id == subtask_id:
                 return subtask
         return None
+
+    def file_owner(self, path: str) -> Optional[Subtask]:
+        owners = [st for st in self.subtasks if any(pf.path == path for pf in st.planned_files)]
+        return owners[0] if len(owners) == 1 else None
 
     def content_hash(self) -> str:
         """Stable sha256 over the plan's full validated content - MA6.7's
@@ -259,6 +291,7 @@ class PlannerStructuredOutput(BaseModel):
     acceptance_criteria: List[AcceptanceCriterion] = Field(default_factory=list)
     extension_points: List[str] = Field(default_factory=list)
     refactor_baseline: Optional[str] = None
+    global_invariants: List[str] = Field(default_factory=list)
 
 
 def build_engineering_plan_from_planner_output(
@@ -277,5 +310,5 @@ def build_engineering_plan_from_planner_output(
     return EngineeringPlan(
         plan_id=plan_id, kind=kind, subtasks=output.subtasks,
         acceptance_criteria=output.acceptance_criteria, extension_points=output.extension_points,
-        refactor_baseline=output.refactor_baseline,
+        refactor_baseline=output.refactor_baseline, global_invariants=output.global_invariants,
     )

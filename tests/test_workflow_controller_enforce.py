@@ -27,6 +27,7 @@ from kriya.workflow.workflow_controller import (
     WorkflowController,
     build_subtask_constraint_context,
     build_subtask_goal_text,
+    build_subtask_semantic_context,
 )
 from kriya.workflow.workflow_types import SubtaskStatus
 
@@ -100,6 +101,37 @@ def test_subtask_goal_preserves_overall_constraints_and_mapped_acceptance_withou
     assert "framework X and integration Y" in constraints
     assert "only its approved files" in constraints
     assert "not this stage's completion scope" in constraints
+
+
+def test_subtask_semantic_context_projects_invariants_upstream_and_downstream_contracts():
+    invariant = "runtime configuration remains external"
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK, global_invariants=[invariant],
+        subtasks=[
+            Subtask(
+                id="config", description="write config", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="config.xml", action=FileAction.CREATE)],
+                provides=["config.ready"], relevant_global_invariants=[invariant],
+            ),
+            Subtask(
+                id="app", description="consume config", execution_method=ExecutionMethod.MODEL,
+                depends_on=["config"],
+                planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
+                requires=["config.ready"], relevant_global_invariants=[invariant],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.JUDGMENT, description="application consumes config",
+                )],
+            ),
+        ],
+    )
+
+    provider_context = build_subtask_semantic_context(plan, plan.subtasks[0])
+    consumer_context = build_subtask_semantic_context(plan, plan.subtasks[1])
+    assert '"consumer": "app"' in provider_context
+    assert '"capability": "config.ready"' in provider_context
+    assert '"provider": "config"' in consumer_context
+    assert invariant in consumer_context
+    assert "application consumes config" in consumer_context
 
 
 # --- core per-subtask orchestration ---
@@ -447,6 +479,75 @@ async def test_enforce_surfaces_grounded_out_of_scope_repair_as_plan_revision(tm
     assert result.legacy_result["reason_codes"] == ["PLAN_SCOPE_REVISION_REQUIRED"]
     assert result.subtask_results[0].status == SubtaskStatus.NEEDS_REVIEW
     assert result.subtask_results[0].reason_codes == ("PLAN_SCOPE_REVISION_REQUIRED",)
+
+
+@pytest.mark.asyncio
+async def test_enforce_reopens_unique_upstream_owner_and_reruns_consumer(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        global_invariants=["framework dependencies must be resolved"],
+        subtasks=[
+            Subtask(
+                id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+                provides=["build.dependencies.ready"],
+                relevant_global_invariants=["framework dependencies must be resolved"],
+            ),
+            Subtask(
+                id="s3", description="create application", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="src/App.java", action=FileAction.CREATE)],
+                requires=["build.dependencies.ready"],
+                relevant_global_invariants=["framework dependencies must be resolved"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if len(calls) == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "misdirected_edit",
+                    "required_files": ["pom.xml"],
+                    "allowed_files": ["src/App.java"],
+                },
+            }
+        if len(calls) == 3:
+            (tmp_path / "pom.xml").write_text("<project><dependencies/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        (tmp_path / "src").mkdir(exist_ok=True)
+        (tmp_path / "src" / "App.java").write_text("class App {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["src/App.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 4
+    assert calls[1]["allowed_write_relpaths"] == ["src/App.java"]
+    assert calls[2]["allowed_write_relpaths"] == ["pom.xml"]
+    assert calls[3]["allowed_write_relpaths"] == ["src/App.java"]
+    assert result.legacy_result["plan_recovery_events"] == [{
+        "failed_subtask": "s3",
+        "reopened_owner": "s1",
+        "required_repair_files": ["pom.xml"],
+        "classification": "PLAN_SCOPE_INSUFFICIENT",
+        "reason": None,
+        "invalidated_subtasks": ["s3"],
+        "owner_recovery_passed": True,
+    }]
 
 
 # --- enforce mode fully replaces legacy, never runs it too ---

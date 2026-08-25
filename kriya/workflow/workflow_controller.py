@@ -247,10 +247,11 @@ def build_subtask_goal_text(
     """MA7.8 - the per-subtask analogue of kriya/workflow/milestones.py's
     build_milestone_goal_text(): deterministic string assembly, no extra
     LLM call, same reasoning (run_generation_workflow's own repo-analysis
-    stage re-scans workspace_path fresh on every call, so "what does
-    subtask N see of subtasks 1..N-1" is already free once their real
-    output is on disk - no new context-plumbing needed here beyond what
-    milestones.py's own precedent already established)."""
+    stage re-scans workspace_path fresh on every call, so real upstream
+    output is visible once applied. Plan-level semantic contracts and
+    global invariants are rendered separately by
+    build_subtask_semantic_context(), keeping this string the bounded
+    executable goal rather than an unstructured copy of the whole plan)."""
     header = ""
     if subtask.depends_on:
         dep_list = ", ".join(sorted(subtask.depends_on))
@@ -300,6 +301,34 @@ def build_subtask_constraint_context(original_goal: str) -> str:
     )
 
 
+def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> str:
+    """Render the plan-level semantic contract for one bounded stage."""
+    providers = {
+        capability: provider.id
+        for provider in plan.subtasks
+        for capability in provider.provides
+    }
+    upstream = [
+        {"capability": requirement, "provider": providers.get(requirement)}
+        for requirement in subtask.requires
+    ]
+    downstream = [
+        {"consumer": consumer.id, "capability": requirement}
+        for consumer in plan.subtasks
+        for requirement in consumer.requires
+        if requirement in subtask.provides
+    ]
+    payload = {
+        "local_description": subtask.description,
+        "planned_files": [pf.path for pf in subtask.planned_files],
+        "relevant_global_invariants": list(subtask.relevant_global_invariants),
+        "upstream_contracts": upstream,
+        "downstream_requirements": downstream,
+        "verification_targets": [vm.description for vm in subtask.verification],
+    }
+    return "--- bounded subtask semantic context ---\n" + json.dumps(payload, indent=2, sort_keys=True)
+
+
 def build_subtask_plan_text(subtask: Subtask) -> str:
     """MA7-C1 (2026-08-25 external review) - the 'plan' half of the
     predetermined_plan/predetermined_design bypass (kriya/workflow/
@@ -334,6 +363,8 @@ def build_structured_plan_repair_prompt(
         "- Correct only invalid plan structure; do not broaden scope or invent modules/entrypoints.\n"
         "- Declare depends_on for every stage that consumes files, configuration, contracts, or "
         "build setup produced by another stage.\n"
+        "- Preserve or add goal-derived global_invariants, relevant_global_invariants, and stable "
+        "provides/requires metadata; every requirement needs exactly one provider and a depends_on edge.\n"
         "- Every execution_method=model subtask MUST declare every file it may modify in planned_files.\n"
         "- Verification-only build/test/run/output checks belong in verification or acceptance_criteria, "
         "not in a MODEL subtask with no files.\n"
@@ -365,6 +396,33 @@ def build_approved_plan_document(
         "stage_states": dict(stage_states),
         "plan": plan.model_dump(mode="json"),
     }
+
+
+def transitive_subtask_dependents(plan: EngineeringPlan, subtask_id: str) -> List[str]:
+    """Return every downstream stage invalidated by reopening one owner."""
+    dependents: set[str] = set()
+    frontier = [subtask_id]
+    while frontier:
+        provider_id = frontier.pop()
+        direct = [st.id for st in plan.subtasks if provider_id in st.depends_on]
+        for dependent_id in direct:
+            if dependent_id not in dependents:
+                dependents.add(dependent_id)
+                frontier.append(dependent_id)
+    return [subtask_id_ for subtask_id_ in topological_subtask_order(plan) if subtask_id_ in dependents]
+
+
+def resolve_scope_conflict_owners(
+    plan: EngineeringPlan, required_files: List[str], failed_subtask: Subtask,
+) -> Dict[str, List[str]]:
+    """Resolve required repair files to unique, declared upstream owners."""
+    owners: Dict[str, List[str]] = {}
+    for path in required_files:
+        owner = plan.file_owner(path)
+        if owner is None or owner.id == failed_subtask.id or owner.id not in failed_subtask.depends_on:
+            continue
+        owners.setdefault(owner.id, []).append(path)
+    return owners
 
 
 def compute_abandoned_plan_files(
@@ -1295,6 +1353,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         route=route, triage_service=self.workflow_engine.engineering_triage,
                         resuming_own_established_progress=has_own_established_progress,
                         require_model_planned_files=True,
+                        require_semantic_contracts=True,
                     )
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
@@ -1458,6 +1517,37 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         subtask_results: List[SubtaskResult] = []
         subtask_call_results: List[Dict[str, Any]] = []
         knowledge_gap_break: Optional[Dict[str, Any]] = None
+        recovered_owner_ids: set[str] = set()
+        plan_recovery_events: List[Dict[str, Any]] = []
+
+        async def _invoke_bounded_subtask(
+            target: Subtask,
+            target_position: int,
+            *,
+            recovery_context: str = "",
+        ) -> Dict[str, Any]:
+            target_goal = build_subtask_goal_text(target, target_position, total, plan=plan)
+            target_files = [pf.path for pf in target.planned_files]
+            target_context = project_for_subtask(execution_context, target)
+            target_context_text = subtask_executor._render_context_package(target_context)
+            return await self.workflow_engine.run_generation_workflow(
+                goal=target_goal,
+                workspace_path=workspace_path,
+                supplementary_context="\n\n".join(filter(None, (
+                    build_subtask_constraint_context(goal),
+                    build_subtask_semantic_context(plan, target),
+                    recovery_context,
+                    render_established_file_context(established_file_context),
+                    target_context_text,
+                ))),
+                established_files=sorted(established_file_context.keys()),
+                predetermined_plan=build_subtask_plan_text(target),
+                predetermined_design=target_goal,
+                predetermined_architect_files=target_files,
+                allowed_write_relpaths=target_files,
+                required_verification=[vm.model_dump(mode="json") for vm in target.verification],
+                **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
+            )
 
         for position, subtask_id in enumerate(order, start=1):
             subtask = plan.subtask_by_id(subtask_id)
@@ -1503,9 +1593,6 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             save_control_state(workspace_path, control_state)
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
-            subtask_goal = build_subtask_goal_text(
-                subtask, position, total, plan=plan,
-            )
             # MA7-C1 (2026-08-25 external review): the validated Subtask is
             # now authoritative - predetermined_plan/predetermined_design/
             # predetermined_architect_files (kriya/workflow/workflow.py)
@@ -1519,34 +1606,145 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # own docstring for the full account of what is and isn't
             # skipped.
             predetermined_files = [pf.path for pf in subtask.planned_files]
-            projected_context = project_for_subtask(execution_context, subtask)
-            projected_context_text = subtask_executor._render_context_package(projected_context)
-            call_result = await self.workflow_engine.run_generation_workflow(
-                goal=subtask_goal,
-                workspace_path=workspace_path,
-                supplementary_context="\n\n".join(filter(None, (
-                    build_subtask_constraint_context(goal),
-                    render_established_file_context(established_file_context),
-                    projected_context_text,
-                ))),
-                established_files=sorted(established_file_context.keys()),
-                predetermined_plan=build_subtask_plan_text(subtask),
-                predetermined_design=subtask_goal,
-                predetermined_architect_files=predetermined_files,
-                allowed_write_relpaths=predetermined_files,
-                required_verification=[vm.model_dump(mode="json") for vm in subtask.verification],
-                # trace_id_override is deliberately EXCLUDED (kriya/cli.py's own
-                # docstring for it: overwrite the ONE transient knowledge_gap
-                # trace row a single whole-goal retry produces) - forwarding it
-                # unfiltered here would give every subtask in this loop the SAME
-                # trace id, and since traces.db's own schema does INSERT OR
-                # REPLACE keyed by run_id, each subtask's own real trace row
-                # would silently overwrite the previous subtask's, not just the
-                # transient knowledge_gap placeholder it was meant to supersede.
-                # Each subtask call gets its OWN fresh trace id instead, same as
-                # every other real call this loop makes.
-                **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
-            )
+            call_result = await _invoke_bounded_subtask(subtask, position)
+            scope_conflict = call_result.get("plan_scope_conflict") or {}
+            owner_map = resolve_scope_conflict_owners(
+                plan, list(scope_conflict.get("required_files", [])), subtask,
+            ) if scope_conflict else {}
+            required_scope_files = set(scope_conflict.get("required_files", []))
+            resolved_scope_files = {
+                path for owner_paths in owner_map.values() for path in owner_paths
+            }
+            if len(owner_map) == 1 and resolved_scope_files == required_scope_files:
+                owner_id, required_owner_files = next(iter(owner_map.items()))
+                owner = plan.subtask_by_id(owner_id)
+                if owner is not None and owner_id not in recovered_owner_ids:
+                    recovered_owner_ids.add(owner_id)
+                    invalidated = transitive_subtask_dependents(plan, owner_id)
+                    for invalidated_id in invalidated:
+                        approved_stage_states[invalidated_id] = "pending"
+                    approved_stage_states[owner_id] = "in_progress"
+                    control_state = control_state.with_updates(
+                        subtask_states={
+                            **control_state.subtask_states,
+                            **{invalidated_id: "pending" for invalidated_id in invalidated},
+                            owner_id: "in_progress",
+                        },
+                    )
+                    save_approved_plan(
+                        workspace_path, plan.plan_id,
+                        build_approved_plan_document(
+                            plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                            stage_states=approved_stage_states, lifecycle_state="recovering",
+                        ),
+                    )
+                    save_control_state(workspace_path, control_state)
+                    owner_position = order.index(owner_id) + 1
+                    recovery_context = (
+                        "--- authoritative plan recovery ---\n"
+                        f"Failed consumer: {subtask.id}\n"
+                        f"Reopened owner: {owner_id}\n"
+                        f"Required repair files: {json.dumps(required_owner_files)}\n"
+                        f"Failure type: {scope_conflict.get('failure_type')}\n"
+                        "Repair only the reopened owner's approved files. Preserve its provided "
+                        "contracts and all relevant global invariants."
+                    )
+                    owner_result = await _invoke_bounded_subtask(
+                        owner, owner_position, recovery_context=recovery_context,
+                    )
+                    owner_declared = {pf.path for pf in owner.planned_files}
+                    owner_undeclared = sorted(
+                        set(owner_result.get("files") or []) - owner_declared
+                    )
+                    owner_written = set(owner_result.get("files") or [])
+                    owner_passed = (
+                        bool(owner_result.get("quality_gates_passed"))
+                        and not owner_undeclared
+                        and set(required_owner_files).issubset(owner_written)
+                    )
+                    plan_recovery_events.append({
+                        "failed_subtask": subtask.id,
+                        "reopened_owner": owner_id,
+                        "required_repair_files": sorted(required_owner_files),
+                        "classification": scope_conflict.get(
+                            "classification", "PLAN_SCOPE_INSUFFICIENT",
+                        ),
+                        "reason": scope_conflict.get("reason"),
+                        "invalidated_subtasks": invalidated,
+                        "owner_recovery_passed": owner_passed,
+                    })
+                    approved_stage_states[owner_id] = "completed" if owner_passed else "needs_review"
+                    control_state = control_state.with_updates(
+                        subtask_states={
+                            **control_state.subtask_states,
+                            owner_id: "completed" if owner_passed else "needs_review",
+                        },
+                        subtask_written_files={
+                            **control_state.subtask_written_files,
+                            owner_id: sorted(owner_result.get("files") or []),
+                        },
+                    )
+                    save_approved_plan(
+                        workspace_path, plan.plan_id,
+                        build_approved_plan_document(
+                            plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                            stage_states=approved_stage_states,
+                            lifecycle_state="in_progress" if owner_passed else "needs_review",
+                        ),
+                    )
+                    save_control_state(workspace_path, control_state)
+                    if owner_passed:
+                        for path in owner_result.get("files") or []:
+                            try:
+                                with open(
+                                    os.path.join(workspace_path, path), "r",
+                                    encoding="utf-8", errors="replace",
+                                ) as fh:
+                                    owner_content = fh.read()
+                            except OSError:
+                                continue
+                            projection = project_implementation_source(
+                                owner_content, path,
+                                _ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+                                reason="recovered_upstream_subtask",
+                            )
+                            established_file_context[path] = projection.content
+                        approved_stage_states[subtask.id] = "in_progress"
+                        control_state = control_state.with_updates(
+                            subtask_states={
+                                **control_state.subtask_states,
+                                subtask.id: "in_progress",
+                            },
+                        )
+                        save_approved_plan(
+                            workspace_path, plan.plan_id,
+                            build_approved_plan_document(
+                                plan, plan_hash=current_plan_hash,
+                                repair_attempts=repair_attempts,
+                                stage_states=approved_stage_states,
+                                lifecycle_state="in_progress",
+                            ),
+                        )
+                        save_control_state(workspace_path, control_state)
+                        call_result = await _invoke_bounded_subtask(
+                            subtask, position,
+                            recovery_context=(
+                                "--- upstream recovery completed ---\n"
+                                f"Upstream owner {owner_id} was repaired and re-verified. "
+                                "Re-run this consumer against the updated workspace."
+                            ),
+                        )
+                    else:
+                        for result_index, prior_result in enumerate(subtask_results):
+                            if prior_result.subtask_id == owner_id:
+                                subtask_results[result_index] = SubtaskResult(
+                                    subtask_id=owner_id,
+                                    status=SubtaskStatus.NEEDS_REVIEW,
+                                    execution_method=ExecutionMethod.MODEL.value,
+                                    error="upstream owner failed bounded plan recovery verification",
+                                    reason_codes=("PLAN_RECOVERY_OWNER_FAILED",),
+                                )
+                                break
             subtask_call_results.append(call_result)
 
             quality_gates_passed = bool(call_result.get("quality_gates_passed"))
@@ -1719,6 +1917,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["recovery"] = "PLAN_REPAIR"
             aggregated["reason_codes"] = ["PLAN_SCOPE_REVISION_REQUIRED"]
             aggregated["plan_scope_conflict"] = scope_conflict_result
+        if plan_recovery_events:
+            aggregated["plan_recovery_events"] = plan_recovery_events
         if subtask_call_results:
             aggregated["last_subtask_result"] = subtask_call_results[-1]
             # MA7.9 - real subtask retry-locality data, not a guess: each

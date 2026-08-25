@@ -269,8 +269,10 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             outside_scope = sorted(set(implicated) - allowed_scope)
             if outside_scope:
                 state.plan_scope_conflict = {
+                    "classification": "PLAN_SCOPE_INSUFFICIENT",
                     "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
                     "failure_type": fail_type,
+                    "reason": attribution.reasoning,
                     "required_files": outside_scope,
                     "allowed_files": sorted(allowed_scope),
                 }

@@ -141,6 +141,17 @@ def test_subtask_valid_model_subtask_with_dependency():
     assert st.depends_on == ["s0"]
 
 
+def test_subtask_semantic_contract_metadata_round_trips():
+    subtask = _model_subtask(
+        provides=["build.ready"], requires=["config.ready"],
+        relevant_global_invariants=["runtime must exit cleanly"],
+    )
+    restored = Subtask.model_validate(subtask.model_dump(mode="json"))
+    assert restored.provides == ["build.ready"]
+    assert restored.requires == ["config.ready"]
+    assert restored.relevant_global_invariants == ["runtime must exit cleanly"]
+
+
 # --- EngineeringPlan ---
 
 def test_engineering_plan_rejects_blank_plan_id():
@@ -157,6 +168,18 @@ def test_engineering_plan_subtask_by_id_found_and_missing():
     plan = EngineeringPlan(plan_id="p1", kind=ChangeKind.TASK, subtasks=[_model_subtask(id="s1")])
     assert plan.subtask_by_id("s1").id == "s1"
     assert plan.subtask_by_id("does-not-exist") is None
+
+
+def test_engineering_plan_resolves_only_unique_file_owner():
+    owner = _model_subtask(
+        id="s1", planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+    )
+    plan = EngineeringPlan(
+        plan_id="p1", kind=ChangeKind.TASK, subtasks=[owner],
+        global_invariants=["one application"],
+    )
+    assert plan.file_owner("pom.xml") == owner
+    assert plan.file_owner("missing.xml") is None
 
 
 def test_engineering_plan_content_hash_is_stable_and_deterministic():

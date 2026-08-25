@@ -102,6 +102,7 @@ async def validate_plan(
     context_files: Optional[Iterable[str]] = None,
     resuming_own_established_progress: bool = False,
     require_model_planned_files: bool = False,
+    require_semantic_contracts: bool = False,
 ) -> PlanValidationResult:
     """available_tool_names=None SKIPS the tool-registry check entirely -
     only safe for contexts guaranteed not to contain TOOL-tagged subtasks
@@ -131,6 +132,28 @@ async def validate_plan(
     errors: List[str] = []
     reason_codes: List[str] = []
 
+    if require_semantic_contracts and not plan.global_invariants:
+        errors.append("authoritative multi-stage planning requires non-empty global_invariants")
+        reason_codes.append("PLAN_GLOBAL_INVARIANTS_MISSING")
+    if require_semantic_contracts and len(plan.subtasks) > 1:
+        missing_contracts = [
+            st.id for st in plan.subtasks if not st.provides and not st.requires
+        ]
+        if missing_contracts:
+            errors.append(
+                f"subtask(s) {missing_contracts!r} declare neither provides nor requires; "
+                "authoritative multi-stage plans require explicit semantic contracts"
+            )
+            reason_codes.append("SUBTASK_SEMANTIC_CONTRACT_MISSING")
+        missing_invariant_projection = [
+            st.id for st in plan.subtasks if not st.relevant_global_invariants
+        ]
+        if missing_invariant_projection:
+            errors.append(
+                f"subtask(s) {missing_invariant_projection!r} receive no relevant_global_invariants"
+            )
+            reason_codes.append("SUBTASK_GLOBAL_INVARIANTS_MISSING")
+
     ids = [st.id for st in plan.subtasks]
     duplicate_ids = sorted({sid for sid in ids if ids.count(sid) > 1})
     if duplicate_ids:
@@ -144,6 +167,48 @@ async def validate_plan(
 
     if not _acyclic(plan.subtasks):
         errors.append("subtask dependency graph contains a cycle")
+
+    file_owners: Dict[str, List[str]] = {}
+    capability_providers: Dict[str, List[str]] = {}
+    for st in plan.subtasks:
+        for planned_file in st.planned_files:
+            file_owners.setdefault(planned_file.path, []).append(st.id)
+        for capability in st.provides:
+            capability_providers.setdefault(capability, []).append(st.id)
+    ambiguous_files = {path: owners for path, owners in file_owners.items() if len(owners) != 1}
+    if ambiguous_files:
+        errors.append(f"planned file ownership must be unique: {ambiguous_files}")
+        reason_codes.append("AMBIGUOUS_PLANNED_FILE_OWNERSHIP")
+    ambiguous_capabilities = {
+        capability: providers
+        for capability, providers in capability_providers.items()
+        if len(providers) != 1
+    }
+    if ambiguous_capabilities:
+        errors.append(f"semantic capabilities must have exactly one provider: {ambiguous_capabilities}")
+        reason_codes.append("AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER")
+
+    invariant_set = set(plan.global_invariants)
+    for st in plan.subtasks:
+        unknown_invariants = sorted(set(st.relevant_global_invariants) - invariant_set)
+        if unknown_invariants:
+            errors.append(
+                f"subtask {st.id!r} references unknown global invariant(s): {unknown_invariants}"
+            )
+            reason_codes.append("UNKNOWN_GLOBAL_INVARIANT")
+        for requirement in st.requires:
+            providers = capability_providers.get(requirement, [])
+            if not providers:
+                errors.append(
+                    f"subtask {st.id!r} requires {requirement!r} but no subtask provides it"
+                )
+                reason_codes.append("SUBTASK_REQUIREMENT_UNPROVIDED")
+            elif len(providers) == 1 and providers[0] not in st.depends_on:
+                errors.append(
+                    f"subtask {st.id!r} requires {requirement!r} from {providers[0]!r} "
+                    "but does not declare that provider in depends_on"
+                )
+                reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
 
     for st in plan.subtasks:
         if require_model_planned_files and st.execution_method == ExecutionMethod.MODEL and not st.planned_files:
