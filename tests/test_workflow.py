@@ -7817,6 +7817,113 @@ async def test_workflow_resumes_from_design_checkpoint_skips_planner_and_archite
     assert llm.complete.await_count == 2  # Planner + Architect calls both skipped
 
 
+# ============================================================
+# predetermined_plan/predetermined_design/predetermined_architect_files
+# (MA7-C1, 2026-08-25 external review) - the bounded-subtask-execution
+# bypass. Same shape as the resume_state-driven bypass tests above, but a
+# dedicated, independent mechanism (not resume_state itself - see this
+# param's own docstring for why: resume_state also flips
+# knowledge_risk_confirmed and participates in checkpoint/fingerprint-
+# drift semantics unrelated to "the caller already has a plan/design").
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_predetermined_plan_and_design_skip_both_planner_and_architect(tmp_path):
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',  # Developer
+        "Review: Approved",  # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create math library",
+        workspace_path=str(tmp_path),
+        predetermined_plan="Implement: add a math.py with an add() function",
+        predetermined_design="Implement: add a math.py with an add() function",
+        predetermined_architect_files=["math.py"],
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert res["plan"] == "Implement: add a math.py with an add() function"
+    assert res["design"] == "Implement: add a math.py with an add() function"
+    assert llm.complete.await_count == 2  # Planner + Architect calls both skipped, same as a design-checkpoint resume
+
+
+@pytest.mark.asyncio
+async def test_predetermined_plan_and_design_use_the_real_architect_files_list(tmp_path):
+    """architect_files drives expected-file completeness tracking
+    (generation_manifest) - must come from the SUPPLIED list, not an
+    Architect call that never happened."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create math library",
+        workspace_path=str(tmp_path),
+        predetermined_plan="Implement math.py",
+        predetermined_design="Implement math.py",
+        predetermined_architect_files=["math.py"],
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert "math.py" in res["files"]
+
+
+@pytest.mark.asyncio
+async def test_predetermined_plan_alone_without_design_and_architect_files_raises():
+    """All-or-nothing contract - a partial combination is a caller bug,
+    never silently "use only some predetermined values"."""
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+    with pytest.raises(ValueError):
+        await we.run_generation_workflow(
+            goal="x", workspace_path="/tmp", predetermined_plan="only the plan",
+        )
+
+
+@pytest.mark.asyncio
+async def test_predetermined_design_alone_without_plan_raises():
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+    with pytest.raises(ValueError):
+        await we.run_generation_workflow(
+            goal="x", workspace_path="/tmp", predetermined_design="only the design",
+        )
+
+
+@pytest.mark.asyncio
+async def test_predetermined_architect_files_alone_raises():
+    cfg = AppConfig()
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+    with pytest.raises(ValueError):
+        await we.run_generation_workflow(
+            goal="x", workspace_path="/tmp", predetermined_architect_files=["a.py"],
+        )
+
+
 @pytest.mark.asyncio
 async def test_workflow_resumes_from_developer_success_checkpoint_skips_quality_gates(tmp_path):
     """The most valuable resume point: Developer generation + compile/test gates

@@ -195,6 +195,21 @@ def build_subtask_goal_text(subtask: Subtask, position: int, total: int) -> str:
     return header + subtask.description + planned + verification
 
 
+def build_subtask_plan_text(subtask: Subtask) -> str:
+    """MA7-C1 (2026-08-25 external review) - the 'plan' half of the
+    predetermined_plan/predetermined_design bypass (kriya/workflow/
+    workflow.py::run_generation_workflow) that lets _run_structured_enforce
+    stop re-running a fresh Planner+Architect cycle for an already-validated
+    Subtask. Deliberately short, plain prose with no fenced code blocks -
+    run_attempt()'s own extract_planner_code_blocks(ctx.plan, ...) call
+    looks for inline code a real Planner sometimes drafts directly; finding
+    none here is correct (this subtask has no drafted code yet, only a
+    validated description/file list), and that extraction already degrades
+    gracefully to an ordinary fresh Developer generation call when it finds
+    nothing - exactly the behavior a bounded subtask needs."""
+    return f"Implement: {subtask.description}"
+
+
 class WorkflowController:
     """Wraps an existing WorkflowEngine (kriya/workflow/workflow.py) -
     never constructs its own agents/LLM client, and deliberately reuses
@@ -562,6 +577,28 @@ class WorkflowController:
         failure in subtask 2 only ever retries subtask 2's own call, never
         re-triggers subtask 1 or 3.
 
+        MA7-C1 (2026-08-25 external review): each subtask's own call no
+        longer runs a FRESH Planner+Architect cycle internally either - the
+        already-validated Subtask is now authoritative. build_subtask_plan_
+        text()/build_subtask_goal_text() synthesize predetermined_plan/
+        predetermined_design (plus predetermined_architect_files from the
+        subtask's own planned_files) and pass them into
+        run_generation_workflow(), which skips its own stages 2/3 (Plan/
+        Architect LLM calls) entirely when supplied - see that method's own
+        docstring for the exact mechanism and why it's a dedicated
+        parameter, not an overload of resume_state. Every OTHER stage
+        (Graph RAG retrieval, skill matching, the Developer/Quality-Gates
+        retry loop, failure grounding, attribution, repair, approval,
+        regression verification, trace logging) is completely unmodified -
+        this closes the "current: validated subtask -> fresh legacy
+        Planner/Architect cycle -> Developer" gap the external review
+        flagged as the single most important remaining MA6/MA7
+        architectural discrepancy, without duplicating or reimplementing
+        any of the retry/verification engine SubtaskExecutor deliberately
+        still doesn't own. MA6 invariant 4 (a subtask may not silently
+        modify undeclared files) is now actually enforced, not just
+        detectable - see the subtask loop below.
+
         Known, honest scope boundaries for this first real cut (not silent
         gaps - each is a deliberate, separate decision):
         - TOOL-tagged subtasks are refused outright (see below) - the same
@@ -796,20 +833,58 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
             subtask_goal = build_subtask_goal_text(subtask, position, total)
+            # MA7-C1 (2026-08-25 external review): the validated Subtask is
+            # now authoritative - predetermined_plan/predetermined_design/
+            # predetermined_architect_files (kriya/workflow/workflow.py)
+            # make run_generation_workflow() skip its own fresh Planner+
+            # Architect cycle entirely and use this subtask's own already-
+            # decided description/file list instead, while every other real
+            # guarantee (Graph RAG retrieval, skill matching, the Developer/
+            # Quality-Gates retry loop, failure grounding, attribution,
+            # repair, approval, regression verification, trace logging)
+            # stays completely intact and un-duplicated - see that method's
+            # own docstring for the full account of what is and isn't
+            # skipped.
+            predetermined_files = [pf.path for pf in subtask.planned_files]
             call_result = await self.workflow_engine.run_generation_workflow(
                 goal=subtask_goal,
                 workspace_path=workspace_path,
                 supplementary_context=render_established_file_context(established_file_context),
                 established_files=sorted(established_file_context.keys()),
+                predetermined_plan=build_subtask_plan_text(subtask),
+                predetermined_design=subtask_goal,
+                predetermined_architect_files=predetermined_files,
                 **legacy_kwargs,
             )
             subtask_call_results.append(call_result)
 
-            passed = bool(call_result.get("quality_gates_passed"))
+            quality_gates_passed = bool(call_result.get("quality_gates_passed"))
+            # MA6 invariant 4 (kriya/workflow/workflow_types.py::SubtaskResult's
+            # own docstring: "a subtask may not modify undeclared files
+            # silently... deciding what to do about it is the calling
+            # orchestrator's job") - finally enforced here, not just
+            # detectable. Skipped entirely when the subtask declared NO
+            # planned_files at all (nothing to enforce against, would
+            # otherwise guarantee a false violation on every file written).
+            undeclared_files = (
+                sorted(set(call_result.get("files") or []) - set(predetermined_files))
+                if predetermined_files else []
+            )
+            passed = quality_gates_passed and not undeclared_files
+            if not quality_gates_passed:
+                error = f"subtask did not pass Quality Gates (status={call_result.get('status')!r})"
+            elif undeclared_files:
+                error = (
+                    f"subtask wrote file(s) outside its own declared planned_files scope: "
+                    f"{undeclared_files!r} (declared: {predetermined_files!r}) - refusing to accept "
+                    "a Quality-Gates-passed result that silently broadened the validated subtask's scope"
+                )
+            else:
+                error = None
             result = SubtaskResult(
                 subtask_id=subtask.id, status=(SubtaskStatus.COMPLETED if passed else SubtaskStatus.FAILED),
                 execution_method=ExecutionMethod.MODEL.value,
-                error=None if passed else f"subtask did not pass Quality Gates (status={call_result.get('status')!r})",
+                undeclared_files=tuple(undeclared_files), error=error,
             )
             subtask_results.append(result)
             record_subtask_attempt(ledger, plan, result, attempt=1)

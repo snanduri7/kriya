@@ -464,6 +464,9 @@ class WorkflowEngine:
         milestone_total: Optional[int] = None,
         supplementary_context: str = "",
         established_files: Optional[List[str]] = None,
+        predetermined_plan: Optional[str] = None,
+        predetermined_design: Optional[str] = None,
+        predetermined_architect_files: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -547,7 +550,44 @@ class WorkflowEngine:
         remains - never worse than today's behavior, and correct whenever the retried
         call actually finishes. None (the default) preserves today's exact behavior for
         every other caller - a fresh run_id every time.
-        """
+
+        predetermined_plan/predetermined_design/predetermined_architect_files
+        (MA7-C1, 2026-08-25 external review): when ALL THREE are supplied,
+        stages 2 (Plan) and 3 (Architect) below are skipped entirely - no
+        self.planner.run()/self.architect.run_with_file_list() call happens,
+        the supplied values are used as-is - mirroring the EXISTING
+        resume_state-driven bypass immediately below each stage (same shape,
+        deliberately a SEPARATE, dedicated mechanism rather than overloading
+        resume_state itself: resume_state also flips knowledge_risk_confirmed
+        and participates in checkpoint/fingerprint-drift semantics that have
+        nothing to do with "the caller already knows the plan/design", and
+        reusing it here would silently pull in those unrelated effects).
+        Every OTHER stage (KnowledgeGuard, repository analysis, skill
+        matching/gap/conflict detection, Graph RAG retrieval, learned-
+        knowledge RAG, the Developer/Quality-Gates retry loop itself,
+        approval, worktree-apply, Reviewer, trace logging) is completely
+        unmodified and still runs in full - this is specifically NOT a new,
+        smaller execution path; it is this exact same method with its two
+        planning LLM calls swapped out for values the caller already has.
+        Built for WorkflowController._run_structured_enforce (kriya/workflow/
+        workflow_controller.py) to stop re-planning an already-validated
+        Subtask from scratch inside each subtask's own call, while keeping
+        every other real guarantee (retry budget, failure grounding,
+        attribution, repair, approval, full regression Quality Gates)
+        completely intact and un-duplicated. Partially supplying only one or
+        two of the three raises ValueError immediately - an all-or-nothing
+        contract, never a caller bug silently degrading into "use only
+        SOME predetermined values." None for all three (the default)
+        preserves today's exact behavior for every other caller."""
+        if (predetermined_plan is not None or predetermined_design is not None
+                or predetermined_architect_files is not None) and not (
+                    predetermined_plan is not None and predetermined_design is not None
+                    and predetermined_architect_files is not None
+                ):
+            raise ValueError(
+                "predetermined_plan/predetermined_design/predetermined_architect_files must be "
+                "supplied together or not at all - got a partial combination."
+            )
         # Deliberately BEFORE state is constructed below - state.generation_
         # started_monotonic (kriya/workflow/state.py) defaults to time.monotonic()
         # AT CONSTRUCTION, and that's the real clock generation_time_budget_seconds
@@ -1279,7 +1319,10 @@ class WorkflowEngine:
                 "exact stack. Your plan must not contradict any Rule listed there."
             )
 
-        if resume_state and resume_state.get("plan"):
+        if predetermined_plan is not None:
+            plan = predetermined_plan
+            logger.info("Using predetermined plan (bounded subtask execution) - skipping Planner Agent call.")
+        elif resume_state and resume_state.get("plan"):
             plan = resume_state["plan"]
             logger.info(f"Resuming checkpoint '{run_id}': using saved Plan, skipping Planner Agent call.")
         else:
@@ -1369,7 +1412,11 @@ class WorkflowEngine:
                 "design - they document specific mistakes already confirmed to happen for this "
                 "exact stack. Your design must not contradict any Rule listed there."
             )
-        if resume_state and resume_state.get("design"):
+        if predetermined_design is not None:
+            design = predetermined_design
+            architect_files = predetermined_architect_files
+            logger.info("Using predetermined design (bounded subtask execution) - skipping Architect Agent call.")
+        elif resume_state and resume_state.get("design"):
             design = resume_state["design"]
             architect_files = resume_state.get("architect_files")
             logger.info(f"Resuming checkpoint '{run_id}': using saved Design, skipping Architect Agent call.")

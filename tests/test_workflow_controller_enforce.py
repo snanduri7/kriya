@@ -532,7 +532,10 @@ async def test_enforce_without_resume_flag_never_skips_even_with_prior_state(tmp
 
     async def fake_run(**kwargs):
         calls.append(kwargs["goal"])
-        path = "a.py" if len(calls) == 1 else "b.py"
+        # "'s2'" only ever appears in s2's own goal text (its depends_on
+        # header names it) - robust across however many execute() calls
+        # happen in this test, unlike a bare len(calls) counter.
+        path = "b.py" if "'s2'" in kwargs["goal"] else "a.py"
         (tmp_path / path).write_text(f"# {path}")
         return {"status": "success", "quality_gates_passed": True, "files": [path]}
 
@@ -777,3 +780,106 @@ async def test_enforce_resume_does_not_claim_own_progress_when_nothing_completed
         await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
 
     assert mock_validate_plan.await_args.kwargs["resuming_own_established_progress"] is False
+
+
+# --- MA7-C1 (2026-08-25 external review): bounded subtask execution ---
+
+@pytest.mark.asyncio
+async def test_enforce_passes_predetermined_plan_design_and_files_from_the_subtask(tmp_path):
+    """The core MA7-C1 wiring: each subtask's own run_generation_workflow()
+    call must receive predetermined_plan/predetermined_design/
+    predetermined_architect_files derived from the ALREADY-VALIDATED
+    Subtask, not leave run_generation_workflow() to re-plan from scratch."""
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        path = "a.py" if len(calls) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert len(calls) == 2
+    assert calls[0]["predetermined_plan"] == "Implement: write a.py"
+    assert calls[0]["predetermined_architect_files"] == ["a.py"]
+    assert calls[0]["predetermined_design"]  # non-empty, real content
+    assert calls[1]["predetermined_architect_files"] == ["b.py"]
+
+
+@pytest.mark.asyncio
+async def test_enforce_rejects_a_subtask_that_writes_an_undeclared_file(tmp_path):
+    """MA6 invariant 4, finally enforced: a subtask reporting
+    quality_gates_passed=True must still be rejected if it wrote a file
+    outside its own declared planned_files - a Quality-Gates pass cannot
+    silently broaden the validated subtask's scope."""
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": ["a.py", "unexpected.py"],
+    })
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["quality_gates_passed"] is False
+    s1_result = result.subtask_results[0]
+    assert s1_result.status == SubtaskStatus.FAILED
+    assert s1_result.undeclared_files == ("unexpected.py",)
+    assert "unexpected.py" in s1_result.error
+    # A rejected s1 must stop the plan - s2 (which depends on s1) never runs.
+    we.run_generation_workflow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_enforce_accepts_a_subtask_that_stays_within_planned_files(tmp_path):
+    """Sanity check: scope enforcement must not false-positive on the
+    ordinary, correct case."""
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+
+    async def fake_run(**kwargs):
+        path = "a.py" if kwargs["predetermined_architect_files"] == ["a.py"] else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["quality_gates_passed"] is True
+    assert all(r.undeclared_files == () for r in result.subtask_results)
+
+
+@pytest.mark.asyncio
+async def test_enforce_scope_check_skipped_when_subtask_declares_no_planned_files(tmp_path):
+    """A subtask with an empty planned_files list has nothing to enforce
+    against - must not guarantee-fail on the first file it ever writes."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(id="s1", description="do something", execution_method=ExecutionMethod.MODEL)],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": ["whatever.py"],
+    })
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["quality_gates_passed"] is True
+    assert result.subtask_results[0].undeclared_files == ()
