@@ -14,6 +14,7 @@ from kriya.control.contracts import (
     compute_shape_hash,
     contract_records_from_provided_capabilities,
     mark_capabilities_implemented,
+    wire_contract_consumers,
 )
 from kriya.agents.contracts import MilestoneV2, ProvidedCapability
 
@@ -215,10 +216,11 @@ def test_to_dict_from_dict_round_trips_full_history_and_state():
 # was never built - confirmed dead code (zero callers anywhere) until
 # 2026-08-24, when it was wired into kriya/workflow/milestones.py::run_milestones().
 
-def _milestone(id="M1", provides=None):
+def _milestone(id="M1", provides=None, consumes=None, depends_on=None):
     return MilestoneV2(
-        id=id, goal="build the thing",
+        id=id, goal="build the thing", depends_on=depends_on or [],
         provides=[ProvidedCapability(**p) for p in (provides or [])],
+        consumes=list(consumes or []),
     )
 
 
@@ -297,3 +299,132 @@ def test_mark_capabilities_implemented_is_idempotent():
     mark_capabilities_implemented(reg, m)  # must not raise
 
     assert reg.get("M1:Cache").state == ContractState.IMPLEMENTED
+
+
+# --- add_consumer (2026-08-25 external review, P0: consumers were never populated anywhere) ---
+
+def test_add_consumer_appends_to_the_current_record():
+    reg = _registry_with_one_contract(consumers=())
+    updated = reg.add_consumer("M1:ProtocolClient", "M2")
+    assert updated.consumers == ("M2",)
+    assert reg.get("M1:ProtocolClient").consumers == ("M2",)
+
+
+def test_add_consumer_is_idempotent_no_duplicates():
+    reg = _registry_with_one_contract(consumers=())
+    reg.add_consumer("M1:ProtocolClient", "M2")
+    reg.add_consumer("M1:ProtocolClient", "M2")
+    assert reg.get("M1:ProtocolClient").consumers == ("M2",)
+
+
+def test_add_consumer_appends_multiple_distinct_consumers():
+    reg = _registry_with_one_contract(consumers=())
+    reg.add_consumer("M1:ProtocolClient", "M2")
+    reg.add_consumer("M1:ProtocolClient", "M4")
+    assert reg.get("M1:ProtocolClient").consumers == ("M2", "M4")
+
+
+def test_add_consumer_does_not_change_state_or_revision():
+    """Recording a consumer is bookkeeping about the contract, not a
+    lifecycle transition or a shape change - must be addable at ANY state,
+    including PROPOSED, without disturbing it."""
+    reg = _registry_with_one_contract(consumers=())
+    before = reg.get("M1:ProtocolClient")
+    after = reg.add_consumer("M1:ProtocolClient", "M2")
+    assert after.state == before.state == ContractState.PROPOSED
+    assert after.revision == before.revision
+    assert after.content_hash == before.content_hash
+
+
+def test_add_consumer_raises_on_unknown_contract():
+    reg = ContractRegistry()
+    with pytest.raises(ContractNotFoundError):
+        reg.add_consumer("does-not-exist", "M2")
+
+
+# --- wire_contract_consumers (real runtime population from milestone.consumes[]) ---
+
+def test_wire_contract_consumers_populates_from_real_consumes():
+    reg = ContractRegistry()
+    milestones = [
+        _milestone(id="M1", provides=[{"name": "ProtocolCodec"}]),
+        _milestone(id="M2", consumes=["ProtocolCodec"], depends_on=["M1"]),
+        _milestone(id="M4", consumes=["ProtocolCodec"], depends_on=["M1"]),
+    ]
+    for m in milestones:
+        contract_records_from_provided_capabilities(reg, m)
+
+    wire_contract_consumers(reg, milestones)
+
+    assert reg.get("M1:ProtocolCodec").consumers == ("M2", "M4")
+
+
+def test_wire_contract_consumers_ignores_a_consumed_name_nobody_provides():
+    """Should never happen for a plan that already passed
+    MilestonePlanValidator's reachability check, but must not raise even
+    if it somehow does - this function trusts, never re-validates,
+    reachability."""
+    reg = ContractRegistry()
+    milestones = [_milestone(id="M2", consumes=["NeverProvided"])]
+    wire_contract_consumers(reg, milestones)  # must not raise
+    assert reg.all_records() == ()
+
+
+def test_wire_contract_consumers_is_idempotent():
+    reg = ContractRegistry()
+    milestones = [
+        _milestone(id="M1", provides=[{"name": "ProtocolCodec"}]),
+        _milestone(id="M2", consumes=["ProtocolCodec"], depends_on=["M1"]),
+    ]
+    for m in milestones:
+        contract_records_from_provided_capabilities(reg, m)
+
+    wire_contract_consumers(reg, milestones)
+    wire_contract_consumers(reg, milestones)
+
+    assert reg.get("M1:ProtocolCodec").consumers == ("M2",)
+
+
+def test_wire_contract_consumers_feeds_real_propose_change_affected_consumers():
+    """The actual payoff: ContractChange.affected_consumers (propose_change's
+    whole reason for existing) must now name a real downstream milestone,
+    not always be empty."""
+    reg = ContractRegistry()
+    milestones = [
+        _milestone(id="M1", provides=[{"name": "ProtocolCodec", "description": "v1 shape"}]),
+        _milestone(id="M2", consumes=["ProtocolCodec"], depends_on=["M1"]),
+    ]
+    for m in milestones:
+        contract_records_from_provided_capabilities(reg, m)
+    wire_contract_consumers(reg, milestones)
+
+    change = reg.propose_change("M1:ProtocolCodec", proposed_shape="v2 shape", reason="real shape drift")
+    assert change.affected_consumers == ("M2",)
+
+
+# --- contract_records_from_provided_capabilities: real shape-change detection ---
+
+def test_bridge_detects_a_real_shape_change_and_applies_it_as_a_new_revision():
+    """2026-08-25 external review: this bridge previously always took the
+    "already registered" branch unconditionally on a second call, meaning
+    a genuine shape change could never be detected or recorded at all."""
+    reg = ContractRegistry()
+    m_v1 = _milestone(provides=[{"name": "Cache", "description": "shape A"}])
+    contract_records_from_provided_capabilities(reg, m_v1)
+
+    m_v2 = _milestone(provides=[{"name": "Cache", "description": "shape B"}])
+    records = contract_records_from_provided_capabilities(reg, m_v2)
+
+    assert records[0].shape == "shape B"
+    assert records[0].revision == "v2"
+    assert records[0].state == ContractState.PROPOSED, "a changed shape resets to PROPOSED, not silently FROZEN"
+    assert len(reg.history_for("M1:Cache")) == 2
+    assert reg.history_for("M1:Cache")[0].shape == "shape A", "the original revision is preserved in history"
+
+
+def test_bridge_still_idempotent_when_shape_is_unchanged():
+    reg = ContractRegistry()
+    m = _milestone(provides=[{"name": "Cache", "description": "shape A"}])
+    contract_records_from_provided_capabilities(reg, m)
+    contract_records_from_provided_capabilities(reg, m)
+    assert len(reg.history_for("M1:Cache")) == 1, "no new revision when nothing actually changed"

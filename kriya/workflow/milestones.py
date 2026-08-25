@@ -27,7 +27,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
-from kriya.control.contracts import contract_records_from_provided_capabilities, mark_capabilities_implemented
+from kriya.control.contracts import (
+    contract_records_from_provided_capabilities,
+    mark_capabilities_implemented,
+    wire_contract_consumers,
+)
 from kriya.control.persistence import load_contract_registry, save_contract_registry
 from kriya.workflow.context_projection import (
     project_implementation_source,
@@ -647,6 +651,15 @@ async def run_milestones(
     for m in run_state.milestones:
         if m.provides:
             contract_records_from_provided_capabilities(contract_registry, m)
+    # 2026-08-25 external review, P0 finding: the bridge above only ever
+    # registered the PROVIDER side - ContractRecord.consumers was always
+    # empty, so ContractChange.affected_consumers (propose_change()'s own
+    # reason for existing) could never actually name anyone. Wired here,
+    # after every milestone's provides[] is registered and BEFORE the
+    # execution loop starts, using the plan's own already-validated
+    # provides[]/consumes[] - MilestonePlanValidator already confirmed
+    # every consumed name is reachable before run_milestones() ever runs.
+    wire_contract_consumers(contract_registry, run_state.milestones)
     try:
         save_contract_registry(workspace_path, contract_registry)
     except Exception as e:

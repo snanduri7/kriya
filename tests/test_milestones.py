@@ -32,7 +32,7 @@ from kriya.workflow.milestones import (
 from kriya.workflow.repository_topology import RepositoryTopology
 
 
-def mkv2(id, goal="g", success_criterion="c", depends_on=None, mode=None, extends=None, provides=None):
+def mkv2(id, goal="g", success_criterion="c", depends_on=None, mode=None, extends=None, provides=None, consumes=None):
     """MilestoneV2 test helper - `success_criterion` becomes the milestone's
     single acceptance criterion, mirroring how normalize_legacy_milestones()
     (kriya/workflow/milestone_normalization.py) maps a v1 milestone's own
@@ -45,6 +45,7 @@ def mkv2(id, goal="g", success_criterion="c", depends_on=None, mode=None, extend
         id=id, goal=goal, depends_on=depends_on or [], mode=mode, extends=extends,
         acceptance=[AcceptanceCriterion(id=f"{id}-A1", description=success_criterion)],
         provides=[ProvidedCapability(**p) for p in (provides or [])],
+        consumes=list(consumes or []),
     )
 
 
@@ -734,6 +735,36 @@ async def test_run_milestones_registers_and_implements_declared_capabilities():
         assert codec.state == ContractState.IMPLEMENTED
         assert codec.shape == "encode/decode Protocol objects"
         assert registry.get("M2:MainEntrypoint").state == ContractState.IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_run_milestones_populates_real_contract_consumers_from_consumes():
+    """2026-08-25 external review, P0 finding: contract_records_from_
+    provided_capabilities() registered the provider side of every
+    declared capability but never populated ContractRecord.consumers from
+    the matching milestone.consumes[] - so ContractChange.affected_consumers
+    could never actually name a real downstream milestone. Wired via
+    wire_contract_consumers(), called once per run_milestones() invocation
+    right after every milestone's provides[] is registered."""
+    milestones = [
+        mkv2("M1", goal="g1", success_criterion="c1", provides=[{"name": "ProtocolCodec"}]),
+        mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"], consumes=["ProtocolCodec"]),
+        mkv2("M4", goal="g4", success_criterion="c4", depends_on=["M1"], consumes=["ProtocolCodec"]),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+        we = MagicMock()
+        we.run_generation_workflow = AsyncMock(
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
+        )
+        we.run_verifier = MagicMock()
+        we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+
+        result = await run_milestones(we, state, tmp)
+
+        assert result["status"] == "success"
+        registry = load_contract_registry(tmp)
+        assert registry.get("M1:ProtocolCodec").consumers == ("M2", "M4")
 
 
 @pytest.mark.asyncio

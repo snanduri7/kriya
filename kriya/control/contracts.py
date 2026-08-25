@@ -211,6 +211,27 @@ class ContractRegistry:
         self._history[contract_id][-1] = updated
         return updated
 
+    def add_consumer(self, contract_id: str, consumer_milestone_id: str) -> ContractRecord:
+        """Records that `consumer_milestone_id` depends on this contract -
+        real runtime population of ContractRecord.consumers, previously
+        only ever settable at register() time and never actually called
+        with a non-empty value anywhere (confirmed dead field, 2026-08-25
+        external review). Deliberately NOT a lifecycle transition
+        (_transition/state unchanged, no revision bump) - who consumes a
+        contract is bookkeeping about the contract, not a change to its
+        shape or approval state, and must be addable at ANY state
+        (a PROPOSED contract can already have known consumers lined up).
+        Idempotent - adding the same consumer twice is a no-op, not a
+        duplicate entry."""
+        current = self.get(contract_id)
+        if consumer_milestone_id in current.consumers:
+            return current
+        updated = replace(
+            current, consumers=current.consumers + (consumer_milestone_id,), updated_at=_now_iso(),
+        )
+        self._history[contract_id][-1] = updated
+        return updated
+
     def approve(self, contract_id: str) -> ContractRecord:
         return self._transition(contract_id, ContractState.APPROVED)
 
@@ -358,24 +379,83 @@ def contract_records_from_provided_capabilities(
     shape is capability.description when given, else capability.name -
     ProvidedCapability has no formal shape/schema field, only a name and
     an optional free-text description; this bridge does not invent a
-    schema that was never there. Already-registered ids are returned
-    as-is, not re-registered (register() would raise) - a resumed
-    multi-milestone run re-processing a milestone whose capabilities were
-    already registered on an earlier attempt must not crash."""
+    schema that was never there. Already-registered ids with an UNCHANGED
+    shape are returned as-is, not re-registered (register() would raise) -
+    a resumed multi-milestone run re-processing a milestone whose
+    capabilities were already registered on an earlier attempt must not
+    crash. Already-registered ids whose shape genuinely DIFFERS from what
+    was previously recorded (a real, if unusual, case - the same workspace
+    later planned with a milestone/capability name that collides with an
+    earlier, unrelated goal's) go through propose_change()/apply_change()
+    (MA5.3) instead of being silently overwritten or silently ignored -
+    2026-08-25, external review: this bridge previously always took the
+    "already registered" branch unconditionally, meaning a real shape
+    change could never be detected or recorded at all."""
     records = []
     for capability in milestone.provides:
         contract_id = f"{milestone.id}:{capability.name}"
+        new_shape = capability.description or capability.name
         existing = registry.try_get(contract_id)
-        if existing is not None:
+        if existing is None:
+            records.append(registry.register(
+                contract_id=contract_id,
+                name=capability.name,
+                provider_milestone_id=milestone.id,
+                shape=new_shape,
+            ))
+        elif existing.shape != new_shape:
+            change = registry.propose_change(
+                contract_id, proposed_shape=new_shape,
+                reason=(
+                    f"milestone {milestone.id!r}'s declared shape for capability "
+                    f"{capability.name!r} differs from the previously registered shape"
+                ),
+            )
+            records.append(registry.apply_change(change))
+        else:
             records.append(existing)
-            continue
-        records.append(registry.register(
-            contract_id=contract_id,
-            name=capability.name,
-            provider_milestone_id=milestone.id,
-            shape=capability.description or capability.name,
-        ))
     return tuple(records)
+
+
+def wire_contract_consumers(registry: "ContractRegistry", milestones: Any) -> None:
+    """The other half of the P0 gap the 2026-08-25 external review found:
+    contract_records_from_provided_capabilities() above registers the
+    PROVIDER side of every declared capability, but nothing ever populated
+    ContractRecord.consumers from the matching milestone.consumes[] - so
+    ContractChange.affected_consumers (propose_change()'s whole reason for
+    existing) was always empty, and consumers_of() could never answer "who
+    actually depends on this." Call this once, after every milestone in
+    `milestones` has already been registered via
+    contract_records_from_provided_capabilities() (run_milestones() does
+    both in one pass, before the execution loop starts).
+
+    Builds a simple capability-name -> provider-milestone-id map directly
+    from `milestones` (NOT re-deriving milestone_validation.py's own
+    ancestry-aware reachability check - by the time run_milestones() calls
+    this, the plan has ALREADY passed MilestonePlanValidator's reachability
+    validation, so every name in some milestone's consumes[] is guaranteed
+    to have exactly the provider(s) that check already confirmed reachable;
+    re-deriving that here would duplicate, not add, safety). A capability
+    name provided by more than one milestone registers the consumer against
+    ALL of them - ambiguous by construction (the same ambiguity
+    milestone_validation.py's own _capability_providers already tolerates),
+    not this function's problem to resolve.
+
+    `milestones` is typed Any (an Iterable of MilestoneV2-shaped objects),
+    matching contract_records_from_provided_capabilities()'s own reasoning
+    for not importing kriya.agents.contracts into this control-plane
+    module."""
+    provider_ids_by_capability: Dict[str, List[str]] = {}
+    for m in milestones:
+        for capability in m.provides:
+            provider_ids_by_capability.setdefault(capability.name, []).append(m.id)
+
+    for m in milestones:
+        for capability_name in m.consumes:
+            for provider_id in provider_ids_by_capability.get(capability_name, []):
+                contract_id = f"{provider_id}:{capability_name}"
+                if registry.try_get(contract_id) is not None:
+                    registry.add_consumer(contract_id, m.id)
 
 
 def mark_capabilities_implemented(registry: "ContractRegistry", milestone: Any) -> None:
