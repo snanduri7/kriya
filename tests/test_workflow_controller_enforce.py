@@ -664,6 +664,71 @@ async def test_enforce_resume_refused_when_plan_hash_differs(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_enforce_resume_refused_quarantines_abandoned_plan_files(tmp_path):
+    """Regression test for a real live bug, 2026-08-25 (protocol_encoder_java):
+    an abandoned plan's own completed subtask had already applied a real
+    file to the workspace; a later re-plan whose resume gets refused (a
+    different plan hash) no longer referenced that file at all, but nothing
+    ever cleaned it up - it just sat there, orphaned, alongside the new
+    plan's own output. Confirms the abandoned file is moved into
+    .kriya/abandoned_plan_files/ (never deleted, never left in the active
+    tree) while a file BOTH plans still reference is left untouched."""
+    _init_git_repo(tmp_path)
+    plan_a = _two_subtask_plan()  # s1 -> a.py, s2 -> b.py
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run_a(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "a.py" if len(calls) == 1 else "b.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run_a
+
+    p1, p2, p3 = _patched(plan_a)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+    assert (tmp_path / "b.py").exists()
+
+    # A re-plan whose s2 writes c.py instead of b.py - a genuinely different
+    # plan shape (content_hash() differs), not just an edited description.
+    plan_b = EngineeringPlan(
+        plan_id="run2", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="write c.py instead", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], planned_files=[PlannedFile(path="c.py", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    assert plan_b.content_hash() != plan_a.content_hash()
+
+    async def fake_run_b(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "c.py" if "c.py" in kwargs["goal"] else "a.py"
+        (tmp_path / path).write_text(f"# {path} v2")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run_b
+
+    p1, p2, p3 = _patched(plan_b)
+    with p1, p2, p3:
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
+
+    assert (tmp_path / "a.py").exists(), "still referenced by the new plan - must stay in place"
+    assert (tmp_path / "c.py").exists()
+    assert not (tmp_path / "b.py").exists(), "abandoned - must no longer sit in the active tree"
+    quarantined = list((tmp_path / ".kriya" / "abandoned_plan_files").rglob("b.py"))
+    assert len(quarantined) == 1
+
+
+@pytest.mark.asyncio
 async def test_enforce_resume_refused_when_workspace_has_drifted(tmp_path):
     _init_git_repo(tmp_path)
     plan = _two_subtask_plan()

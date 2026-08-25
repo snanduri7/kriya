@@ -99,6 +99,28 @@ def test_subtask_states_defaults_empty_when_loading_a_pre_existing_persisted_dic
     assert reconstructed.subtask_states == {}
 
 
+def test_subtask_written_files_defaults_empty_and_round_trips():
+    """subtask_written_files (added 2026-08-25) records the real, applied
+    file paths each completed subtask wrote - see this field's own docstring
+    for the abandoned-plan-residue bug it exists to let WorkflowController
+    detect and clean up."""
+    fresh = ControlState.new(run_id="run-1")
+    assert fresh.subtask_written_files == {}
+
+    state = fresh.with_updates(subtask_written_files={"s1": ["Protocol.java"], "s2": ["ProtocolMain.java"]})
+    reconstructed = ControlState.from_dict(state.to_dict())
+    assert reconstructed.subtask_written_files == {"s1": ["Protocol.java"], "s2": ["ProtocolMain.java"]}
+
+
+def test_subtask_written_files_defaults_empty_when_loading_a_pre_existing_persisted_dict():
+    """A ControlState persisted before this field existed must load cleanly
+    with subtask_written_files={}, not KeyError."""
+    old_style_dict = ControlState.new(run_id="run-1").to_dict()
+    del old_style_dict["subtask_written_files"]
+    reconstructed = ControlState.from_dict(old_style_dict)
+    assert reconstructed.subtask_written_files == {}
+
+
 def test_from_dict_always_drops_live_route_and_profile_objects():
     """The documented asymmetry - a loaded ControlState never resurrects a
     live EngineeringRoute/ProcessProfile from its own to_dict() summary."""

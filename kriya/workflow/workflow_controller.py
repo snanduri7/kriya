@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import parse_planner_structured_output
@@ -208,6 +209,67 @@ def build_subtask_plan_text(subtask: Subtask) -> str:
     gracefully to an ordinary fresh Developer generation call when it finds
     nothing - exactly the behavior a bounded subtask needs."""
     return f"Implement: {subtask.description}"
+
+
+def compute_abandoned_plan_files(
+    prior_subtask_states: Dict[str, str],
+    prior_subtask_written_files: Dict[str, List[str]],
+    new_plan_files: Any,
+) -> List[str]:
+    """Pure computation of which real, already-applied files belong ONLY to
+    an abandoned plan and no longer belong to any subtask in a freshly
+    re-planned one - see ControlState.subtask_written_files's own docstring
+    (kriya/control/state.py) for the live incident (protocol_encoder_java,
+    2026-08-25) this closes.
+
+    A file counts as abandoned only if it was written by a subtask the prior
+    ControlState recorded as genuinely "completed" (a failed/incomplete
+    subtask's own written files are ordinary in-progress work, not
+    abandoned residue - resume already refuses to reuse them for an
+    unrelated reason) AND it does not appear anywhere in the NEW plan's own
+    declared planned_files. Deliberately conservative: a file the new plan
+    happens to declare too (the re-plan genuinely reuses/regenerates it) is
+    left alone, never treated as abandoned just because it came from an
+    earlier subtask id."""
+    new_files = set(new_plan_files)
+    abandoned: set = set()
+    for subtask_id, status in prior_subtask_states.items():
+        if status != "completed":
+            continue
+        for path in prior_subtask_written_files.get(subtask_id, []):
+            if path not in new_files:
+                abandoned.add(path)
+    return sorted(abandoned)
+
+
+def quarantine_abandoned_plan_files(
+    workspace_path: str, abandoned_files: List[str], quarantine_subdir: str,
+) -> List[str]:
+    """Moves (never deletes) each real, on-disk abandoned file into
+    `.kriya/abandoned_plan_files/<quarantine_subdir>/<relative_path>`,
+    preserving it exactly rather than discarding it outright - a re-plan
+    correctly abandoning a file is still a real, possibly-informative
+    Kriya-authored artifact, not proven garbage, and this whole mechanism
+    only ever runs unattended (enforce mode, no human approval gate in this
+    path) - see this module's own risk-handling convention (prefer a
+    reversible move over deletion whenever nothing forces an irreversible
+    one). Best-effort per file: a single unmovable file (permissions, races,
+    already gone) is logged and skipped, never allowed to fail the real run
+    this cleanup is only ever a courtesy alongside. Returns the list of
+    files actually moved."""
+    moved: List[str] = []
+    for rel_path in abandoned_files:
+        src = os.path.join(workspace_path, rel_path)
+        if not os.path.isfile(src):
+            continue
+        dest = os.path.join(workspace_path, ".kriya", "abandoned_plan_files", quarantine_subdir, rel_path)
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.move(src, dest)
+            moved.append(rel_path)
+        except OSError as e:
+            logger.warning(f"Could not quarantine abandoned plan file {rel_path!r} (non-fatal, left in place): {e}")
+    return moved
 
 
 class WorkflowController:
@@ -838,6 +900,39 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "subtask(s) already completed will be skipped."
                     )
 
+        # A refused resume (either branch above) leaves resumed_subtask_states
+        # empty while prior_control_state still holds real record of an
+        # earlier, now-abandoned plan's completed work - the exact gap that
+        # let ProtocolMain.java linger in the real workspace live, 2026-08-25
+        # (protocol_encoder_java): see compute_abandoned_plan_files()/
+        # quarantine_abandoned_plan_files()'s own docstrings above for the
+        # full incident and design. Best-effort/non-fatal, matching this
+        # whole method's "a bookkeeping/cleanup convenience never fails the
+        # real run" convention - deliberately scoped to only the resume-was-
+        # REQUESTED-but-refused case (prior_control_state is only ever loaded
+        # at all when the caller opted into resume), not a broader always-on
+        # scan of the workspace for anything Kriya might have ever written.
+        if prior_control_state is not None and not resumed_subtask_states:
+            try:
+                new_plan_files = {pf.path for st in plan.subtasks for pf in st.planned_files}
+                abandoned_files = compute_abandoned_plan_files(
+                    prior_control_state.subtask_states,
+                    prior_control_state.subtask_written_files,
+                    new_plan_files,
+                )
+                quarantined = quarantine_abandoned_plan_files(
+                    workspace_path, abandoned_files, prior_control_state.run_id,
+                )
+                if quarantined:
+                    logger.warning(
+                        f"WorkflowController enforce run {run_id!r}: the abandoned plan's own "
+                        f"completed subtask(s) had already applied {quarantined!r} to the real "
+                        "workspace - moved to .kriya/abandoned_plan_files/ since no subtask in "
+                        "the freshly re-planned goal references them anymore."
+                    )
+            except Exception as e:
+                logger.warning(f"WorkflowController enforce run {run_id!r}: abandoned-plan-file cleanup failed (non-fatal): {e}")
+
         # base_commit/tree_hash are refreshed here for EVERY route kind, not
         # just REFACTOR (_attach_refactor_baseline above only sets them for
         # that one kind) - subtask resume needs a real workspace-drift
@@ -949,6 +1044,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # own completed_milestone_ids sidecar convention.
             control_state = control_state.with_updates(
                 subtask_states={**control_state.subtask_states, subtask.id: result.status.value},
+                # The real, applied file list (not the plan's mere upfront
+                # planned_files declaration) - see ControlState.subtask_
+                # written_files's own docstring for why a later re-plan
+                # needs this to detect abandoned residue.
+                subtask_written_files={
+                    **control_state.subtask_written_files,
+                    subtask.id: sorted(call_result.get("files", [])),
+                },
             )
             try:
                 save_control_state(workspace_path, control_state)

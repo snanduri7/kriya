@@ -42,7 +42,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from kriya.workflow.process_profile import ProcessProfile
 from kriya.workflow.triage import EngineeringRoute
@@ -86,6 +86,24 @@ class ControlState:
     # exactly the drift MA5.9 was designed to catch.
     subtask_states: Dict[str, str] = field(default_factory=dict)
 
+    # subtask_id -> the real, applied file paths that subtask actually wrote
+    # to the workspace (not the plan's mere upfront planned_files declaration -
+    # this mirrors call_result["files"], the ground truth) - added 2026-08-25
+    # so a LATER re-plan that abandons this subtask (a fresh Planner call
+    # produces a different plan shape - see WorkflowController._run_structured_
+    # enforce's "refusing subtask resume" path) has enough information to
+    # identify which real, already-applied files belonged only to the
+    # abandoned plan and no longer belong to any subtask in the new one.
+    # Found live, 2026-08-25 (protocol_encoder_java): an abandoned plan's own
+    # completed subtask had already applied ProtocolMain.java to the real
+    # workspace; the next run re-planned with a different shape (Main.java
+    # instead) and nothing ever knew ProtocolMain.java was now orphaned -
+    # left silently on disk, alongside the new files, with no plan
+    # referencing it. Without this field, that recovery is structurally
+    # impossible - subtask_states alone only says "id -> completed", not
+    # "which files did completing it produce."
+    subtask_written_files: Dict[str, List[str]] = field(default_factory=dict)
+
     current_plan_hash: Optional[str] = None
     current_contract_hash: Optional[str] = None
 
@@ -126,6 +144,7 @@ class ControlState:
             "current_milestone_id": self.current_milestone_id,
             "milestone_states": dict(self.milestone_states),
             "subtask_states": dict(self.subtask_states),
+            "subtask_written_files": {k: list(v) for k, v in self.subtask_written_files.items()},
             "current_plan_hash": self.current_plan_hash,
             "current_contract_hash": self.current_contract_hash,
             "base_commit": self.base_commit,
@@ -154,6 +173,7 @@ class ControlState:
             current_milestone_id=data.get("current_milestone_id"),
             milestone_states=dict(data.get("milestone_states", {})),
             subtask_states=dict(data.get("subtask_states", {})),
+            subtask_written_files={k: list(v) for k, v in data.get("subtask_written_files", {}).items()},
             current_plan_hash=data.get("current_plan_hash"),
             current_contract_hash=data.get("current_contract_hash"),
             base_commit=data.get("base_commit"),

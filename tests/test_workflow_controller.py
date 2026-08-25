@@ -17,7 +17,10 @@ import pytest
 from kriya.workflow.plan_schema import AcceptanceCriterion, EngineeringPlan, ExecutionMethod, Subtask
 from kriya.workflow.plan_validation import PlanValidationResult
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
-from kriya.workflow.workflow_controller import WorkflowController, WorkflowControllerConfigurationError
+from kriya.workflow.workflow_controller import (
+    WorkflowController, WorkflowControllerConfigurationError,
+    compute_abandoned_plan_files, quarantine_abandoned_plan_files,
+)
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
 
 
@@ -40,6 +43,64 @@ def _workflow_engine(route=None, legacy_result=None):
     we.engineering_triage.classify = AsyncMock(return_value=route or _route())
     we.run_generation_workflow = AsyncMock(return_value=legacy_result or {"status": "success", "run_id": "legacy-run"})
     return we
+
+
+# --- abandoned-plan-file cleanup (2026-08-25 live finding) ---
+
+def test_compute_abandoned_plan_files_flags_a_file_from_a_completed_subtask_the_new_plan_no_longer_declares():
+    abandoned = compute_abandoned_plan_files(
+        prior_subtask_states={"s1": "completed", "s2": "completed"},
+        prior_subtask_written_files={"s1": ["a.py"], "s2": ["b.py"]},
+        new_plan_files={"a.py", "c.py"},
+    )
+    assert abandoned == ["b.py"]
+
+
+def test_compute_abandoned_plan_files_leaves_a_file_the_new_plan_still_declares():
+    abandoned = compute_abandoned_plan_files(
+        prior_subtask_states={"s1": "completed"},
+        prior_subtask_written_files={"s1": ["a.py"]},
+        new_plan_files={"a.py"},
+    )
+    assert abandoned == []
+
+
+def test_compute_abandoned_plan_files_ignores_a_subtask_that_never_completed():
+    """A failed/incomplete subtask's own written files are ordinary
+    in-progress work, not abandoned residue - resume already refuses to
+    reuse them for an unrelated reason (plan-hash/drift mismatch)."""
+    abandoned = compute_abandoned_plan_files(
+        prior_subtask_states={"s1": "failed"},
+        prior_subtask_written_files={"s1": ["a.py"]},
+        new_plan_files=set(),
+    )
+    assert abandoned == []
+
+
+def test_quarantine_abandoned_plan_files_moves_the_file_and_leaves_no_original(tmp_path):
+    (tmp_path / "b.py").write_text("# b")
+    moved = quarantine_abandoned_plan_files(str(tmp_path), ["b.py"], "run-1")
+    assert moved == ["b.py"]
+    assert not (tmp_path / "b.py").exists()
+    quarantined = tmp_path / ".kriya" / "abandoned_plan_files" / "run-1" / "b.py"
+    assert quarantined.exists()
+    assert quarantined.read_text() == "# b"
+
+
+def test_quarantine_abandoned_plan_files_preserves_subdirectory_structure(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.py").write_text("# b")
+    moved = quarantine_abandoned_plan_files(str(tmp_path), ["sub/b.py"], "run-1")
+    assert moved == ["sub/b.py"]
+    quarantined = tmp_path / ".kriya" / "abandoned_plan_files" / "run-1" / "sub" / "b.py"
+    assert quarantined.exists()
+
+
+def test_quarantine_abandoned_plan_files_skips_a_file_that_no_longer_exists():
+    """Never guessed at, never raised - a file already gone (a previous
+    quarantine, a manual delete) is simply not in the returned list."""
+    moved = quarantine_abandoned_plan_files("/nonexistent/workspace", ["gone.py"], "run-1")
+    assert moved == []
 
 
 # --- migration_mode validation ---
