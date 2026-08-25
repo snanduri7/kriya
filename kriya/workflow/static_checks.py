@@ -408,6 +408,88 @@ def _ecosystem_for_marker(filepath: str) -> Optional[str]:
     return None
 
 
+# MA7.5's own honest scope note (find_established_stack_drift's docstring,
+# 2026-08-24): "a first-milestone goal-text-vs-generated-language mismatch
+# ... intentionally out of scope". Closed 2026-08-25 (external review, P1) -
+# _MARKER_ECOSYSTEM_FAMILY groups the marker-file ecosystems above (which
+# distinguish maven/gradle - a real distinction for FILE drift) into the
+# coarser LANGUAGE family a human names in a goal ("Java" doesn't imply
+# maven vs gradle; the goal-text side can't know that distinction, only the
+# broader family). _GOAL_FAMILY_KEYWORDS is deliberately narrow and
+# high-precision-only, framework names and unambiguous language names ONLY -
+# no bare, common-English-collidable words (e.g. "go" alone is excluded;
+# "golang" is not, matching this session's own hard-won lesson from
+# _EXPLICIT_TEST_REQUEST_RE's three real false-positive incidents - a
+# missed catch here is only as bad as before this fix; a false positive
+# would burn an entire retry budget on a goal that never asked for this
+# check to fire at all, the exact failure mode already paid for once today).
+_MARKER_ECOSYSTEM_FAMILY: Dict[str, str] = {
+    "java (maven)": "java",
+    "java (gradle)": "java",
+    "ruby": "ruby",
+    "python": "python",
+    "npm": "node",
+    "go": "go",
+}
+
+_GOAL_FAMILY_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "java": ("java", "spring", "springboot", "spring boot", "maven", "gradle"),
+    "python": ("python", "django", "flask", "fastapi"),
+    "ruby": ("ruby", "rails", "sinatra"),
+    "node": ("node\\.js", "nodejs", "express\\.js", "npm"),
+    "go": ("golang",),
+}
+_GOAL_FAMILY_PATTERNS: Dict[str, "re.Pattern"] = {
+    family: re.compile(r"\b(?:" + "|".join(keywords) + r")\b", re.IGNORECASE)
+    for family, keywords in _GOAL_FAMILY_KEYWORDS.items()
+}
+
+
+def _goal_declared_family(goal: str) -> Optional[str]:
+    """The single, unambiguous language family the goal text names - None
+    if the goal names zero families (nothing to check against) OR two-plus
+    DIFFERENT families (an intentionally mixed-stack goal, e.g. "a Python
+    service called from a Java client" - ambiguous on purpose, not this
+    check's business to referee)."""
+    matched = {family for family, pattern in _GOAL_FAMILY_PATTERNS.items() if pattern.search(goal or "")}
+    return next(iter(matched)) if len(matched) == 1 else None
+
+
+def find_goal_stack_mismatch(goal: str, all_files_written: Iterable[str]) -> Optional[str]:
+    """The first-milestone counterpart to find_established_stack_drift
+    above: that check compares NEW writes against an ALREADY-ESTABLISHED
+    marker, so it structurally cannot fire on a genuinely first-ever
+    milestone/goal (nothing established yet to contradict). This compares
+    the GOAL TEXT's own declared language family against whatever
+    ecosystem marker THIS SAME attempt's writes establish - "goal said
+    Django, generated architecture wrote pom.xml" is now catchable even
+    with zero established history. A weaker, keyword-based signal than the
+    established-marker check (goal text is natural language, not a real
+    file on disk) - see _goal_declared_family's own docstring for why it's
+    deliberately conservative (fires on unambiguous single-family goals
+    only). Only ONE mismatch is ever reported (first found, sorted
+    iteration), matching this module's own "first violation wins"
+    convention."""
+    declared_family = _goal_declared_family(goal)
+    if declared_family is None:
+        return None
+
+    for filepath in sorted(all_files_written):
+        ecosystem = _ecosystem_for_marker(filepath)
+        if ecosystem is None:
+            continue
+        written_family = _MARKER_ECOSYSTEM_FAMILY[ecosystem]
+        if written_family != declared_family:
+            return (
+                f"the goal explicitly names '{declared_family}', but {filepath} establishes "
+                f"a '{written_family}' ({ecosystem}) project instead. Generated architecture "
+                "must match the ecosystem the goal actually asked for - if this goal genuinely "
+                "requires a different or additional ecosystem, say so explicitly rather than "
+                "silently substituting one."
+            )
+    return None
+
+
 def find_established_stack_drift(worktree_path: str, all_files_written: Iterable[str]) -> Optional[str]:
     """MA7.5 (MA6 spec section 72's "Django doesn't drift to Spring, Python
     doesn't invent Maven layout" regression category) - generic, marker-

@@ -24,15 +24,21 @@ category X covered," start here before assuming it needs a new test.
    per explicit user direction ("we cannot afford tests for all kinds of
    combinations, the design should handle it"):
      kriya/workflow/static_checks.py::find_established_stack_drift
-     tests/test_stack_drift.py (10 tests)
-   Real scope boundary, not yet closed: only fires when the workspace
-   already has an ESTABLISHED marker (2nd+ milestone or an existing repo) -
-   a first-milestone goal-text-vs-generated-language mismatch (nothing
-   established yet to contradict) is a materially different, weaker
-   signal (keyword-based, not file-existence-based) and remains
-   unimplemented. Live-model validation of this check has NOT been done
-   yet - the user's own stated expectation is that this is exactly the
-   kind of thing likely to surface something under a real model.
+     tests/test_stack_drift.py (19 tests)
+   First-milestone gap CLOSED 2026-08-25 (external review, P1):
+   find_established_stack_drift only fires when the workspace already has
+   an ESTABLISHED marker (2nd+ milestone or an existing repo) - a
+   first-milestone goal-text-vs-generated-language mismatch (nothing
+   established yet to contradict) was a real, separate gap. Closed by the
+   companion kriya/workflow/static_checks.py::find_goal_stack_mismatch -
+   compares the goal text's own declared language family (a deliberately
+   narrow, high-precision keyword set - framework names and unambiguous
+   language names only, no bare common-English-collidable words like bare
+   "go") against this attempt's own newly-written ecosystem marker, wired
+   into the same kriya/workflow/attempt.py call site. Live-model
+   validation of NEITHER check has been done yet - the user's own stated
+   expectation for the established-marker check is that this is exactly
+   the kind of thing likely to surface something under a real model.
 
 3. Dependency/import preservation across milestones (an earlier
    milestone's file must stay visible/correct to later ones):
@@ -83,6 +89,7 @@ def test_every_named_regression_guard_still_exists():
         ("kriya.workflow.repository_topology", "detect_repository_topology"),
         ("kriya.workflow.milestone_validation", "MilestonePlanValidator"),
         ("kriya.workflow.static_checks", "find_established_stack_drift"),
+        ("kriya.workflow.static_checks", "find_goal_stack_mismatch"),
         ("kriya.core.llm", "is_local_url"),
         ("kriya.skills.skill", "is_accidental_shared_skill_write"),
     ]

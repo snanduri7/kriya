@@ -55,7 +55,7 @@ from kriya.workflow.operations import (
     operation_for_file,
     validate_operation_result,
 )
-from kriya.workflow.static_checks import find_established_stack_drift, run_static_checks
+from kriya.workflow.static_checks import find_established_stack_drift, find_goal_stack_mismatch, run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.banners import log_quality_gate_banner
 from kriya.workflow.acceptance import (
@@ -1858,6 +1858,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # must count as the ESTABLISHED baseline this check compares
             # against, not get counted as part of "what this attempt wrote."
             static_violation = find_established_stack_drift(ctx.worktree_path, state.all_files_written)
+        if not static_violation:
+            # 2026-08-25 (external review, P1) - MA7.5's own honest scope
+            # note said a first-milestone goal-vs-generated-language
+            # mismatch (nothing established yet to compare against) was
+            # intentionally out of scope. This is that gap, closed: goal
+            # text's own declared language family vs. this attempt's own
+            # newly-written ecosystem marker, independent of established
+            # history. Same all_files_written-only scoping as the check
+            # above, same reasoning.
+            static_violation = find_goal_stack_mismatch(ctx.goal, state.all_files_written)
         if static_violation:
             # _build_quality_gate_failure() (not a bare Failure(...)), matching the
             # SAME construction every other Quality Gate type already uses (compile/
