@@ -57,6 +57,11 @@ class VerificationMethodType(str, Enum):
     JUDGMENT = "judgment"
 
 
+BUILTIN_QUALITY_GATE_VERIFIERS = frozenset({
+    "quality_gates", "compile", "test", "tests", "regression",
+})
+
+
 class FileAction(str, Enum):
     CREATE = "create"
     MODIFY = "modify"

@@ -14,7 +14,13 @@ from kriya.agents.contracts import (
     parse_milestone_list,
 )
 from kriya.control.contracts import ContractState
-from kriya.control.persistence import load_contract_registry
+from kriya.control.persistence import (
+    load_contract_registry,
+    load_control_state,
+    save_control_state,
+)
+from kriya.control.state import CURRENT_SCHEMA_VERSION, ControlState
+from kriya.workflow.checkpoint import checkpoint_path, save_checkpoint
 from kriya.workflow.milestones import (
     MilestoneRunState,
     build_integration_goal_text,
@@ -802,11 +808,25 @@ async def test_run_milestones_invalidates_a_completed_consumer_when_its_provider
                 {"name": "ProtocolCodec", "description": "NEW shape: encode/decode with 6 fields"},
             ]),
             mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"], consumes=["ProtocolCodec"]),
+            mkv2("M3", goal="g3", success_criterion="c3", depends_on=["M2"]),
         ]
         state = MilestoneRunState(
             group_id="grp", original_goal="orig", milestones=milestones,
-            completed_milestone_ids=["M1", "M2"],  # both already done, per the prior run
+            completed_milestone_ids=["M1", "M2", "M3"],
         )
+        save_checkpoint(tmp, "stale-m3", {
+            "stage": "developer",
+            "milestone_group_id": "grp",
+            "milestone_index": 3,
+        })
+        save_control_state(tmp, ControlState(
+            schema_version=CURRENT_SCHEMA_VERSION,
+            run_id="prior-run",
+            milestone_group_id="grp",
+            milestone_states={"M1": "done", "M2": "done", "M3": "done"},
+            current_plan_hash="old-plan",
+            last_verified_checkpoint="stale-m3",
+        ))
         we = MagicMock()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": ["b.py"]}
@@ -818,14 +838,27 @@ async def test_run_milestones_invalidates_a_completed_consumer_when_its_provider
 
         assert result["status"] == "success"
         # M1 stays skipped (the provider itself isn't re-executed by this
-        # mechanism) - only M2 (the invalidated consumer) gets a real call,
+        # mechanism) - M2 and its transitive dependent M3 get real calls,
         # plus the final integration pass every successful run makes
         # (see test_run_milestones_success_path_through_all_milestones_and_
-        # integration's own "2 milestones + integration" precedent) - 2
-        # calls total, not 1, since M1 stays correctly skipped.
-        assert we.run_generation_workflow.await_count == 2
+        # integration's own "2 milestones + integration" precedent) - three
+        # calls total, since M1 stays correctly skipped.
+        assert we.run_generation_workflow.await_count == 3
         assert "M1" in state.completed_milestone_ids
         assert "M2" in state.completed_milestone_ids  # re-added once it completes again, for real
+        assert "M3" in state.completed_milestone_ids
+        assert state.stale_milestone_ids == []
+        assert not os.path.exists(checkpoint_path(tmp, "stale-m3"))
+        evidence = state.invalidation_evidence[-1]
+        assert evidence["transitively_invalidated"] == ["M2", "M3"]
+        assert evidence["invalidated_checkpoints"] == ["stale-m3"]
+        assert evidence["replacement_plan_revalidated"] is True
+        assert len(evidence["replacement_plan_hash"]) == 64
+        control_state = load_control_state(tmp)
+        assert control_state.milestone_states["M2"] == "done"
+        assert control_state.milestone_states["M3"] == "done"
+        assert control_state.current_plan_hash == evidence["replacement_plan_hash"]
+        assert control_state.last_verified_checkpoint is None
         registry = load_contract_registry(tmp)
         assert registry.get("M1:ProtocolCodec").shape == "NEW shape: encode/decode with 6 fields"
 

@@ -10,7 +10,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
+from kriya.workflow.plan_schema import (
+    EngineeringPlan,
+    ExecutionMethod,
+    FileAction,
+    PlannedFile,
+    Subtask,
+    VerificationMethod,
+    VerificationMethodType,
+)
 from kriya.workflow.plan_validation import PlanValidationResult
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import WorkflowController
@@ -562,6 +570,7 @@ async def test_enforce_artifact_derivation_failure_fails_closed(tmp_path):
     # without durable physical-linkage evidence requires review.
     assert result.legacy_result["status"] == "needs_review"
     assert result.legacy_result["quality_gates_passed"] is False
+    assert result.legacy_result["status"] == "needs_review"
     assert result.legacy_result["artifact_error"] == "derivation exploded"
     assert "derived_artifacts" not in result.legacy_result
 
@@ -1036,9 +1045,71 @@ async def test_enforce_accepts_a_subtask_that_stays_within_planned_files(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_enforce_scope_check_skipped_when_subtask_declares_no_planned_files(tmp_path):
-    """A subtask with an empty planned_files list has nothing to enforce
-    against - must not guarantee-fail on the first file it ever writes."""
+async def test_enforce_requires_authoritative_subtask_verification_evidence(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+            verification=[VerificationMethod(
+                type=VerificationMethodType.TOOL,
+                tool_name="quality_gates",
+                description="compile, tests, and regression pass",
+            )],
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": ["a.py"],
+        "verification_results": [{
+            "type": "tool", "tool_name": "quality_gates",
+            "description": "compile, tests, and regression pass",
+            "passed": True, "source": "existing_quality_gates",
+        }],
+    })
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+    assert result.legacy_result["quality_gates_passed"] is True
+    assert we.run_generation_workflow.await_args.kwargs["required_verification"][0]["tool_name"] == "quality_gates"
+
+
+@pytest.mark.asyncio
+async def test_enforce_marks_unresolved_subtask_verification_needs_review(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+            verification=[VerificationMethod(
+                type=VerificationMethodType.JUDGMENT,
+                description="human confirms the behavior",
+            )],
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": ["a.py"],
+        "verification_results": [{
+            "type": "judgment", "tool_name": None,
+            "description": "human confirms the behavior",
+            "passed": None, "source": "unresolved",
+        }],
+    })
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+    assert result.legacy_result["quality_gates_passed"] is False
+    assert result.subtask_results[0].status == SubtaskStatus.NEEDS_REVIEW
+    assert result.subtask_results[0].reason_codes == ("VERIFICATION_UNRESOLVED",)
+
+
+@pytest.mark.asyncio
+async def test_enforce_rejects_model_subtask_without_planned_files(tmp_path):
     plan = EngineeringPlan(
         plan_id="run1", kind=ChangeKind.TASK,
         subtasks=[Subtask(id="s1", description="do something", execution_method=ExecutionMethod.MODEL)],
@@ -1053,5 +1124,7 @@ async def test_enforce_scope_check_skipped_when_subtask_declares_no_planned_file
         controller = WorkflowController(we)
         result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
 
-    assert result.legacy_result["quality_gates_passed"] is True
-    assert result.subtask_results[0].undeclared_files == ()
+    assert result.legacy_result["status"] == "needs_review"
+    assert result.legacy_result["quality_gates_passed"] is False
+    assert result.legacy_result["reason_codes"] == ["UNBOUNDED_MODEL_SUBTASK"]
+    we.run_generation_workflow.assert_not_awaited()

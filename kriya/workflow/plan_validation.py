@@ -35,7 +35,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
-from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, Subtask, VerificationMethodType
+from kriya.workflow.plan_schema import (
+    BUILTIN_QUALITY_GATE_VERIFIERS,
+    EngineeringPlan,
+    ExecutionMethod,
+    FileAction,
+    Subtask,
+    VerificationMethodType,
+)
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
 
 import os
@@ -93,6 +100,7 @@ async def validate_plan(
     triage_service: Optional[EngineeringTriageService] = None,
     context_files: Optional[Iterable[str]] = None,
     resuming_own_established_progress: bool = False,
+    require_model_planned_files: bool = False,
 ) -> PlanValidationResult:
     """available_tool_names=None SKIPS the tool-registry check entirely -
     only safe for contexts guaranteed not to contain TOOL-tagged subtasks
@@ -136,6 +144,11 @@ async def validate_plan(
         errors.append("subtask dependency graph contains a cycle")
 
     for st in plan.subtasks:
+        if require_model_planned_files and st.execution_method == ExecutionMethod.MODEL and not st.planned_files:
+            errors.append(
+                f"subtask {st.id!r} uses execution_method=model but declares no planned_files; "
+                "authoritative execution requires a non-empty modification scope"
+            )
         for pf in st.planned_files:
             full_path = os.path.join(workspace_path, pf.path)
             if not os.path.exists(full_path) and pf.action != FileAction.CREATE:
@@ -191,12 +204,20 @@ async def validate_plan(
             if st.execution_method == ExecutionMethod.TOOL and st.tool_name not in available:
                 errors.append(f"subtask {st.id!r} references unregistered tool_name {st.tool_name!r}")
             for vm in st.verification:
-                if vm.type == VerificationMethodType.TOOL and vm.tool_name not in available:
+                if (
+                    vm.type == VerificationMethodType.TOOL
+                    and vm.tool_name not in available
+                    and vm.tool_name not in BUILTIN_QUALITY_GATE_VERIFIERS
+                ):
                     errors.append(
                         f"subtask {st.id!r} verification references unregistered tool_name {vm.tool_name!r}"
                     )
         for ac in plan.acceptance_criteria:
-            if ac.method == VerificationMethodType.TOOL and ac.tool_name not in available:
+            if (
+                ac.method == VerificationMethodType.TOOL
+                and ac.tool_name not in available
+                and ac.tool_name not in BUILTIN_QUALITY_GATE_VERIFIERS
+            ):
                 errors.append(f"acceptance criterion {ac.id!r} references unregistered tool_name {ac.tool_name!r}")
 
     if context_files is not None:

@@ -40,6 +40,23 @@ async def test_valid_single_subtask_plan_passes(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_authoritative_validation_rejects_model_subtask_without_planned_files(tmp_path):
+    plan = _plan([_model_subtask()])
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), require_model_planned_files=True,
+    )
+    assert result.valid is False
+    assert any("declares no planned_files" in error for error in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_legacy_validation_keeps_empty_model_scope_backward_compatible(tmp_path):
+    plan = _plan([_model_subtask()])
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
 async def test_unknown_depends_on_reference_is_an_error(tmp_path):
     plan = _plan([_model_subtask(id="s1", depends_on=["ghost"])])
     result = await validate_plan(plan, workspace_path=str(tmp_path))

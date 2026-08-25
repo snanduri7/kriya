@@ -70,6 +70,8 @@ MA7.1's scope, left for a later increment.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import shutil
@@ -107,6 +109,7 @@ from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
     Subtask,
+    VerificationMethodType,
     build_engineering_plan_from_planner_output,
 )
 from kriya.workflow.plan_validation import validate_plan
@@ -122,6 +125,45 @@ from kriya.workflow.triage import ChangeKind
 from kriya.workflow.verification_report import build_verification_report
 from kriya.workflow.workflow import _log_phase_banner
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport, WorkflowResult
+
+
+def _evaluate_subtask_verification(
+    subtask: Subtask, call_result: Dict[str, Any],
+) -> Tuple[SubtaskStatus, Optional[str], Tuple[str, ...]]:
+    if not subtask.verification:
+        return SubtaskStatus.COMPLETED, None, ()
+    evidence = call_result.get("verification_results")
+    if not isinstance(evidence, list) or len(evidence) != len(subtask.verification):
+        return (
+            SubtaskStatus.NEEDS_REVIEW,
+            "declared verification requirements have no complete authoritative evidence",
+            ("VERIFICATION_EVIDENCE_MISSING",),
+        )
+    unresolved: List[str] = []
+    failed: List[str] = []
+    for method, item in zip(subtask.verification, evidence, strict=True):
+        if not isinstance(item, dict) or item.get("type") != method.type.value:
+            unresolved.append(method.description)
+            continue
+        if method.type == VerificationMethodType.TOOL and item.get("tool_name") != method.tool_name:
+            unresolved.append(method.description)
+            continue
+        if item.get("description", "") != method.description:
+            unresolved.append(method.description)
+            continue
+        if item.get("passed") is False:
+            failed.append(method.description)
+        elif item.get("passed") is not True:
+            unresolved.append(method.description)
+    if failed:
+        return SubtaskStatus.FAILED, f"verification failed: {failed!r}", ("VERIFICATION_FAILED",)
+    if unresolved:
+        return (
+            SubtaskStatus.NEEDS_REVIEW,
+            f"verification unresolved: {unresolved!r}",
+            ("VERIFICATION_UNRESOLVED",),
+        )
+    return SubtaskStatus.COMPLETED, None, ()
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +204,10 @@ class _StructuredPlanUnavailable(Exception):
     stay a clean failure result, never silently retried via a different
     execution model that could double-generate or conflict with whatever
     was already applied to the real workspace."""
+
+
+class _UnsafeStructuredPlan(Exception):
+    """A parsed plan violates an authoritative safety boundary."""
 
 
 def build_subtask_goal_text(subtask: Subtask, position: int, total: int) -> str:
@@ -357,6 +403,16 @@ class WorkflowController:
                         goal, workspace_path, route, run_id, control_context, control_state, legacy_kwargs,
                     )
                 )
+            except _UnsafeStructuredPlan as e:
+                logger.error(f"WorkflowController enforce run {run_id!r}: unsafe structured plan: {e}")
+                legacy_result = {
+                    "status": "needs_review",
+                    "quality_gates_passed": False,
+                    "files": [],
+                    "reason_codes": ["UNBOUNDED_MODEL_SUBTASK"],
+                    "error": str(e),
+                    "run_id": run_id,
+                }
             except _StructuredPlanUnavailable as e:
                 logger.warning(
                     f"WorkflowController enforce run {run_id!r}: structured plan unavailable "
@@ -485,6 +541,22 @@ class WorkflowController:
 
         from kriya.workflow.milestones import run_milestones
         legacy_result = await run_milestones(self.workflow_engine, run_state, workspace_path, **milestone_kwargs)
+
+        plan_blob = json.dumps(
+            [milestone.model_dump(mode="json") for milestone in run_state.milestones],
+            sort_keys=True,
+        )
+        control_state = control_state.with_updates(
+            milestone_states={
+                milestone.id: (
+                    "stale" if milestone.id in run_state.stale_milestone_ids
+                    else "done" if milestone.id in run_state.completed_milestone_ids
+                    else "pending"
+                )
+                for milestone in run_state.milestones
+            },
+            current_plan_hash=hashlib.sha256(plan_blob.encode("utf-8")).hexdigest(),
+        )
 
         try:
             save_control_state(workspace_path, control_state)
@@ -805,6 +877,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 "yet execute TOOL subtasks for real (see this method's own docstring)"
             )
 
+        unbounded_model_subtasks = [
+            st.id for st in plan.subtasks
+            if st.execution_method == ExecutionMethod.MODEL and not st.planned_files
+        ]
+        if unbounded_model_subtasks:
+            raise _UnsafeStructuredPlan(
+                f"MODEL subtask(s) {unbounded_model_subtasks!r} declare no planned_files; "
+                "refusing legacy fallback because it would discard the validated scope boundary"
+            )
+
         kernel = getattr(self.workflow_engine, "kernel", None)
         available_tool_names = None
         if kernel is not None:
@@ -866,6 +948,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
             route=route, triage_service=self.workflow_engine.engineering_triage,
             resuming_own_established_progress=has_own_established_progress,
+            require_model_planned_files=True,
         )
         if not validation.valid:
             raise _StructuredPlanUnavailable(f"plan failed validation: {validation.errors}")
@@ -1014,6 +1097,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 predetermined_design=subtask_goal,
                 predetermined_architect_files=predetermined_files,
                 allowed_write_relpaths=predetermined_files,
+                required_verification=[vm.model_dump(mode="json") for vm in subtask.verification],
                 # trace_id_override is deliberately EXCLUDED (kriya/cli.py's own
                 # docstring for it: overwrite the ONE transient knowledge_gap
                 # trace row a single whole-goal retry produces) - forwarding it
@@ -1040,7 +1124,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 sorted(set(call_result.get("files") or []) - set(predetermined_files))
                 if predetermined_files else []
             )
-            passed = quality_gates_passed and not undeclared_files
+            verification_status, verification_error, verification_reason_codes = (
+                _evaluate_subtask_verification(subtask, call_result)
+            )
+            passed = (
+                quality_gates_passed
+                and not undeclared_files
+                and verification_status == SubtaskStatus.COMPLETED
+            )
             if not quality_gates_passed:
                 error = f"subtask did not pass Quality Gates (status={call_result.get('status')!r})"
             elif undeclared_files:
@@ -1049,12 +1140,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     f"{undeclared_files!r} (declared: {predetermined_files!r}) - refusing to accept "
                     "a Quality-Gates-passed result that silently broadened the validated subtask's scope"
                 )
+            elif verification_error:
+                error = verification_error
             else:
                 error = None
             result = SubtaskResult(
-                subtask_id=subtask.id, status=(SubtaskStatus.COMPLETED if passed else SubtaskStatus.FAILED),
+                subtask_id=subtask.id,
+                status=(
+                    SubtaskStatus.COMPLETED if passed
+                    else SubtaskStatus.FAILED if not quality_gates_passed or undeclared_files
+                    else verification_status
+                ),
                 execution_method=ExecutionMethod.MODEL.value,
                 undeclared_files=tuple(undeclared_files), error=error,
+                reason_codes=verification_reason_codes,
             )
             subtask_results.append(result)
             record_subtask_attempt(ledger, plan, result, attempt=1)
@@ -1123,8 +1222,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         all_completed = len(subtask_results) == total and all(
             r.status == SubtaskStatus.COMPLETED for r in subtask_results
         )
+        needs_review = any(r.status == SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
         aggregated: Dict[str, Any] = {
-            "status": "success" if all_completed else "failed",
+            "status": "success" if all_completed else "needs_review" if needs_review else "failed",
             "quality_gates_passed": all_completed,
             "run_id": run_id,
             "subtask_results": [r.to_dict() for r in subtask_results],

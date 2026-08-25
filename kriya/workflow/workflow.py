@@ -160,11 +160,35 @@ from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.review_context import build_review_batches, build_reviewer_verified_evidence
 from kriya.workflow.state import GenerationState
+from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
 
 _PHASE_BANNER_WIDTH = 70
+
+
+def _build_required_verification_evidence(
+    requirements: Optional[List[Dict[str, Any]]], quality_gates_passed: bool,
+) -> List[Dict[str, Any]]:
+    """Resolve only requirements the mature execution core can prove."""
+    evidence: List[Dict[str, Any]] = []
+    for requirement in requirements or []:
+        item = {
+            "type": requirement.get("type"),
+            "description": requirement.get("description", ""),
+            "tool_name": requirement.get("tool_name"),
+            "passed": None,
+            "source": "unresolved",
+        }
+        if (
+            requirement.get("type") == "tool"
+            and requirement.get("tool_name") in BUILTIN_QUALITY_GATE_VERIFIERS
+        ):
+            item["passed"] = bool(quality_gates_passed)
+            item["source"] = "existing_quality_gates"
+        evidence.append(item)
+    return evidence
 
 
 async def _ensure_repository_indexed(cfg: Any, workspace_path: str) -> None:
@@ -490,6 +514,7 @@ class WorkflowEngine:
         predetermined_architect_files: Optional[List[str]] = None,
         protected_source_file: Optional[str] = None,
         allowed_write_relpaths: Optional[List[str]] = None,
+        required_verification: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -1321,6 +1346,8 @@ class WorkflowEngine:
                 "workspace_fingerprint": checkpoint_ws_fp,
                 "config_fingerprint": checkpoint_cfg_fp,
                 "goal_fingerprint": checkpoint_goal_fp,
+                "milestone_group_id": milestone_group_id,
+                "milestone_index": milestone_index,
                 **extra,
             })
 
@@ -2623,6 +2650,9 @@ class WorkflowEngine:
             "design": design,
             "files": list(state.all_files_written),
             "quality_gates_passed": quality_passed,
+            "verification_results": _build_required_verification_evidence(
+                required_verification, quality_passed,
+            ),
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
             "failure_report": failure_report_dicts,

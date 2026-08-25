@@ -54,6 +54,7 @@ from kriya.workflow.workflow import (
     _build_full_set_retry_prompt,
     _build_lsp_diagnostics_context,
     _build_missing_files_retry_prompt,
+    _build_required_verification_evidence,
     _build_targeted_retry_prompt,
     _check_java_toolchain_mismatch,
     _detect_missing_build_manifest,
@@ -98,6 +99,26 @@ from kriya.workflow.workflow import (
     normalize_written_filepath,
     _resolve_file_locations,
 )
+
+
+def test_required_verification_evidence_preserves_identity_and_only_resolves_builtin_gates():
+    requirements = [
+        {"type": "tool", "tool_name": "quality_gates", "description": "compile and test"},
+        {"type": "tool", "tool_name": "custom_validator", "description": "validate protocol"},
+        {"type": "judgment", "description": "review usability"},
+    ]
+
+    evidence = _build_required_verification_evidence(requirements, quality_gates_passed=True)
+
+    assert evidence == [
+        {
+            **requirements[0],
+            "passed": True,
+            "source": "existing_quality_gates",
+        },
+        {**requirements[1], "passed": None, "source": "unresolved"},
+        {**requirements[2], "tool_name": None, "passed": None, "source": "unresolved"},
+    ]
 
 
 def _init_git_repo(tmp_path):

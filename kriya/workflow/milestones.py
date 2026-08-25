@@ -19,10 +19,12 @@ see milestone N's real applied output" is already true by construction, with
 no new plumbing.
 """
 
+import hashlib
 import json
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -35,8 +37,10 @@ from kriya.control.contracts import (
 from kriya.control.persistence import (
     load_artifact_registry,
     load_contract_registry,
+    load_control_state,
     save_artifact_registry,
     save_contract_registry,
+    save_control_state,
 )
 from kriya.control.workspace_identity import ownership_metadata, validate_ownership
 from kriya.policy.filesystem import AuthorizedFileWriter
@@ -47,6 +51,7 @@ from kriya.workflow.context_projection import (
                                         # backward compatibility (tests/test_milestones.py's own import,
                                         # any other existing consumer of kriya.workflow.milestones.render_established_file_context).
 )
+from kriya.workflow.checkpoint import delete_checkpoint, list_checkpoints
 from kriya.workflow.file_resolution import _resolve_run_command
 from kriya.workflow.milestone_normalization import normalize_legacy_milestones
 from kriya.workflow.milestone_validation import (
@@ -60,6 +65,38 @@ from kriya.workflow.verification_contract import extract_contract_verdict
 from kriya.workflow.workflow import _log_phase_banner
 
 logger = logging.getLogger(__name__)
+
+
+def _transitive_downstream_milestones(
+    milestones: List[MilestoneV2], direct_consumers: set[str],
+) -> set[str]:
+    """Expand invalidation through the validated milestone DAG."""
+    stale = set(direct_consumers)
+    changed = True
+    while changed:
+        changed = False
+        for milestone in milestones:
+            if milestone.id not in stale and set(milestone.depends_on) & stale:
+                stale.add(milestone.id)
+                changed = True
+    return stale
+
+
+def _invalidate_milestone_checkpoints(
+    workspace_path: str, group_id: str, milestone_ids: set[str], ordered: List[MilestoneV2],
+) -> List[str]:
+    ids_by_position = {position: milestone.id for position, milestone in enumerate(ordered, start=1)}
+    deleted: List[str] = []
+    for checkpoint in list_checkpoints(workspace_path):
+        if checkpoint.get("milestone_group_id") != group_id:
+            continue
+        if ids_by_position.get(checkpoint.get("milestone_index")) not in milestone_ids:
+            continue
+        run_id = checkpoint.get("run_id")
+        if run_id:
+            delete_checkpoint(workspace_path, run_id)
+            deleted.append(run_id)
+    return sorted(deleted)
 
 # Deliberately language-agnostic (project_implementation_source just bounds
 # raw text by character count - no per-language parsing), not the signature-
@@ -725,28 +762,57 @@ async def run_milestones(
     # (the same field the ordinary `if milestone.id in
     # completed_milestone_ids: skip` check reads) - reusing it here is
     # honest re-use, not a new "stale plan" concept invented from nothing.
-    # Deliberately ONE level only (a change's own affected_consumers), not
-    # transitive/cascading invalidation of a consumer's own consumers -
-    # the action item's own example is one level deep; going further is
-    # real, additional scope not asked for here.
-    invalidated_ids = set()
+    # Direct affected_consumers are expanded through the validated
+    # depends_on DAG so no downstream milestone can retain assumptions
+    # inherited from a stale consumer.
+    direct_invalidated_ids: set[str] = set()
     for change in contract_changes:
-        stale_consumers = [c for c in change.affected_consumers if c in run_state.completed_milestone_ids]
+        stale_consumers = list(change.affected_consumers)
         if stale_consumers:
             logger.warning(
                 f"Contract '{change.contract_id}' changed shape ({change.reason}) - consumer "
                 f"milestone(s) {stale_consumers!r} already completed against the now-stale shape "
                 "in an earlier run and are invalidated: they will be re-executed, not skipped."
             )
-            invalidated_ids.update(stale_consumers)
+            direct_invalidated_ids.update(stale_consumers)
+    invalidated_ids = _transitive_downstream_milestones(
+        run_state.milestones, direct_invalidated_ids,
+    )
     if invalidated_ids:
+        replacement_validation = MilestonePlanValidator().validate(run_state.milestones)
+        if not replacement_validation.valid:
+            return {
+                "status": "milestone_plan_invalid",
+                "group_id": run_state.group_id,
+                "quality_gates_passed": False,
+                "validation": replacement_validation.to_dict(),
+                "reason_codes": ["REPLACEMENT_PLAN_INVALID"],
+            }
+        run_state.milestones = replacement_validation.milestones
+        replacement_plan_hash = hashlib.sha256(
+            json.dumps(
+                [milestone.model_dump(mode="json") for milestone in run_state.milestones],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        invalidated_checkpoints = _invalidate_milestone_checkpoints(
+            workspace_path, run_state.group_id, invalidated_ids, ordered,
+        )
         run_state.stale_milestone_ids = sorted(set(run_state.stale_milestone_ids) | invalidated_ids)
         run_state.invalidation_evidence.extend(
             {
                 "contract_id": change.contract_id,
                 "old_revision": change.old_revision,
                 "affected_consumers": list(change.affected_consumers),
+                "transitively_invalidated": sorted(invalidated_ids),
+                "invalidated_checkpoints": invalidated_checkpoints,
                 "reason": change.reason,
+                "requires_replan": True,
+                "requires_revalidation": True,
+                "replacement_plan_revalidated": True,
+                "replacement_plan_hash": replacement_plan_hash,
+                "invalidated_at": datetime.now(timezone.utc).isoformat(),
             }
             for change in contract_changes
             if set(change.affected_consumers) & invalidated_ids
@@ -754,10 +820,19 @@ async def run_milestones(
         run_state.completed_milestone_ids = [
             mid for mid in run_state.completed_milestone_ids if mid not in invalidated_ids
         ]
-        try:
-            save_milestone_run_state(workspace_path, run_state)
-        except Exception as e:
-            logger.warning(f"Failed to persist invalidated completed_milestone_ids (non-fatal): {e}")
+        save_milestone_run_state(workspace_path, run_state)
+
+        control_state = load_control_state(workspace_path)
+        if control_state is not None and control_state.milestone_group_id == run_state.group_id:
+            control_state = control_state.with_updates(
+                milestone_states={
+                    **control_state.milestone_states,
+                    **{milestone_id: "stale" for milestone_id in invalidated_ids},
+                },
+                current_plan_hash=replacement_plan_hash,
+                last_verified_checkpoint=None,
+            )
+            save_control_state(workspace_path, control_state)
     try:
         save_contract_registry(workspace_path, contract_registry)
     except Exception as e:
@@ -933,6 +1008,15 @@ async def run_milestones(
         if milestone.id in run_state.stale_milestone_ids:
             run_state.stale_milestone_ids.remove(milestone.id)
         save_milestone_run_state(workspace_path, run_state)
+        control_state = load_control_state(workspace_path)
+        if control_state is not None and control_state.milestone_group_id == run_state.group_id:
+            save_control_state(
+                workspace_path,
+                control_state.with_updates(
+                    current_milestone_id=milestone.id,
+                    milestone_states={**control_state.milestone_states, milestone.id: "done"},
+                ),
+            )
 
     replay_failures = replay_prior_milestone_verifications(workspace_path, run_state)
     if replay_failures:
