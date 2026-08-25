@@ -2492,8 +2492,34 @@ class SpecComplianceAgent(BaseAgent):
             [m for m in raw_missing if isinstance(m, str)]
             if isinstance(raw_missing, list) else []
         )
+        compliant = _coerce_bool_field(parsed.get("compliant"), "compliant", "Spec Compliance check()")
+        # Found live, 2026-08-25 (protocol_encoder_java, 3 separate rounds of the same
+        # run): a goal with zero concrete/literal requirements got compliant=false with
+        # an EMPTY missing_requirements list, while the model's own reasoning correctly
+        # concluded there was nothing to check ("the goal does not contain any
+        # concrete... requirements... that can be checked against the code"). No parse
+        # warning fired - the model returned a real JSON bool, just the wrong one. This
+        # gate's own contract (system_prompt above, and the class docstring) is that a
+        # FALSE verdict only means something when it names at least one concrete,
+        # missing identifier/value - by definition, a false verdict with nothing listed
+        # as missing is self-contradictory. Weaker local models pattern-match
+        # negation-heavy reasoning ("does NOT contain...") into compliant=false despite
+        # concluding there's nothing to flag. Treat the (required-to-be-populated on a
+        # real failure) missing_requirements list as authoritative over an ambiguous
+        # compliant field, matching this gate's own fail-open design (see check()'s
+        # docstring above) - deliberately one-directional: never override the opposite
+        # case (compliant=true with requirements listed), which wasn't observed live
+        # and risks turning real passes into failures instead of the reverse.
+        if not compliant and not missing_requirements:
+            logger.warning(
+                "Spec Compliance check() returned compliant=False with an empty "
+                "missing_requirements list (self-contradictory per this gate's own "
+                "contract) - treating as compliant rather than trusting the ambiguous "
+                f"verdict. Reasoning was: {parsed.get('reasoning')!r}"
+            )
+            compliant = True
         return {
-            "compliant": _coerce_bool_field(parsed.get("compliant"), "compliant", "Spec Compliance check()"),
+            "compliant": compliant,
             "reasoning": parsed.get("reasoning") or "",
             "missing_requirements": missing_requirements,
             "likely_files": likely_files,

@@ -2721,6 +2721,58 @@ async def test_spec_compliance_check_flags_missing_named_field():
     assert result["likely_files"] == ["Protocol.java"]
 
 @pytest.mark.asyncio
+async def test_spec_compliance_check_false_verdict_with_no_missing_requirements_is_treated_as_compliant():
+    """Regression test for a real live bug, 2026-08-25 (protocol_encoder_java,
+    3 separate rounds of the same run): the goal had zero concrete/literal
+    requirements, and the model's own reasoning correctly said so ("the goal
+    does not contain any concrete... requirements... that can be checked
+    against the code"), but still returned compliant=false with an empty
+    missing_requirements list - self-contradictory per this gate's own
+    contract, since a false verdict is only supposed to mean something when
+    it names at least one concrete missing identifier/value."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "compliant": False,
+        "reasoning": "The goal does not contain any concrete, literally-named requirements that can be checked against the code.",
+        "missing_requirements": [],
+        "likely_files": [],
+    }))
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(
+        goal="Create Main.java with test logic to demo encode/decode round-trip",
+        files_written=["Main.java"],
+        file_contents={"Main.java": "class Main {}"},
+    )
+
+    assert result["compliant"] is True
+    assert result["missing_requirements"] == []
+
+@pytest.mark.asyncio
+async def test_spec_compliance_check_false_verdict_with_real_missing_requirements_is_unaffected():
+    """The fix above must stay one-directional: a genuine failure (missing_
+    requirements actually populated) must still fail, matching the
+    already-passing test_spec_compliance_check_flags_missing_named_field
+    above - this just pins that the new guard doesn't regress it."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "compliant": False,
+        "reasoning": "Missing a field.",
+        "missing_requirements": ["someField"],
+        "likely_files": [],
+    }))
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(
+        goal="Goal", files_written=["Protocol.java"], file_contents={"Protocol.java": "class Protocol {}"},
+    )
+
+    assert result["compliant"] is False
+    assert result["missing_requirements"] == ["someField"]
+
+@pytest.mark.asyncio
 async def test_spec_compliance_check_filters_out_hallucinated_likely_files():
     cfg = AppConfig()
     llm = LLMClient(cfg)
