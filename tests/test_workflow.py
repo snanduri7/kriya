@@ -3942,6 +3942,86 @@ def test_ground_java_entrypoint_leaves_non_run_commands_unchanged_when_no_real_e
     assert result == [["javac", "Protocol.java", "ProtocolParser.java"]]
 
 
+def test_ground_java_entrypoint_qualifies_bare_class_name_when_ambiguous_between_two_real_entrypoints():
+    """Regression test for a real live bug, 2026-08-25 (protocol_encoder_java):
+    two files each had a real main() method (Protocol.java's own self-test
+    main(), ProtocolMain.java's demo main()), so which one should run is
+    genuinely ambiguous and correctly left to the model's own guess - but the
+    model's guess used the bare simple name ("ProtocolMain"), which fails at
+    runtime for a class declared inside a package
+    (`NoClassDefFoundError: com/example/protocol/ProtocolMain (wrong name:
+    ProtocolMain)`). The class CHOICE stays the model's; only its
+    QUALIFICATION gets deterministically corrected."""
+    result = ground_java_entrypoint_in_no_build_file_projects(
+        run_commands=[
+            ["javac", "Protocol.java", "ProtocolMain.java"],
+            ["java", "ProtocolMain"],
+        ],
+        command_source="inferred",
+        files_written=["Protocol.java", "ProtocolMain.java"],
+        java_main_classes={
+            "Protocol.java": "com.example.protocol.Protocol",
+            "ProtocolMain.java": "com.example.protocol.ProtocolMain",
+        },
+        jvm_module_flags=[],
+        build_file_content=None,
+    )
+    assert result == [
+        ["javac", "Protocol.java", "ProtocolMain.java"],
+        ["java", "com.example.protocol.ProtocolMain"],
+    ]
+
+
+def test_ground_java_entrypoint_leaves_program_arguments_after_class_name_untouched():
+    """The qualification correction only rewrites the FIRST matching token
+    (the entrypoint class name itself) - a later CLI argument that happens
+    to coincidentally match a known simple name must never be touched."""
+    result = ground_java_entrypoint_in_no_build_file_projects(
+        run_commands=[
+            ["javac", "Protocol.java", "ProtocolMain.java"],
+            ["java", "ProtocolMain", "Protocol"],
+        ],
+        command_source="inferred",
+        files_written=["Protocol.java", "ProtocolMain.java"],
+        java_main_classes={
+            "Protocol.java": "com.example.protocol.Protocol",
+            "ProtocolMain.java": "com.example.protocol.ProtocolMain",
+        },
+        jvm_module_flags=[],
+        build_file_content=None,
+    )
+    assert result == [
+        ["javac", "Protocol.java", "ProtocolMain.java"],
+        ["java", "com.example.protocol.ProtocolMain", "Protocol"],
+    ]
+
+
+def test_ground_java_entrypoint_never_guesses_an_unmatched_ambiguous_class_name():
+    """If the model's chosen class name doesn't match any known entrypoint's
+    simple name at all (e.g. a hallucinated or already-fully-qualified-but-
+    wrong-package guess), leave it untouched rather than guess - matches
+    this function's own established "never guess, only correct when
+    unambiguous" posture."""
+    result = ground_java_entrypoint_in_no_build_file_projects(
+        run_commands=[
+            ["javac", "Protocol.java", "ProtocolMain.java"],
+            ["java", "SomethingElse"],
+        ],
+        command_source="inferred",
+        files_written=["Protocol.java", "ProtocolMain.java"],
+        java_main_classes={
+            "Protocol.java": "com.example.protocol.Protocol",
+            "ProtocolMain.java": "com.example.protocol.ProtocolMain",
+        },
+        jvm_module_flags=[],
+        build_file_content=None,
+    )
+    assert result == [
+        ["javac", "Protocol.java", "ProtocolMain.java"],
+        ["java", "SomethingElse"],
+    ]
+
+
 @pytest.mark.asyncio
 async def test_run_attempt_disables_run_verification_end_to_end_when_no_real_entrypoint_exists(tmp_path):
     """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol

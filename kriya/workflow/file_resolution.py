@@ -544,6 +544,69 @@ def extract_jvm_module_flags(skills_prompt: str) -> List[str]:
     return list(seen.keys())
 
 
+def _correct_java_entrypoint_qualification(
+    run_commands: Optional[List[List[str]]],
+    java_main_classes: Dict[str, str],
+) -> Optional[List[List[str]]]:
+    """Corrects a `java <ClassName>` invocation's class-name TOKEN to its real
+    fully-qualified form when it matches exactly one known entrypoint's
+    simple name - without picking WHICH entrypoint runs (that ambiguous
+    choice stays the model's own, unchanged, same as before this function
+    existed).
+
+    Found live, 2026-08-25 (protocol_encoder_java): two files each had a real
+    main() method (Protocol.java's own self-test main(), ProtocolMain.java's
+    demo main()), so the caller's own `len(java_main_classes) != 1` branch
+    correctly declined to pick one - but previously just returned the
+    model's raw guess completely unchanged. RunVerifierAgent.judge()'s own
+    system prompt explicitly instructs "the bare class name only, no path"
+    (kriya/agents/agent.py), which is flatly wrong for a class declared
+    inside a package: `java ProtocolMain` (bare) fails with
+    `NoClassDefFoundError: com/example/protocol/ProtocolMain (wrong name:
+    ProtocolMain)` - Java requires the FULLY QUALIFIED name (`java
+    com.example.protocol.ProtocolMain`) to run a packaged class from outside
+    it. The model reliably repeats this exact wrong guess on retry (the
+    live run's own self-correction micro-loop re-inferred and got the
+    identical wrong command again) because the underlying INSTRUCTION, not
+    sampling noise, is what's wrong - a case for a deterministic fix, not
+    another prompt patch, matching this whole module's own established
+    pattern (see this function's sibling below).
+
+    Builds a simple-name -> FQCN map from every known entrypoint (a name
+    that maps to two DIFFERENT FQCNs - e.g. two same-named classes in
+    different packages - is dropped from the map entirely rather than
+    guessed at). Only the FIRST token in a `java` command matching a mapped
+    simple name is rewritten (the entrypoint class token appears once; a
+    later token that happens to coincidentally match, e.g. a CLI argument
+    value, is a program argument and must never be touched)."""
+    if not run_commands:
+        return run_commands
+    simple_to_fqcn: Dict[str, str] = {}
+    ambiguous_simple_names = set()
+    for fqcn in java_main_classes.values():
+        simple = fqcn.rsplit(".", 1)[-1]
+        if simple in simple_to_fqcn and simple_to_fqcn[simple] != fqcn:
+            ambiguous_simple_names.add(simple)
+        else:
+            simple_to_fqcn[simple] = fqcn
+    for simple in ambiguous_simple_names:
+        simple_to_fqcn.pop(simple, None)
+    if not simple_to_fqcn:
+        return run_commands
+    corrected: List[List[str]] = []
+    for cmd in run_commands:
+        if not cmd or cmd[0] != "java":
+            corrected.append(cmd)
+            continue
+        new_cmd = list(cmd)
+        for i in range(1, len(new_cmd)):
+            if new_cmd[i] in simple_to_fqcn:
+                new_cmd[i] = simple_to_fqcn[new_cmd[i]]
+                break
+        corrected.append(new_cmd)
+    return corrected
+
+
 def ground_java_entrypoint_in_no_build_file_projects(
     run_commands: Optional[List[List[str]]],
     command_source: str,
@@ -636,7 +699,14 @@ def ground_java_entrypoint_in_no_build_file_projects(
             return None
         return run_commands
     if len(java_main_classes) != 1:
-        return run_commands
+        # Genuinely ambiguous WHICH class should run (2+ real main() methods -
+        # e.g. one file's own self-test main() plus another file's demo
+        # main()) - that choice correctly stays the model's own, unchanged
+        # from before this branch existed. But whichever class name the model
+        # DID choose can still be QUALIFICATION-corrected deterministically:
+        # see _correct_java_entrypoint_qualification()'s own docstring for
+        # the real live bug this closes.
+        return _correct_java_entrypoint_qualification(run_commands, java_main_classes)
     entrypoint_class = next(iter(java_main_classes.values()))
     compile_files = sorted(f for f in files_written if f.endswith(".java"))
     if not compile_files:
