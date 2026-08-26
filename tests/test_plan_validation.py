@@ -237,6 +237,7 @@ async def test_milestone_plan_requires_extension_points(tmp_path):
     result = await validate_plan(plan, workspace_path=str(tmp_path))
     assert result.valid is False
     assert any("extension_points" in e for e in result.errors)
+    assert "EXTENSION_POINT_REQUIRED" in result.reason_codes
 
 
 @pytest.mark.asyncio

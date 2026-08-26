@@ -259,6 +259,7 @@ async def validate_plan(
             f"plan kind={plan.kind.value} requires at least one extension_points entry "
             "(a real insertion point the new capability attaches to) but none were given"
         )
+        reason_codes.append("EXTENSION_POINT_REQUIRED")
 
     if plan.kind == ChangeKind.REFACTOR and not (plan.refactor_baseline or "").strip():
         errors.append(

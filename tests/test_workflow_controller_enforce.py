@@ -26,6 +26,7 @@ from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight,
 from kriya.workflow.workflow_controller import (
     _StructuredPlanUnavailable,
     WorkflowController,
+    _authoritative_planner_extension_candidates,
     build_authoritative_planner_request,
     build_subtask_constraint_context,
     build_subtask_goal_text,
@@ -154,6 +155,26 @@ def test_plan_repair_prompt_is_json_only_and_gives_exact_unscoped_check_correcti
     assert "Never invent a fake file" in prompt
 
 
+def test_plan_repair_prompt_gives_exact_schema_contract_and_extension_evidence():
+    prompt = build_structured_plan_repair_prompt(
+        "extend the application",
+        "previous response",
+        ["schema invalid", "extension point required"],
+        [
+            "STRUCTURED_PLAN_SCHEMA_INVALID",
+            "SUBTASK_REQUIREMENT_UNPROVIDED",
+            "EXTENSION_POINT_REQUIRED",
+        ],
+        1,
+        route_kind=ChangeKind.MILESTONE,
+        extension_candidates=["Existing.java"],
+    )
+    assert "verification item must be an object" in prompt
+    assert "character-for-character" in prompt
+    assert '["Existing.java"]' in prompt
+    assert "Do not invent a path" in prompt
+
+
 def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():
     request = build_authoritative_planner_request("Build one runnable application.")
     assert "Original product request:\nBuild one runnable application." in request
@@ -164,6 +185,24 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     assert "Emit no prose" in request
     assert "observable application behavior" in request
     assert "actually runs the application" in request
+    assert "Never emit verification strings" in request
+    assert "exactly match one provides string" in request
+
+
+def test_authoritative_planner_request_supplies_route_extension_candidates(tmp_path):
+    (tmp_path / "Existing.java").write_text("class Existing {}")
+    (tmp_path / "goal.md").write_text("private goal text")
+    (tmp_path / "kriya.yaml").write_text("autonomy: {}")
+    candidates = _authoritative_planner_extension_candidates(str(tmp_path))
+    request = build_authoritative_planner_request(
+        "Extend the application",
+        route_kind=ChangeKind.MILESTONE,
+        extension_candidates=candidates,
+    )
+    assert candidates == ["Existing.java"]
+    assert "extension_points must name" in request
+    assert '["Existing.java"]' in request
+    assert "private goal text" not in request
 
 
 @pytest.mark.asyncio
@@ -187,6 +226,23 @@ async def test_enforce_planner_calls_use_json_only_system_contract(tmp_path):
     assert planner_kwargs["json_mode"] is True
     assert "Return exactly one valid JSON object" in planner_kwargs["system_prompt_override"]
     assert "no Markdown" in planner_kwargs["system_prompt_override"]
+
+
+@pytest.mark.asyncio
+async def test_enforce_classifies_schema_invalid_plan_separately_from_json_parse_failure(tmp_path):
+    we = _workflow_engine()
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(None, "structured plan JSON block failed schema validation: invalid verification"),
+    ):
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "needs_review"
+    assert "STRUCTURED_PLAN_SCHEMA_INVALID" in result.legacy_result["reason_codes"]
+    assert "STRUCTURED_PLAN_PARSE_FAILED" not in result.legacy_result["reason_codes"]
+    assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in result.legacy_result["reason_codes"]
 
 
 @pytest.mark.asyncio

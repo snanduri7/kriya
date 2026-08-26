@@ -354,14 +354,41 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     '{"global_invariants": ["..."], "subtasks": [{"id": "s1", "description": "...", '
     '"execution_method": "model", "depends_on": [], "planned_files": '
     '[{"path": "...", "action": "create|modify|delete"}], "provides": ["..."], '
-    '"requires": [], "relevant_global_invariants": ["..."], "verification": [], '
+    '"requires": [], "relevant_global_invariants": ["..."], "verification": '
+    '[{"type": "judgment", "description": "...", "requires_runtime_execution": false}], '
     '"acceptance_criteria_ids": ["ac1"]}], "acceptance_criteria": '
     '[{"id": "ac1", "description": "...", "method": "judgment"}], '
     '"extension_points": [], "refactor_baseline": null}. '
     "Every model subtask must own every file it may change. Verification-only work belongs in "
-    "verification or acceptance_criteria. Preserve explicit producer/consumer dependencies and "
-    "goal-derived invariants. Never invent product requirements."
+    "verification or acceptance_criteria. A verification entry must always be an object, never a "
+    "string. A judgment verification must omit tool_name. A tool verification must name a real "
+    "registered tool. Every requires value must exactly equal one provides value from exactly one "
+    "declared dependency. Preserve goal-derived invariants without inventing unspecified choices."
 )
+
+
+def _authoritative_planner_extension_candidates(
+    workspace_path: str, max_files: int = 100,
+) -> List[str]:
+    """Return bounded local path evidence for route-required insertion points."""
+    ignored_dirs = {
+        ".git", ".kriya", "__pycache__", "node_modules", "target", ".venv",
+        "venv", "logs", "memory",
+    }
+    ignored_root_files = {"kriya.yaml", "kriya.yml"}
+    candidates: List[str] = []
+    if not os.path.isdir(workspace_path):
+        return candidates
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = sorted(name for name in dirs if name not in ignored_dirs)
+        is_root = os.path.abspath(root) == os.path.abspath(workspace_path)
+        for name in sorted(filenames):
+            if is_root and (name in ignored_root_files or name.lower().endswith(".md")):
+                continue
+            candidates.append(os.path.relpath(os.path.join(root, name), workspace_path))
+            if len(candidates) >= max_files:
+                return candidates
+    return candidates
 
 
 def build_structured_plan_repair_prompt(
@@ -370,6 +397,9 @@ def build_structured_plan_repair_prompt(
     errors: List[str],
     reason_codes: List[str],
     repair_attempt: int,
+    *,
+    route_kind: Optional[ChangeKind] = None,
+    extension_candidates: Optional[List[str]] = None,
 ) -> str:
     """Build a bounded local-only correction request for the complete plan."""
     targeted_correction = ""
@@ -388,6 +418,25 @@ def build_structured_plan_repair_prompt(
             "onto the nearest implementation dependency. If it genuinely edits files, retain it only "
             "with the exact real planned_files it owns. Never invent a fake file for a check.\n"
         )
+    if "STRUCTURED_PLAN_SCHEMA_INVALID" in reason_codes:
+        targeted_correction += (
+            "- Repair every schema-invalid field to the system contract. In particular, each "
+            "verification item must be an object with type, description, and "
+            "requires_runtime_execution; never use a string verification item.\n"
+        )
+    if "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
+        targeted_correction += (
+            "- Replace each unprovided requires value with the exact, character-for-character "
+            "provides value exported by its declared upstream dependency. Do not paraphrase "
+            "capability names.\n"
+        )
+    if "EXTENSION_POINT_REQUIRED" in reason_codes:
+        candidates = extension_candidates or []
+        targeted_correction += (
+            f"- The {route_kind.value if route_kind else 'current'} route requires a real "
+            "extension point. Set extension_points using only these existing relative paths: "
+            f"{json.dumps(candidates)}. Do not invent a path.\n"
+        )
     return (
         "Repair the previous structured engineering plan. This is PLAN_REPAIR, not implementation.\n"
         "Return only one complete JSON object and nothing else. Do not use Markdown or code fences.\n\n"
@@ -401,7 +450,10 @@ def build_structured_plan_repair_prompt(
         "- Declare depends_on for every stage that consumes files, configuration, contracts, or "
         "build setup produced by another stage.\n"
         "- Preserve or add goal-derived global_invariants, relevant_global_invariants, and stable "
-        "provides/requires metadata; every requirement needs exactly one provider and a depends_on edge.\n"
+        "provides/requires metadata; every requires string must exactly equal one provides string "
+        "from exactly one declared dependency.\n"
+        "- Every verification item must be an object with type, description, and "
+        "requires_runtime_execution; never emit a verification string.\n"
         "- Every execution_method=model subtask MUST declare every file it may modify in planned_files.\n"
         "- Verification-only build/test/run/output checks belong in verification or acceptance_criteria, "
         "not in a MODEL subtask with no files.\n"
@@ -413,8 +465,27 @@ def build_structured_plan_repair_prompt(
     )
 
 
-def build_authoritative_planner_request(goal: str) -> str:
+def build_authoritative_planner_request(
+    goal: str,
+    *,
+    route_kind: Optional[ChangeKind] = None,
+    extension_candidates: Optional[List[str]] = None,
+) -> str:
     """Add enforce-only protocol constraints without changing the product goal."""
+    route_guidance = ""
+    if route_kind in {ChangeKind.ENHANCEMENT, ChangeKind.MILESTONE}:
+        candidates = extension_candidates or []
+        if candidates:
+            route_guidance = (
+                f"- This request is routed as {route_kind.value}. extension_points must name at "
+                "least one real existing path where the capability attaches. Select only from "
+                f"these local workspace candidates: {json.dumps(candidates)}.\n"
+            )
+        else:
+            route_guidance = (
+                f"- This request is routed as {route_kind.value}, but the workspace has no existing "
+                "project files that can be an insertion point; use extension_points=[].\n"
+            )
     return (
         "Original product request:\n"
         f"{goal}\n\n"
@@ -426,12 +497,18 @@ def build_authoritative_planner_request(goal: str) -> str:
         "- Every MODEL subtask must own at least one exact planned_files path.\n"
         "- Include goal-derived global_invariants and per-subtask relevant_global_invariants, "
         "provides, requires, and complete depends_on edges.\n"
+        "- Each requires string must exactly match one provides string from exactly one upstream "
+        "subtask, and that provider must appear in depends_on.\n"
+        "- Every verification entry must be an object with type, description, and "
+        "requires_runtime_execution. Use type=judgment without tool_name for semantic/runtime "
+        "checks; type=tool requires a real registered tool_name. Never emit verification strings.\n"
         "- Build/config stages may use compile or test verification. Any original-request "
         "requirement for observable application behavior must also be verified by an entrypoint-owning "
         "stage that actually runs the application, observes the required result, and confirms clean exit; "
         "set requires_runtime_execution=true on that verification method and false on build-only checks.\n"
         "- Do not copy these protocol rules into global_invariants; derive those only from the "
-        "original product request above."
+        "original product request above. Do not invent unspecified implementation choices.\n"
+        + route_guidance
     )
 
 
@@ -1435,7 +1512,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         )
         logger.info("Generating validated EngineeringPlan (planner_model=%s)...", planner_model or "default")
         plan_text = await self.workflow_engine.planner.run(
-            build_authoritative_planner_request(goal),
+            build_authoritative_planner_request(
+                goal,
+                route_kind=route.kind,
+                extension_candidates=_authoritative_planner_extension_candidates(workspace_path),
+            ),
             max_tokens_override=planner_token_cap,
             system_prompt_override=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
             json_mode=True,
@@ -1453,6 +1534,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 errors.append(f"structured plan parse failed: {parse_issue}")
                 if parse_issue and "execution_method=tool but no tool_name" in parse_issue:
                     reason_codes.append("TOOL_SUBTASK_MISSING_TOOL_NAME")
+                elif parse_issue and "failed schema validation" in parse_issue:
+                    reason_codes.append("STRUCTURED_PLAN_SCHEMA_INVALID")
                 else:
                     reason_codes.append("STRUCTURED_PLAN_PARSE_FAILED")
             else:
@@ -1529,6 +1612,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             repair_attempts += 1
             repair_prompt = build_structured_plan_repair_prompt(
                 goal, plan_text, errors, reason_codes, repair_attempts,
+                route_kind=route.kind,
+                extension_candidates=_authoritative_planner_extension_candidates(workspace_path),
             )
             ledger.record_and_persist(
                 workspace_path, "structured_plan_repair_requested", run_id=run_id,

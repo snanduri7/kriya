@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _execution_policy = ExecutionPolicy()
 
 
-def _audit_write_file(full_path: str) -> None:
+def _audit_write_file(full_path: str, workspace_path: Optional[str] = None) -> None:
     """MA4.5 - audit-only ExecutionPolicy consultation, mirroring
     kriya/core/llm.py's _audit_llm_network_access (MA4.3) and kriya/tools/
     validate.py's _audit_run_command (MA4.4) exactly: can never affect
@@ -28,14 +28,10 @@ def _audit_write_file(full_path: str) -> None:
     caught and logged, never propagated, and the decision is only logged,
     never branched on.
 
-    No workspace_path is available at THIS call site - atomic_write_file()
-    remains a pure path-in/bytes-in primitive with no concept of "which
-    repo/worktree root is this write happening under", deliberately kept
-    that way (see kriya/policy/filesystem.py's module docstring). That
-    means kriya/policy/execution.py's ExecutionPolicy._check_filesystem's
-    workspace-containment rule still cannot run from HERE - only its
-    context-free sensitive-path rule can, so this remains audit-only
-    telemetry, not enforcement.
+    AuthorizedFileWriter callers supply their already-validated workspace
+    root so this second audit reports the same containment fact accurately.
+    Low-level compatibility callers may omit it; those retain the historical
+    context-free default-deny audit without changing write behavior.
 
     MA4.16 update: this is no longer the only policy consultation Kriya's
     two real content-write call sites (kriya/workflow/attempt.py,
@@ -51,7 +47,10 @@ def _audit_write_file(full_path: str) -> None:
     not the only one anymore."""
     try:
         result = _execution_policy.evaluate(
-            ActionRequest(action_type=ActionType.WRITE_FILE, target=full_path)
+            ActionRequest(
+                action_type=ActionType.WRITE_FILE, target=full_path,
+                workspace_path=workspace_path,
+            )
         )
         logger.debug(
             "MA4 policy audit (not enforced): WRITE_FILE '%s' -> %s (%s)",
@@ -96,7 +95,10 @@ def read_file_revision(full_path: str) -> str:
         return content_revision("")
 
 
-def commit_revision_grounded_file(full_path: str, content: str, expected_revision: str) -> str:
+def commit_revision_grounded_file(
+    full_path: str, content: str, expected_revision: str,
+    workspace_path: Optional[str] = None,
+) -> str:
     """Atomically commit a fully staged file only if its base is unchanged."""
     actual_revision = read_file_revision(full_path)
     if actual_revision != expected_revision:
@@ -104,11 +106,13 @@ def commit_revision_grounded_file(full_path: str, content: str, expected_revisio
             f"Refusing stale write to '{full_path}': expected revision "
             f"{expected_revision[:12]}, found {actual_revision[:12]}. Re-read the file and retry."
         )
-    atomic_write_file(full_path, content)
+    atomic_write_file(full_path, content, workspace_path=workspace_path)
     return content_revision(content)
 
 
-def atomic_write_file(full_path: str, content: str) -> None:
+def atomic_write_file(
+    full_path: str, content: str, workspace_path: Optional[str] = None,
+) -> None:
     """Writes `content` to `full_path` atomically - via a temp file in the SAME
     directory, then os.replace() (atomic on both POSIX and Windows NTFS) - so a
     process killed mid-write can never leave `full_path` truncated/corrupted at
@@ -139,7 +143,7 @@ def atomic_write_file(full_path: str, content: str) -> None:
     system tmp dir) so os.replace() stays within one filesystem - crossing
     filesystems silently degrades to a non-atomic copy+delete on some
     platforms, defeating the whole point."""
-    _audit_write_file(full_path)
+    _audit_write_file(full_path, workspace_path=workspace_path)
     tmp_path = f"{full_path}.kriya-tmp-{os.getpid()}"
     with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -153,7 +157,9 @@ def _atomic_write_bytes(full_path: str, content: bytes) -> None:
     os.replace(tmp_path, full_path)
 
 
-def commit_revision_grounded_batch(writes: Iterable[StagedFileWrite]) -> Dict[str, str]:
+def commit_revision_grounded_batch(
+    writes: Iterable[StagedFileWrite], workspace_path: Optional[str] = None,
+) -> Dict[str, str]:
     """Commit a candidate set only after every source revision is still current.
 
     The function performs a full preflight before the first write, repeats each
@@ -191,7 +197,7 @@ def commit_revision_grounded_batch(writes: Iterable[StagedFileWrite]) -> Dict[st
             except FileNotFoundError:
                 snapshots[item.target_path] = None
             os.makedirs(os.path.dirname(item.target_path), exist_ok=True)
-            atomic_write_file(item.target_path, item.content)
+            atomic_write_file(item.target_path, item.content, workspace_path=workspace_path)
             committed.append(item.target_path)
     except Exception as commit_error:
         rollback_errors = []

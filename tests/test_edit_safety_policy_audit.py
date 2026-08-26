@@ -50,6 +50,26 @@ def test_audit_call_observes_the_real_target_path(tmp_path, monkeypatch):
     assert captured["target"] == str(target)
 
 
+def test_audit_call_uses_authorized_workspace_context_when_supplied(tmp_path, monkeypatch):
+    captured = {}
+    real_evaluate = edit_safety._execution_policy.evaluate
+
+    def spy(request):
+        captured["workspace_path"] = request.workspace_path
+        captured["result"] = real_evaluate(request)
+        return captured["result"]
+
+    monkeypatch.setattr(edit_safety._execution_policy, "evaluate", spy)
+    target = tmp_path / ".kriya" / "control" / "state.json"
+    target.parent.mkdir(parents=True)
+    edit_safety.atomic_write_file(
+        str(target), "{}", workspace_path=str(tmp_path),
+    )
+    assert captured["workspace_path"] == str(tmp_path)
+    assert captured["result"].decision == PolicyDecision.ALLOW
+    assert captured["result"].reason_code == "PATH_WITHIN_WORKSPACE_ALLOWED"
+
+
 def test_sensitive_looking_target_still_writes_since_ma45_is_audit_only(tmp_path):
     """A path matching the sensitive-path pattern (e.g. containing
     'credentials') would DENY at the policy level, but MA4.5 is audit-only -

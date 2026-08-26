@@ -215,7 +215,10 @@ class AuthorizedFileWriter:
         commit_revision_grounded_file - nothing is written if this raises."""
 
         self._raise_if_denied(full_path)
-        return commit_revision_grounded_file(full_path, content, expected_revision=expected_revision)
+        return commit_revision_grounded_file(
+            full_path, content, expected_revision=expected_revision,
+            workspace_path=self._scope.writable_roots[0],
+        )
 
     def commit_batch(self, writes: Iterable[StagedFileWrite]) -> Dict[str, str]:
         """Every item is authorized BEFORE any write in the batch happens -
@@ -226,4 +229,6 @@ class AuthorizedFileWriter:
         materialized = list(writes)
         for item in materialized:
             self._raise_if_denied(item.target_path)
-        return commit_revision_grounded_batch(materialized)
+        return commit_revision_grounded_batch(
+            materialized, workspace_path=self._scope.writable_roots[0],
+        )
