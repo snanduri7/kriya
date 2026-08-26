@@ -127,6 +127,10 @@ from kriya.workflow.plan_schema import (
     build_engineering_plan_from_planner_output,
 )
 from kriya.workflow.plan_validation import validate_plan
+from kriya.workflow.planning_diagnostics import (
+    bounded_repository_evidence,
+    persist_planning_attempt_diagnostic,
+)
 from kriya.workflow.subtask_checkpoint import topological_subtask_order
 from kriya.workflow.subtask_context_projection import project_for_subtask
 from kriya.workflow.subtask_telemetry import (
@@ -1532,12 +1536,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "planner_max_tokens", None,
         )
         logger.info("Generating validated EngineeringPlan (planner_model=%s)...", planner_model or "default")
+        planning_repository_candidates = _authoritative_planner_extension_candidates(workspace_path)
+        authoritative_planner_request = build_authoritative_planner_request(
+            goal,
+            route_kind=route.kind,
+            extension_candidates=planning_repository_candidates,
+        )
+        planning_repository_evidence = bounded_repository_evidence(
+            workspace_path, planning_repository_candidates,
+        )
         plan_text = await self.workflow_engine.planner.run(
-            build_authoritative_planner_request(
-                goal,
-                route_kind=route.kind,
-                extension_candidates=_authoritative_planner_extension_candidates(workspace_path),
-            ),
+            authoritative_planner_request,
             max_tokens_override=planner_token_cap,
             system_prompt_override=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
             json_mode=True,
@@ -1604,11 +1613,55 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
             if plan is not None and not errors:
+                try:
+                    persist_planning_attempt_diagnostic(
+                        workspace_path, run_id,
+                        attempt=repair_attempts,
+                        planner_request=authoritative_planner_request,
+                        planner_system_prompt=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
+                        raw_plan_response=plan_text,
+                        plan=plan,
+                        validation_errors=errors,
+                        reason_codes=reason_codes,
+                        repository_evidence=planning_repository_evidence,
+                        repair_prompt=None,
+                    )
+                except Exception as diagnostic_error:
+                    logger.warning(
+                        "Failed to persist local structured-planning diagnostics for run %r "
+                        "attempt %d: %s", run_id, repair_attempts, diagnostic_error,
+                    )
                 ledger.record_and_persist(
                     workspace_path, "structured_plan_validation", run_id=run_id,
                     valid=True, repair_attempts=repair_attempts,
                 )
                 break
+
+            repair_prompt = None
+            if repair_attempts < 2:
+                repair_prompt = build_structured_plan_repair_prompt(
+                    goal, plan_text, errors, reason_codes, repair_attempts + 1,
+                    route_kind=route.kind,
+                    extension_candidates=planning_repository_candidates,
+                )
+            try:
+                persist_planning_attempt_diagnostic(
+                    workspace_path, run_id,
+                    attempt=repair_attempts,
+                    planner_request=authoritative_planner_request,
+                    planner_system_prompt=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
+                    raw_plan_response=plan_text,
+                    plan=plan,
+                    validation_errors=errors,
+                    reason_codes=reason_codes,
+                    repository_evidence=planning_repository_evidence,
+                    repair_prompt=repair_prompt,
+                )
+            except Exception as diagnostic_error:
+                logger.warning(
+                    "Failed to persist local structured-planning diagnostics for run %r "
+                    "attempt %d: %s", run_id, repair_attempts, diagnostic_error,
+                )
 
             ledger.record_and_persist(
                 workspace_path, "structured_plan_validation", run_id=run_id,
@@ -1631,11 +1684,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
 
             repair_attempts += 1
-            repair_prompt = build_structured_plan_repair_prompt(
-                goal, plan_text, errors, reason_codes, repair_attempts,
-                route_kind=route.kind,
-                extension_candidates=_authoritative_planner_extension_candidates(workspace_path),
-            )
+            assert repair_prompt is not None
             ledger.record_and_persist(
                 workspace_path, "structured_plan_repair_requested", run_id=run_id,
                 repair_attempt=repair_attempts, reason_codes=reason_codes,

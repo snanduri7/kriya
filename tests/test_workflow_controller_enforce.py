@@ -5,6 +5,7 @@ run_generation_workflow() once per subtask (the same real pattern
 kriya/workflow/milestones.py::run_milestones() already uses per milestone)
 rather than reimplementing edit-application/verification/approval."""
 
+import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,6 +23,11 @@ from kriya.workflow.plan_schema import (
     VerificationMethodType,
 )
 from kriya.workflow.plan_validation import PlanValidationResult
+from kriya.workflow.planning_diagnostics import (
+    normalized_ownership_validation_records,
+    persist_planning_attempt_diagnostic,
+    planning_diagnostics_path,
+)
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import (
     _StructuredPlanUnavailable,
@@ -189,6 +195,83 @@ def test_plan_repair_prompt_resolves_duplicate_file_ownership_without_weakening_
     assert "verification or acceptance criteria" in prompt
     assert "do not rename, replace, or invent files" in prompt
     assert "'formatter.py': ['implementation', 'verify']" in prompt
+
+
+def test_normalized_ownership_diagnostic_exposes_duplicate_claims_without_inventing_symbols(tmp_path):
+    (tmp_path / "formatter.py").write_text("def format_name(value): return value\n")
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="implementation", description="fix formatter",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="formatter.py", action=FileAction.MODIFY, reason="existing implementation",
+                )],
+            ),
+            Subtask(
+                id="verification", description="verify formatter",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="formatter.py", action=FileAction.MODIFY, reason="run checks",
+                )],
+            ),
+        ],
+    )
+
+    records = normalized_ownership_validation_records(plan, workspace_path=str(tmp_path))
+
+    assert records == [{
+        "planned_path": "formatter.py",
+        "planned_symbol": None,
+        "declared_owner": None,
+        "declared_owners": ["implementation", "verification"],
+        "candidate_existing_owners": ["formatter.py"],
+        "repository_evidence": {
+            "exact_path_exists": True,
+            "ownership_discovery_performed": False,
+            "claims": [
+                {"subtask_id": "implementation", "action": "modify", "reason": "existing implementation"},
+                {"subtask_id": "verification", "action": "modify", "reason": "run checks"},
+            ],
+        },
+        "validator_rule": "each planned file path must be owned by exactly one subtask",
+        "decision": "rejected",
+        "reason": "planned path is claimed by 2 subtasks",
+    }]
+
+
+def test_planning_diagnostics_append_bounded_local_attempt_records(tmp_path):
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="implementation", description="write app",
+            execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="app.py", action=FileAction.CREATE)],
+        )],
+    )
+    for attempt in range(3):
+        persist_planning_attempt_diagnostic(
+            str(tmp_path), "run/unsafe:id",
+            attempt=attempt,
+            planner_request="request",
+            planner_system_prompt="system",
+            raw_plan_response=f"response {attempt}",
+            plan=plan,
+            validation_errors=["validation error"],
+            reason_codes=["REASON"],
+            repository_evidence=[{"path": "app.py", "exists": False}],
+            repair_prompt="repair" if attempt < 2 else None,
+        )
+
+    path = planning_diagnostics_path(str(tmp_path), "run/unsafe:id")
+    records = [json.loads(line) for line in open(path, encoding="utf-8")]
+    assert [record["attempt"] for record in records] == [0, 1, 2]
+    assert records[0]["raw_plan_response"] == "response 0"
+    assert records[1]["repair_prompt"] == "repair"
+    assert records[2]["repair_prompt"] is None
+    assert records[0]["repository_evidence"] == [{"path": "app.py", "exists": False}]
+    assert path.endswith("/.kriya/control/planning-diagnostics/run_unsafe_id.jsonl")
 
 
 def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():
@@ -654,6 +737,16 @@ async def test_enforce_plan_repair_exhaustion_fails_closed_without_legacy_execut
     assert "MODEL_SUBTASK_MISSING_PLANNED_FILES" in result.legacy_result["reason_codes"]
     assert we.planner.run.await_count == 3
     we.run_generation_workflow.assert_not_awaited()
+    diagnostics = [
+        json.loads(line)
+        for line in open(
+            planning_diagnostics_path(str(tmp_path), result.run_id), encoding="utf-8",
+        )
+    ]
+    assert [record["attempt"] for record in diagnostics] == [0, 1, 2]
+    assert diagnostics[0]["repair_prompt"] is not None
+    assert diagnostics[1]["repair_prompt"] is not None
+    assert diagnostics[2]["repair_prompt"] is None
 
 
 @pytest.mark.asyncio
