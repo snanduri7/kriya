@@ -1895,7 +1895,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
-    if not resuming_developer_stage:
+    if not resuming_candidate_stage:
         # Completeness Check: catch the Developer Agent silently under-delivering
         # (e.g. only writing pom.xml when the Architect's design called for 7 files).
         # A trivially-passing compile on a near-empty sandbox would otherwise report
