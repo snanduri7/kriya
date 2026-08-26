@@ -175,6 +175,22 @@ def test_plan_repair_prompt_gives_exact_schema_contract_and_extension_evidence()
     assert "Do not invent a path" in prompt
 
 
+def test_plan_repair_prompt_resolves_duplicate_file_ownership_without_weakening_scope():
+    prompt = build_structured_plan_repair_prompt(
+        "Fix the existing formatter and add regression coverage",
+        "previous response",
+        ["planned file ownership must be unique: {'formatter.py': ['implementation', 'verify']}"],
+        ["AMBIGUOUS_PLANNED_FILE_OWNERSHIP"],
+        1,
+    )
+
+    assert "owned by exactly one MODEL subtask" in prompt
+    assert "retain it only on the subtask that actually performs" in prompt
+    assert "verification or acceptance criteria" in prompt
+    assert "do not rename, replace, or invent files" in prompt
+    assert "'formatter.py': ['implementation', 'verify']" in prompt
+
+
 def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():
     request = build_authoritative_planner_request("Build one runnable application.")
     assert "Original product request:\nBuild one runnable application." in request

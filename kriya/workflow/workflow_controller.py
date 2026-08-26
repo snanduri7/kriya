@@ -433,6 +433,16 @@ def build_structured_plan_repair_prompt(
             "provides value exported by its declared upstream dependency. Do not paraphrase "
             "capability names.\n"
         )
+    if "AMBIGUOUS_PLANNED_FILE_OWNERSHIP" in reason_codes:
+        targeted_correction += (
+            "- Each planned file path must be owned by exactly one MODEL subtask. For every "
+            "duplicated path named in the validation errors, retain it only on the subtask that "
+            "actually performs that file's implementation change. Express downstream checks as "
+            "verification or acceptance criteria on an appropriate implementation subtask; do "
+            "not duplicate a path merely so another subtask can compile, test, inspect, or use "
+            "it. Preserve real dependency edges and do not rename, replace, or invent files to "
+            "avoid the ownership conflict.\n"
+        )
     if "EXTENSION_POINT_REQUIRED" in reason_codes:
         candidates = extension_candidates or []
         targeted_correction += (
