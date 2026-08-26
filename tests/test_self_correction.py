@@ -449,6 +449,8 @@ async def test_self_correction_resolve_missing_dependency_looks_up_a_real_coordi
         {"content": "done", "tool_calls": []},
     ])
     validator = MagicMock()
+    validator.autonomy_cfg.egress_policy = "open"
+    validator.autonomy_cfg.web_lookup_enabled = True
 
     with patch(
         "kriya.workflow.self_correction.resolve_maven_class",
@@ -460,7 +462,33 @@ async def test_self_correction_resolve_missing_dependency_looks_up_a_real_coordi
         )
 
     assert "qpid-jms-client" in result.transcript[0]["result"]
-    mock_resolve.assert_called_with("org.apache.qpid.jms.JmsConnectionFactory", "fc")
+    mock_resolve.assert_called_with(
+        "org.apache.qpid.jms.JmsConnectionFactory", "fc", allow_external_lookup=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_self_correction_dependency_lookup_respects_local_only_policy(tmp_path):
+    llm = MagicMock()
+    llm.complete_with_tools = AsyncMock(side_effect=[
+        {"content": "", "tool_calls": [{
+            "id": "1", "name": "resolve_missing_dependency",
+            "arguments": {"symbol": "com.example.proprietary.InternalType"},
+        }]},
+        {"content": "done", "tool_calls": []},
+    ])
+    validator = MagicMock()
+    validator.autonomy_cfg.egress_policy = "local_only"
+    validator.autonomy_cfg.web_lookup_enabled = True
+
+    with patch("kriya.workflow.self_correction.resolve_maven_class") as mock_resolve:
+        result = await run_self_correction_loop(
+            llm=llm, worktree_path=str(tmp_path), validator=validator,
+            files_in_scope=[], compile_error_output="err", active_code_context="",
+        )
+
+    mock_resolve.assert_not_called()
+    assert "disabled" in result.transcript[0]["result"]
 
 
 @pytest.mark.asyncio

@@ -596,7 +596,13 @@ class PolymorphicValidator:
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
                     try:
                         from kriya.tools.resolver import enrich_java_compiler_errors
-                        error_output = enrich_java_compiler_errors(error_output)
+                        error_output = enrich_java_compiler_errors(
+                            error_output,
+                            allow_external_lookup=(
+                                self.autonomy_cfg.egress_policy != "local_only"
+                                and self.autonomy_cfg.web_lookup_enabled
+                            ),
+                        )
                     except Exception as ree:
                         logger.warning(f"Resolver failed to run: {ree}")
                     return {"success": False, "output": error_output}
@@ -653,7 +659,13 @@ class PolymorphicValidator:
                     error_output = f"Java compilation failed:\n{res['stderr']}"
                     try:
                         from kriya.tools.resolver import enrich_java_compiler_errors
-                        error_output = enrich_java_compiler_errors(error_output)
+                        error_output = enrich_java_compiler_errors(
+                            error_output,
+                            allow_external_lookup=(
+                                self.autonomy_cfg.egress_policy != "local_only"
+                                and self.autonomy_cfg.web_lookup_enabled
+                            ),
+                        )
                     except Exception as ree:
                         logger.warning(f"Resolver failed to run: {ree}")
                     return {"success": False, "output": error_output}

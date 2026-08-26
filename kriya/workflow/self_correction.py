@@ -392,9 +392,23 @@ def _dispatch_tool_call(
             )
         last_segment = symbol.rsplit(".", 1)[-1]
         query_type = "fc" if last_segment[:1].isupper() else "g"
-        coord = resolve_maven_class(symbol, query_type)
+        autonomy_cfg = validator.autonomy_cfg
+        allow_external_lookup = bool(
+            autonomy_cfg.egress_policy != "local_only"
+            and autonomy_cfg.web_lookup_enabled
+        )
+        if not allow_external_lookup:
+            return (
+                "External dependency lookup is disabled by local-only or web-lookup policy; "
+                "use project-local dependencies and classpath evidence instead."
+            )
+        coord = resolve_maven_class(
+            symbol, query_type, allow_external_lookup=allow_external_lookup,
+        )
         if not coord and query_type == "fc":
-            coord = resolve_maven_class(symbol, "g")
+            coord = resolve_maven_class(
+                symbol, "g", allow_external_lookup=allow_external_lookup,
+            )
         if not coord:
             return f"No Maven Central match found for '{symbol}'."
         return (

@@ -751,13 +751,22 @@ _LIVE_INCIDENT_POM = """<?xml version="1.0" encoding="UTF-8"?>
     </build>
 </project>"""
 
-def test_ensure_maven_covers_nonconventional_java_files_widens_source_directory():
+def test_ensure_maven_covers_nonconventional_java_files_refuses_workspace_root_widening():
+    assert ensure_maven_covers_nonconventional_java_files(
+        _LIVE_INCIDENT_POM, ["App.java", "Protocol.java", "ProtocolParser.java"], "skills",
+    ) is None
+
+
+def test_ensure_maven_covers_nonconventional_java_files_uses_narrow_source_root():
     import xml.etree.ElementTree as ET
     corrected = ensure_maven_covers_nonconventional_java_files(
-        _LIVE_INCIDENT_POM, ["App.java", "Protocol.java", "ProtocolParser.java"], "skills",
+        _LIVE_INCIDENT_POM,
+        ["application/App.java", "application/Protocol.java"],
+        "skills",
     )
     assert corrected is not None
-    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected
+    assert "<sourceDirectory>${project.basedir}/application</sourceDirectory>" in corrected
+    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" not in corrected
     assert "<exclude>skills/**</exclude>" in corrected
     assert "<exclude>.kriya/**</exclude>" in corrected
     ET.fromstring(corrected)  # still well-formed XML
@@ -765,6 +774,28 @@ def test_ensure_maven_covers_nonconventional_java_files_widens_source_directory(
 def test_ensure_maven_covers_nonconventional_java_files_is_a_noop_for_conventional_layout():
     assert ensure_maven_covers_nonconventional_java_files(
         _LIVE_INCIDENT_POM, ["src/main/java/com/example/App.java"], "skills",
+    ) is None
+
+
+def test_ensure_maven_covers_nonconventional_java_files_ignores_standard_test_tree():
+    assert ensure_maven_covers_nonconventional_java_files(
+        _LIVE_INCIDENT_POM,
+        [
+            "src/main/java/com/example/App.java",
+            "src/test/java/com/example/AppTest.java",
+        ],
+        "skills",
+    ) is None
+
+
+def test_ensure_maven_covers_nonconventional_java_files_ignores_module_test_tree():
+    assert ensure_maven_covers_nonconventional_java_files(
+        _LIVE_INCIDENT_POM,
+        [
+            "module-a/src/main/java/com/example/App.java",
+            "module-a/src/test/java/com/example/AppTest.java",
+        ],
+        "skills",
     ) is None
 
 def test_ensure_maven_covers_nonconventional_java_files_never_overrides_a_real_customization():
@@ -781,9 +812,11 @@ def test_ensure_maven_covers_nonconventional_java_files_handles_no_build_section
 <project><modelVersion>4.0.0</modelVersion>
 <groupId>g</groupId><artifactId>a</artifactId><version>1.0</version>
 </project>"""
-    corrected = ensure_maven_covers_nonconventional_java_files(bare_pom, ["App.java"], "skills")
+    corrected = ensure_maven_covers_nonconventional_java_files(
+        bare_pom, ["generated-src/App.java"], "skills",
+    )
     assert corrected is not None
-    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected
+    assert "<sourceDirectory>${project.basedir}/generated-src</sourceDirectory>" in corrected
     ET.fromstring(corrected)
 
 def test_ensure_maven_covers_nonconventional_java_files_handles_compiler_plugin_without_configuration():
@@ -794,7 +827,9 @@ def test_ensure_maven_covers_nonconventional_java_files_handles_compiler_plugin_
 <groupId>g</groupId><artifactId>maven-compiler-plugin</artifactId><version>1</version>
 </plugin></plugins></build>
 </project>"""
-    corrected = ensure_maven_covers_nonconventional_java_files(pom, ["App.java"], "skills")
+    corrected = ensure_maven_covers_nonconventional_java_files(
+        pom, ["generated-src/App.java"], "skills",
+    )
     assert corrected is not None
     assert "<excludes><exclude>.kriya/**</exclude><exclude>skills/**</exclude></excludes>" in corrected
     ET.fromstring(corrected)
@@ -812,7 +847,9 @@ def test_ensure_maven_covers_nonconventional_java_files_never_excludes_a_differe
 <configuration><executable>java</executable></configuration></plugin>
 </plugins></build>
 </project>"""
-    corrected = ensure_maven_covers_nonconventional_java_files(pom, ["App.java"], "skills")
+    corrected = ensure_maven_covers_nonconventional_java_files(
+        pom, ["generated-src/App.java"], "skills",
+    )
     assert corrected is not None
     exec_config_start = corrected.index("<executable>java</executable>")
     assert "skills/**" not in corrected[:exec_config_start] or corrected.index("skills/**") < exec_config_start
@@ -827,9 +864,11 @@ def test_ensure_maven_covers_nonconventional_java_files_always_excludes_dot_kriy
     """`.kriya/worktree` exists unconditionally the moment Quality Gates has
     run once, independent of whether a skills directory is even configured -
     so its exclusion must not depend on skills_relpath being set."""
-    corrected = ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, ["App.java"], None)
+    corrected = ensure_maven_covers_nonconventional_java_files(
+        _LIVE_INCIDENT_POM, ["generated-src/App.java"], None,
+    )
     assert corrected is not None
-    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected
+    assert "<sourceDirectory>${project.basedir}/generated-src</sourceDirectory>" in corrected
     assert "<excludes><exclude>.kriya/**</exclude></excludes>" in corrected
     assert "skills/**" not in corrected
 
@@ -845,7 +884,9 @@ def test_ensure_maven_covers_nonconventional_java_files_marks_the_insertion_as_a
     extend it and produced malformed XML, burning that milestone's entire retry
     budget. The inserted block must be self-explanatory wherever it's later shown,
     without requiring every context-building call site to know about it."""
-    corrected = ensure_maven_covers_nonconventional_java_files(_LIVE_INCIDENT_POM, ["App.java"], "skills")
+    corrected = ensure_maven_covers_nonconventional_java_files(
+        _LIVE_INCIDENT_POM, ["generated-src/App.java"], "skills",
+    )
     assert corrected is not None
     assert "auto-managed" in corrected
     assert "do not duplicate, edit, or remove" in corrected
@@ -5018,28 +5059,29 @@ async def test_run_attempt_misdirected_edit_can_target_an_established_file(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_widens_maven_source_directory_for_root_level_java_files(tmp_path):
+async def test_run_attempt_uses_narrow_nonstandard_maven_source_directory(tmp_path):
     """End-to-end regression test for the real live incident, 2026-08-22
     (ignite_qpid_protocol milestone 3/4): a pom.xml introduced for the first
-    time while an established .java file (Protocol.java, from an earlier
-    no-build-file milestone) lives at the workspace root, not under Maven's
-    default src/main/java sourceDirectory. Confirms run_attempt() corrects
+    time while established Java files live in a bounded nonstandard source
+    directory outside Maven's default src/main/java. Confirms run_attempt() corrects
     the worktree's own pom.xml content deterministically, before the
     compile check runs, rather than letting a false-positive "success" (see
     the sibling test in test_polymorphic_validation.py) reach Runtime
     Verification undetected."""
-    (tmp_path / "Protocol.java").write_text("public class Protocol {}\n")
+    (tmp_path / "application").mkdir()
+    (tmp_path / "application" / "Protocol.java").write_text("public class Protocol {}\n")
     state = GenerationState()
     developer = AsyncMock()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "pom.xml", "content": "<project><build><plugins></plugins></build></project>"},
-        {"filepath": "App.java", "content": "public class App { public static void main(String[] a) { new Protocol(); } }"},
+        {"filepath": "application/App.java", "content": "public class App { public static void main(String[] a) { new Protocol(); } }"},
     ])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
-        architect_files=["pom.xml", "App.java"], expected_files_upfront=["pom.xml", "App.java"],
-        architect_basename_to_path={"pom.xml": "pom.xml", "App.java": "App.java"},
-        established_files=["Protocol.java"],
+        architect_files=["pom.xml", "application/App.java"],
+        expected_files_upfront=["pom.xml", "application/App.java"],
+        architect_basename_to_path={"pom.xml": "pom.xml", "App.java": "application/App.java"},
+        established_files=["application/Protocol.java"],
     )
 
     with patch(
@@ -5055,7 +5097,8 @@ async def test_run_attempt_widens_maven_source_directory_for_root_level_java_fil
         await run_attempt(state, ctx)
 
     corrected_pom = (tmp_path / "pom.xml").read_text()
-    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" in corrected_pom
+    assert "<sourceDirectory>${project.basedir}/application</sourceDirectory>" in corrected_pom
+    assert "<sourceDirectory>${project.basedir}</sourceDirectory>" not in corrected_pom
 
 
 @pytest.mark.asyncio

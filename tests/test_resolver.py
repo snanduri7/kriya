@@ -48,6 +48,16 @@ def test_resolve_maven_class_http_error():
     assert result is None
 
 
+def test_resolve_maven_class_blocks_external_lookup_before_client_creation():
+    with patch("httpx.Client") as MockClient:
+        result = resolve_maven_class(
+            "org.example.PrivateClass", "fc", allow_external_lookup=False,
+        )
+
+    assert result is None
+    MockClient.assert_not_called()
+
+
 def test_enrich_class_not_found():
     """Should detect ClassNotFoundException and append a KRIYA SUGGESTION."""
     compiler_output = (
@@ -171,6 +181,22 @@ def test_enrich_still_queries_missing_package():
         mock_resolve.return_value = {"groupId": "javax.jms", "artifactId": "jms", "version": "1.1"}
         enriched = enrich_java_compiler_errors(compiler_output)
 
-    mock_resolve.assert_called_once_with("javax.jms", "g")
+    mock_resolve.assert_called_once_with(
+        "javax.jms", "g", allow_external_lookup=True,
+    )
     assert "<groupId>javax.jms</groupId>" in enriched
     assert "<artifactId>jms</artifactId>" in enriched
+
+
+def test_enrich_compiler_errors_does_not_resolve_when_external_lookup_is_blocked():
+    compiler_output = "[ERROR] package com.example.proprietary does not exist"
+
+    with patch("kriya.tools.resolver.resolve_maven_class") as mock_resolve:
+        enriched = enrich_java_compiler_errors(
+            compiler_output, allow_external_lookup=False,
+        )
+
+    mock_resolve.assert_called_once_with(
+        "com.example.proprietary", "g", allow_external_lookup=False,
+    )
+    assert enriched == compiler_output

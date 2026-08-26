@@ -226,18 +226,15 @@ def ensure_maven_covers_nonconventional_java_files(
     import/package theories because nothing in the Developer's own context
     said "Maven isn't looking where your established files actually live."
 
-    Fix: widen the POM's own sourceDirectory to cover the workspace root
-    whenever a known .java file (established OR just written this attempt)
-    lives outside `src/main/java` - `${project.basedir}` is recursively
-    scanned, EXCLUDING the skills directory (real .java example files ship
-    inside active skills' own `examples/` folders - see e.g.
-    skills/qpid/examples/BrokerServer.java - and would otherwise get swept
-    into the same compile, risking duplicate/conflicting classes or
-    missing-dependency errors from files that were never meant to be part
-    of the generated application).
+    Fix: add a narrow POM sourceDirectory only when known main sources share
+    a bounded nonstandard directory outside `src/main/java`. Standard test
+    roots are never main-source evidence. Workspace-root widening is refused
+    because `${project.basedir}` recursively captures `src/test/java` and
+    unrelated Java fixtures; root-level sources instead remain an explicit
+    build-layout failure for plan/model recovery.
 
     Second real incident, same day, found via live validation of THIS fix:
-    `${project.basedir}` also recursively covers `.kriya/worktree/` -
+    A broad `${project.basedir}` also recursively covers `.kriya/worktree/` -
     Kriya's own sandbox git worktree (kriya/workflow/worktree.py), which
     contains its own nested copy of every active skill's `examples/`
     folder. A top-level `skills/**` exclude does not match that nested
@@ -255,22 +252,50 @@ def ensure_maven_covers_nonconventional_java_files(
 
     Deliberately conservative: a no-op if `<sourceDirectory>` already
     appears anywhere in the pom (a real customization already exists -
-    don't guess about overriding it), if no known `.java` file actually
-    needs it (the ordinary Maven-convention case, left untouched), or if
-    the content has no `<build>`/`</project>` anchor to insert against at
-    all. Textual insertion (matching this module's existing pom.xml-
+    don't guess about overriding it), if only Maven main/test convention
+    paths exist, if the only safe common root is the workspace itself, or
+    if the content has no `<build>`/`</project>` anchor. Textual insertion
+    (matching this module's existing pom.xml-
     adjacent corrections just above - exec:java/exec:exec and mainClass
     handling - rather than full XML-tree reconstruction: round-tripping
     this file's default Maven namespace through ElementTree risks mangling
     attributes/formatting well beyond the two small, targeted insertions
     actually needed here."""
+    normalized_java_files = [
+        f.replace("\\", "/").lstrip("./")
+        for f in java_files
+        if f.endswith(".java")
+    ]
+
+    # Maven's standard test tree is deliberately outside main sourceDirectory.
+    # It is not evidence that the main-source layout needs widening. The old
+    # predicate classified every path outside src/main/java as nonstandard,
+    # so the mere presence of src/test/java triggered project.basedir and made
+    # Maven compile JUnit tests during its main compile phase.
+    def _under_path_segment(path: str, segment: str) -> bool:
+        return path.startswith(segment) or f"/{segment}" in path
+
     relevant = [
-        f for f in java_files
-        if f.endswith(".java") and not f.replace("\\", "/").startswith("src/main/java/")
+        f for f in normalized_java_files
+        if not _under_path_segment(f, "src/main/java/")
+        and not _under_path_segment(f, "src/test/")
+        and not f.startswith(("test/", "tests/"))
     ]
     if not relevant:
         return None
     if "<sourceDirectory>" in pom_content:
+        return None
+
+    # A workspace-root source directory is too broad to be a safe automatic
+    # Maven repair: it recursively captures src/test/java and any unrelated
+    # Java fixtures. Only configure a narrow, common nonstandard source root.
+    # Root-level Java remains a detectable build-layout failure (the compile
+    # gate's zero-class safety net) for explicit plan/model recovery.
+    top_level_roots = {path.split("/", 1)[0] for path in relevant if "/" in path}
+    if len(top_level_roots) != 1:
+        return None
+    source_root = next(iter(top_level_roots))
+    if source_root in ("", ".", "..") or os.path.isabs(source_root):
         return None
 
     # Real live incident, same day this widening itself first shipped: when
@@ -290,7 +315,7 @@ def ensure_maven_covers_nonconventional_java_files(
         "<!-- Kriya: auto-managed by Quality Gates, reapplied automatically "
         "on every attempt when needed - do not duplicate, edit, or remove "
         "this element. -->\n"
-        "<sourceDirectory>${project.basedir}</sourceDirectory>"
+        f"<sourceDirectory>${{project.basedir}}/{source_root}</sourceDirectory>"
     )
     if "<build>" in pom_content:
         new_content = pom_content.replace("<build>", f"<build>\n{source_dir_block}", 1)

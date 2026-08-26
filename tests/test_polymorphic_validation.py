@@ -82,6 +82,31 @@ def test_unknown_stack_run_tests_is_honest_about_no_validation(tmp_path):
     assert "not confirmed" in res["output"].lower()
 
 
+def test_java_compile_enrichment_respects_local_only_without_network(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    (tmp_path / "src" / "main" / "java").mkdir(parents=True)
+    source = tmp_path / "src" / "main" / "java" / "App.java"
+    source.write_text("class App {}")
+    cfg = AppConfig()
+    cfg.autonomy.egress_policy = "local_only"
+    cfg.autonomy.web_lookup_enabled = False
+    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=cfg.autonomy)
+
+    with patch.object(
+        validator,
+        "_run_cmd_with_timeout",
+        return_value={
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "package com.example.proprietary does not exist",
+        },
+    ), patch("httpx.Client") as http_client:
+        result = validator.run_compile_check(["src/main/java/App.java"])
+
+    assert result["success"] is False
+    http_client.assert_not_called()
+
+
 def test_python_compile_check(tmp_path):
     # Written before construction: stack is now detected from real Python
     # markers (a .py file present, among others), not a blind default.
