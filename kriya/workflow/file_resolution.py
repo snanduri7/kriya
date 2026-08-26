@@ -154,9 +154,10 @@ def prefer_existing_artifact_owners(
     """Resolve invented parallel artifact names back to a unique brownfield owner.
 
     This is stack-neutral: candidates compete only within the same extension
-    and executable-test role, using filename tokens plus goal vocabulary. An
-    existing owner replaces a nonexistent planned path only when its semantic
-    score is unique and the request does not explicitly ask for a new artifact.
+    and executable-test role. A unique exact basename match is deterministic;
+    otherwise filename tokens plus goal vocabulary provide the semantic score.
+    An existing owner replaces a nonexistent planned path only when that
+    evidence is unique and the request does not explicitly ask for a new artifact.
     """
     planned = list(planned_files)
     if re.search(r"\b(?:create|introduce|add)\s+(?:a\s+)?new\b", goal or "", re.IGNORECASE):
@@ -179,6 +180,23 @@ def prefer_existing_artifact_owners(
         extension = os.path.splitext(path)[1].lower()
         planned_tokens = _artifact_name_tokens(path)
         planned_is_test = is_runnable_test_file(path)
+        exact_name_candidates = [
+            candidate for candidate in existing
+            if candidate not in claimed
+            and os.path.splitext(candidate)[1].lower() == extension
+            and is_runnable_test_file(candidate) == planned_is_test
+            and os.path.basename(candidate) == os.path.basename(path)
+        ]
+        if len(exact_name_candidates) == 1:
+            owner = exact_name_candidates[0]
+            resolved.append(owner)
+            claimed.add(owner)
+            logger.info(
+                "Resolved nonexistent planned artifact '%s' to unique exact-name "
+                "existing owner '%s'.",
+                path, owner,
+            )
+            continue
         scored = []
         for candidate in existing:
             if candidate in claimed or os.path.splitext(candidate)[1].lower() != extension:

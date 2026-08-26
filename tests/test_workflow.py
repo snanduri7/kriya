@@ -780,6 +780,43 @@ def test_brownfield_owner_resolution_prefers_unique_existing_implementation(tmp_
     ]
 
 
+def test_brownfield_owner_resolution_preserves_unique_exact_owner_package_path(tmp_path):
+    implementation = "src/main/java/com/example/customer/CustomerDisplayNameFormatter.java"
+    test = "src/test/java/com/example/customer/CustomerDisplayNameFormatterTest.java"
+    (tmp_path / implementation).parent.mkdir(parents=True)
+    (tmp_path / test).parent.mkdir(parents=True)
+    (tmp_path / implementation).write_text(
+        "package com.example.customer; class CustomerDisplayNameFormatter {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / test).write_text(
+        "package com.example.customer; class CustomerDisplayNameFormatterTest {}\n",
+        encoding="utf-8",
+    )
+
+    resolved = prefer_existing_artifact_owners(
+        [
+            "src/main/java/com/example/CustomerDisplayNameFormatter.java",
+            "src/test/java/com/example/CustomerDisplayNameFormatterTest.java",
+        ],
+        "Correct null and whitespace behavior",
+        str(tmp_path),
+    )
+
+    assert resolved == [implementation, test]
+
+
+def test_brownfield_exact_owner_resolution_refuses_duplicate_basenames(tmp_path):
+    for package in ("one", "two"):
+        candidate = tmp_path / "src" / package / "Formatter.java"
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text(f"package {package}; class Formatter {{}}\n", encoding="utf-8")
+
+    assert prefer_existing_artifact_owners(
+        ["src/Formatter.java"], "Correct formatting behavior", str(tmp_path),
+    ) == ["src/Formatter.java"]
+
+
 def test_ensure_maven_covers_nonconventional_java_files_uses_narrow_source_root():
     import xml.etree.ElementTree as ET
     corrected = ensure_maven_covers_nonconventional_java_files(
