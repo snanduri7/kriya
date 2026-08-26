@@ -776,3 +776,49 @@ def find_locator_files_outside_known_scope(error_text: str, known_files: Iterabl
         return []
     known_basenames = {os.path.basename(f) for f in known_files}
     return sorted(basenames - known_basenames)
+
+
+def resolve_repository_locator_files(
+    error_text: str,
+    workspace_path: str,
+    known_files: Iterable[str],
+    *,
+    max_files_scanned: int = 20_000,
+) -> List[str]:
+    """Resolve precise failure locators to unique existing repository files.
+
+    This is a bounded, local re-grounding step for terminal regression
+    failures that name an implementation file outside the current repair set.
+    It never guesses between duplicate basenames and never reads file content:
+    only a unique on-disk match for a real file:line locator is returned.
+    """
+    located_basenames = {
+        basename for basename, _line in extract_error_source_locations(error_text)
+    }
+    known_basenames = {os.path.basename(path) for path in known_files}
+    unresolved = located_basenames - known_basenames
+    if not unresolved:
+        return []
+
+    excluded_dirs = {
+        ".git", ".kriya", ".pytest_cache", "__pycache__", "node_modules",
+        "target", "build", "dist", ".venv", "venv",
+    }
+    matches: Dict[str, List[str]] = {basename: [] for basename in unresolved}
+    scanned = 0
+    for root, dirs, files in os.walk(workspace_path):
+        dirs[:] = sorted(name for name in dirs if name not in excluded_dirs)
+        for filename in sorted(files):
+            scanned += 1
+            if scanned > max_files_scanned:
+                return []
+            if filename not in unresolved:
+                continue
+            full_path = os.path.join(root, filename)
+            if not os.path.isfile(full_path) or os.path.islink(full_path):
+                continue
+            matches[filename].append(os.path.relpath(full_path, workspace_path))
+
+    return sorted(
+        paths[0] for paths in matches.values() if len(paths) == 1
+    )

@@ -31,6 +31,7 @@ from kriya.workflow.failure_grounding import (
     build_failure_signature,
     classify_environment_failure,
     extract_error_search_terms,
+    resolve_repository_locator_files,
 )
 from kriya.workflow.file_resolution import IncompleteGenerationError
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
@@ -400,9 +401,27 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         # a genuinely new failure (not yet a "confirmed repeat") redirect
         # immediately, one attempt earlier than self_diagnosed_files alone
         # (which only kicks in on the signature-matched repeat) would allow.
+        known_attribution_files = sorted(
+            set(state.all_files_written) | set(ctx.established_files)
+        )
+        repository_regrounded_files: list[str] = []
+        if fail_type == "regression_test":
+            repository_regrounded_files = resolve_repository_locator_files(
+                failure.raw_output or failure.message,
+                ctx.worktree_path,
+                known_attribution_files,
+            )
+            known_attribution_files = sorted(
+                set(known_attribution_files) | set(repository_regrounded_files)
+            )
+            if repository_regrounded_files:
+                # The prior self-diagnosis was formed without this repository
+                # owner in its candidate set. Fresh authoritative terminal
+                # evidence must be allowed to invalidate that stale scope.
+                self_diagnosed_files = None
         attribution = await attribute_failure(
             failure,
-            sorted(set(state.all_files_written) | set(ctx.established_files)),
+            known_attribution_files,
             state.budgets.retry_count,
             ctx.chain,
             ctx.developer.llm,
@@ -410,6 +429,11 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             self_diagnosed_files=self_diagnosed_files,
         )
         implicated = attribution.files
+        if repository_regrounded_files and set(implicated) & set(repository_regrounded_files):
+            attribution.reasoning = (
+                f"{attribution.reasoning} Terminal regression re-grounded the precise locator "
+                "to a unique existing repository file outside the prior repair set."
+            )
         state.last_attribution = attribution
         # failure.likely_files must be overwritten with the FINAL attribution
         # result, not left at whatever _build_quality_gate_failure() computed
@@ -486,7 +510,11 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # full-set batch (same scoping fix as prior_error_context
     # below).
     fresh_error_source_context = _build_error_source_context(
-        ctx.worktree_path, raw_error_context, state.all_files_written
+        ctx.worktree_path,
+        raw_error_context,
+        set(state.all_files_written)
+        | set(ctx.established_files)
+        | set(state.last_implicated_files or []),
     )
     state.last_error_source_context = (
         fresh_error_source_context

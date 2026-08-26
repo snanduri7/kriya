@@ -24,7 +24,7 @@ from kriya.workflow.attempt import (
 from kriya.workflow.operations import CodeOperation
 from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
+from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.file_resolution import (
     correct_exec_main_class_property,
     ensure_maven_covers_nonconventional_java_files,
@@ -4092,6 +4092,49 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
     )
     defaults.update(overrides)
     return AttemptContext(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_full_regression_locator_regrounds_stale_target_to_unique_repository_owner(tmp_path):
+    stale_target = "tests/FormatterTest.java"
+    actual_owner = "src/Formatter.java"
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src").mkdir()
+    (tmp_path / stale_target).write_text("class FormatterTest {}\n", encoding="utf-8")
+    (tmp_path / actual_owner).write_text("class Formatter {}\n", encoding="utf-8")
+
+    state = GenerationState()
+    state.attempt_number = 2
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {stale_target}
+    state.last_implicated_files = [stale_target]
+    failure_text = "at example.Formatter.normalize(Formatter.java:1)"
+    failure = Failure(
+        type="regression_test",
+        message=failure_text,
+        raw_output=failure_text,
+        likely_files=[stale_target],
+    )
+    state.last_self_diagnosis = (
+        build_failure_signature("regression_test", failure_text),
+        [stale_target],
+    )
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        architect_files=[stale_target],
+        expected_files_upfront=[stale_target],
+        architect_basename_to_path={"FormatterTest.java": stale_target},
+        allowed_write_relpaths=[stale_target],
+    )
+
+    assert await handle_attempt_failure(state, ctx, QualityGateFailure(failure)) is True
+    assert state.last_implicated_files == [actual_owner]
+    assert state.last_attribution.tier == "locator"
+    assert state.last_attribution.confidence == "high"
+    assert actual_owner in state.last_error_source_context
+    assert state.plan_scope_conflict["required_files"] == [actual_owner]
+    assert state.plan_scope_conflict["allowed_files"] == [stale_target]
+
 
 @pytest.mark.asyncio
 async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(tmp_path):
@@ -10602,6 +10645,17 @@ def test_find_locator_files_outside_known_scope_empty_when_locator_matches_a_kno
 
 def test_find_locator_files_outside_known_scope_empty_when_no_locator_at_all():
     assert find_locator_files_outside_known_scope("Process exited with code 1.", ["App.java"]) == []
+
+
+def test_repository_locator_regrounding_rejects_ambiguous_existing_owners(tmp_path):
+    (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
+    (tmp_path / "one" / "Owner.java").write_text("class Owner {}\n", encoding="utf-8")
+    (tmp_path / "two" / "Owner.java").write_text("class Owner {}\n", encoding="utf-8")
+
+    assert resolve_repository_locator_files(
+        "at example.Owner.run(Owner.java:1)", str(tmp_path), [],
+    ) == []
 
 def test_build_targeted_retry_prompt_frames_target_and_reference_files(tmp_path):
     (tmp_path / "App.java").write_text("class App { /* broken */ }")
