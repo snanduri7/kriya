@@ -74,6 +74,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -462,7 +463,7 @@ def build_structured_plan_repair_prompt(
             "- Each planned file path must be owned by exactly one MODEL subtask. For every "
             "duplicated path named in the validation errors, retain it only on the subtask that "
             "actually performs that file's implementation change. REMOVE any separate MODEL "
-            "subtask whose only purpose is to analyze, inspect, research, or explain that same "
+            "subtask whose sole purpose is to analyze, inspect, research, or explain that same "
             "file; fold necessary analysis into the implementation subtask. Express downstream checks as "
             "verification or acceptance criteria on an appropriate implementation subtask; do "
             "not duplicate a path merely so another subtask can compile, test, inspect, or use "
