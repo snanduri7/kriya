@@ -10759,12 +10759,14 @@ async def test_workflow_success_via_targeted_attempt_after_full_set_budget_exhau
             {"success": False, "output": same_error},
             {"success": True, "output": ""},
         ]
-        # Every Developer call (1 full-set + 3 targeted + 1 more targeted) returns
-        # the same file - content doesn't matter here since run_compile_check is
-        # mocked directly.
-        we.developer.run_generation = AsyncMock(
-            return_value=[{"filepath": "math.py", "content": "def add(a,b): return a+b"}]
-        )
+        # This regression isolates retry-budget accounting, not the separate
+        # repeated-action stop policy. Each candidate therefore makes material
+        # progress while the mocked compiler keeps failing until the final
+        # targeted attempt.
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "math.py", "content": f"def add(a,b): return a+b  # attempt {n}"}]
+            for n in range(1, 6)
+        ])
         res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
 
     assert res["quality_gates_passed"] is True

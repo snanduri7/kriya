@@ -74,6 +74,7 @@ def reset_state_for_independent_candidate(state) -> None:
     state.last_progress_failure_signature = None
     state.last_progress_stage = None
     state.last_progress_files = ()
+    state.last_progress_action = None
     state.last_progress_classification = None
     state.consecutive_no_progress_attempts = 0
     state.no_progress_terminated = False

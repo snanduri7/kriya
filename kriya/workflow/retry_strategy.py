@@ -62,6 +62,7 @@ def record_workspace_progress(
     failure_signature=None,
     stage: Optional[str] = None,
     files=None,
+    action: Optional[str] = None,
 ) -> bool:
     """Classify every failed attempt and bound retries without content progress."""
     normalized_files = tuple(sorted(set(files or ())))
@@ -72,8 +73,11 @@ def record_workspace_progress(
         "test": 3, "run_verification": 4, "run_verification_hung": 4,
         "goal_spec_compliance": 5, "regression_test": 6,
     }
+    action_changed = action != state.last_progress_action
     if not same_workspace:
         classification = "PROGRESS"
+    elif action_changed:
+        classification = "NO_PROGRESS"
     elif (
         stage is not None
         and state.last_progress_stage is not None
@@ -91,7 +95,7 @@ def record_workspace_progress(
     else:
         classification = "NO_PROGRESS"
 
-    if same_workspace:
+    if same_workspace and not action_changed:
         state.consecutive_no_progress_attempts += 1
     else:
         state.consecutive_no_progress_attempts = 0
@@ -99,6 +103,7 @@ def record_workspace_progress(
     state.last_progress_failure_signature = failure_signature
     state.last_progress_stage = stage
     state.last_progress_files = normalized_files
+    state.last_progress_action = action
     state.last_progress_classification = classification
     if classification == "REGRESSION":
         state.consecutive_no_progress_attempts = max(
@@ -311,6 +316,10 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         failure_signature=current_failure_signature,
         stage=fail_type,
         files=getattr(failure, "likely_files", None),
+        action=(
+            f"{state.last_attempt_mode}:"
+            f"{state.last_model_override or ctx.kernel.config.llm.model}"
+        ),
     ):
         logger.error(
             "Quality Gates stopped after %s consecutive attempts produced no "
@@ -324,7 +333,8 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         state.budgets.targeted_retry_count = max(
             state.budgets.targeted_retry_count, ctx.targeted_max_retries,
         )
-        state.budgets.fallback_targeted_attempted = True
+        if ctx.chain:
+            state.budgets.fallback_targeted_requested = True
 
     # Re-evaluate which file(s) THIS failure implicates/is missing -
     # independent of whether this attempt was itself targeted, missing-

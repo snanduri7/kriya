@@ -225,6 +225,7 @@ class GenerationState:
     last_progress_failure_signature: Optional[Tuple[str, Any]] = None
     last_progress_stage: Optional[str] = None
     last_progress_files: Tuple[str, ...] = ()
+    last_progress_action: Optional[str] = None
     last_progress_classification: Optional[str] = None
     consecutive_no_progress_attempts: int = 0
     no_progress_terminated: bool = False

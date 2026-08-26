@@ -202,11 +202,28 @@ def _create_scoped_snapshot_sandbox(workspace_path: str) -> str:
 
     # Stop Git commands issued from inside the snapshot from walking upward
     # and rediscovering the enclosing repository we deliberately excluded.
-    # A deliberately invalid gitdir pointer is a discovery boundary without
-    # creating or mutating a repository, and remains reliable when validation
-    # tests replace subprocess/Popen globally.
-    with open(os.path.join(sandbox_path, ".git"), "w", encoding="utf-8") as git_boundary:
-        git_boundary.write("gitdir: .kriya-nonexistent-snapshot-gitdir\n")
+    # Build the small on-disk shape of an empty repository directly. This is a
+    # real Git discovery boundary (`rev-parse --show-toplevel` resolves to the
+    # snapshot), but does not depend on spawning `git init`; validation tests
+    # and embedders may replace subprocess/Popen globally while testing build
+    # commands. No commit or application-repository mutation is involved.
+    git_dir = os.path.join(sandbox_path, ".git")
+    os.makedirs(os.path.join(git_dir, "objects", "info"), exist_ok=True)
+    os.makedirs(os.path.join(git_dir, "objects", "pack"), exist_ok=True)
+    os.makedirs(os.path.join(git_dir, "refs", "heads"), exist_ok=True)
+    os.makedirs(os.path.join(git_dir, "refs", "tags"), exist_ok=True)
+    with open(os.path.join(git_dir, "HEAD"), "w", encoding="utf-8") as head:
+        head.write("ref: refs/heads/main\n")
+    with open(os.path.join(git_dir, "config"), "w", encoding="utf-8") as config:
+        config.write(
+            "[core]\n"
+            "\trepositoryformatversion = 0\n"
+            "\tfilemode = true\n"
+            "\tbare = false\n"
+            "\tlogallrefupdates = true\n"
+        )
+    with open(os.path.join(git_dir, "description"), "w", encoding="utf-8") as description:
+        description.write("Kriya workspace-scoped snapshot sandbox\n")
     with open(os.path.join(sandbox_path, _SCOPED_SNAPSHOT_SENTINEL), "w", encoding="utf-8") as marker:
         marker.write("workspace-scoped sandbox; not an enclosing-repository checkout\n")
     return sandbox_path
