@@ -228,7 +228,8 @@ class PolymorphicValidator:
         # 1. Check for Java
         if (os.path.exists(os.path.join(self.workspace_path, "pom.xml")) or
             os.path.exists(os.path.join(self.workspace_path, "build.gradle")) or
-            os.path.exists(os.path.join(self.workspace_path, "src", "main", "java"))):
+            os.path.exists(os.path.join(self.workspace_path, "src", "main", "java")) or
+            self._has_any_java_file()):
             return "java"
 
         # 2. Check for Ruby
@@ -247,6 +248,18 @@ class PolymorphicValidator:
             return "python"
 
         return "unknown"
+
+    def _has_any_java_file(self) -> bool:
+        """Recognize standalone Java sources without requiring build metadata."""
+        skip_dirs = {
+            ".git", "node_modules", "venv", ".venv", "__pycache__", "build",
+            "dist", "target", ".kriya",
+        }
+        for _root, dirs, filenames in os.walk(self.workspace_path):
+            dirs[:] = [name for name in dirs if name not in skip_dirs]
+            if any(name.endswith(".java") for name in filenames):
+                return True
+        return False
 
     def _has_any_py_file(self) -> bool:
         """Bounded recursive fallback for a Python project with none of the
@@ -472,6 +485,13 @@ class PolymorphicValidator:
         """Runs language-specific compilation check on changed files."""
         if not files:
             return {"success": True, "output": "No files to compile check."}
+
+        # A from-scratch workspace can be marker-free when the validator is
+        # constructed and gain its first source file moments later during the
+        # Developer stage. Refresh only an unknown result at the gate boundary;
+        # established stack decisions remain stable.
+        if self.stack == "unknown":
+            self.stack = self._detect_stack()
 
         if self.stack == "python":
             errors = []

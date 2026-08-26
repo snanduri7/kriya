@@ -187,6 +187,8 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     assert "actually runs the application" in request
     assert "Never emit verification strings" in request
     assert "exactly match one provides string" in request
+    assert "tool_name=compile" in request
+    assert "runnable entrypoint stage" in request
 
 
 def test_authoritative_planner_request_supplies_route_extension_candidates(tmp_path):

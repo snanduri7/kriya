@@ -197,7 +197,14 @@ def commit_revision_grounded_batch(
             except FileNotFoundError:
                 snapshots[item.target_path] = None
             os.makedirs(os.path.dirname(item.target_path), exist_ok=True)
-            atomic_write_file(item.target_path, item.content, workspace_path=workspace_path)
+            if workspace_path is None:
+                # Preserve the historical two-argument primitive call shape for
+                # direct callers and test/integration wrappers around it.
+                atomic_write_file(item.target_path, item.content)
+            else:
+                atomic_write_file(
+                    item.target_path, item.content, workspace_path=workspace_path,
+                )
             committed.append(item.target_path)
     except Exception as commit_error:
         rollback_errors = []

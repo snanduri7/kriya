@@ -117,7 +117,6 @@ def test_required_verification_evidence_preserves_identity_and_only_resolves_bui
         {"type": "tool", "tool_name": "custom_validator", "description": "validate protocol"},
         {"type": "judgment", "description": "review usability"},
     ]
-
     evidence = _build_required_verification_evidence(requirements, quality_gates_passed=True)
 
     assert evidence == [
@@ -129,6 +128,61 @@ def test_required_verification_evidence_preserves_identity_and_only_resolves_bui
         {**requirements[1], "passed": None, "source": "unresolved"},
         {**requirements[2], "tool_name": None, "passed": None, "source": "unresolved"},
     ]
+
+
+def test_required_compile_verification_stays_unresolved_when_gate_was_skipped():
+    requirements = [{
+        "type": "tool", "tool_name": "compile", "description": "compile source",
+        "requires_runtime_execution": False,
+    }]
+    evidence = _build_required_verification_evidence(
+        requirements,
+        quality_gates_passed=True,
+        gate_outcomes=[{
+            "type": "compile", "success": True,
+            "output": "No compile check available. Quality gate skipped, NOT confirmed to compile.",
+        }],
+    )
+    assert evidence[0]["passed"] is None
+    assert evidence[0]["source"] == "unresolved"
+
+
+def test_required_compile_verification_uses_authoritative_gate_outcome():
+    requirements = [{
+        "type": "tool", "tool_name": "compile", "description": "compile source",
+        "requires_runtime_execution": False,
+    }]
+    evidence = _build_required_verification_evidence(
+        requirements,
+        quality_gates_passed=True,
+        gate_outcomes=[{
+            "type": "compile", "success": True,
+            "output": "Java classes compiled successfully.",
+        }],
+    )
+    assert evidence[0]["passed"] is True
+    assert evidence[0]["source"] == "authoritative_gate_outcome"
+
+
+def test_polymorphic_validator_detects_standalone_java_source(tmp_path):
+    from kriya.tools.validate import PolymorphicValidator
+
+    (tmp_path / "Protocol.java").write_text("public class Protocol {}\n")
+    assert PolymorphicValidator(str(tmp_path)).stack == "java"
+
+
+def test_compile_gate_refreshes_unknown_stack_after_first_java_file_is_generated(tmp_path):
+    from kriya.tools.validate import PolymorphicValidator
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "unknown"
+    (tmp_path / "Protocol.java").write_text("public class Protocol {}\n")
+    with patch.object(validator, "_run_cmd_with_timeout", return_value={
+        "returncode": 0, "stdout": "", "stderr": "",
+    }):
+        result = validator.run_compile_check(["Protocol.java"])
+    assert validator.stack == "java"
+    assert result == {"success": True, "output": "Java classes compiled successfully."}
 
 
 def _init_git_repo(tmp_path):

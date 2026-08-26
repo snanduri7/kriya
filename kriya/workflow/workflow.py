@@ -171,8 +171,32 @@ _PHASE_BANNER_WIDTH = 70
 
 def _build_required_verification_evidence(
     requirements: Optional[List[Dict[str, Any]]], quality_gates_passed: bool,
+    gate_outcomes: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Resolve only requirements the mature execution core can prove."""
+    outcomes_supplied = gate_outcomes is not None
+    outcomes = gate_outcomes or []
+
+    def _latest_outcome(types: set[str]) -> Optional[Dict[str, Any]]:
+        return next(
+            (outcome for outcome in reversed(outcomes) if outcome.get("type") in types),
+            None,
+        )
+
+    def _outcome_passed(outcome: Optional[Dict[str, Any]]) -> Optional[bool]:
+        if outcome is None:
+            return None
+        if outcome.get("success") is False:
+            return False
+        output = str(outcome.get("output", "")).lower()
+        unresolved_markers = (
+            "quality gate skipped", "not confirmed", "no compile check available",
+            "no test runner available", "no java test config found",
+        )
+        if any(marker in output for marker in unresolved_markers):
+            return None
+        return True if outcome.get("success") is True else None
+
     evidence: List[Dict[str, Any]] = []
     for requirement in requirements or []:
         item = {
@@ -186,8 +210,48 @@ def _build_required_verification_evidence(
             requirement.get("type") == "tool"
             and requirement.get("tool_name") in BUILTIN_QUALITY_GATE_VERIFIERS
         ):
-            item["passed"] = bool(quality_gates_passed)
-            item["source"] = "existing_quality_gates"
+            tool_name = requirement.get("tool_name")
+            outcome_types = {
+                "compile": {"compile"},
+                "test": {"test", "targeted_test", "regression_test"},
+                "tests": {"test", "targeted_test", "regression_test"},
+                "regression": {"regression_test"},
+                "quality_gates": {"compile", "test", "targeted_test", "regression_test"},
+            }[tool_name]
+            if outcomes_supplied:
+                if tool_name == "quality_gates":
+                    applicable = [
+                        outcome for outcome in outcomes
+                        if outcome.get("type") in outcome_types
+                    ]
+                    statuses = [_outcome_passed(outcome) for outcome in applicable]
+                    item["passed"] = (
+                        False if False in statuses
+                        else None if not statuses or None in statuses
+                        else True
+                    )
+                else:
+                    item["passed"] = _outcome_passed(_latest_outcome(outcome_types))
+            else:
+                # Compatibility for callers that only have the historical
+                # aggregate result and no per-gate evidence.
+                item["passed"] = bool(quality_gates_passed)
+            item["source"] = (
+                "authoritative_gate_outcome"
+                if item["passed"] is not None and outcomes_supplied
+                else "existing_quality_gates" if not outcomes_supplied
+                else "unresolved"
+            )
+        elif (
+            requirement.get("type") == "judgment"
+            and requirement.get("requires_runtime_execution") is True
+            and outcomes_supplied
+        ):
+            item["passed"] = _outcome_passed(_latest_outcome({"run_verification"}))
+            item["source"] = (
+                "authoritative_runtime_verification"
+                if item["passed"] is not None else "unresolved"
+            )
         evidence.append(item)
     return evidence
 
@@ -2016,6 +2080,34 @@ class WorkflowEngine:
                 else:
                     await run_attempt(state, attempt_ctx)
 
+                # Authoritative subtask verification is part of the pre-apply
+                # success boundary.  A skipped/unavailable check or unresolved
+                # judgment must never reach approval or copy sandbox files into
+                # the real workspace merely because the legacy aggregate gate
+                # boolean remained true.
+                required_evidence = _build_required_verification_evidence(
+                    required_verification,
+                    quality_gates_passed=True,
+                    gate_outcomes=state.gate_outcomes,
+                )
+                unresolved_requirements = [
+                    item.get("description", "") for item in required_evidence
+                    if item.get("passed") is not True
+                ]
+                if unresolved_requirements:
+                    message = (
+                        "REQUIRED VERIFICATION UNRESOLVED: no authoritative passing evidence "
+                        f"was produced for {unresolved_requirements!r}; refusing pre-apply success."
+                    )
+                    failure = Failure(
+                        type="verification_infrastructure_failure",
+                        message=message,
+                        raw_output=message,
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+
                 # Checkpoint here (before the human approval gate, which can block
                 # indefinitely on interactive input) so a kill/crash while waiting on
                 # approval - or during the apply/regression steps just below - doesn't
@@ -2724,7 +2816,7 @@ class WorkflowEngine:
             "files": list(state.all_files_written),
             "quality_gates_passed": quality_passed,
             "verification_results": _build_required_verification_evidence(
-                required_verification, quality_passed,
+                required_verification, quality_passed, gate_outcomes=state.gate_outcomes,
             ),
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,

@@ -355,14 +355,17 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     '"execution_method": "model", "depends_on": [], "planned_files": '
     '[{"path": "...", "action": "create|modify|delete"}], "provides": ["..."], '
     '"requires": [], "relevant_global_invariants": ["..."], "verification": '
-    '[{"type": "judgment", "description": "...", "requires_runtime_execution": false}], '
+    '[{"type": "tool", "description": "...", "tool_name": "compile", '
+    '"requires_runtime_execution": false}], '
     '"acceptance_criteria_ids": ["ac1"]}], "acceptance_criteria": '
     '[{"id": "ac1", "description": "...", "method": "judgment"}], '
     '"extension_points": [], "refactor_baseline": null}. '
     "Every model subtask must own every file it may change. Verification-only work belongs in "
     "verification or acceptance_criteria. A verification entry must always be an object, never a "
     "string. A judgment verification must omit tool_name. A tool verification must name a real "
-    "registered tool. Every requires value must exactly equal one provides value from exactly one "
+    "registered tool; use tool_name=compile for compilation and tool_name=test for tests. Every "
+    "acceptance criterion may be assigned only to a stage capable of demonstrating it. Every "
+    "requires value must exactly equal one provides value from exactly one "
     "declared dependency. Preserve goal-derived invariants without inventing unspecified choices."
 )
 
@@ -453,7 +456,11 @@ def build_structured_plan_repair_prompt(
         "provides/requires metadata; every requires string must exactly equal one provides string "
         "from exactly one declared dependency.\n"
         "- Every verification item must be an object with type, description, and "
-        "requires_runtime_execution; never emit a verification string.\n"
+        "requires_runtime_execution; use type=tool/tool_name=compile for compilation, "
+        "type=tool/tool_name=test for tests, and type=judgment without tool_name for "
+        "semantic/runtime checks; never emit a verification string.\n"
+        "- Map each acceptance criterion only to a stage capable of directly proving it; runtime "
+        "output criteria belong on the runnable entrypoint stage.\n"
         "- Every execution_method=model subtask MUST declare every file it may modify in planned_files.\n"
         "- Verification-only build/test/run/output checks belong in verification or acceptance_criteria, "
         "not in a MODEL subtask with no files.\n"
@@ -500,8 +507,12 @@ def build_authoritative_planner_request(
         "- Each requires string must exactly match one provides string from exactly one upstream "
         "subtask, and that provider must appear in depends_on.\n"
         "- Every verification entry must be an object with type, description, and "
-        "requires_runtime_execution. Use type=judgment without tool_name for semantic/runtime "
-        "checks; type=tool requires a real registered tool_name. Never emit verification strings.\n"
+        "requires_runtime_execution. Use type=tool with tool_name=compile for compilation and "
+        "tool_name=test for tests. Use type=judgment without tool_name for semantic/runtime checks. "
+        "Never emit verification strings.\n"
+        "- Assign an acceptance_criteria id only to a subtask that can directly demonstrate it. "
+        "An application-output or round-trip criterion belongs on the runnable entrypoint stage, "
+        "not an upstream library/configuration stage.\n"
         "- Build/config stages may use compile or test verification. Any original-request "
         "requirement for observable application behavior must also be verified by an entrypoint-owning "
         "stage that actually runs the application, observes the required result, and confirms clean exit; "
