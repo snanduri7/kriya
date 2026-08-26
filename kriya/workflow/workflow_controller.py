@@ -365,7 +365,10 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     '[{"id": "ac1", "description": "...", "method": "judgment"}], '
     '"extension_points": [], "refactor_baseline": null}. '
     "Every model subtask must own every file it may change. Verification-only work belongs in "
-    "verification or acceptance_criteria. A verification entry must always be an object, never a "
+    "verification or acceptance_criteria. Each planned path must be owned by exactly one model "
+    "subtask. Do not emit a model subtask solely to analyze, inspect, research, or explain code; "
+    "the implementation subtask performs any necessary analysis before editing its owned file. "
+    "A verification entry must always be an object, never a "
     "string. A judgment verification must omit tool_name. A tool verification must name a real "
     "registered tool; use tool_name=compile for compilation and tool_name=test for tests. Every "
     "acceptance criterion may be assigned only to a stage capable of demonstrating it. Every "
@@ -375,9 +378,16 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
 
 
 def _authoritative_planner_extension_candidates(
-    workspace_path: str, max_files: int = 100,
+    workspace_path: str, max_files: int = 100, *, goal: str = "",
 ) -> List[str]:
-    """Return bounded local path evidence for route-required insertion points."""
+    """Return bounded, goal-ranked local path evidence for planning.
+
+    Ranking is stack-neutral and content-free: camel-case/path tokens that
+    overlap the request sort ahead of unrelated paths, while path order keeps
+    ties deterministic. This prevents a large repository's first 100
+    lexicographic files from crowding the likely existing owner out of the
+    planner's bounded evidence.
+    """
     ignored_dirs = {
         ".git", ".kriya", "__pycache__", "node_modules", "target", ".venv",
         "venv", "logs", "memory",
@@ -393,9 +403,17 @@ def _authoritative_planner_extension_candidates(
             if is_root and (name in ignored_root_files or name.lower().endswith(".md")):
                 continue
             candidates.append(os.path.relpath(os.path.join(root, name), workspace_path))
-            if len(candidates) >= max_files:
-                return candidates
-    return candidates
+    if goal:
+        def tokens(value: str) -> set[str]:
+            expanded = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value)
+            return {
+                token.lower() for token in re.split(r"[^A-Za-z0-9]+", expanded)
+                if len(token) > 1
+            }
+
+        goal_tokens = tokens(goal)
+        candidates.sort(key=lambda path: (-len(tokens(path) & goal_tokens), path))
+    return candidates[:max_files]
 
 
 def build_structured_plan_repair_prompt(
@@ -407,6 +425,7 @@ def build_structured_plan_repair_prompt(
     *,
     route_kind: Optional[ChangeKind] = None,
     extension_candidates: Optional[List[str]] = None,
+    repository_candidates: Optional[List[str]] = None,
 ) -> str:
     """Build a bounded local-only correction request for the complete plan."""
     targeted_correction = ""
@@ -438,14 +457,19 @@ def build_structured_plan_repair_prompt(
             "capability names.\n"
         )
     if "AMBIGUOUS_PLANNED_FILE_OWNERSHIP" in reason_codes:
+        candidates = repository_candidates or []
         targeted_correction += (
             "- Each planned file path must be owned by exactly one MODEL subtask. For every "
             "duplicated path named in the validation errors, retain it only on the subtask that "
-            "actually performs that file's implementation change. Express downstream checks as "
+            "actually performs that file's implementation change. REMOVE any separate MODEL "
+            "subtask whose only purpose is to analyze, inspect, research, or explain that same "
+            "file; fold necessary analysis into the implementation subtask. Express downstream checks as "
             "verification or acceptance criteria on an appropriate implementation subtask; do "
             "not duplicate a path merely so another subtask can compile, test, inspect, or use "
             "it. Preserve real dependency edges and do not rename, replace, or invent files to "
-            "avoid the ownership conflict.\n"
+            "avoid the ownership conflict. Existing local paths available as ownership evidence: "
+            f"{json.dumps(candidates)}. For modify/delete, use an exact relevant existing path; "
+            "do not create or rename a parallel artifact when a relevant owner exists.\n"
         )
     if "EXTENSION_POINT_REQUIRED" in reason_codes:
         candidates = extension_candidates or []
@@ -491,6 +515,7 @@ def build_authoritative_planner_request(
     *,
     route_kind: Optional[ChangeKind] = None,
     extension_candidates: Optional[List[str]] = None,
+    repository_candidates: Optional[List[str]] = None,
 ) -> str:
     """Add enforce-only protocol constraints without changing the product goal."""
     route_guidance = ""
@@ -516,6 +541,14 @@ def build_authoritative_planner_request(
         "- Do not emit execution_method=tool subtasks; this execution path has no policy-mediated "
         "TOOL router. Represent non-editing checks as verification or acceptance criteria.\n"
         "- Every MODEL subtask must own at least one exact planned_files path.\n"
+        "- Each planned_files path must be owned by exactly one MODEL subtask. Do not create a "
+        "MODEL subtask solely to analyze, inspect, research, or explain code; fold necessary "
+        "analysis into the implementation subtask that owns and edits the file.\n"
+        "- Existing local workspace paths available as repository evidence are: "
+        f"{json.dumps(repository_candidates or [])}. For modify/delete actions, select the exact "
+        "relevant existing path from this evidence. Do not invent a parallel replacement when a "
+        "relevant existing owner is present. Use action=create only for a genuinely requested "
+        "artifact with no relevant existing path.\n"
         "- Include goal-derived global_invariants and per-subtask relevant_global_invariants, "
         "provides, requires, and complete depends_on edges.\n"
         "- Each requires string must exactly match one provides string from exactly one upstream "
@@ -1536,11 +1569,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "planner_max_tokens", None,
         )
         logger.info("Generating validated EngineeringPlan (planner_model=%s)...", planner_model or "default")
-        planning_repository_candidates = _authoritative_planner_extension_candidates(workspace_path)
+        planning_repository_candidates = _authoritative_planner_extension_candidates(
+            workspace_path, goal=goal,
+        )
         authoritative_planner_request = build_authoritative_planner_request(
             goal,
             route_kind=route.kind,
             extension_candidates=planning_repository_candidates,
+            repository_candidates=planning_repository_candidates,
         )
         planning_repository_evidence = bounded_repository_evidence(
             workspace_path, planning_repository_candidates,
@@ -1643,6 +1679,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     goal, plan_text, errors, reason_codes, repair_attempts + 1,
                     route_kind=route.kind,
                     extension_candidates=planning_repository_candidates,
+                    repository_candidates=planning_repository_candidates,
                 )
             try:
                 persist_planning_attempt_diagnostic(

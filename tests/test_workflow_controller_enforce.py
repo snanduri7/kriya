@@ -188,6 +188,10 @@ def test_plan_repair_prompt_resolves_duplicate_file_ownership_without_weakening_
         ["planned file ownership must be unique: {'formatter.py': ['implementation', 'verify']}"],
         ["AMBIGUOUS_PLANNED_FILE_OWNERSHIP"],
         1,
+        repository_candidates=[
+            "src/CustomerDisplayNameFormatter.java",
+            "tests/CustomerDisplayNameFormatterTest.java",
+        ],
     )
 
     assert "owned by exactly one MODEL subtask" in prompt
@@ -195,6 +199,10 @@ def test_plan_repair_prompt_resolves_duplicate_file_ownership_without_weakening_
     assert "verification or acceptance criteria" in prompt
     assert "do not rename, replace, or invent files" in prompt
     assert "'formatter.py': ['implementation', 'verify']" in prompt
+    assert "REMOVE any separate MODEL" in prompt
+    assert "sole purpose is to analyze, inspect, research, or explain" in prompt
+    assert "src/CustomerDisplayNameFormatter.java" in prompt
+    assert "For modify/delete, use an exact relevant existing path" in prompt
 
 
 def test_normalized_ownership_diagnostic_exposes_duplicate_claims_without_inventing_symbols(tmp_path):
@@ -288,6 +296,25 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     assert "exactly match one provides string" in request
     assert "tool_name=compile" in request
     assert "runnable entrypoint stage" in request
+    assert "Each planned_files path must be owned by exactly one MODEL subtask" in request
+    assert "solely to analyze, inspect, research, or explain code" in request
+
+
+def test_task_planner_request_supplies_existing_paths_for_brownfield_owner_selection():
+    request = build_authoritative_planner_request(
+        "Fix the existing display-name formatter and update its tests",
+        route_kind=ChangeKind.TASK,
+        repository_candidates=[
+            "src/CustomerDisplayNameFormatter.java",
+            "tests/CustomerDisplayNameFormatterTest.java",
+        ],
+    )
+
+    assert "Existing local workspace paths available as repository evidence" in request
+    assert "src/CustomerDisplayNameFormatter.java" in request
+    assert "tests/CustomerDisplayNameFormatterTest.java" in request
+    assert "For modify/delete actions, select the exact relevant existing path" in request
+    assert "Use action=create only" in request
 
 
 def test_authoritative_planner_request_supplies_route_extension_candidates(tmp_path):
@@ -304,6 +331,21 @@ def test_authoritative_planner_request_supplies_route_extension_candidates(tmp_p
     assert "extension_points must name" in request
     assert '["Existing.java"]' in request
     assert "private goal text" not in request
+
+
+def test_planner_repository_evidence_keeps_goal_relevant_owner_inside_bound(tmp_path):
+    for index in range(110):
+        (tmp_path / f"AUnrelated{index:03d}.java").write_text("class Unrelated {}")
+    relevant = tmp_path / "ZCustomerDisplayNameFormatter.java"
+    relevant.write_text("class ZCustomerDisplayNameFormatter {}")
+
+    candidates = _authoritative_planner_extension_candidates(
+        str(tmp_path), max_files=10,
+        goal="Fix the existing customer display name formatter",
+    )
+
+    assert "ZCustomerDisplayNameFormatter.java" in candidates
+    assert len(candidates) == 10
 
 
 @pytest.mark.asyncio
