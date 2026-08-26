@@ -148,6 +148,40 @@ def _artifact_name_tokens(path: str) -> set[str]:
     return _semantic_tokens(os.path.basename(path).rsplit(".", 1)[0])
 
 
+def _explicitly_requests_new_artifact(path: str, goal: str) -> bool:
+    """Scope explicit-new intent to the artifact phrase that carries it."""
+    phrases = re.findall(
+        r"\b(?:create|introduce|add)\s+(?:(?:a|an)\s+)?new\s+"
+        r"([^,.;:\n]+?)(?=\s+(?:and|while|without|that|which|to)\b|[,.;:\n]|$)",
+        goal or "",
+        re.IGNORECASE,
+    )
+    if not phrases:
+        return False
+    path_tokens = _artifact_name_tokens(path)
+    path_is_test = is_runnable_test_file(path)
+    test_tokens = {"test", "tests", "spec", "specs", "regression"}
+    generic_tokens = {"artifact", "file", "component", "module"}
+    implementation_tokens = {"implementation", "source", "class", "service", "helper"}
+    for phrase in phrases:
+        phrase_tokens = _semantic_tokens(phrase)
+        describes_test = bool(phrase_tokens & test_tokens)
+        describes_implementation = bool(phrase_tokens & implementation_tokens)
+        if describes_test and not describes_implementation:
+            if path_is_test:
+                return True
+            continue
+        if describes_implementation and not describes_test:
+            if not path_is_test:
+                return True
+            continue
+        if phrase_tokens & generic_tokens:
+            return True
+        if len(path_tokens & phrase_tokens) >= 2:
+            return True
+    return False
+
+
 def prefer_existing_artifact_owners(
     planned_files: Iterable[str], goal: str, workspace_path: str,
 ) -> List[str]:
@@ -161,8 +195,6 @@ def prefer_existing_artifact_owners(
     evidence is unique and the request does not explicitly ask for a new artifact.
     """
     planned = list(planned_files)
-    if re.search(r"\b(?:create|introduce|add)\s+(?:a\s+)?new\b", goal or "", re.IGNORECASE):
-        return planned
 
     ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
     existing: List[str] = []
@@ -176,6 +208,9 @@ def prefer_existing_artifact_owners(
     claimed = {path for path in planned if os.path.exists(os.path.join(workspace_path, path))}
     for path in planned:
         if os.path.exists(os.path.join(workspace_path, path)):
+            resolved.append(path)
+            continue
+        if _explicitly_requests_new_artifact(path, goal):
             resolved.append(path)
             continue
         extension = os.path.splitext(path)[1].lower()

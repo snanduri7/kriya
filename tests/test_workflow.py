@@ -848,6 +848,31 @@ def test_brownfield_token_containment_resolution_refuses_multiple_candidates(tmp
     ) == ["src/CustomerNameFormatter.java"]
 
 
+def test_explicit_new_test_does_not_disable_existing_implementation_owner(tmp_path):
+    implementation = "src/CustomerDisplayNameFormatter.java"
+    test = "tests/CustomerDisplayNameFormatterTest.java"
+    (tmp_path / implementation).parent.mkdir(parents=True)
+    (tmp_path / implementation).write_text("class CustomerDisplayNameFormatter {}\n")
+
+    assert prefer_existing_artifact_owners(
+        ["src/DisplayNameFormatter.java", test],
+        "Fix display-name null handling and add a new regression test",
+        str(tmp_path),
+    ) == [implementation, test]
+
+
+def test_explicit_new_implementation_is_not_redirected_to_existing_owner(tmp_path):
+    existing = tmp_path / "src" / "CustomerDisplayNameFormatter.java"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("class CustomerDisplayNameFormatter {}\n")
+
+    assert prefer_existing_artifact_owners(
+        ["src/DisplayNameFormatter.java"],
+        "Introduce a new display name formatter implementation",
+        str(tmp_path),
+    ) == ["src/DisplayNameFormatter.java"]
+
+
 def test_ensure_maven_covers_nonconventional_java_files_uses_narrow_source_root():
     import xml.etree.ElementTree as ET
     corrected = ensure_maven_covers_nonconventional_java_files(
@@ -1490,7 +1515,9 @@ async def test_workflow_fallback_chain(tmp_path):
     assert any(fact["value"] == "Avoid missing colon in function definition." for fact in staged_facts)
 
 @pytest.mark.asyncio
-async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_full_set_attempts(tmp_path):
+async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_full_set_attempts(
+    tmp_path, caplog,
+):
     """Regression test for a real gap found live, 2026-08-11 (the same
     session's "durable verified project facts" backlog item): lesson
     extraction used to be gated on `state.last_model_override and chain` -
@@ -1513,6 +1540,7 @@ async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     cfg.paths.skills = str(tmp_path / "skills")
+    caplog.set_level(logging.INFO)
 
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
@@ -1550,6 +1578,15 @@ async def test_workflow_extracts_lesson_from_primary_model_recovery_needing_two_
         fact["value"] == "Always resolve the build dependency graph fully before adding an explicit version pin."
         for fact in staged_facts
     )
+    messages = [record.getMessage() for record in caplog.records]
+    terminal_gate_index = messages.index(
+        "Quality Gates: Running full test suite regression check..."
+    )
+    learning_index = next(
+        index for index, message in enumerate(messages)
+        if message.startswith("Terminal success established - extracting structured knowledge facts")
+    )
+    assert terminal_gate_index < learning_index
 
 @pytest.mark.asyncio
 async def test_workflow_does_not_extract_lesson_from_a_single_targeted_retry(tmp_path):

@@ -2513,47 +2513,12 @@ class WorkflowEngine:
                 self_corrected_outcome = next(
                     (o for o in state.gate_outcomes if o.get("self_corrected")), None,
                 )
-                if (
+                should_extract_hard_won_knowledge = bool(
                     state.last_model_override
                     or state.budgets.retry_count >= 2
                     or state.budgets.best_of_n_candidates_tried >= 2
                     or self_corrected_outcome is not None
-                ):
-                    try:
-                        logger.info("A hard-won fix resolved the issue - extracting structured knowledge facts...")
-                        from kriya.knowledge import staging as knowledge_staging
-                        from kriya.knowledge.channels.live_failure import LiveFailureChannel, LiveFailureContext
-
-                        file_contents = {}
-                        for filepath in state.all_files_written:
-                            full_path = os.path.join(worktree_path, filepath)
-                            try:
-                                with open(full_path, "r", encoding="utf-8") as fh:
-                                    file_contents[filepath] = fh.read()
-                            except Exception as e:
-                                logger.debug(f"Failed to read '{full_path}' for lesson extraction: {e}")
-
-                        channel = LiveFailureChannel(self.llm)
-                        facts = await channel.extract(LiveFailureContext(
-                            error_context=state.error_context,
-                            file_contents=file_contents,
-                            model_override=state.last_model_override,
-                            base_url_override=state.last_base_url_override,
-                            api_key_override=state.last_api_key_override,
-                            extra_body_override=state.last_extra_body_override,
-                            transcript=(
-                                self_corrected_outcome.get("self_correction_transcript")
-                                if self_corrected_outcome is not None else None
-                            ),
-                        ))
-                        if facts:
-                            skills_dir = self.kernel.config.paths.skills
-                            skill_folder = os.path.join(skills_dir, f"auto-{repo_slug}")
-                            written = knowledge_staging.stage_facts(skill_folder, facts)
-                            if written:
-                                logger.info(f"Staged {len(written)} structured knowledge fact(s) to {skill_folder}")
-                    except Exception as ex:
-                        logger.warning(f"Failed to extract lesson or update skills: {ex}")
+                )
 
                 # If targeted gates passed, run the full regression suite against
                 # the still-isolated candidate. The real application workspace is
@@ -2654,14 +2619,57 @@ class WorkflowEngine:
                     details={"passed": True, "applied": True},
                 ))
                 log_gate_banner("OVERALL ATTEMPT", "PASSED", state.attempt_number)
+                state.quality_gates_succeeded = True
 
-                # Clean up worktree sandbox - only now, once the regression suite has
-                # ALSO passed (see the long comment above the file-copy loop for why
-                # this moved here instead of running right after the copy).
+                # Authoritative work is durable now; release the sandbox
+                # before any optional learning call can stall or fail.
                 if worktree_path != workspace_path:
                     remove_git_worktree(workspace_path, worktree_path)
 
-                state.quality_gates_succeeded = True
+                # Advisory learning may consume a slow model call. It is legal
+                # only after terminal regression and atomic application have
+                # established authoritative success, never between candidate
+                # gates and the terminal regression boundary.
+                if should_extract_hard_won_knowledge:
+                    try:
+                        logger.info(
+                            "Terminal success established - extracting structured "
+                            "knowledge facts from the hard-won fix..."
+                        )
+                        from kriya.knowledge import staging as knowledge_staging
+                        from kriya.knowledge.channels.live_failure import LiveFailureChannel, LiveFailureContext
+
+                        file_contents = {}
+                        for filepath in state.all_files_written:
+                            full_path = os.path.join(workspace_path, filepath)
+                            try:
+                                with open(full_path, "r", encoding="utf-8") as fh:
+                                    file_contents[filepath] = fh.read()
+                            except Exception as e:
+                                logger.debug(f"Failed to read '{full_path}' for lesson extraction: {e}")
+
+                        channel = LiveFailureChannel(self.llm)
+                        facts = await channel.extract(LiveFailureContext(
+                            error_context=state.error_context,
+                            file_contents=file_contents,
+                            model_override=state.last_model_override,
+                            base_url_override=state.last_base_url_override,
+                            api_key_override=state.last_api_key_override,
+                            extra_body_override=state.last_extra_body_override,
+                            transcript=(
+                                self_corrected_outcome.get("self_correction_transcript")
+                                if self_corrected_outcome is not None else None
+                            ),
+                        ))
+                        if facts:
+                            skills_dir = self.kernel.config.paths.skills
+                            skill_folder = os.path.join(skills_dir, f"auto-{repo_slug}")
+                            written = knowledge_staging.stage_facts(skill_folder, facts)
+                            if written:
+                                logger.info(f"Staged {len(written)} structured knowledge fact(s) to {skill_folder}")
+                    except Exception as ex:
+                        logger.warning(f"Failed to extract lesson or update skills: {ex}")
+
                 break
 
             except Exception as e:
