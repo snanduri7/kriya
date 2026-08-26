@@ -31,6 +31,27 @@ def test_polymorphic_stack_detection(tmp_path):
     assert v3.stack == "ruby"
 
 
+def test_explicit_ruby_marker_precedes_residual_standalone_java(tmp_path):
+    (tmp_path / "Old.java").write_text("class Old {}")
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'")
+
+    assert PolymorphicValidator(str(tmp_path)).stack == "ruby"
+
+
+def test_standalone_javac_ignores_contextual_files_absent_from_sandbox(tmp_path):
+    (tmp_path / "App.java").write_text("class App {}")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch.object(validator, "_run_cmd_with_timeout") as run_cmd:
+        run_cmd.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
+        result = validator.run_compile_check(["App.java", "Earlier.java"])
+
+    assert result["success"] is True
+    command = run_cmd.call_args.args[0]
+    assert str(tmp_path / "App.java") in command
+    assert str(tmp_path / "Earlier.java") not in command
+
+
 def test_polymorphic_stack_detection_unknown_for_unsupported_stack(tmp_path):
     # Regression test: a real JS/TS/Go/Rust/C# project (or any workspace with
     # none of the Java/Python/Ruby markers) used to silently fall back to

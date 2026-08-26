@@ -225,11 +225,14 @@ class PolymorphicValidator:
         - a quality gate that never actually checked anything. Python is now
         detected the same way Java/Ruby are, by real markers, so "no markers
         matched" is distinguishable from "this is a Python project"."""
-        # 1. Check for Java
+        # Explicit project markers take precedence over loose source files. A
+        # mixed or migrating workspace can retain a standalone source from a
+        # different ecosystem; that residue must not override the build system
+        # the workspace explicitly declares.
+        # 1. Check for Java project markers
         if (os.path.exists(os.path.join(self.workspace_path, "pom.xml")) or
             os.path.exists(os.path.join(self.workspace_path, "build.gradle")) or
-            os.path.exists(os.path.join(self.workspace_path, "src", "main", "java")) or
-            self._has_any_java_file()):
+            os.path.exists(os.path.join(self.workspace_path, "src", "main", "java"))):
             return "java"
 
         # 2. Check for Ruby
@@ -243,8 +246,17 @@ class PolymorphicValidator:
             os.path.exists(os.path.join(self.workspace_path, "pyproject.toml")) or
             os.path.exists(os.path.join(self.workspace_path, "setup.py")) or
             os.path.exists(os.path.join(self.workspace_path, "setup.cfg")) or
-            os.path.exists(os.path.join(self.workspace_path, "Pipfile")) or
-            self._has_any_py_file()):
+            os.path.exists(os.path.join(self.workspace_path, "Pipfile"))):
+            return "python"
+
+        # Marker-free, from-scratch Java projects still need a real compiler
+        # gate once their first generated source appears. Keep this fallback
+        # after every explicit ecosystem marker so it cannot misclassify a
+        # mixed workspace merely because an old .java file remains.
+        if self._has_any_java_file():
+            return "java"
+
+        if self._has_any_py_file():
             return "python"
 
         return "unknown"
@@ -617,7 +629,17 @@ class PolymorphicValidator:
                     logger.warning(f"Failed to invoke gradle compileJava: {e}")
             
             # 3. Fallback to raw javac syntax check (for simple single-class projects)
-            java_files = [os.path.join(self.workspace_path, f) for f in files if f.endswith(".java")]
+            # `files` can include controller-provided established-file context
+            # used to inform planning and runtime judgment. Only pass sources
+            # that physically exist in this sandbox to javac: a contextual name
+            # that has not been materialized here must not turn an otherwise
+            # valid compile into javac's unrelated "file not found" failure.
+            java_files = [
+                os.path.join(self.workspace_path, f)
+                for f in files
+                if f.endswith(".java")
+                and os.path.isfile(os.path.join(self.workspace_path, f))
+            ]
             if not java_files:
                 return {"success": True, "output": "No Java files to compile."}
                 
