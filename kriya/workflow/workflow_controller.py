@@ -2268,7 +2268,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             r.status == SubtaskStatus.COMPLETED for r in subtask_results
         )
         try:
-            if all_completed:
+            if all_completed and plan_workspace_path != workspace_path:
                 terminal_writes: List[StagedFileWrite] = []
                 for planned_subtask in plan.subtasks:
                     for planned_file in planned_subtask.planned_files:
@@ -2302,9 +2302,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             base_path=target_path,
                             expected_base_revision=original_plan_revisions[planned_file.path],
                         ))
-                if plan_workspace_path != workspace_path:
-                    commit_revision_grounded_batch(terminal_writes, workspace_path=workspace_path)
-            else:
+                commit_revision_grounded_batch(terminal_writes, workspace_path=workspace_path)
+            elif not all_completed and plan_workspace_path != workspace_path:
                 # No subtask output reached the user workspace. A later resume
                 # must rerun previously successful stages rather than skipping
                 # them based on sandbox-only work that has now been discarded.
