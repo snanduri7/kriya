@@ -35,7 +35,7 @@ from kriya.workflow.checkpoint import (
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
-from kriya.workflow.triage import EngineeringRoute, EngineeringTriageService
+from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
@@ -61,9 +61,12 @@ from kriya.workflow.context_budget import (
     skeletonize_python,
 )
 from kriya.workflow.edit_safety import (
+    StagedFileWrite,
     _strip_java_comments_and_strings,
     apply_anchored_edits,
     atomic_write_file,
+    commit_revision_grounded_batch,
+    content_revision,
     find_structural_corruption,
     normalize_whitespace,
 )
@@ -83,6 +86,7 @@ from kriya.workflow.file_resolution import (
     _resolve_file_paths_from_design,
     _resolve_maven_main_class,
     _resolve_run_command,
+    prefer_existing_artifact_owners,
     check_plan_completeness,
     downgrade_ungrounded_goal_explicit_commands,
     extract_expected_files,
@@ -1616,6 +1620,14 @@ class WorkflowEngine:
                 "Architect file list: structured JSON extraction unavailable - falling back to "
                 "heuristic regex extraction over the design's prose."
             )
+
+        # Brownfield ownership outranks creation of a parallel, similarly
+        # named artifact. Apply only to task-shaped requests; larger topology
+        # changes retain the Architect's explicit file set.
+        if engineering_route is not None and engineering_route.kind == ChangeKind.TASK:
+            architect_files = prefer_existing_artifact_owners(
+                architect_files, goal, workspace_path,
+            )
         if step_callback:
             step_callback("Design", design)
 
@@ -1991,7 +2003,10 @@ class WorkflowEngine:
             worktree_path = create_git_worktree(workspace_path)
             logger.info(f"Isolated sandbox worktree created at: {worktree_path}")
         except Exception as e:
-            logger.warning(f"Failed to create git worktree sandbox: {e}. Falling back to default workspace.")
+            raise RuntimeError(
+                f"Failed to create an isolated generation sandbox: {e}. "
+                "Refusing to generate directly in the application workspace."
+            ) from e
 
         # Loop-invariant - nothing in this object is reassigned across retry
         # attempts, so it's built once here rather than reconstructed per
@@ -2374,15 +2389,6 @@ class WorkflowEngine:
                         "approval_callback was provided to run_generation_workflow().",
                     )
 
-                # If approved, write files to the actual workspace
-                if worktree_path != workspace_path:
-                    for filepath in state.all_files_written:
-                        worktree_file = os.path.join(worktree_path, filepath)
-                        actual_file = os.path.join(workspace_path, filepath)
-                        os.makedirs(os.path.dirname(actual_file), exist_ok=True)
-                        shutil.copy2(worktree_file, actual_file)
-                        logger.info(f"Successfully applied sandbox change to actual workspace file: {filepath}")
-
                 # Worktree cleanup deliberately does NOT happen here anymore - see the
                 # real live incident this fix closes, 2026-08-22 (ignite_qpid_protocol
                 # milestone 2/3): compile+run-verification passing is not the same as
@@ -2424,7 +2430,7 @@ class WorkflowEngine:
                     final_contents_combined = ""
                     for filepath in state.all_files_written:
                         try:
-                            with open(os.path.join(workspace_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
                                 final_contents_combined += fh.read()
                         except Exception as e:
                             logger.debug(f"Failed to read '{filepath}' for auto-accrual verification: {e}")
@@ -2516,7 +2522,7 @@ class WorkflowEngine:
 
                         file_contents = {}
                         for filepath in state.all_files_written:
-                            full_path = os.path.join(workspace_path, filepath)
+                            full_path = os.path.join(worktree_path, filepath)
                             try:
                                 with open(full_path, "r", encoding="utf-8") as fh:
                                     file_contents[filepath] = fh.read()
@@ -2545,17 +2551,12 @@ class WorkflowEngine:
                     except Exception as ex:
                         logger.warning(f"Failed to extract lesson or update skills: {ex}")
 
-                # If we successfully compiled and passed targeted tests, run the full regression
-                # test suite once. Must use a validator pointed at the real workspace, not the
-                # worktree - the "Clean up worktree sandbox" step above already ran `git checkout
-                # -f HEAD` + `git clean -fd` on the worktree once a separate one was used,
-                # silently reverting it to the pre-change state. Reusing the earlier `validator`
-                # (constructed against the worktree, before that reset) would test stale,
-                # pre-change content and report a false pass. The real workspace already has the
-                # applied changes copied into it by this point either way.
+                # If targeted gates passed, run the full regression suite against
+                # the still-isolated candidate. The real application workspace is
+                # deliberately untouched until this terminal gate passes.
                 logger.info("Quality Gates: Running full test suite regression check...")
                 validator = PolymorphicValidator(
-                    workspace_path, original_workspace_path=workspace_path,
+                    worktree_path, original_workspace_path=workspace_path,
                     autonomy_cfg=self.kernel.config.autonomy,
                 )
 
@@ -2576,13 +2577,10 @@ class WorkflowEngine:
 
                 full_test_res = validator.run_tests()
                 if not full_test_res["success"]:
-                    # Real workspace, not the worktree - this check runs against
-                    # workspace_path (see the validator constructed above), so
-                    # failed_content/file_locations must be captured from there to
-                    # match what was actually validated.
                     failure = _build_quality_gate_failure(
                         "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}",
-                        full_test_res.get("output", ""), workspace_path, state.all_files_written, state.attempt_number,
+                        full_test_res.get("output", ""), worktree_path,
+                        state.all_files_written, state.attempt_number,
                     )
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
@@ -2592,6 +2590,30 @@ class WorkflowEngine:
                     "success": True,
                     "output": full_test_res.get("output", "")
                 })
+
+                # Terminal apply: materialize the complete verified candidate as
+                # one revision-grounded batch. Every real-workspace base revision
+                # must still match what this run originally read; a partial write
+                # is rolled back by commit_revision_grounded_batch.
+                final_writes = []
+                for filepath in sorted(state.all_files_written):
+                    candidate_path = os.path.join(worktree_path, filepath)
+                    with open(candidate_path, "r", encoding="utf-8", errors="replace") as fh:
+                        candidate_content = fh.read()
+                    actual_path = os.path.join(workspace_path, filepath)
+                    final_writes.append(StagedFileWrite(
+                        target_path=actual_path,
+                        content=candidate_content,
+                        base_path=actual_path,
+                        expected_base_revision=content_revision(
+                            state.all_original_contents.get(filepath, "")
+                        ),
+                    ))
+                commit_revision_grounded_batch(final_writes, workspace_path=workspace_path)
+                for filepath in sorted(state.all_files_written):
+                    logger.info(
+                        "Applied terminally verified sandbox change to workspace: %s", filepath,
+                    )
 
                 # Clean up worktree sandbox - only now, once the regression suite has
                 # ALSO passed (see the long comment above the file-copy loop for why

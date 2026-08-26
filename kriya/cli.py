@@ -1591,7 +1591,10 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         click.secho("  - Add detailed code blocks to instructions.md and files in examples/.", fg="cyan")
                         click.secho("Refer to Part 2 Section 2-D of the User Guide for detailed instructions.", fg="cyan")
                     await kernel.stop()
-                    sys.exit(0)
+                    # Declining a required knowledge/safety decision is an
+                    # unsuccessful generation, not a successful no-op. Keep it
+                    # non-zero for CI and shell callers.
+                    sys.exit(3)
 
         await kernel.stop()
         
@@ -1697,6 +1700,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         # documented gap for a v1: those paths don't get JSON output,
         # matching their pre-existing narrower, non-structured signal today.
         sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
+
+    # Click otherwise returns zero merely because the command function reached
+    # its end. Workflow outcome is the process contract for both human and JSON
+    # presentation modes: only terminally verified generation is success.
+    sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
 
 @main.command(name="plan-milestones")
 @click.argument('goal', required=False)

@@ -69,6 +69,14 @@ def reset_state_for_independent_candidate(state) -> None:
     state.budgets.last_failure_signature = None
     state.budgets.scoped_full_set_failure_signature = None
     state.budgets.fallback_targeted_requested = False
+    state.budgets.anchor_failure_counts = {}
+    state.last_failed_workspace_hash = None
+    state.last_progress_failure_signature = None
+    state.last_progress_stage = None
+    state.last_progress_files = ()
+    state.last_progress_classification = None
+    state.consecutive_no_progress_attempts = 0
+    state.no_progress_terminated = False
 
 
 async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:

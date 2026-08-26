@@ -479,6 +479,19 @@ def find_structural_corruption(filepath: str, content: str) -> Optional[str]:
         duplicate = _find_duplicate_top_level_type(stripped)
         if duplicate:
             return f"duplicate top-level type declaration: '{duplicate}' is declared more than once."
+        # A complete compilation unit followed by model commentary is often
+        # brace-balanced and therefore invisible to the checks above.  At
+        # least one top-level type means the last top-level closing brace is
+        # the end of Java source; non-whitespace afterward is payload
+        # contamination, not valid source. Comments/strings have already been
+        # blanked by the language adapter, avoiding marker-word heuristics.
+        if _TOP_LEVEL_TYPE_RE.search(stripped):
+            last_close = stripped.rfind("}")
+            trailing = stripped[last_close + 1:]
+            # Java permits empty top-level declarations (`;`) between/after
+            # type declarations; they are source, not model commentary.
+            if last_close >= 0 and trailing.replace(";", "").strip():
+                return "non-source payload appears after the final top-level type declaration."
     elif filepath.endswith(".xml"):
         try:
             ET.fromstring(content)

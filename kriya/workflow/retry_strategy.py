@@ -21,6 +21,7 @@ estimate.
 import hashlib
 import logging
 import os
+from typing import Optional
 
 from kriya.workflow.attribution import _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.banners import log_quality_gate_banner
@@ -53,13 +54,56 @@ _REPAIR_FEEDBACK_FAILURE_TYPES = {
 }
 
 
-def record_workspace_progress(state: GenerationState, workspace_hash: str, limit: int) -> bool:
-    """Return False once repeated failures make no effective content progress."""
-    if workspace_hash == state.last_failed_workspace_hash:
+def record_workspace_progress(
+    state: GenerationState,
+    workspace_hash: str,
+    limit: int,
+    *,
+    failure_signature=None,
+    stage: Optional[str] = None,
+    files=None,
+) -> bool:
+    """Classify every failed attempt and bound retries without content progress."""
+    normalized_files = tuple(sorted(set(files or ())))
+    same_workspace = workspace_hash == state.last_failed_workspace_hash
+    stage_order = {
+        "operation_contract": 0, "anchored_edit": 0,
+        "structural_corruption": 1, "compile": 2,
+        "test": 3, "run_verification": 4, "run_verification_hung": 4,
+        "goal_spec_compliance": 5, "regression_test": 6,
+    }
+    if not same_workspace:
+        classification = "PROGRESS"
+    elif (
+        stage is not None
+        and state.last_progress_stage is not None
+        and stage in stage_order
+        and state.last_progress_stage in stage_order
+        and stage_order[stage] < stage_order[state.last_progress_stage]
+    ):
+        classification = "REGRESSION"
+    elif (
+        failure_signature == state.last_progress_failure_signature
+        and stage == state.last_progress_stage
+        and normalized_files == state.last_progress_files
+    ):
+        classification = "REPEATED_ACTION"
+    else:
+        classification = "NO_PROGRESS"
+
+    if same_workspace:
         state.consecutive_no_progress_attempts += 1
     else:
         state.consecutive_no_progress_attempts = 0
     state.last_failed_workspace_hash = workspace_hash
+    state.last_progress_failure_signature = failure_signature
+    state.last_progress_stage = stage
+    state.last_progress_files = normalized_files
+    state.last_progress_classification = classification
+    if classification == "REGRESSION":
+        state.consecutive_no_progress_attempts = max(
+            state.consecutive_no_progress_attempts, 2,
+        )
     state.no_progress_terminated = state.consecutive_no_progress_attempts >= limit
     return not state.no_progress_terminated
 
@@ -246,28 +290,41 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             ctx.kernel.config.search.base_url, ctx.kernel.config.search.top_k
         )
     state.budgets.last_failure_signature = current_failure_signature
-    # Failure-family churn is not progress when the effective workspace is
-    # unchanged. Bound repeated model calls using content ground truth while
-    # preserving the existing global attempt ceiling.
-    if failure_family_changed:
-        current_workspace_hash = compute_effective_workspace_hash(
-            ctx.worktree_path,
-            set(state.all_files_written) | set(ctx.established_files),
+    # Measure every failed attempt. Repeating the same failure/action against
+    # identical bytes is the strongest no-progress evidence and must not reset
+    # merely because the failure family stayed the same.
+    current_workspace_hash = compute_effective_workspace_hash(
+        ctx.worktree_path,
+        set(state.all_files_written) | set(ctx.established_files),
+    )
+    # The runtime contract allows two recovery actions and stops on the third
+    # consecutive no-progress result. Older configurations commonly used 2
+    # for the former failure-family-churn counter; do not reinterpret that as
+    # an immediate stop under the richer per-attempt signal.
+    no_progress_limit = max(
+        3, ctx.kernel.config.autonomy.max_consecutive_no_progress_attempts,
+    )
+    if not record_workspace_progress(
+        state,
+        current_workspace_hash,
+        no_progress_limit,
+        failure_signature=current_failure_signature,
+        stage=fail_type,
+        files=getattr(failure, "likely_files", None),
+    ):
+        logger.error(
+            "Quality Gates stopped after %s consecutive attempts produced no "
+            "effective workspace change (classification=%s).",
+            no_progress_limit,
+            state.last_progress_classification,
         )
-        no_progress_limit = ctx.kernel.config.autonomy.max_consecutive_no_progress_attempts
-        if not record_workspace_progress(state, current_workspace_hash, no_progress_limit):
-            logger.error(
-                "Quality Gates stopped after %s consecutive failure-family changes "
-                "produced no effective workspace change.",
-                no_progress_limit,
-            )
-    else:
-        # Repeated failures already consume the existing scoped/full-set/model
-        # budgets.  They are not "failure churn" and must retain the bounded
-        # escalation path those budgets deliberately provide.
-        state.consecutive_no_progress_attempts = 0
-        state.last_failed_workspace_hash = None
-        state.no_progress_terminated = False
+    elif state.consecutive_no_progress_attempts >= 2:
+        # Force the existing bounded full-set/escalation route; this changes
+        # strategy, not authorization or file scope.
+        state.budgets.targeted_retry_count = max(
+            state.budgets.targeted_retry_count, ctx.targeted_max_retries,
+        )
+        state.budgets.fallback_targeted_attempted = True
 
     # Re-evaluate which file(s) THIS failure implicates/is missing -
     # independent of whether this attempt was itself targeted, missing-

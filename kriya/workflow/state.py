@@ -85,6 +85,10 @@ class RetryBudgets:
     # this check flagging it, so an unrelated, later mismatch on the same
     # file still gets its own first (bounded) veto.
     diagnosis_mismatch_veto_counts: Dict[str, int] = field(default_factory=dict)
+    # Consecutive anchor mismatches per authorized file. The first mismatch
+    # refreshes exact content for one more anchored attempt; the second changes
+    # only the edit protocol, never the file scope, to a full-file repair.
+    anchor_failure_counts: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -218,6 +222,10 @@ class GenerationState:
     cached_run_verification_judgment: Optional[Dict[str, Any]] = None
     cached_run_verification_basis_hash: Optional[str] = None
     last_failed_workspace_hash: Optional[str] = None
+    last_progress_failure_signature: Optional[Tuple[str, Any]] = None
+    last_progress_stage: Optional[str] = None
+    last_progress_files: Tuple[str, ...] = ()
+    last_progress_classification: Optional[str] = None
     consecutive_no_progress_attempts: int = 0
     no_progress_terminated: bool = False
     # Set True only right before the success-path `break` - retry_count alone

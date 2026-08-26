@@ -136,6 +136,72 @@ _MAIN_METHOD_PATTERN = re.compile(r"public\s+static\s+void\s+main\s*\(\s*String(
 _PACKAGE_DECL_PATTERN = re.compile(r"^\s*package\s+([\w.]+)\s*;", re.MULTILINE)
 
 
+def _semantic_tokens(text: str) -> set[str]:
+    expanded = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
+    return {
+        token.lower() for token in re.split(r"[^A-Za-z0-9]+", expanded)
+        if len(token) > 1
+    }
+
+
+def _artifact_name_tokens(path: str) -> set[str]:
+    return _semantic_tokens(os.path.basename(path).rsplit(".", 1)[0])
+
+
+def prefer_existing_artifact_owners(
+    planned_files: Iterable[str], goal: str, workspace_path: str,
+) -> List[str]:
+    """Resolve invented parallel artifact names back to a unique brownfield owner.
+
+    This is stack-neutral: candidates compete only within the same extension
+    and executable-test role, using filename tokens plus goal vocabulary. An
+    existing owner replaces a nonexistent planned path only when its semantic
+    score is unique and the request does not explicitly ask for a new artifact.
+    """
+    planned = list(planned_files)
+    if re.search(r"\b(?:create|introduce|add)\s+(?:a\s+)?new\b", goal or "", re.IGNORECASE):
+        return planned
+
+    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
+    existing: List[str] = []
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = [name for name in dirs if name not in ignored]
+        for filename in filenames:
+            existing.append(os.path.relpath(os.path.join(root, filename), workspace_path))
+
+    goal_tokens = _semantic_tokens(goal or "")
+    resolved: List[str] = []
+    claimed = {path for path in planned if os.path.exists(os.path.join(workspace_path, path))}
+    for path in planned:
+        if os.path.exists(os.path.join(workspace_path, path)):
+            resolved.append(path)
+            continue
+        extension = os.path.splitext(path)[1].lower()
+        planned_tokens = _artifact_name_tokens(path)
+        planned_is_test = is_runnable_test_file(path)
+        scored = []
+        for candidate in existing:
+            if candidate in claimed or os.path.splitext(candidate)[1].lower() != extension:
+                continue
+            if is_runnable_test_file(candidate) != planned_is_test:
+                continue
+            candidate_tokens = _artifact_name_tokens(candidate)
+            name_overlap = len(planned_tokens & candidate_tokens)
+            goal_overlap = len(goal_tokens & candidate_tokens)
+            if name_overlap == 0 or goal_overlap < 2:
+                continue
+            scored.append((name_overlap * 3 + goal_overlap, candidate))
+        scored.sort(reverse=True)
+        if scored and (len(scored) == 1 or scored[0][0] > scored[1][0]):
+            owner = scored[0][1]
+            resolved.append(owner)
+            claimed.add(owner)
+            logger.info("Resolved planned artifact '%s' to existing owner '%s'.", path, owner)
+        else:
+            resolved.append(path)
+    return resolved
+
+
 def _resolve_maven_main_class(worktree_path: str) -> Optional[str]:
     """Scans src/main/java for a class with a real `public static void
     main(String[] args)` method and returns its fully-qualified name (package

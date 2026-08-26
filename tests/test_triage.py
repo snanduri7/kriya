@@ -267,6 +267,23 @@ def test_to_dict_not_escalated_when_max_was_already_at_its_ceiling():
     assert recomputed.to_dict()["escalated"] is False
 
 
+@pytest.mark.asyncio
+async def test_contained_bug_fix_with_acceptance_bullets_remains_one_task(tmp_path):
+    (tmp_path / "formatter.py").write_text("def format_name(value): return value")
+    route = await EngineeringTriageService().classify(
+        """Fix the display-name defect in the existing formatter.
+- Update the implementation.
+- Add a regression test.
+- Preserve the public API.
+""",
+        str(tmp_path),
+        known_files=["formatter.py", "test_formatter.py"],
+    )
+
+    assert route.kind == ChangeKind.TASK
+    assert route.execution_weight == ExecutionWeight.LIGHT
+
+
 def test_to_dict_escalation_stage_none_when_never_recomputed():
     route = _route(ChangeKind.TASK, RiskClass.LOW)
     assert route.to_dict()["escalation_stage"] == "none"

@@ -390,7 +390,7 @@ _REPRO_SHAPE_RE = re.compile(
     r"\b(?:traceback|stack\s*trace|exception|throws?\b|"
     r"crashes?\s+when|fails?\s+when|breaks?\s+when|"
     r"expected\s+.{1,60}?\bgot\b|returns?\s+(?:a\s+)?\d{3}\b|"
-    r"\bbug\b|\bregression\b|\bbroken\b)",
+    r"\bbug\b|\bdefect\b|\bregression\b|\bbroken\b)",
     re.IGNORECASE,
 )
 # A file:line reference (a real stack-trace frame, or a reproduction quoting
@@ -428,21 +428,31 @@ def _detect_migration_language(goal: str) -> bool:
 _NUMBERED_LIST_RE = re.compile(r"(?:^|\n)\s*(?:\d+[.)]|[-*•])\s+\S", re.MULTILINE)
 _SEQUENCE_KEYWORD_RE = re.compile(r"\b(?:first|then|next|finally|afterwards?)\b", re.IGNORECASE)
 _ADDITIVE_LANGUAGE_RE = re.compile(r"\b(?:and\s+also|as\s+well\s+as|in\s+addition\s+to)\b", re.IGNORECASE)
+_INDEPENDENT_DELIVERABLE_RE = re.compile(
+    r"\b(?:independent\s+(?:deliverable|stage|service|module|artifact)|"
+    r"separate\s+(?:application|service|module|artifact|entrypoint)|"
+    r"multiple\s+(?:applications|services|modules|artifacts|entrypoints)|"
+    r"milestones?|phase\s+\d+)\b",
+    re.IGNORECASE,
+)
 
 
 def _detect_multi_part_structure(goal: str) -> bool:
-    """Pulls toward `milestone` - a numbered/bulleted list, or language
-    chaining multiple steps ("first… then… finally," "and also"). Two or
-    more sequencing keywords (not just one - "then" alone appears in
-    ordinary prose too often to be decisive by itself) is required before
-    the keyword path fires; a numbered/bulleted list is decisive on its
-    own since that structure has no other common reading."""
+    """Detect independent delivery topology, not acceptance-criteria length.
+
+    Lists and sequencing language count only when the goal also names
+    independent stages/artifacts. A production edit plus its supporting test,
+    or several bullets describing one defect, remains one task.
+    """
     text = goal or ""
-    if _NUMBERED_LIST_RE.search(text):
-        return True
-    if _ADDITIVE_LANGUAGE_RE.search(text):
-        return True
-    return len(_SEQUENCE_KEYWORD_RE.findall(text)) >= 2
+    topology = bool(_INDEPENDENT_DELIVERABLE_RE.search(text))
+    if not topology:
+        return False
+    return bool(
+        _NUMBERED_LIST_RE.search(text)
+        or _ADDITIVE_LANGUAGE_RE.search(text)
+        or len(_SEQUENCE_KEYWORD_RE.findall(text)) >= 2
+    )
 
 
 _NARROW_SCOPE_RE = re.compile(r"\b(?:just|only|quick|small|simple|tiny|minor)\b", re.IGNORECASE)

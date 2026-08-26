@@ -202,12 +202,11 @@ def _create_scoped_snapshot_sandbox(workspace_path: str) -> str:
 
     # Stop Git commands issued from inside the snapshot from walking upward
     # and rediscovering the enclosing repository we deliberately excluded.
-    # An empty .git directory is not a boundary: Git ignores it and continues
-    # discovery upward. A real, ephemeral repository makes every Git-aware
-    # helper resolve this exact sandbox while remaining wholly disposable.
-    subprocess.run(
-        ["git", "init", "-q"], cwd=sandbox_path, check=True, capture_output=True,
-    )
+    # A deliberately invalid gitdir pointer is a discovery boundary without
+    # creating or mutating a repository, and remains reliable when validation
+    # tests replace subprocess/Popen globally.
+    with open(os.path.join(sandbox_path, ".git"), "w", encoding="utf-8") as git_boundary:
+        git_boundary.write("gitdir: .kriya-nonexistent-snapshot-gitdir\n")
     with open(os.path.join(sandbox_path, _SCOPED_SNAPSHOT_SENTINEL), "w", encoding="utf-8") as marker:
         marker.write("workspace-scoped sandbox; not an enclosing-repository checkout\n")
     return sandbox_path
@@ -218,9 +217,19 @@ def create_git_worktree(repo_path: str) -> str:
     try:
         res = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo_path, capture_output=True, text=True)
         if res.returncode != 0:
-            raise ValueError("Not a git repository")
+            logger.info(
+                "Workspace '%s' is not a Git repository; using an isolated "
+                "workspace-scoped snapshot sandbox.", repo_path,
+            )
+            return _create_scoped_snapshot_sandbox(os.path.realpath(repo_path))
     except Exception as e:
-        raise ValueError(f"Directory is not a git repository: {e}") from e
+        if not os.path.isdir(repo_path):
+            raise ValueError(f"Workspace directory is unavailable: {e}") from e
+        logger.info(
+            "Git repository detection failed for '%s'; using an isolated "
+            "workspace-scoped snapshot sandbox: %s", repo_path, e,
+        )
+        return _create_scoped_snapshot_sandbox(os.path.realpath(repo_path))
 
     # `git rev-parse --is-inside-work-tree` is true for every ordinary
     # directory nested below a repository. That does not make the directory

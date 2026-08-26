@@ -193,6 +193,18 @@ def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
     assert "looks good" in result.stdout
 
 
+def test_generate_without_json_returns_nonzero_when_quality_gates_fail(runner, tmp_path):
+    failing_result = dict(_FAKE_GENERATE_RESULT, quality_gates_passed=False)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert result.exit_code == 1
+    assert "Generation Workflow Completed" in result.output
+
+
 def test_generate_renders_streamed_reviewer_report_only_once(runner, tmp_path):
     """Reviewer tokens are progress, while the final report owns presentation."""
     mock_we = MagicMock()

@@ -80,13 +80,22 @@ def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
 
 def _operation_map(
     ctx: "AttemptContext", filepaths: List[str], attempt_operation: CodeOperation,
+    state: Optional[GenerationState] = None,
 ) -> Dict[str, CodeOperation]:
-    return {
+    operations = {
         filepath: operation_for_file(
             attempt_operation, file_exists=_target_exists(ctx, filepath),
         )
         for filepath in filepaths
     }
+    if state is not None:
+        for filepath in filepaths:
+            if (
+                state.budgets.anchor_failure_counts.get(filepath, 0) >= 2
+                and _target_exists(ctx, filepath)
+            ):
+                operations[filepath] = CodeOperation.REPAIR_WITH_FULL_FILE
+    return operations
 
 
 def _preserved_authoritative_locator_files(
@@ -878,7 +887,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             files_with_current_content=state.all_files_written,
             sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
             operation_by_file=_operation_map(
-                ctx, state.last_implicated_files, attempt_operation,
+                ctx, state.last_implicated_files, attempt_operation, state,
             ),
             default_operation=attempt_operation,
         )
@@ -953,7 +962,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             files_with_current_content=state.all_files_written,
             sibling_content_budget=_reserve_sibling_content_budget(fallback.context_window),
             operation_by_file=_operation_map(
-                ctx, state.last_implicated_files, attempt_operation,
+                ctx, state.last_implicated_files, attempt_operation, state,
             ),
             default_operation=attempt_operation,
         )
@@ -1018,7 +1027,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             known_target_files=resolved_missing_files,
             sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
             operation_by_file=_operation_map(
-                ctx, resolved_missing_files, attempt_operation,
+                ctx, resolved_missing_files, attempt_operation, state,
             ),
             default_operation=attempt_operation,
         )
@@ -1187,7 +1196,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 files_with_current_content=state.all_files_written,
                 sibling_content_budget=_reserve_sibling_content_budget(active_context_window),
                 operation_by_file=(
-                    _operation_map(ctx, known_target_files, attempt_operation)
+                    _operation_map(ctx, known_target_files, attempt_operation, state)
                     if known_target_files else None
                 ),
                 default_operation=attempt_operation,
@@ -1502,6 +1511,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure) from anchor_ex
 
+                state.budgets.anchor_failure_counts[filepath] = (
+                    state.budgets.anchor_failure_counts.get(filepath, 0) + 1
+                )
                 failure = Failure(
                     type="anchored_edit",
                     message=f"ANCHORED EDIT FAILURE in {filepath}: {anchor_ex}",
@@ -1514,6 +1526,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure) from anchor_ex
+
+            state.budgets.anchor_failure_counts[filepath] = 0
 
             # Layer 0 pre-flight check (see find_whole_response_no_op's own
             # docstring): purely structural, no analysis text or fail_type

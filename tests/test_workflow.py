@@ -16,10 +16,12 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import (
     AttemptContext,
+    _operation_map,
     _record_self_correction_scope_conflict,
     _run_verification_basis_hash,
     run_attempt,
 )
+from kriya.workflow.operations import CodeOperation
 from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
@@ -30,6 +32,7 @@ from kriya.workflow.file_resolution import (
     find_runnable_test_files,
     ground_java_entrypoint_in_no_build_file_projects,
     is_runnable_test_file,
+    prefer_existing_artifact_owners,
     strip_package_declaration_matching_source_root,
 )
 from kriya.workflow.edit_safety import (
@@ -755,6 +758,26 @@ def test_ensure_maven_covers_nonconventional_java_files_refuses_workspace_root_w
     assert ensure_maven_covers_nonconventional_java_files(
         _LIVE_INCIDENT_POM, ["App.java", "Protocol.java", "ProtocolParser.java"], "skills",
     ) is None
+
+
+def test_brownfield_owner_resolution_prefers_unique_existing_implementation(tmp_path):
+    existing = tmp_path / "src" / "CustomerDisplayNameFormatter.py"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("def format_customer_name(customer):\n    return customer.name\n")
+    test = tmp_path / "tests" / "test_customer_display_name_formatter.py"
+    test.parent.mkdir()
+    test.write_text("def test_display_name():\n    pass\n")
+
+    resolved = prefer_existing_artifact_owners(
+        ["src/DisplayNameFormatter.py", "tests/test_display_name_formatter.py"],
+        "Fix the existing customer display name formatter behavior and its test",
+        str(tmp_path),
+    )
+
+    assert resolved == [
+        "src/CustomerDisplayNameFormatter.py",
+        "tests/test_customer_display_name_formatter.py",
+    ]
 
 
 def test_ensure_maven_covers_nonconventional_java_files_uses_narrow_source_root():
@@ -1497,13 +1520,10 @@ async def test_workflow_does_not_extract_lesson_from_a_single_targeted_retry(tmp
     assert not os.path.exists(staged_knowledge_file)
 
 @pytest.mark.asyncio
-async def test_workflow_best_of_n_never_activates_without_a_real_sandbox(tmp_path):
-    """best_of_n_first_attempt > 1 must be a no-op whenever create_git_worktree()
-    fell back to worktree_path == workspace_path (no real isolated sandbox - here
-    because tmp_path is never git-initialized) - discarding a candidate with
-    nowhere to reset to would leave its files on the real project. Confirms the
-    workflow.py dispatch condition, not just run_attempt_with_best_of_n's own
-    internal behavior (already covered in tests/test_best_of_n.py)."""
+async def test_workflow_best_of_n_uses_snapshot_sandbox_without_git_repo(tmp_path):
+    """A non-Git workspace now receives a real isolated snapshot, so Best-of-N
+    remains safe instead of being silently disabled or writing candidates into
+    the application directory."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
@@ -1519,14 +1539,13 @@ async def test_workflow_best_of_n_never_activates_without_a_real_sandbox(tmp_pat
     ])
     we = WorkflowEngine(kernel, llm)
 
-    with patch("kriya.workflow.best_of_n.run_attempt_with_best_of_n") as mock_best_of_n:
-        res = await we.run_generation_workflow(
-            goal="Create a math library",
-            workspace_path=str(tmp_path),
-        )
+    res = await we.run_generation_workflow(
+        goal="Create a math library",
+        workspace_path=str(tmp_path),
+    )
 
     assert res["quality_gates_passed"] is True
-    mock_best_of_n.assert_not_called()
+    assert (tmp_path / "math.py").exists()
 
 @pytest.mark.asyncio
 async def test_workflow_best_of_n_succeeds_on_second_independent_candidate(tmp_path):
@@ -3930,6 +3949,20 @@ def test_progress_gate_stops_failure_family_churn_without_content_change():
     assert state.no_progress_terminated is True
     assert record_workspace_progress(state, "changed-content", 2) is True
     assert state.consecutive_no_progress_attempts == 0
+
+
+def test_repeated_anchor_failure_switches_protocol_without_widening_scope(tmp_path):
+    target = tmp_path / "Owner.py"
+    target.write_text("value = 1\n")
+    ctx = MagicMock(worktree_path=str(tmp_path), workspace_path=str(tmp_path))
+    state = GenerationState()
+    state.budgets.anchor_failure_counts["Owner.py"] = 2
+
+    operations = _operation_map(
+        ctx, ["Owner.py"], CodeOperation.REPAIR_WITH_PATCH, state,
+    )
+
+    assert operations == {"Owner.py": CodeOperation.REPAIR_WITH_FULL_FILE}
 
 
 def test_effective_workspace_hash_tracks_uncommitted_known_file_content(tmp_path):
@@ -12872,6 +12905,11 @@ def test_find_structural_corruption_none_for_balanced_java():
         "}\n"
     )
     assert find_structural_corruption("Foo.java", valid) is None
+
+
+def test_find_structural_corruption_rejects_prose_after_java_compilation_unit():
+    contaminated = "class Foo { int value = 1; }\nVERIFICATION: PASS\n"
+    assert "non-source payload" in find_structural_corruption("Foo.java", contaminated)
 
 
 def test_find_structural_corruption_detects_unclosed_and_extra_braces():

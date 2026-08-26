@@ -2450,6 +2450,15 @@ class SpecComplianceAgent(BaseAgent):
     def system_prompt(self) -> str:
         return (
             "You are the Kriya Goal Spec Compliance Checker.\n"
+            "Classify each goal statement before judging it as one of: "
+            "BEHAVIORAL_REQUIREMENT, ARCHITECTURAL_INVARIANT, LOCATOR_CONTEXT, "
+            "or VERIFICATION_CRITERION. Enforce behavioral requirements and explicit "
+            "architectural invariants. Locator context identifies the existing owner "
+            "to inspect; it is not itself a required final code shape. Verification "
+            "criteria are established by the verification gates, not by requiring "
+            "test wording to appear in production source. For example, 'fix the "
+            "existing private helper responsible for formatting' is LOCATOR_CONTEXT, "
+            "not a requirement that the final implementation retain a private helper.\n"
             "You will be given a goal and the real content of every file generated for it "
             "(already compiled and passing any existing tests). Check ONLY whether the "
             "goal's CONCRETE, LITERALLY-NAMED requirements actually appear in the code:\n"
