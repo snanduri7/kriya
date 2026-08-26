@@ -196,7 +196,5 @@ def test_enrich_compiler_errors_does_not_resolve_when_external_lookup_is_blocked
             compiler_output, allow_external_lookup=False,
         )
 
-    mock_resolve.assert_called_once_with(
-        "com.example.proprietary", "g", allow_external_lookup=False,
-    )
+    mock_resolve.assert_not_called()
     assert enriched == compiler_output

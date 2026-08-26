@@ -53,6 +53,12 @@ def enrich_java_compiler_errors(
     """
     if not output:
         return output
+    # Enforce the capability at this public boundary too, before parsing
+    # potentially proprietary compiler text or invoking even a mocked/custom
+    # resolver implementation. The lower-level resolver repeats the guard as
+    # defense in depth for direct callers.
+    if not allow_external_lookup:
+        return output
 
     suggestions = []
 
