@@ -1,4 +1,4 @@
-"""Console/log banner for one Developer + Quality Gates attempt's outcome.
+"""Console/log banners for distinct Developer and verification boundaries.
 
 Deliberately separate from kriya/workflow/workflow.py's _log_phase_banner,
 which announces a top-level pipeline phase (Planning/Architecture/
@@ -22,8 +22,11 @@ logger = logging.getLogger(__name__)
 _QUALITY_GATE_BANNER_WIDTH = 70
 
 
-def log_quality_gate_banner(status: str, attempt_number: int, detail: str = "") -> None:
-    """Logs a dashed-border banner for one attempt's Quality Gates outcome.
+def log_gate_banner(label: str, status: str, attempt_number: int, detail: str = "") -> None:
+    """Log one explicitly named attempt boundary without conflating stages.
+
+    ``label`` distinguishes candidate checks, terminal regression, and the
+    overall attempt. Only the terminal aggregate uses ``QUALITY GATE``.
     `status` is "PASSED" or "FAILED"; PASSED logs at INFO, FAILED at WARNING
     to match the severity of what each previously logged standalone. `detail`
     carries whatever line-level context the call site already had (retry
@@ -46,8 +49,13 @@ def log_quality_gate_banner(status: str, attempt_number: int, detail: str = "") 
     Purely cosmetic (log-scanning aid for a human watching a run) - never
     gates or changes control flow."""
     bar = "-" * _QUALITY_GATE_BANNER_WIDTH
-    title = f"QUALITY GATE - Attempt {attempt_number}: {status}"
+    title = f"{label} - Attempt {attempt_number}: {status}"
     message = f"\n{bar}\n{title.center(_QUALITY_GATE_BANNER_WIDTH)}\n{bar}"
     if detail:
         message += f"\n{detail}"
     (logger.info if status == "PASSED" else logger.warning)(message)
+
+
+def log_quality_gate_banner(status: str, attempt_number: int, detail: str = "") -> None:
+    """Backward-compatible terminal Quality Gate banner wrapper."""
+    log_gate_banner("QUALITY GATE", status, attempt_number, detail)

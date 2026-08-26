@@ -58,7 +58,7 @@ from kriya.workflow.operations import (
 )
 from kriya.workflow.static_checks import find_established_stack_drift, find_goal_stack_mismatch, run_static_checks
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
-from kriya.workflow.banners import log_quality_gate_banner
+from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.acceptance import (
     goal_explicitly_requires_tests,
     output_confirms_nonzero_test_execution,
@@ -745,6 +745,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
     state.attempt_number += 1
+    state.candidate_gates_succeeded = False
+    state.terminal_regression_succeeded = False
+    state.overall_attempt_succeeded = False
     # Mode selection delegates to retry_policy.decide_retry_action() - the
     # same pure decision function the outer while loop (workflow.py) and the
     # post-failure budget bookkeeping (retry_strategy.py) already call to
@@ -804,20 +807,25 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # Needed unconditionally below (both the normal compile/test gate
     # path and the always-run full regression check use it) - imported
     # here rather than only inside the skippable gate block so a
-    # resumed "developer_success" checkpoint iteration (which skips
+    # resumed candidate-gates checkpoint iteration (which skips
     # that block entirely) still has it in scope.
     from kriya.tools.validate import PolymorphicValidator
 
-    # A "developer_success" checkpoint means Developer generation + all
-    # Quality Gates already passed once, before this process was
-    # interrupted - only usable on the very first iteration of a resumed
-    # run; any retry after that needs a real, fresh generation attempt.
-    resuming_developer_stage = bool(
-        ctx.resume_state and ctx.resume_state.get("stage") == "developer_success" and state.attempt_number == 1
+    # A candidate-gates checkpoint means generation plus the inner checks
+    # passed, but terminal regression did not. The legacy developer_success
+    # name is accepted conservatively as the same pre-regression boundary;
+    # neither form may bypass the terminal suite.
+    resuming_candidate_stage = bool(
+        ctx.resume_state
+        and ctx.resume_state.get("stage") in {"candidate_gates_passed", "developer_success"}
+        and state.attempt_number == 1
     )
 
-    if resuming_developer_stage:
-        logger.info(f"Resuming checkpoint '{ctx.run_id}': using saved Developer output, skipping generation + Quality Gates.")
+    if resuming_candidate_stage:
+        logger.info(
+            f"Resuming checkpoint '{ctx.run_id}': using saved candidate output and skipping "
+            "generation plus candidate gates; terminal regression remains required."
+        )
         files = [
             {"filepath": fp, "content": content}
             for fp, content in ctx.resume_state.get("final_files", {}).items()
@@ -3132,5 +3140,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         })
         logger.info(f"Quality Gates: Goal spec compliance PASSED: {spec_result['reasoning']}")
 
-    # If we made it here, Quality Gates passed successfully!
-    log_quality_gate_banner("PASSED", state.attempt_number)
+    # The isolated candidate passed its inner checks. Terminal full regression
+    # and application still remain, so this must never claim overall success.
+    state.candidate_gates_succeeded = True
+    state.record_event(RunEvent(
+        kind="candidate_gates.passed",
+        attempt=state.attempt_number,
+        source="workflow",
+        authority=EventAuthority.AUTHORITATIVE,
+        details={"passed": True, "terminal": False},
+    ))
+    log_gate_banner("CANDIDATE GATES", "PASSED", state.attempt_number)

@@ -24,7 +24,7 @@ import os
 from typing import Optional
 
 from kriya.workflow.attribution import _detect_missing_build_manifest, attribute_failure, read_worktree_file
-from kriya.workflow.banners import log_quality_gate_banner
+from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
@@ -36,6 +36,7 @@ from kriya.workflow.file_resolution import IncompleteGenerationError
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.state import GenerationState
+from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.worktree import remove_git_worktree
 from kriya.workflow.retry_policy import RetryAction, decide_for_state
 
@@ -171,14 +172,6 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # "full_set" -> "full-set" to match this log line's original
     # wording exactly; the other three modes were already hyphen-free.
     attempt_mode = "full-set" if state.last_attempt_mode in (None, "full_set") else state.last_attempt_mode
-    log_quality_gate_banner(
-        "FAILED", state.attempt_number,
-        detail=(
-            f"{attempt_mode}, full-set {state.budgets.retry_count}/{ctx.max_retries} + "
-            f"targeted {state.budgets.targeted_retry_count}/{ctx.targeted_max_retries}: {e}"
-        ),
-    )
-
     # Every failure source now raises with a real Failure object attached
     # (QualityGateFailure.failure directly, or IncompleteGenerationError.failure
     # for backward compat - see kriya/workflow/failure.py) instead of a bare
@@ -189,11 +182,36 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         type="general_error", message=raw_error_context, raw_output=raw_error_context,
         source="orchestrator",
     )
+    failure_detail = (
+        f"{attempt_mode}, full-set {state.budgets.retry_count}/{ctx.max_retries} + "
+        f"targeted {state.budgets.targeted_retry_count}/{ctx.targeted_max_retries}: {e}"
+    )
+    if failure.type == "regression_test":
+        state.terminal_regression_succeeded = False
+        log_gate_banner("FULL REGRESSION", "FAILED", state.attempt_number, failure_detail)
+    elif not state.candidate_gates_succeeded:
+        log_gate_banner("CANDIDATE GATES", "FAILED", state.attempt_number, failure_detail)
+    state.overall_attempt_succeeded = False
+    log_gate_banner("OVERALL ATTEMPT", "FAILED", state.attempt_number, failure_detail)
     previous_primary_failure = state.last_failure
     previous_error_source_context = dict(state.last_error_source_context)
     failure.attempt = state.attempt_number
     failure.mode = attempt_mode
     state.record_failure(failure, operation=attempt_mode)
+    state.record_event(RunEvent(
+        kind="attempt.failed",
+        attempt=state.attempt_number,
+        source="workflow",
+        authority=EventAuthority.AUTHORITATIVE,
+        operation=attempt_mode,
+        details={
+            "passed": False,
+            "failure_type": failure.type,
+            "candidate_gates_passed": state.candidate_gates_succeeded,
+            "terminal_regression_passed": state.terminal_regression_succeeded,
+            "applied": False,
+        },
+    ))
     failure_is_authoritative = getattr(failure, "authority", "authoritative") == "authoritative"
     # Advisory Developer feedback is useful retry/attribution evidence, but
     # may not replace the compiler/test/runtime failure the next repair prompt

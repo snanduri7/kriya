@@ -229,6 +229,10 @@ class GenerationState:
     last_progress_classification: Optional[str] = None
     consecutive_no_progress_attempts: int = 0
     no_progress_terminated: bool = False
+    # Current attempt's three distinct verification/application boundaries.
+    candidate_gates_succeeded: bool = False
+    terminal_regression_succeeded: bool = False
+    overall_attempt_succeeded: bool = False
     # Set True only right before the success-path `break` - retry_count alone
     # can no longer indicate success/failure now that a run can succeed via a
     # targeted attempt after the full-set budget was already exhausted.

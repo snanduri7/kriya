@@ -2950,7 +2950,9 @@ async def test_workflow_reviewer_not_run_early_when_no_approval_needed(tmp_path)
     assert res["review_included_in_approval"] is False
 
 @pytest.mark.asyncio
-async def test_workflow_stale_pre_approval_review_not_reused_after_later_attempt_fails(tmp_path):
+async def test_workflow_terminal_regression_failure_is_not_reported_or_applied_as_success(
+    tmp_path, caplog,
+):
     """Regression test for a real bug caught by independent review of Finding 1's own
     fix (2026-08-15): the original reset (`state.pre_approval_review = None`) was
     placed INSIDE the "4.5. Pre-Apply Human Approval Gate" section, so it only ran if
@@ -3001,15 +3003,43 @@ async def test_workflow_stale_pre_approval_review_not_reused_after_later_attempt
         ],
     ):
         we = WorkflowEngine(kernel, llm)
-        res = await we.run_generation_workflow(
-            goal="Create app", workspace_path=str(tmp_path),
-            approval_callback=lambda files, reason: True,
-        )
+        with caplog.at_level(logging.INFO):
+            res = await we.run_generation_workflow(
+                goal="Create app", workspace_path=str(tmp_path),
+                approval_callback=lambda files, reason: True,
+            )
 
     assert res["quality_gates_passed"] is False
+    assert res["candidate_gates_passed"] is False
+    assert res["terminal_regression_passed"] is False
+    assert res["overall_attempt_passed"] is False
     assert res["environment_failure"] is not None
     assert res["review"] == "Review B - fresh, describes the real final failure"
     assert llm.complete.await_count == 6
+    assert not (tmp_path / "app.py").exists()
+    checkpoint = load_checkpoint(str(tmp_path), res["run_id"])
+    assert checkpoint["stage"] == "candidate_gates_passed"
+    assert checkpoint["candidate_gates_passed"] is True
+    assert checkpoint["terminal_regression_passed"] is False
+    assert checkpoint["overall_attempt_passed"] is False
+
+    messages = [record.message for record in caplog.records]
+    candidate_pass = next(
+        index for index, message in enumerate(messages)
+        if "CANDIDATE GATES - Attempt 1: PASSED" in message
+    )
+    regression_fail = next(
+        index for index, message in enumerate(messages)
+        if "FULL REGRESSION - Attempt 1: FAILED" in message
+    )
+    overall_fail = next(
+        index for index, message in enumerate(messages)
+        if "OVERALL ATTEMPT - Attempt 1: FAILED" in message
+    )
+    assert candidate_pass < regression_fail < overall_fail
+    assert not any(
+        "QUALITY GATE - Attempt 1: PASSED" in message for message in messages
+    )
 
 
 @pytest.mark.asyncio
@@ -8601,10 +8631,9 @@ async def test_predetermined_architect_files_alone_raises():
 
 
 @pytest.mark.asyncio
-async def test_workflow_resumes_from_developer_success_checkpoint_skips_quality_gates(tmp_path):
-    """The most valuable resume point: Developer generation + compile/test gates
-    already passed before the crash, so only the human-approval/apply/regression
-    tail and the Reviewer need to run - no re-generation, no re-compiling."""
+async def test_workflow_resumes_from_candidate_gates_checkpoint_but_still_runs_regression(tmp_path):
+    """Candidate generation and inner gates may be reused, but terminal
+    regression remains mandatory before application or overall success."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -8614,7 +8643,7 @@ async def test_workflow_resumes_from_developer_success_checkpoint_skips_quality_
     goal = "Create math library"
 
     _seed_checkpoint(
-        tmp_path, cfg, goal, "ckpt-dev", "developer_success",
+        tmp_path, cfg, goal, "ckpt-dev", "candidate_gates_passed",
         plan="Step 1 (from checkpoint)",
         design="Design: Write math.py (from checkpoint)",
         final_files={"math.py": "def add(a,b):\n    return a+b"},
@@ -8630,6 +8659,9 @@ async def test_workflow_resumes_from_developer_success_checkpoint_skips_quality_
     res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume=True)
 
     assert res["quality_gates_passed"] is True
+    assert res["candidate_gates_passed"] is True
+    assert res["terminal_regression_passed"] is True
+    assert res["overall_attempt_passed"] is True
     assert "math.py" in res["files"]
     assert (tmp_path / "math.py").read_text() == "def add(a,b):\n    return a+b"
     assert llm.complete.await_count == 1  # Planner, Architect, Developer all skipped

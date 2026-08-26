@@ -32,6 +32,8 @@ from kriya.workflow.checkpoint import (
     new_run_id,
     save_checkpoint,
 )
+from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
+from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
@@ -2123,10 +2125,9 @@ class WorkflowEngine:
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
 
-                # Checkpoint here (before the human approval gate, which can block
-                # indefinitely on interactive input) so a kill/crash while waiting on
-                # approval - or during the apply/regression steps just below - doesn't
-                # force redoing the expensive Developer generation + Quality Gates work.
+                # Candidate-only checkpoint: generation and inner gates passed, but
+                # terminal regression and application have not. Its name and payload
+                # preserve that distinction for resume and external inspection.
                 final_files_for_checkpoint = {}
                 for filepath in state.all_files_written:
                     try:
@@ -2135,7 +2136,7 @@ class WorkflowEngine:
                     except Exception as ex:
                         logger.debug(f"Failed to snapshot '{filepath}' for checkpoint: {ex}")
                 _save_stage_checkpoint(
-                    "developer_success",
+                    "candidate_gates_passed",
                     plan=plan,
                     design=design,
                     final_files=final_files_for_checkpoint,
@@ -2144,6 +2145,9 @@ class WorkflowEngine:
                     model_hops=state.model_hops,
                     retry_count=state.budgets.retry_count,
                     targeted_retry_count=state.budgets.targeted_retry_count,
+                    candidate_gates_passed=True,
+                    terminal_regression_passed=False,
+                    overall_attempt_passed=False,
                 )
 
                 # 4.5. Pre-Apply Human Approval Gate
@@ -2590,6 +2594,32 @@ class WorkflowEngine:
                     "success": True,
                     "output": full_test_res.get("output", "")
                 })
+                state.terminal_regression_succeeded = True
+                state.record_event(RunEvent(
+                    kind="terminal_regression.passed",
+                    attempt=state.attempt_number,
+                    source="workflow",
+                    authority=EventAuthority.AUTHORITATIVE,
+                    details={"passed": True, "terminal": True},
+                ))
+                log_quality_gate_banner("PASSED", state.attempt_number)
+
+                # A semantically final-success checkpoint is legal only after
+                # every required terminal gate has passed.
+                _save_stage_checkpoint(
+                    "developer_success",
+                    plan=plan,
+                    design=design,
+                    final_files=final_files_for_checkpoint,
+                    original_files=state.all_original_contents,
+                    gate_outcomes=state.gate_outcomes,
+                    model_hops=state.model_hops,
+                    retry_count=state.budgets.retry_count,
+                    targeted_retry_count=state.budgets.targeted_retry_count,
+                    candidate_gates_passed=True,
+                    terminal_regression_passed=True,
+                    overall_attempt_passed=False,
+                )
 
                 # Terminal apply: materialize the complete verified candidate as
                 # one revision-grounded batch. Every real-workspace base revision
@@ -2614,6 +2644,16 @@ class WorkflowEngine:
                     logger.info(
                         "Applied terminally verified sandbox change to workspace: %s", filepath,
                     )
+
+                state.overall_attempt_succeeded = True
+                state.record_event(RunEvent(
+                    kind="attempt.passed",
+                    attempt=state.attempt_number,
+                    source="workflow",
+                    authority=EventAuthority.AUTHORITATIVE,
+                    details={"passed": True, "applied": True},
+                ))
+                log_gate_banner("OVERALL ATTEMPT", "PASSED", state.attempt_number)
 
                 # Clean up worktree sandbox - only now, once the regression suite has
                 # ALSO passed (see the long comment above the file-copy loop for why
@@ -2837,6 +2877,9 @@ class WorkflowEngine:
             "design": design,
             "files": list(state.all_files_written),
             "quality_gates_passed": quality_passed,
+            "candidate_gates_passed": state.candidate_gates_succeeded,
+            "terminal_regression_passed": state.terminal_regression_succeeded,
+            "overall_attempt_passed": state.overall_attempt_succeeded,
             "verification_results": _build_required_verification_evidence(
                 required_verification, quality_passed, gate_outcomes=state.gate_outcomes,
             ),

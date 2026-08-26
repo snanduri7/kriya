@@ -194,7 +194,13 @@ def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
 
 
 def test_generate_without_json_returns_nonzero_when_quality_gates_fail(runner, tmp_path):
-    failing_result = dict(_FAKE_GENERATE_RESULT, quality_gates_passed=False)
+    failing_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        candidate_gates_passed=True,
+        terminal_regression_passed=False,
+        overall_attempt_passed=False,
+    )
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
              patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
