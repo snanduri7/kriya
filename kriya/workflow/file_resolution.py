@@ -154,8 +154,9 @@ def prefer_existing_artifact_owners(
     """Resolve invented parallel artifact names back to a unique brownfield owner.
 
     This is stack-neutral: candidates compete only within the same extension
-    and executable-test role. A unique exact basename match is deterministic;
-    otherwise filename tokens plus goal vocabulary provide the semantic score.
+    and executable-test role. A unique exact basename or strict basename-token
+    containment match is deterministic; otherwise filename tokens plus goal
+    vocabulary provide the semantic score.
     An existing owner replaces a nonexistent planned path only when that
     evidence is unique and the request does not explicitly ask for a new artifact.
     """
@@ -193,6 +194,32 @@ def prefer_existing_artifact_owners(
             claimed.add(owner)
             logger.info(
                 "Resolved nonexistent planned artifact '%s' to unique exact-name "
+                "existing owner '%s'.",
+                path, owner,
+            )
+            continue
+        containment_candidates = []
+        if len(planned_tokens) >= 2:
+            for candidate in existing:
+                if candidate in claimed or os.path.splitext(candidate)[1].lower() != extension:
+                    continue
+                if is_runnable_test_file(candidate) != planned_is_test:
+                    continue
+                candidate_tokens = _artifact_name_tokens(candidate)
+                if (
+                    len(candidate_tokens) >= 2
+                    and (
+                        planned_tokens < candidate_tokens
+                        or candidate_tokens < planned_tokens
+                    )
+                ):
+                    containment_candidates.append(candidate)
+        if len(containment_candidates) == 1:
+            owner = containment_candidates[0]
+            resolved.append(owner)
+            claimed.add(owner)
+            logger.info(
+                "Resolved renamed planned artifact '%s' to unique token-containing "
                 "existing owner '%s'.",
                 path, owner,
             )

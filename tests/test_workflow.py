@@ -817,6 +817,37 @@ def test_brownfield_exact_owner_resolution_refuses_duplicate_basenames(tmp_path)
     ) == ["src/Formatter.java"]
 
 
+def test_brownfield_owner_resolution_preserves_unique_token_containing_owner(tmp_path):
+    implementation = "src/main/java/com/example/customer/CustomerDisplayNameFormatter.java"
+    test = "src/test/java/com/example/customer/CustomerDisplayNameFormatterTest.java"
+    (tmp_path / implementation).parent.mkdir(parents=True)
+    (tmp_path / test).parent.mkdir(parents=True)
+    (tmp_path / implementation).write_text("class CustomerDisplayNameFormatter {}\n")
+    (tmp_path / test).write_text("class CustomerDisplayNameFormatterTest {}\n")
+
+    assert prefer_existing_artifact_owners(
+        [
+            "src/main/java/com/example/customer/CustomerNameFormatter.java",
+            "src/test/java/com/example/customer/CustomerNameFormatterTest.java",
+        ],
+        "Correct null and whitespace behavior",
+        str(tmp_path),
+    ) == [implementation, test]
+
+
+def test_brownfield_token_containment_resolution_refuses_multiple_candidates(tmp_path):
+    for qualifier in ("Display", "Legal"):
+        candidate = tmp_path / "src" / f"Customer{qualifier}NameFormatter.java"
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text(f"class Customer{qualifier}NameFormatter {{}}\n")
+
+    assert prefer_existing_artifact_owners(
+        ["src/CustomerNameFormatter.java"],
+        "Correct null and whitespace behavior",
+        str(tmp_path),
+    ) == ["src/CustomerNameFormatter.java"]
+
+
 def test_ensure_maven_covers_nonconventional_java_files_uses_narrow_source_root():
     import xml.etree.ElementTree as ET
     corrected = ensure_maven_covers_nonconventional_java_files(
