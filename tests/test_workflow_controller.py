@@ -8,6 +8,7 @@ string like "/tmp/proj" - execute() now really writes to
 so a fake, nonexistent workspace_path would leave real, uncleaned files
 under a shared /tmp/proj on the machine running these tests."""
 
+import os
 import subprocess
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -122,9 +123,16 @@ async def test_enforce_migration_mode_is_now_accepted_not_rejected(tmp_path):
     the mode string itself is no longer refused at the top of execute()."""
     we = _workflow_engine()
     we.planner.run = AsyncMock(return_value="valid structured plan")
-    we.run_generation_workflow = AsyncMock(return_value={
-        "status": "success", "quality_gates_passed": True, "files": [],
-    })
+
+    async def successful_generation(**kwargs):
+        candidate_path = os.path.join(kwargs["workspace_path"], "a.py")
+        with open(candidate_path, "w", encoding="utf-8") as candidate:
+            candidate.write("# generated\n")
+        return {
+            "status": "success", "quality_gates_passed": True, "files": ["a.py"],
+        }
+
+    we.run_generation_workflow = AsyncMock(side_effect=successful_generation)
     plan = EngineeringPlan(
         plan_id="run1", kind=ChangeKind.TASK,
         subtasks=[Subtask(
