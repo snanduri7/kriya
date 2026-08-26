@@ -7,11 +7,12 @@ rather than reimplementing edit-application/verification/approval."""
 
 import json
 import os
+import shutil
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kriya.control.persistence import load_approved_plan
+from kriya.control.persistence import load_approved_plan, load_control_state
 from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
@@ -38,8 +39,21 @@ from kriya.workflow.workflow_controller import (
     build_subtask_goal_text,
     build_subtask_semantic_context,
     build_structured_plan_repair_prompt,
+    resolve_scope_conflict_owners,
 )
 from kriya.workflow.workflow_types import SubtaskStatus
+
+
+@pytest.fixture(autouse=True)
+def _keep_mocked_controller_tests_on_their_explicit_workspace(monkeypatch):
+    """Most tests mock the entire subtask workflow and isolate orchestration.
+
+    Transactional-sandbox tests below override this with a distinct copy and
+    therefore exercise the real terminal apply/discard boundary directly.
+    """
+    monkeypatch.setattr(
+        "kriya.workflow.workflow_controller.create_git_worktree", lambda workspace: workspace,
+    )
 
 
 def _route(kind=ChangeKind.TASK):
@@ -56,6 +70,33 @@ def _workflow_engine(route=None):
     we.planner.run = AsyncMock(return_value="fake plan text")
     we.kernel = None
     return we
+
+
+def test_scope_conflict_owner_resolution_accepts_unique_transitive_upstream_owner():
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="owner", description="implement behavior",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="src/Owner.py", action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="adapter", description="adapt integration",
+                execution_method=ExecutionMethod.MODEL, depends_on=["owner"],
+                planned_files=[PlannedFile(path="src/Adapter.py", action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="consumer", description="verify behavior",
+                execution_method=ExecutionMethod.MODEL, depends_on=["adapter"],
+                planned_files=[PlannedFile(path="tests/test_owner.py", action=FileAction.MODIFY)],
+            ),
+        ],
+    )
+
+    assert resolve_scope_conflict_owners(
+        plan, ["src/Owner.py"], plan.subtask_by_id("consumer"),
+    ) == {"owner": ["src/Owner.py"]}
 
 
 def _two_subtask_plan():
@@ -889,8 +930,151 @@ async def test_enforce_reopens_unique_upstream_owner_and_reruns_consumer(tmp_pat
         "classification": "PLAN_SCOPE_INSUFFICIENT",
         "reason": None,
         "invalidated_subtasks": ["s3"],
+        "ownership_revalidated": True,
+        "revalidation_basis": "unique approved upstream file owner",
         "owner_recovery_passed": True,
     }]
+
+
+@pytest.mark.asyncio
+async def test_enforce_reopens_owner_with_grounded_diagnosis_and_commits_plan_atomically(
+    tmp_path, monkeypatch,
+):
+    source_path = "src/Formatter.java"
+    test_path = "tests/FormatterTest.java"
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / source_path).write_text("incomplete\n")
+    (tmp_path / test_path).write_text("test\n")
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK, global_invariants=["output is normalized"],
+        subtasks=[
+            Subtask(
+                id="implementation", description="fix formatter",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=source_path, action=FileAction.MODIFY)],
+                provides=["formatter.fixed"], relevant_global_invariants=["output is normalized"],
+            ),
+            Subtask(
+                id="tests", description="update formatter tests",
+                execution_method=ExecutionMethod.MODEL, depends_on=["implementation"],
+                planned_files=[PlannedFile(path=test_path, action=FileAction.MODIFY)],
+                requires=["formatter.fixed"], relevant_global_invariants=["output is normalized"],
+            ),
+        ],
+    )
+    sandbox = tmp_path / "plan-sandbox"
+
+    def create_plan_sandbox(workspace):
+        shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+        return str(sandbox)
+
+    monkeypatch.setattr(
+        "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+    )
+    monkeypatch.setattr(
+        "kriya.workflow.workflow_controller.remove_git_worktree",
+        lambda workspace, candidate: shutil.rmtree(candidate),
+    )
+    calls = []
+    diagnosis = "Whitespace-only middle names still produce duplicate spaces"
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (sandbox / source_path).write_text("still incomplete\n")
+            return {"status": "success", "quality_gates_passed": True, "files": [source_path]}
+        if len(calls) == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "targeted_test", "reason": diagnosis,
+                    "required_files": [source_path], "allowed_files": [test_path],
+                },
+            }
+        if len(calls) == 3:
+            assert diagnosis in kwargs["supplementary_context"]
+            (sandbox / source_path).write_text("complete\n")
+            return {"status": "success", "quality_gates_passed": True, "files": [source_path]}
+        return {"status": "success", "quality_gates_passed": True, "files": [test_path]}
+
+    we = _workflow_engine()
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "fix formatter", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert (tmp_path / source_path).read_text() == "complete\n"
+    assert not sandbox.exists()
+    assert result.legacy_result["plan_recovery_events"][0]["owner_recovery_passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_enforce_discards_successful_earlier_subtask_when_plan_fails(
+    tmp_path, monkeypatch,
+):
+    source_path = "src/Formatter.java"
+    test_path = "tests/FormatterTest.java"
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / source_path).write_text("original\n")
+    (tmp_path / test_path).write_text("test\n")
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="implementation", description="fix formatter",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=source_path, action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="tests", description="update tests", execution_method=ExecutionMethod.MODEL,
+                depends_on=["implementation"],
+                planned_files=[PlannedFile(path=test_path, action=FileAction.MODIFY)],
+            ),
+        ],
+    )
+    sandbox = tmp_path / "plan-sandbox"
+
+    def create_plan_sandbox(workspace):
+        shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+        return str(sandbox)
+
+    monkeypatch.setattr(
+        "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+    )
+    monkeypatch.setattr(
+        "kriya.workflow.workflow_controller.remove_git_worktree",
+        lambda workspace, candidate: shutil.rmtree(candidate),
+    )
+    calls = 0
+
+    async def fake_run(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            (sandbox / source_path).write_text("staged change\n")
+            return {"status": "success", "quality_gates_passed": True, "files": [source_path]}
+        return {"status": "failed", "quality_gates_passed": False, "files": []}
+
+    we = _workflow_engine()
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "fix formatter", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["quality_gates_passed"] is False
+    assert (tmp_path / source_path).read_text() == "original\n"
+    assert not sandbox.exists()
+    persisted = load_control_state(str(tmp_path))
+    assert persisted.subtask_states["implementation"] == "pending"
+    assert persisted.subtask_written_files == {}
 
 
 # --- enforce mode fully replaces legacy, never runs it too ---

@@ -75,12 +75,16 @@ class StagedFileWrite:
     ``base_path`` can differ from ``target_path`` when a sandbox file has not
     been materialized yet and generation read the corresponding workspace file.
     The source revision is still guarded before the candidate is committed.
+    ``delete`` represents an approved deletion in the same guarded batch; its
+    empty ``content`` value is ignored except for the returned tombstone
+    revision.
     """
 
     target_path: str
     content: str
     base_path: str
     expected_base_revision: str
+    delete: bool = False
 
 
 def content_revision(content: str) -> str:
@@ -197,7 +201,13 @@ def commit_revision_grounded_batch(
             except FileNotFoundError:
                 snapshots[item.target_path] = None
             os.makedirs(os.path.dirname(item.target_path), exist_ok=True)
-            if workspace_path is None:
+            if item.delete:
+                _audit_write_file(item.target_path, workspace_path=workspace_path)
+                try:
+                    os.unlink(item.target_path)
+                except FileNotFoundError:
+                    pass
+            elif workspace_path is None:
                 # Preserve the historical two-argument primitive call shape for
                 # direct callers and test/integration wrappers around it.
                 atomic_write_file(item.target_path, item.content)
@@ -225,7 +235,7 @@ def commit_revision_grounded_batch(
         raise
 
     return {
-        item.target_path: content_revision(item.content)
+        item.target_path: content_revision("" if item.delete else item.content)
         for item in staged
     }
 

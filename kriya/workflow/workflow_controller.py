@@ -123,9 +123,15 @@ from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
+    FileAction,
     Subtask,
     VerificationMethodType,
     build_engineering_plan_from_planner_output,
+)
+from kriya.workflow.edit_safety import (
+    StagedFileWrite,
+    commit_revision_grounded_batch,
+    read_file_revision,
 )
 from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.planning_diagnostics import (
@@ -144,6 +150,7 @@ from kriya.workflow.triage import ChangeKind
 from kriya.workflow.verification_report import build_verification_report
 from kriya.workflow.workflow import _log_phase_banner
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport, WorkflowResult
+from kriya.workflow.worktree import create_git_worktree, remove_git_worktree
 
 
 def _evaluate_subtask_verification(
@@ -612,10 +619,20 @@ def resolve_scope_conflict_owners(
     plan: EngineeringPlan, required_files: List[str], failed_subtask: Subtask,
 ) -> Dict[str, List[str]]:
     """Resolve required repair files to unique, declared upstream owners."""
+    upstream_ids: set[str] = set()
+    frontier = list(failed_subtask.depends_on)
+    while frontier:
+        dependency_id = frontier.pop()
+        if dependency_id in upstream_ids:
+            continue
+        upstream_ids.add(dependency_id)
+        dependency = plan.subtask_by_id(dependency_id)
+        if dependency is not None:
+            frontier.extend(dependency.depends_on)
     owners: Dict[str, List[str]] = {}
     for path in required_files:
         owner = plan.file_owner(path)
-        if owner is None or owner.id == failed_subtask.id or owner.id not in failed_subtask.depends_on:
+        if owner is None or owner.id == failed_subtask.id or owner.id not in upstream_ids:
             continue
         owners.setdefault(owner.id, []).append(path)
     return owners
@@ -1848,6 +1865,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             ),
         )
         save_control_state(workspace_path, control_state)
+        # The authoritative plan is one transaction. Individual subtask
+        # workflows may apply only into this plan-level sandbox; the user
+        # workspace remains unchanged until every subtask and any bounded
+        # owner-recovery pass succeeds.
+        planned_paths = sorted({
+            planned_file.path
+            for planned_subtask in plan.subtasks
+            for planned_file in planned_subtask.planned_files
+        })
+        original_plan_revisions = {
+            path: read_file_revision(os.path.join(workspace_path, path))
+            for path in planned_paths
+        }
+        plan_workspace_path = create_git_worktree(workspace_path)
         established_file_context: Dict[str, str] = {}
         subtask_results: List[SubtaskResult] = []
         subtask_call_results: List[Dict[str, Any]] = []
@@ -1870,7 +1901,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             process_profiles = getattr(config, "process_profiles", None)
             return await self.workflow_engine.run_generation_workflow(
                 goal=target_goal,
-                workspace_path=workspace_path,
+                workspace_path=plan_workspace_path,
                 supplementary_context="\n\n".join(filter(None, (
                     build_subtask_constraint_context(goal),
                     build_subtask_semantic_context(plan, target),
@@ -1910,7 +1941,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 for planned_file in subtask.planned_files:
                     try:
                         with open(
-                            os.path.join(workspace_path, planned_file.path), "r", encoding="utf-8", errors="replace",
+                            os.path.join(plan_workspace_path, planned_file.path), "r", encoding="utf-8", errors="replace",
                         ) as fh:
                             content = fh.read()
                     except OSError as e:
@@ -1998,6 +2029,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         f"Reopened owner: {owner_id}\n"
                         f"Required repair files: {json.dumps(required_owner_files)}\n"
                         f"Failure type: {scope_conflict.get('failure_type')}\n"
+                        f"Grounded failure diagnosis: {scope_conflict.get('reason') or 'unavailable'}\n"
                         "Repair only the reopened owner's approved files. Preserve its provided "
                         "contracts and all relevant global invariants."
                     )
@@ -2023,6 +2055,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         ),
                         "reason": scope_conflict.get("reason"),
                         "invalidated_subtasks": invalidated,
+                        "ownership_revalidated": True,
+                        "revalidation_basis": "unique approved upstream file owner",
                         "owner_recovery_passed": owner_passed,
                     })
                     approved_stage_states[owner_id] = "completed" if owner_passed else "needs_review"
@@ -2049,7 +2083,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         for path in owner_result.get("files") or []:
                             try:
                                 with open(
-                                    os.path.join(workspace_path, path), "r",
+                                    os.path.join(plan_workspace_path, path), "r",
                                     encoding="utf-8", errors="replace",
                                 ) as fh:
                                     owner_content = fh.read()
@@ -2216,7 +2250,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
             for path in call_result.get("files", []):
                 try:
-                    with open(os.path.join(workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
+                    with open(os.path.join(plan_workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
                         content = fh.read()
                 except OSError as e:
                     logger.warning(
@@ -2233,6 +2267,62 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         all_completed = len(subtask_results) == total and all(
             r.status == SubtaskStatus.COMPLETED for r in subtask_results
         )
+        try:
+            if all_completed:
+                terminal_writes: List[StagedFileWrite] = []
+                for planned_subtask in plan.subtasks:
+                    for planned_file in planned_subtask.planned_files:
+                        if planned_file.action == FileAction.DELETE:
+                            candidate_path = os.path.join(plan_workspace_path, planned_file.path)
+                            if os.path.exists(candidate_path):
+                                raise RuntimeError(
+                                    f"Terminal plan candidate did not delete approved file {planned_file.path!r}"
+                                )
+                            target_path = os.path.join(workspace_path, planned_file.path)
+                            terminal_writes.append(StagedFileWrite(
+                                target_path=target_path,
+                                content="",
+                                base_path=target_path,
+                                expected_base_revision=original_plan_revisions[planned_file.path],
+                                delete=True,
+                            ))
+                            continue
+                        candidate_path = os.path.join(plan_workspace_path, planned_file.path)
+                        try:
+                            with open(candidate_path, "r", encoding="utf-8", errors="replace") as handle:
+                                candidate_content = handle.read()
+                        except OSError as error:
+                            raise RuntimeError(
+                                f"Terminal plan candidate is missing approved file {planned_file.path!r}: {error}"
+                            ) from error
+                        target_path = os.path.join(workspace_path, planned_file.path)
+                        terminal_writes.append(StagedFileWrite(
+                            target_path=target_path,
+                            content=candidate_content,
+                            base_path=target_path,
+                            expected_base_revision=original_plan_revisions[planned_file.path],
+                        ))
+                if plan_workspace_path != workspace_path:
+                    commit_revision_grounded_batch(terminal_writes, workspace_path=workspace_path)
+            else:
+                # No subtask output reached the user workspace. A later resume
+                # must rerun previously successful stages rather than skipping
+                # them based on sandbox-only work that has now been discarded.
+                approved_stage_states = {
+                    subtask_id: ("pending" if status == "completed" else status)
+                    for subtask_id, status in approved_stage_states.items()
+                }
+                control_state = control_state.with_updates(
+                    subtask_states={
+                        subtask_id: ("pending" if status == "completed" else status)
+                        for subtask_id, status in control_state.subtask_states.items()
+                    },
+                    subtask_written_files={},
+                )
+                save_control_state(workspace_path, control_state)
+        finally:
+            if plan_workspace_path != workspace_path:
+                remove_git_worktree(workspace_path, plan_workspace_path)
         needs_review = any(r.status == SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
         final_plan_lifecycle = "completed" if all_completed else "needs_review" if needs_review else "failed"
         save_approved_plan(
