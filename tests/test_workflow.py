@@ -14,6 +14,8 @@ from kriya.agents.agent import DeveloperAgent
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.workflow.attempt import (
     AttemptContext,
     _brownfield_owner_contract_block,
@@ -7041,6 +7043,47 @@ async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_auth
     assert state.plan_scope_conflict["attribution_tier"] == "judge"
     assert state.plan_scope_conflict["grounded_owner_files"] == []
     assert state.plan_scope_conflict["reason"]
+
+
+@pytest.mark.asyncio
+async def test_denied_existing_production_target_immediately_drives_exact_scope_revision(tmp_path):
+    service = tmp_path / "src/CustomerService.java"
+    controller = tmp_path / "src/CustomerController.java"
+    service.parent.mkdir(parents=True)
+    service.write_text("class CustomerService {}\n")
+    controller.write_text("class CustomerController {}\n")
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        allowed_write_relpaths=["src/CustomerService.java"],
+    )
+    denial = PolicyDeniedError(
+        request=ActionRequest(
+            action_type=ActionType.WRITE_FILE,
+            target=str(controller),
+        ),
+        result=PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE",
+            explanation="outside service-only scope",
+        ),
+    )
+
+    should_break = await handle_attempt_failure(state, ctx, denial)
+
+    assert should_break is True
+    assert state.budgets.retry_count == 0
+    assert state.last_failure.type == "plan_scope_conflict"
+    assert state.last_failure.attribution_kind == "PLAN_SCOPE_DEFECT"
+    assert state.plan_scope_conflict["required_files"] == [
+        "src/CustomerController.java"
+    ]
+    assert state.plan_scope_conflict["grounded_owner_files"] == [
+        "src/CustomerController.java"
+    ]
+    assert state.plan_scope_conflict["attribution_tier"] == "architectural_owner"
 
 @pytest.mark.asyncio
 async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path):
