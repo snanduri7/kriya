@@ -2440,8 +2440,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 established_file_context[path] = projection.content
 
-        all_completed = len(subtask_results) == total and all(
-            r.status == SubtaskStatus.COMPLETED for r in subtask_results
+        # Authoritative scope recovery may merge/remove a stage. Completion
+        # must be measured against the revalidated CURRENT plan, not the
+        # original loop's pre-revision `total`, or a successfully executed
+        # revised plan is falsely reported as failed solely because it has
+        # fewer stages.
+        current_plan_subtask_ids = {subtask.id for subtask in plan.subtasks}
+        latest_status_by_subtask = {
+            result.subtask_id: result.status for result in subtask_results
+        }
+        all_completed = (
+            set(latest_status_by_subtask) == current_plan_subtask_ids
+            and all(
+                latest_status_by_subtask[subtask_id] == SubtaskStatus.COMPLETED
+                for subtask_id in current_plan_subtask_ids
+            )
         )
         try:
             if all_completed and plan_workspace_path != workspace_path:
