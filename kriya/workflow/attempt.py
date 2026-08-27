@@ -430,6 +430,9 @@ class AttemptContext:
     # Human-readable identity for nested structured executions. Attempt
     # numbers are local to each bounded run and otherwise collide in logs.
     execution_scope: str = ""
+    # Original/global goal used only for deterministic architectural owner
+    # discovery when a bounded subtask's local wording omits that context.
+    grounding_goal: str = ""
 
 
 def _extract_grounded_contract_verdict(
@@ -474,11 +477,14 @@ def _record_self_correction_scope_conflict(
     if not required:
         return
     state.plan_scope_conflict = {
-        "classification": "PLAN_SCOPE_INSUFFICIENT",
+        "classification": "PLAN_SCOPE_DEFECT",
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
         "failure_type": failure_type,
         "required_files": required,
         "allowed_files": sorted(ctx.allowed_write_relpaths),
         "reason": "self-correction diagnosis requires a readable file outside approved write scope",
+        "attribution_tier": "self_correction",
+        "grounded_owner_files": [],
     }
 
 
@@ -3464,7 +3470,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
             )
             grounded_architectural_owners = discover_response_construction_owners(
-                ctx.worktree_path, ctx.goal, spec_check_files,
+                ctx.worktree_path, ctx.grounding_goal or ctx.goal, spec_check_files,
             )
             failure = _build_quality_gate_failure(
                 "goal_spec_compliance", message, message,

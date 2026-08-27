@@ -643,6 +643,88 @@ def resolve_scope_conflict_owners(
     return owners
 
 
+def revise_plan_for_grounded_scope_owner(
+    plan: EngineeringPlan,
+    failed_subtask_id: str,
+    grounded_files: List[str],
+    workspace_path: str,
+) -> EngineeringPlan:
+    """Move deterministically grounded existing owners into the failed stage.
+
+    This is plan surgery, not a retry hint: ownership remains unique, an
+    emptied owner stage is merged into the failed stage, dependency edges are
+    rewired, and the caller must validate the returned plan before execution.
+    """
+    revised = plan.model_copy(deep=True)
+    failed = revised.subtask_by_id(failed_subtask_id)
+    if failed is None:
+        raise ValueError(f"unknown failed subtask {failed_subtask_id!r}")
+
+    grounded = list(dict.fromkeys(grounded_files))
+    for path in grounded:
+        if not os.path.isfile(os.path.join(workspace_path, path)):
+            raise ValueError(f"grounded scope owner does not exist: {path}")
+        owner = revised.file_owner(path)
+        moved: Optional[PlannedFile] = None
+        if owner is not None and owner.id != failed.id:
+            moved = next(pf for pf in owner.planned_files if pf.path == path)
+            moved = moved.model_copy(update={
+                "reason": "deterministically grounded architectural owner",
+            })
+            owner.planned_files = [pf for pf in owner.planned_files if pf.path != path]
+        elif owner is None:
+            moved = PlannedFile(
+                path=path, action=FileAction.MODIFY,
+                reason="deterministically grounded architectural owner",
+            )
+        if moved is not None and not any(pf.path == path for pf in failed.planned_files):
+            failed.planned_files.append(moved)
+
+        if owner is None or owner.id == failed.id or owner.planned_files:
+            continue
+
+        # The old stage has no independently executable scope after moving
+        # its sole owner. Merge its contract and remove it, preserving the DAG.
+        failed.depends_on = list(dict.fromkeys(
+            dep for dep in failed.depends_on + owner.depends_on
+            if dep not in (failed.id, owner.id)
+        ))
+        failed.acceptance_criteria_ids = list(dict.fromkeys(
+            failed.acceptance_criteria_ids + owner.acceptance_criteria_ids
+        ))
+        existing_verification = {
+            json.dumps(vm.model_dump(mode="json"), sort_keys=True)
+            for vm in failed.verification
+        }
+        failed.verification.extend(
+            vm for vm in owner.verification
+            if json.dumps(vm.model_dump(mode="json"), sort_keys=True)
+            not in existing_verification
+        )
+        failed.provides = list(dict.fromkeys(failed.provides + owner.provides))
+        failed.requires = [
+            item for item in dict.fromkeys(failed.requires + owner.requires)
+            if item not in failed.provides
+        ]
+        failed.relevant_global_invariants = list(dict.fromkeys(
+            failed.relevant_global_invariants + owner.relevant_global_invariants
+        ))
+        revised.subtasks = [st for st in revised.subtasks if st.id != owner.id]
+        for consumer in revised.subtasks:
+            if owner.id not in consumer.depends_on:
+                continue
+            consumer.depends_on = list(dict.fromkeys(
+                failed.id if dep == owner.id else dep for dep in consumer.depends_on
+                if (failed.id if dep == owner.id else dep) != consumer.id
+            ))
+
+    failed.description = (
+        f"{failed.description} Authoritative scope revision: modify grounded owner(s) "
+        f"{', '.join(grounded)}."
+    )
+    return EngineeringPlan.model_validate(revised.model_dump(mode="json"))
+
+
 def compute_abandoned_plan_files(
     prior_subtask_states: Dict[str, str],
     prior_subtask_written_files: Dict[str, List[str]],
@@ -1926,6 +2008,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 ),
                 strict_spec_compliance=True,
                 execution_scope=f"subtask={target.id} role={execution_role}",
+                grounding_goal=goal,
                 strict_dependency_index=bool(
                     process_profiles is not None
                     and getattr(process_profiles, "enabled", False) is True
@@ -1998,6 +2081,90 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             predetermined_files = [pf.path for pf in subtask.planned_files]
             call_result = await _invoke_bounded_subtask(subtask, position)
             scope_conflict = call_result.get("plan_scope_conflict") or {}
+            grounded_scope_files = list(scope_conflict.get("grounded_owner_files") or [])
+            if (
+                scope_conflict.get("classification") == "PLAN_SCOPE_DEFECT"
+                and grounded_scope_files
+            ):
+                revised_plan = revise_plan_for_grounded_scope_owner(
+                    plan, subtask.id, grounded_scope_files, plan_workspace_path,
+                )
+                revision_validation = await validate_plan(
+                    revised_plan,
+                    workspace_path=plan_workspace_path,
+                    available_tool_names=available_tool_names,
+                    route=route,
+                    triage_service=self.workflow_engine.engineering_triage,
+                    resuming_own_established_progress=True,
+                    require_model_planned_files=True,
+                    require_semantic_contracts=True,
+                )
+                if revision_validation.valid:
+                    prior_hash = current_plan_hash
+                    plan = revised_plan
+                    current_plan_hash = plan.content_hash()
+                    execution_context = await self._build_context(
+                        goal, plan, plan_workspace_path, route, control_context, control_state,
+                    )
+                    subtask = plan.subtask_by_id(subtask_id)
+                    assert subtask is not None
+                    predetermined_files = [pf.path for pf in subtask.planned_files]
+                    for path in grounded_scope_files:
+                        original_plan_revisions.setdefault(
+                            path, read_file_revision(os.path.join(workspace_path, path)),
+                        )
+                    approved_stage_states = {
+                        sid: approved_stage_states.get(sid, "pending")
+                        for sid in topological_subtask_order(plan)
+                    }
+                    approved_stage_states[subtask.id] = "in_progress"
+                    control_state = control_state.with_updates(
+                        current_plan_hash=current_plan_hash,
+                        subtask_states=dict(approved_stage_states),
+                    )
+                    save_approved_plan(
+                        workspace_path, plan.plan_id,
+                        build_approved_plan_document(
+                            plan, plan_hash=current_plan_hash,
+                            repair_attempts=repair_attempts,
+                            stage_states=approved_stage_states,
+                            lifecycle_state="scope_revised",
+                        ),
+                    )
+                    save_control_state(workspace_path, control_state)
+                    plan_recovery_events.append({
+                        "failed_subtask": subtask.id,
+                        "classification": "PLAN_SCOPE_DEFECT",
+                        "required_repair_files": sorted(grounded_scope_files),
+                        "prior_plan_hash": prior_hash,
+                        "revised_plan_hash": current_plan_hash,
+                        "ownership_revalidated": True,
+                        "revalidation_basis": "deterministic grounded owner plus validate_plan",
+                    })
+                    logger.warning(
+                        "Authoritative PLAN_SCOPE_DEFECT recovery revised subtask %s scope to %s "
+                        "and revalidated plan %s.",
+                        subtask.id, predetermined_files, current_plan_hash,
+                    )
+                    call_result = await _invoke_bounded_subtask(
+                        subtask, position,
+                        recovery_context=(
+                            "--- authoritative PLAN_SCOPE_DEFECT recovery ---\n"
+                            f"The validated scope now includes grounded owner(s): "
+                            f"{json.dumps(grounded_scope_files)}. Modify the actual owner; do not "
+                            "repeat the former service-only repair."
+                        ),
+                        execution_role="plan_scope_recovery",
+                    )
+                    scope_conflict = call_result.get("plan_scope_conflict") or {}
+                else:
+                    scope_conflict = {
+                        **scope_conflict,
+                        "reason": (
+                            "authoritative grounded-owner plan revision failed validation: "
+                            + "; ".join(revision_validation.errors)
+                        ),
+                    }
             owner_map = resolve_scope_conflict_owners(
                 plan, list(scope_conflict.get("required_files", [])), subtask,
             ) if scope_conflict else {}

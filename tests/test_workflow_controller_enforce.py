@@ -23,7 +23,7 @@ from kriya.workflow.plan_schema import (
     VerificationMethod,
     VerificationMethodType,
 )
-from kriya.workflow.plan_validation import PlanValidationResult
+from kriya.workflow.plan_validation import PlanValidationResult, validate_plan
 from kriya.workflow.planning_diagnostics import (
     normalized_ownership_validation_records,
     persist_planning_attempt_diagnostic,
@@ -40,6 +40,7 @@ from kriya.workflow.workflow_controller import (
     build_subtask_semantic_context,
     build_structured_plan_repair_prompt,
     resolve_scope_conflict_owners,
+    revise_plan_for_grounded_scope_owner,
 )
 from kriya.workflow.workflow_types import SubtaskStatus
 
@@ -97,6 +98,67 @@ def test_scope_conflict_owner_resolution_accepts_unique_transitive_upstream_owne
     assert resolve_scope_conflict_owners(
         plan, ["src/Owner.py"], plan.subtask_by_id("consumer"),
     ) == {"owner": ["src/Owner.py"]}
+
+
+@pytest.mark.asyncio
+async def test_grounded_controller_revises_and_revalidates_service_only_scope(tmp_path):
+    service = "src/main/java/example/CustomerService.java"
+    controller = "src/main/java/example/CustomerController.java"
+    test_file = "src/test/java/example/CustomerControllerTest.java"
+    for path in (service, controller, test_file):
+        full = tmp_path / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text("class Placeholder {}\n")
+
+    plan = EngineeringPlan(
+        plan_id="scope-recovery", kind=ChangeKind.TASK,
+        global_invariants=["Preserve the existing endpoint architecture."],
+        subtasks=[
+            Subtask(
+                id="s2", description="update service behavior",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
+                provides=["customer behavior"],
+                relevant_global_invariants=["Preserve the existing endpoint architecture."],
+            ),
+            Subtask(
+                id="s3", description="compose endpoint response",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s2"],
+                planned_files=[PlannedFile(path=controller, action=FileAction.MODIFY)],
+                requires=["customer behavior"], provides=["endpoint response"],
+                relevant_global_invariants=["Preserve the existing endpoint architecture."],
+            ),
+            Subtask(
+                id="s4", description="extend response coverage",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s3"],
+                planned_files=[PlannedFile(path=test_file, action=FileAction.MODIFY)],
+                requires=["endpoint response"],
+                relevant_global_invariants=["Preserve the existing endpoint architecture."],
+            ),
+        ],
+    )
+
+    revised = revise_plan_for_grounded_scope_owner(
+        plan, "s2", [controller], str(tmp_path),
+    )
+    validation = await validate_plan(
+        revised,
+        workspace_path=str(tmp_path),
+        route=_route(ChangeKind.TASK),
+        require_model_planned_files=True,
+        require_semantic_contracts=True,
+    )
+
+    assert validation.valid, validation.errors
+    assert [pf.path for pf in revised.subtask_by_id("s2").planned_files] == [
+        service, controller,
+    ]
+    assert revised.subtask_by_id("s3") is None
+    assert revised.subtask_by_id("s4").depends_on == ["s2"]
+    assert revised.file_owner(controller).id == "s2"
+    assert revised.file_owner(controller).planned_files[1].reason == (
+        "deterministically grounded architectural owner"
+    )
 
 
 def _two_subtask_plan():
@@ -937,6 +999,91 @@ async def test_enforce_reopens_unique_upstream_owner_and_reruns_consumer(tmp_pat
         "revalidation_basis": "unique approved upstream file owner",
         "owner_recovery_passed": True,
     }]
+
+
+@pytest.mark.asyncio
+async def test_enforce_revises_service_scope_to_grounded_controller_and_continues(tmp_path):
+    service = "src/CustomerService.java"
+    controller = "src/CustomerController.java"
+    test_file = "tests/CustomerControllerTest.java"
+    for path in (service, controller, test_file):
+        full = tmp_path / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text("baseline\n")
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        global_invariants=["existing response ownership is preserved"],
+        subtasks=[
+            Subtask(
+                id="s2", description="update service", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
+                provides=["customer behavior"],
+                relevant_global_invariants=["existing response ownership is preserved"],
+            ),
+            Subtask(
+                id="s3", description="compose response", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s2"],
+                planned_files=[PlannedFile(path=controller, action=FileAction.MODIFY)],
+                requires=["customer behavior"], provides=["response composed"],
+                relevant_global_invariants=["existing response ownership is preserved"],
+            ),
+            Subtask(
+                id="s4", description="verify response", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s3"],
+                planned_files=[PlannedFile(path=test_file, action=FileAction.MODIFY)],
+                requires=["response composed"],
+                relevant_global_invariants=["existing response ownership is preserved"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "classification": "PLAN_SCOPE_DEFECT",
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "goal_spec_compliance",
+                    "required_files": [controller],
+                    "grounded_owner_files": [controller],
+                    "attribution_tier": "architectural_owner",
+                    "allowed_files": [service],
+                },
+            }
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "add displayName to the existing endpoint response",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert calls[0]["allowed_write_relpaths"] == [service]
+    assert calls[1]["allowed_write_relpaths"] == [service, controller]
+    assert calls[1]["execution_scope"] == "subtask=s2 role=plan_scope_recovery"
+    assert calls[2]["allowed_write_relpaths"] == [test_file]
+    assert (tmp_path / controller).read_text() == "modified\n"
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_subtasks = approved["plan"]["subtasks"]
+    assert any(
+        item["id"] == "s2"
+        and controller in [pf["path"] for pf in item["planned_files"]]
+        for item in approved_subtasks
+    )
+    assert not any(item["id"] == "s3" for item in approved_subtasks)
+    assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
 
 
 @pytest.mark.asyncio

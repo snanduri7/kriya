@@ -613,6 +613,7 @@ class WorkflowEngine:
         resolved_knowledge_coordinates: Optional[List[str]] = None,
         skill_engine_override: Optional[Any] = None,
         execution_scope: str = "",
+        grounding_goal: str = "",
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -2072,6 +2073,7 @@ class WorkflowEngine:
             ),
             strict_spec_compliance=strict_spec_compliance,
             execution_scope=execution_scope,
+            grounding_goal=grounding_goal,
         )
 
         from kriya.workflow.retry_policy import decide_for_state

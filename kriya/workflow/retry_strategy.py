@@ -532,12 +532,16 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             outside_scope = sorted(set(implicated) - allowed_scope)
             if outside_scope:
                 state.plan_scope_conflict = {
-                    "classification": "PLAN_SCOPE_INSUFFICIENT",
+                    "classification": FailureAttributionKind.PLAN_SCOPE_DEFECT.value,
                     "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
                     "failure_type": fail_type,
                     "reason": attribution.reasoning,
                     "required_files": outside_scope,
                     "allowed_files": sorted(allowed_scope),
+                    "attribution_tier": attribution.tier,
+                    "grounded_owner_files": (
+                        outside_scope if attribution.tier == "architectural_owner" else []
+                    ),
                 }
         # For a QualityGateFailure type that appends its own gate_outcome at
         # the RAISE SITE (compile/test/regression_test/run_verification/

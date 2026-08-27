@@ -4464,11 +4464,14 @@ def test_self_correction_scope_conflict_enters_existing_plan_recovery_contract(t
     result = MagicMock(scope_conflict_files=["upstream.cfg"])
     _record_self_correction_scope_conflict(state, ctx, result, "run_verification")
     assert state.plan_scope_conflict == {
-        "classification": "PLAN_SCOPE_INSUFFICIENT",
+        "classification": "PLAN_SCOPE_DEFECT",
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
         "failure_type": "run_verification",
         "required_files": ["upstream.cfg"],
         "allowed_files": ["owned.py"],
         "reason": "self-correction diagnosis requires a readable file outside approved write scope",
+        "attribution_tier": "self_correction",
+        "grounded_owner_files": [],
     }
 
 
@@ -7030,11 +7033,13 @@ async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_auth
 
     assert should_break is True
     assert state.environment_failure is None
-    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_INSUFFICIENT"
+    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_DEFECT"
     assert state.plan_scope_conflict["reason_code"] == "PLAN_SCOPE_REVISION_REQUIRED"
     assert state.plan_scope_conflict["failure_type"] == "misdirected_edit"
     assert state.plan_scope_conflict["required_files"] == ["pom.xml"]
     assert state.plan_scope_conflict["allowed_files"] == ["src/App.java"]
+    assert state.plan_scope_conflict["attribution_tier"] == "judge"
+    assert state.plan_scope_conflict["grounded_owner_files"] == []
     assert state.plan_scope_conflict["reason"]
 
 @pytest.mark.asyncio
