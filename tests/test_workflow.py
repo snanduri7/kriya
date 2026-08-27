@@ -964,7 +964,7 @@ def test_brownfield_bug_fix_preserves_referenced_public_api(tmp_path):
 
     assert violations == [{
         "owner": owner,
-        "removed_signature": "displayName(String)",
+        "removed_signature": "String displayName(String)",
         "evidence_files": [caller],
     }]
 
@@ -984,13 +984,157 @@ def test_brownfield_bug_fix_allows_private_change_with_public_api_unchanged(tmp_
     ) == []
 
 
+def test_brownfield_enhancement_rejects_unrequested_record_component_addition(tmp_path):
+    """EXISTING_CONTRACT_PRESERVATION: a record's canonical constructor
+    component shape is as much an established public contract as any
+    method signature - PRV-03 hardened (2026-08-27) added displayName as a
+    5th canonical component instead of a derived accessor, breaking every
+    existing caller's 4-arg constructor call."""
+    owner = "src/main/java/com/example/customer/Customer.java"
+    caller = "src/main/java/com/example/customer/CustomerService.java"
+    original = (
+        "public record Customer(long id, String firstName, String middleName, "
+        "String lastName) {}\n"
+    )
+    five_component = (
+        "public record Customer(long id, String firstName, String middleName, "
+        "String lastName, String displayName) {}\n"
+    )
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text('new Customer(id, "John", null, "Smith");\n')
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: five_component},
+        "Add a displayName field to Customer records and expose it via the API",
+    )
+
+    assert violations == [{
+        "owner": owner,
+        "removed_signature": "record Customer(long, String, String, String)",
+        "evidence_files": [caller],
+    }]
+
+
+def test_brownfield_enhancement_rejects_unrequested_return_type_change(tmp_path):
+    """EXISTING_CONTRACT_PRESERVATION: changing an existing method's return
+    type (same name, same params) is exactly as much a contract break as
+    renaming it, even though the old name+params-only signature key would
+    never have noticed. PRV-03 legacy (2026-08-27) changed
+    CustomerService.find(long) to return CustomerDto instead of the
+    established Customer."""
+    owner = "src/main/java/com/example/customer/CustomerService.java"
+    caller = "src/main/java/com/example/customer/CustomerController.java"
+    original = (
+        "public class CustomerService { public Customer find(long id) { "
+        "return new Customer(id, \"John\", null, \"Smith\"); } }\n"
+    )
+    dto_return = (
+        "public class CustomerService { public CustomerDto find(long id) { "
+        "return new CustomerDto(id, \"John\", null, \"Smith\", null); } }\n"
+    )
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("Customer c = service.find(id);\n")
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: dto_return},
+        "Add a displayName field to Customer and expose it via the API",
+    )
+
+    assert violations == [{
+        "owner": owner,
+        "removed_signature": "Customer find(long)",
+        "evidence_files": [caller],
+    }]
+
+
+def test_brownfield_enhancement_allows_new_public_method_alongside_preserved_contract(tmp_path):
+    """EXISTING_CONTRACT_PRESERVATION only blocks REMOVING/CHANGING an
+    established contract - adding a new derived public method (or a new
+    record component-free accessor) alongside the untouched original is
+    exactly the shape the invariant is supposed to allow."""
+    owner = "src/main/java/com/example/customer/Customer.java"
+    caller = "src/test/java/com/example/customer/CustomerTest.java"
+    original = (
+        "public record Customer(long id, String firstName, String middleName, "
+        "String lastName) {}\n"
+    )
+    with_derived_method = (
+        "public record Customer(long id, String firstName, String middleName, "
+        "String lastName) { public String displayName() { return firstName; } }\n"
+    )
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / caller).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("new Customer(1, \"John\", null, \"Smith\");\n")
+
+    assert find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: with_derived_method},
+        "Add a displayName field to Customer records and expose it via the API",
+    ) == []
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_contract_change_on_a_later_attempt_not_just_the_first(tmp_path):
+    """EXISTING_CONTRACT_PRESERVATION regression test: PRV-03 hardened
+    (2026-08-27) introduced its record-arity contract break on attempt 10,
+    not attempt 1 - the brownfield-API-change pre-write check used to only
+    run when state.attempt_number == 1, so it never even looked at that
+    attempt's candidate. This simulates exactly that shape: a LATER retry
+    (attempt_number pre-set so it becomes 2 after run_attempt's own
+    increment) whose candidate breaks an established record's component
+    shape must still be rejected before ever reaching compile."""
+    state = GenerationState()
+    state.attempt_number = 1  # becomes 2 after run_attempt's internal increment
+    owner = "src/main/java/com/example/customer/Customer.java"
+    caller = "src/main/java/com/example/customer/CustomerService.java"
+    original = (
+        "public record Customer(long id, String firstName, String middleName, "
+        "String lastName) {}\n"
+    )
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text('new Customer(id, "John", null, "Smith");\n')
+    state.all_files_written = {owner}
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": owner,
+        "content": (
+            "public record Customer(long id, String firstName, String middleName, "
+            "String lastName, String displayName) {}\n"
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal="Add a displayName field to Customer",
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={"Customer.java": owner},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "brownfield_public_api_changed"
+    assert owner in exc_info.value.failure.likely_files
+
+
 def test_api_recovery_precheck_keeps_signature_and_callsite_evidence_authoritative():
     owner = "src/Formatter.java"
     test = "tests/FormatterTest.java"
     recovery = {
         "violations": [{
             "owner": owner,
-            "removed_signature": "format(String, String, String)",
+            "removed_signature": "String format(String, String, String)",
             "evidence_files": [test],
         }],
         "protected_evidence_files": [test],
@@ -1016,7 +1160,7 @@ def test_api_recovery_precheck_accepts_restored_signature_and_preserved_callsite
     recovery = {
         "violations": [{
             "owner": owner,
-            "removed_signature": "format(String, String, String)",
+            "removed_signature": "String format(String, String, String)",
             "evidence_files": [test],
         }],
         "protected_evidence_files": [test],

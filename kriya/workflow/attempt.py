@@ -36,7 +36,7 @@ from kriya.workflow.dependency_invalidation import (
     invalidate_validated_revisions,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
+from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -1405,8 +1405,32 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # for an ALREADY-OWNED artifact is redirected back to the real owner
     # before it's ever written, treated as a compile target, or targeted
     # for repair - on every attempt, not just the first.
+    #
+    # Must exclude anything THIS RUN has already legitimately established
+    # (state.all_files_written / ctx.established_files) before resolving -
+    # prefer_existing_artifact_owners() only checks ctx.workspace_path (the
+    # pristine ORIGINAL brownfield repo) to decide what already exists, so
+    # a genuinely new file this run created on an earlier attempt (which
+    # naturally doesn't exist in the pristine original) looks identical to
+    # a truly invented duplicate. Found live, PRV-03 legacy (2026-08-27):
+    # attempt 1 legitimately created a new dto/CustomerDto.java; attempt 5
+    # edited that SAME already-established file again, and this check
+    # (before this fix) mistook it for an invented duplicate and redirected
+    # it onto CustomerController.java via the weakest, semantic-overlap-
+    # only fallback tier - a real class merge, not a same-basename/same-
+    # type collision. An existing MISDIRECTED EDIT gate happened to catch
+    # the resulting bad anchored edit before it corrupted
+    # CustomerController.java, but that's a lucky downstream catch, not a
+    # guarantee - the redirect itself must never fire on a file this run
+    # already owns.
+    already_established = set(state.all_files_written) | set(ctx.established_files)
     candidate_paths = [file_obj["filepath"] for file_obj in files]
-    resolved_paths = prefer_existing_artifact_owners(candidate_paths, ctx.goal, ctx.workspace_path)
+    paths_to_resolve = [path for path in candidate_paths if path not in already_established]
+    resolution = dict(zip(
+        paths_to_resolve,
+        prefer_existing_artifact_owners(paths_to_resolve, ctx.goal, ctx.workspace_path),
+    )) if paths_to_resolve else {}
+    resolved_paths = [resolution.get(path, path) for path in candidate_paths]
     if resolved_paths != candidate_paths:
         for file_obj, resolved_path in zip(files, resolved_paths):
             original_path = file_obj["filepath"]
@@ -1431,7 +1455,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # correct existing pathname while pasting an invented replacement class
     # into it. Detect that contract removal now, not after compiler retries or
     # terminal regression.
-    if state.attempt_number == 1 and not state.api_contract_recovery:
+    #
+    # Runs on EVERY attempt, not just the first - found live, PRV-03
+    # hardened (2026-08-27): the actual contract-breaking change (Customer's
+    # record component list going from 4 to 5) was introduced by the model
+    # on attempt 10, not attempt 1. The old `state.attempt_number == 1`
+    # restriction meant this whole detection - and the sticky
+    # api_contract_recovery repair flow it feeds - never even looked at
+    # that attempt's own candidate. `not state.api_contract_recovery` still
+    # guards against double-checking once a violation is already being
+    # actively recovered (find_unrestored_public_api_contracts/find_
+    # protected_api_reference_changes own that phase instead, further
+    # below).
+    if not state.api_contract_recovery:
         baseline_contents = {}
         candidate_contents = {}
         for file_obj in files:
@@ -2583,14 +2619,47 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         compile_res.get("output", ""), compile_known_files,
                     )
                     if unrecognized:
-                        compile_message += (
-                            "\n\nNOTE: this error also references file(s) not tracked by this "
-                            f"run at all: {', '.join(unrecognized)}. These are likely stale/"
-                            "leftover content from an earlier, unrelated run or attempt still "
-                            "sitting in the workspace - not something the current milestone's "
-                            "own files can fix. If they don't belong, they should be removed "
-                            "from the workspace rather than repeatedly retried against."
+                        # Found live, PRV-03 hardened (2026-08-27): "not
+                        # tracked by this run" does NOT mean stale - a real,
+                        # currently-existing brownfield sibling (e.g.
+                        # CustomerService.java, broken because THIS
+                        # candidate changed the Customer record's own
+                        # constructor arity) is exactly as "unrecognized"
+                        # to compile_known_files as genuine leftover cruft
+                        # from an unrelated run would be. The two are only
+                        # distinguishable by checking whether the file
+                        # actually exists in the real worktree - resolve
+                        # that before asserting either story, rather than
+                        # defaulting to the "stale" framing that's actively
+                        # wrong for the common brownfield case.
+                        real_siblings = resolve_repository_locator_files(
+                            compile_res.get("output", ""), ctx.worktree_path, compile_known_files,
                         )
+                        genuinely_unrecognized = sorted(
+                            set(unrecognized) - {os.path.basename(p) for p in real_siblings}
+                        )
+                        if real_siblings:
+                            compile_message += (
+                                "\n\nNOTE: this error also references existing repository "
+                                f"file(s) this run's own tracking never declared as scope: "
+                                f"{', '.join(sorted(real_siblings))}. These are REAL, CURRENT "
+                                "files, not stale content - if they only started failing to "
+                                "compile because of THIS candidate's own change (e.g. an "
+                                "existing type's constructor/signature changed), that is a "
+                                "regression this candidate caused. Prefer preserving the "
+                                "existing contract over expanding scope to repair every caller "
+                                "it breaks."
+                            )
+                        if genuinely_unrecognized:
+                            compile_message += (
+                                "\n\nNOTE: this error also references file(s) not tracked by "
+                                f"this run at all and not found anywhere in the current "
+                                f"workspace either: {', '.join(genuinely_unrecognized)}. These "
+                                "are likely stale/leftover content from an earlier, unrelated "
+                                "run or attempt - not something the current milestone's own "
+                                "files can fix. If they don't belong, they should be removed "
+                                "from the workspace rather than repeatedly retried against."
+                            )
                 failure = cross_package_failure or _build_quality_gate_failure(
                     "compile", compile_message,
                     compile_res.get("output", ""), ctx.worktree_path, compile_known_files, state.attempt_number,

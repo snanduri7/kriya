@@ -492,7 +492,22 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             set(state.all_files_written) | set(ctx.established_files)
         )
         repository_regrounded_files: list[str] = []
-        if fail_type == "regression_test":
+        # PRV-03 hardened (2026-08-27): a "compile" failure deserves the
+        # exact same repository re-grounding as "regression_test" - a
+        # candidate that changes an existing type's public contract (e.g.
+        # a record constructor's arity) can break a REAL, existing sibling
+        # file (e.g. CustomerService.java) this subtask never declared as
+        # known scope. Before this widening, that sibling was invisible to
+        # known_attribution_files/self_diagnosed_files here AND
+        # attempt.py's own compile-failure message asserted it was "likely
+        # stale/leftover content from an earlier, unrelated run" - actively
+        # wrong for a real, current brownfield file broken by THIS
+        # candidate's own change. Genuinely stale content (the scenario
+        # this mechanism was originally built for, MA-era ignite_qpid_
+        # protocol) still resolves to nothing here (it doesn't exist on
+        # disk either), so this widening only ever adds real regrounding
+        # signal, never manufactures one.
+        if fail_type in ("regression_test", "compile"):
             repository_regrounded_files = resolve_repository_locator_files(
                 failure.raw_output or failure.message,
                 ctx.worktree_path,

@@ -379,6 +379,66 @@ class MismatchedFileTypeContentCheck(StaticCheck):
         return None
 
 
+# Extensions where a literal backtick can NEVER be legitimate source syntax
+# - deliberately excludes Ruby (a real command-execution operator,
+# `` `ls` ``) and JS/TS (a real template-literal delimiter). Every other
+# language here treats a bare backtick as a hard syntax error.
+_BACKTICK_ILLEGAL_EXTENSIONS = {
+    ".py", ".java", ".kt", ".kts", ".groovy", ".go", ".rs", ".cs",
+    ".c", ".cc", ".cpp", ".h", ".hpp",
+}
+
+
+class MarkdownInlineCodeLeakCheck(StaticCheck):
+    """Catches a literal backtick character - Markdown's inline-code
+    delimiter, e.g. the backticks around `displayName()` in a model's own
+    prose - ending up as literal file content in a language where a bare
+    backtick is never valid source syntax at all. Not a wording pattern
+    (see find_explanatory_prose_contamination in file_resolution.py for
+    that, which matches a small set of anchored sentence-starter phrases) -
+    a purely structural signal: this character simply cannot appear outside
+    a comment/string in these languages' real grammar, regardless of what
+    the leaked prose actually says.
+
+    Found live, PRV-03 hardened (2026-08-27): a targeted repair's FULL FILE
+    CONTENT response for Customer.java began with the model's own inline-
+    code-formatted analysis text instead of real Java - javac failed at
+    line 1 with "class, interface, enum, or record expected" plus two
+    "illegal character: '`'" errors on that same line. The existing
+    find_explanatory_prose_contamination check didn't fire: this
+    incident's actual wording didn't match any of its anchored sentence-
+    starter patterns, so a full compile-retry cycle was burned on content
+    that could never have been valid source. This check doesn't try to
+    guess the model's phrasing - it catches the structural impossibility
+    instead, which generalizes across whatever prose wraps the backtick.
+
+    Deliberately excludes Ruby and JS/TS - the two mainstream languages
+    where this character is legitimate source syntax (see
+    _BACKTICK_ILLEGAL_EXTENSIONS above)."""
+
+    name = "markdown_inline_code_leak"
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if os.path.splitext(filepath)[1].lower() not in _BACKTICK_ILLEGAL_EXTENSIONS:
+                continue
+            for line_number, line in enumerate((content or "").splitlines(), start=1):
+                stripped = line.lstrip()
+                if not stripped or stripped.startswith(("//", "#", "/*", "*", "--")):
+                    continue
+                if "`" in line:
+                    return (
+                        f"{filepath} line {line_number} contains a literal backtick character - "
+                        "Markdown's inline-code delimiter, never valid source syntax in this "
+                        "language - almost always a sign the model's own prose/analysis text (or "
+                        "a Markdown-formatted explanation) leaked into the file's actual content "
+                        "instead of real code: "
+                        f"{stripped[:160]!r}. Regenerate this file's content as plain source, with "
+                        "no inline-code formatting or explanatory text embedded in it."
+                    )
+        return None
+
+
 def _extract_balanced_block(content: str, open_brace_index: int) -> Optional[str]:
     """content[open_brace_index] must be '{'. Returns the substring from
     that brace through its matching close brace (inclusive), tracking depth
@@ -776,6 +836,7 @@ STATIC_CHECKS = [
     VacuousTestAssertionCheck(),
     TestMethodLacksVerificationCheck(),
     TestOverridesSubjectUnderTestCheck(),
+    MarkdownInlineCodeLeakCheck(),
 ]
 
 

@@ -444,35 +444,79 @@ def find_brownfield_test_redirections(
 
 _JAVA_PUBLIC_METHOD_RE = re.compile(
     r"\bpublic\s+(?!class\b|interface\b|record\b|enum\b)(?:static\s+)?"
-    r"(?:final\s+)?(?:<[^>{}]+>\s*)?[\w.$<>?,\[\]\s]+\s+"
+    r"(?:final\s+)?(?:<[^>{}]+>\s*)?([\w.$<>?,\[\]\s]+)\s+"
     r"([A-Za-z_$][\w$]*)\s*\(([^)]*)\)",
 )
 _PYTHON_PUBLIC_FUNCTION_RE = re.compile(
     r"^[ \t]*(?:async\s+)?def\s+([A-Za-z][A-Za-z0-9]*)\s*\(([^)]*)\)", re.MULTILINE,
 )
+# A public Java/Kotlin/Groovy record's own canonical constructor component
+# list - its real, established data contract, distinct from any method it
+# declares. _JAVA_PUBLIC_METHOD_RE explicitly excludes `record` declarations
+# (its own negative lookahead), so without this a record's component shape
+# is invisible to _normalized_public_signatures entirely.
+_JAVA_RECORD_DECLARATION_RE = re.compile(
+    r"\bpublic\s+record\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)",
+)
+
+
+def _normalize_java_type_list(raw: str) -> str:
+    """Shared by method parameters and record components: strip annotations/
+    `final`/parameter names, keep only the normalized type list, matching
+    the same normalization already applied to method parameters below."""
+    types = []
+    for part in filter(None, (p.strip() for p in raw.split(","))):
+        part = re.sub(r"@\w+(?:\([^)]*\))?\s*", "", part)
+        part = re.sub(r"\bfinal\s+", "", part).strip()
+        types.append(re.sub(r"\s+[A-Za-z_$][\w$]*$", "", part))
+    return ", ".join(types)
 
 
 def _normalized_public_signatures(path: str, content: str) -> Dict[str, str]:
-    """Extract stable public method/function signatures for common brownfield stacks."""
+    """Extract stable public method/function signatures for common brownfield
+    stacks, PLUS (Java/Kotlin/Groovy only) a public record's own canonical
+    constructor component shape - its real, established data contract, not
+    just its methods.
+
+    The Java/Kotlin/Groovy signature key includes the normalized RETURN TYPE
+    (e.g. "Customer find(long)"), not just name+params - found live, PRV-03
+    legacy (2026-08-27): a retry changed CustomerService.find(long) to
+    return CustomerDto instead of the established Customer, an established-
+    contract-breaking change find_brownfield_public_api_changes() couldn't
+    see at all when the signature key was name+params only (identical
+    before and after, since the parameter list never changed).
+
+    The record-component signature family (found live, PRV-03 hardened,
+    same date) closes a sibling gap: a retry changed Customer from a
+    4-component record to 5 (adding displayName as a canonical component
+    instead of a derived accessor), breaking every existing caller's
+    constructor call - this had no representation in this function's output
+    at all before, so there was nothing to diff against."""
     extension = os.path.splitext(path)[1].lower()
-    pattern = _JAVA_PUBLIC_METHOD_RE if extension in {".java", ".kt", ".kts", ".groovy"} else (
-        _PYTHON_PUBLIC_FUNCTION_RE if extension == ".py" else None
-    )
-    if pattern is None:
-        return {}
-    signatures = {}
-    for name, parameters in pattern.findall(content or ""):
-        if extension == ".py" and name.startswith("_"):
-            continue
-        normalized_parameters = re.sub(r"\s+", " ", parameters.strip())
-        if extension in {".java", ".groovy"}:
-            parameter_types = []
-            for parameter in filter(None, (part.strip() for part in parameters.split(","))):
-                parameter = re.sub(r"@\w+(?:\([^)]*\))?\s*", "", parameter)
-                parameter = re.sub(r"\bfinal\s+", "", parameter).strip()
-                parameter_types.append(re.sub(r"\s+[A-Za-z_$][\w$]*$", "", parameter))
-            normalized_parameters = ", ".join(parameter_types)
-        signatures[f"{name}({normalized_parameters})"] = name
+    signatures: Dict[str, str] = {}
+    if extension in {".java", ".kt", ".kts", ".groovy"}:
+        for return_type, name, parameters in _JAVA_PUBLIC_METHOD_RE.findall(content or ""):
+            normalized_return_type = re.sub(r"\s+", " ", return_type.strip())
+            # Matches the pre-existing scoping exactly: only .java/.groovy
+            # use "TYPE name" parameter syntax that _normalize_java_type_list
+            # can correctly strip down to bare types. Kotlin's "name: TYPE"
+            # syntax was never covered by that normalization before this
+            # change either - preserved as-is (whitespace-collapsed only)
+            # rather than risk mis-stripping a Kotlin parameter's real type.
+            normalized_parameters = (
+                _normalize_java_type_list(parameters) if extension in {".java", ".groovy"}
+                else re.sub(r"\s+", " ", parameters.strip())
+            )
+            signatures[f"{normalized_return_type} {name}({normalized_parameters})"] = name
+        for record_name, components in _JAVA_RECORD_DECLARATION_RE.findall(content or ""):
+            normalized_components = _normalize_java_type_list(components)
+            signatures[f"record {record_name}({normalized_components})"] = record_name
+    elif extension == ".py":
+        for name, parameters in _PYTHON_PUBLIC_FUNCTION_RE.findall(content or ""):
+            if name.startswith("_"):
+                continue
+            normalized_parameters = re.sub(r"\s+", " ", parameters.strip())
+            signatures[f"{name}({normalized_parameters})"] = name
     return signatures
 
 
@@ -586,7 +630,18 @@ def find_protected_api_reference_changes(
 
     violations = []
     for contract in recovery.get("violations", []):
-        api_name = contract["removed_signature"].split("(", 1)[0]
+        # _normalized_public_signatures() now prefixes a Java/Kotlin/Groovy
+        # method signature with its return type ("String format(String)")
+        # and a record signature with the literal word "record"
+        # ("record Customer(long, String)") - the bare callable name is the
+        # LAST whitespace-separated token before "(", not everything before
+        # it. A plain split("(", 1)[0] would return "String format" or
+        # "record Customer" here, which then matches nothing in real call
+        # sites (`format(...)`/`new Customer(...)`) and silently defeats
+        # this whole evidence check. Still correct for a bare name with no
+        # prefix (Python's "format(String)" shape) - .split() on a single
+        # token just returns that token.
+        api_name = contract["removed_signature"].split("(", 1)[0].split()[-1]
         for path in contract.get("evidence_files", []):
             if path not in final_contents:
                 continue
