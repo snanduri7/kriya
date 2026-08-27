@@ -3469,7 +3469,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the "
                 f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
             )
-            grounded_architectural_owners = discover_response_construction_owners(
+            # Full synchronous tree-walk + per-file read, re-run on every
+            # failed spec-compliance retry; offload so it doesn't block the
+            # event loop inside this async attempt.
+            grounded_architectural_owners = await asyncio.to_thread(
+                discover_response_construction_owners,
                 ctx.worktree_path, ctx.grounding_goal or ctx.goal, spec_check_files,
             )
             failure = _build_quality_gate_failure(

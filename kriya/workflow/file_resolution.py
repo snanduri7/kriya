@@ -291,8 +291,12 @@ _RESPONSE_OWNER_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _RESPONSE_CONSTRUCTION_RE = re.compile(
-    r"\b(?:put|set|add|write|render|serializ\w*|toJson|response|payload)\s*\("
-    r"|\b(?:Map|dict|object|json)\b",
+    # Deliberately excludes a bare `\b(?:Map|dict|object|json)\b` alternative -
+    # that matched on a stray import/comment/unrelated field in almost any
+    # source file, with no actual construction-call context, and a match
+    # here is trusted at hardcoded confidence="high" downstream
+    # (attribution.py) to move file ownership during plan surgery.
+    r"\b(?:put|set|add|write|render|serializ\w*|toJson|response|payload)\s*\(",
     re.IGNORECASE,
 )
 
@@ -338,6 +342,12 @@ def include_response_construction_owners(
 ) -> List[str]:
     """Add grounded existing response owners without replacing planned owners."""
     planned = list(planned_files)
+    if any(_explicitly_requests_new_artifact(path, goal) for path in planned):
+        # Same guard prefer_existing_artifact_owners applies: if the goal
+        # explicitly asks for a brand-new artifact, this heuristic must not
+        # widen write scope onto an unrelated existing file just because it
+        # shares vocabulary tokens with the goal.
+        return planned
     return list(dict.fromkeys(
         planned + discover_response_construction_owners(workspace_path, goal, planned)
     ))

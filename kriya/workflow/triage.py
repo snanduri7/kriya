@@ -736,10 +736,17 @@ def _floor_kind(multi_part_structure: bool, touches_shared_entrypoint: bool, cre
 
 
 _ENHANCEMENT_LANGUAGE_RE = re.compile(
-    r"\b(?:enhance|extend|augment|add|include|expose|return|support)\w*\b"
-    r"[\s\S]{0,120}\b(?:existing|current|already|endpoint|response|service|system|behavior|feature)\b"
-    r"|\b(?:existing|current|already)\b[\s\S]{0,120}"
-    r"\b(?:enhance|extend|augment|add|include|expose|return|support)\w*\b",
+    # Deliberately excludes generic verbs like "add"/"include"/"return" -
+    # those fire on ordinary bugfix wording ("add a null check to the
+    # existing handler") with no real additive-feature signal. Requires
+    # BOTH a feature-shaped verb AND an existing-surface noun, not just
+    # proximity to "existing/current/already" alone.
+    r"\b(?:enhance|extend|augment|expose|support)\w*\b"
+    r"[\s\S]{0,80}\b(?:existing|current|already)\b[\s\S]{0,40}"
+    r"\b(?:endpoint|response|service|system|api|feature)\b"
+    r"|\b(?:existing|current|already)\b[\s\S]{0,40}"
+    r"\b(?:endpoint|response|service|system|api|feature)\b[\s\S]{0,80}"
+    r"\b(?:enhance|extend|augment|expose|support)\w*\b",
     re.IGNORECASE,
 )
 
@@ -802,7 +809,10 @@ class EngineeringTriageService:
         elif migration_language:
             kind = ChangeKind.REFACTOR
             reason_codes.append("migration_language_detected")
-        elif enhancement_language:
+        elif enhancement_language and not multi_part_structure:
+            # multi_part_structure must win when both fire - _floor_kind's
+            # documented ordering is milestone over enhancement, and this
+            # elif runs ahead of the _floor_kind call below.
             kind = ChangeKind.ENHANCEMENT
             reason_codes.append("existing_system_enhancement_detected")
         else:

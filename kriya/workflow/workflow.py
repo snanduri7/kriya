@@ -1638,8 +1638,10 @@ class WorkflowEngine:
             architect_files = prefer_existing_artifact_owners(
                 architect_files, goal, workspace_path,
             )
-            architect_files = include_response_construction_owners(
-                architect_files, goal, workspace_path,
+            # Full synchronous tree-walk + per-file read; offload so it
+            # doesn't block the event loop inside this async workflow.
+            architect_files = await asyncio.to_thread(
+                include_response_construction_owners, architect_files, goal, workspace_path,
             )
         if step_callback:
             step_callback("Design", design)

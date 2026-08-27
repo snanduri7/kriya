@@ -124,6 +124,7 @@ from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
     FileAction,
+    PlannedFile,
     Subtask,
     VerificationMethodType,
     build_engineering_plan_from_planner_output,
@@ -643,6 +644,21 @@ def resolve_scope_conflict_owners(
     return owners
 
 
+def _transitive_dependents(plan: EngineeringPlan, subtask_id: str) -> set[str]:
+    """Every subtask that depends on `subtask_id`, directly or through a
+    chain of other subtasks - i.e. everything that is DOWNSTREAM of it in
+    the DAG. Used to keep a plan-surgery merge from introducing a cycle."""
+    dependents: set[str] = set()
+    frontier = [subtask_id]
+    while frontier:
+        current = frontier.pop()
+        for st in plan.subtasks:
+            if current in st.depends_on and st.id not in dependents:
+                dependents.add(st.id)
+                frontier.append(st.id)
+    return dependents
+
+
 def revise_plan_for_grounded_scope_owner(
     plan: EngineeringPlan,
     failed_subtask_id: str,
@@ -654,6 +670,21 @@ def revise_plan_for_grounded_scope_owner(
     This is plan surgery, not a retry hint: ownership remains unique, an
     emptied owner stage is merged into the failed stage, dependency edges are
     rewired, and the caller must validate the returned plan before execution.
+
+    The grounded owner is not always upstream of the failed stage - a
+    compliance gate can just as easily discover that a LATER stage (e.g. a
+    controller three subtasks downstream) is the real owner of behavior the
+    failed stage's goal requires. When that happens, naively unioning the
+    owner's OWN depends_on into the failed stage's depends_on can point the
+    failed stage at something that (transitively) already depends on it -
+    an immediate cycle, silently rejected by validate_plan()'s acyclic
+    check with no actionable signal for the caller. See
+    _transitive_dependents below: any owner dependency already downstream
+    of the failed stage is dropped rather than inherited - the failed stage
+    keeps its own original ordering constraints (it already runs at its
+    original position; a dependency that only existed to sequence the
+    NOW-REMOVED owner stage relative to ITS neighbors is meaningless once
+    that stage's scope has been absorbed here).
     """
     revised = plan.model_copy(deep=True)
     failed = revised.subtask_by_id(failed_subtask_id)
@@ -684,10 +715,21 @@ def revise_plan_for_grounded_scope_owner(
             continue
 
         # The old stage has no independently executable scope after moving
-        # its sole owner. Merge its contract and remove it, preserving the DAG.
+        # its sole owner. Merge its contract and remove it, preserving the
+        # DAG. owner.depends_on is only safe to inherit when owner was
+        # UPSTREAM of failed; when it was downstream (this is a
+        # forward-grounded discovery, not a backward one), those
+        # dependencies are already reachable FROM failed and inheriting
+        # them would create a cycle - drop those instead of raising, since
+        # failed's own original position already sequences it correctly
+        # relative to them.
+        failed_downstream = _transitive_dependents(revised, failed.id)
+        dropped_owner_deps = {
+            dep for dep in owner.depends_on if dep in failed_downstream
+        }
         failed.depends_on = list(dict.fromkeys(
             dep for dep in failed.depends_on + owner.depends_on
-            if dep not in (failed.id, owner.id)
+            if dep not in (failed.id, owner.id) and dep not in failed_downstream
         ))
         failed.acceptance_criteria_ids = list(dict.fromkeys(
             failed.acceptance_criteria_ids + owner.acceptance_criteria_ids
@@ -702,8 +744,28 @@ def revise_plan_for_grounded_scope_owner(
             not in existing_verification
         )
         failed.provides = list(dict.fromkeys(failed.provides + owner.provides))
+        # A requires whose sole provider was one of dropped_owner_deps can no
+        # longer be validly declared - keeping it would fail validate_plan's
+        # SEMANTIC_DEPENDENCY_EDGE_MISSING check (requires X but doesn't
+        # depend on X's provider) for exactly the edge we just had to drop
+        # above to avoid a cycle. The capability itself may genuinely not be
+        # ready yet; that risk is accepted the same way any other grounded-
+        # owner recovery accepts it - actual correctness is still enforced
+        # by the merged subtask's own compile/test Quality Gates, not by
+        # this planning-time metadata alone.
+        capability_providers: Dict[str, List[str]] = {}
+        for st in revised.subtasks:
+            for capability in st.provides:
+                capability_providers.setdefault(capability, []).append(st.id)
+        owner_requires = [
+            item for item in owner.requires
+            if not (
+                len(capability_providers.get(item, [])) == 1
+                and capability_providers[item][0] in dropped_owner_deps
+            )
+        ]
         failed.requires = [
-            item for item in dict.fromkeys(failed.requires + owner.requires)
+            item for item in dict.fromkeys(failed.requires + owner_requires)
             if item not in failed.provides
         ]
         failed.relevant_global_invariants = list(dict.fromkeys(
@@ -2158,12 +2220,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     )
                     scope_conflict = call_result.get("plan_scope_conflict") or {}
                 else:
+                    revision_failure_reason = (
+                        "authoritative grounded-owner plan revision failed validation: "
+                        + "; ".join(revision_validation.errors)
+                    )
+                    logger.error(
+                        "WorkflowController enforce run %r: authoritative PLAN_SCOPE_DEFECT "
+                        "recovery for subtask %r (grounded owner file(s) %s) produced a plan "
+                        "that failed revalidation - %s. Falling back to upstream-owner "
+                        "recovery; if that also cannot resolve it, this run terminates with "
+                        "the scope conflict unresolved.",
+                        run_id, subtask.id, grounded_scope_files, revision_failure_reason,
+                    )
                     scope_conflict = {
                         **scope_conflict,
-                        "reason": (
-                            "authoritative grounded-owner plan revision failed validation: "
-                            + "; ".join(revision_validation.errors)
-                        ),
+                        "reason": revision_failure_reason,
                     }
             owner_map = resolve_scope_conflict_owners(
                 plan, list(scope_conflict.get("required_files", [])), subtask,
@@ -2400,6 +2471,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 logger.warning(
                     f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} "
                     f"({position}/{total}) - did not pass Quality Gates."
+                    + (f" Reason: {error}" if error else "")
                 )
                 # Found live, 2026-08-25 (ignite_qpid_protocol): a subtask's own
                 # internal run_generation_workflow() call can hit KnowledgeGuard's
@@ -2449,12 +2521,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         latest_status_by_subtask = {
             result.subtask_id: result.status for result in subtask_results
         }
-        all_completed = (
-            set(latest_status_by_subtask) == current_plan_subtask_ids
-            and all(
-                latest_status_by_subtask[subtask_id] == SubtaskStatus.COMPLETED
-                for subtask_id in current_plan_subtask_ids
-            )
+        # Scope recovery can merge/remove a subtask mid-run, leaving its
+        # stale COMPLETED entry in subtask_results even though it's no
+        # longer part of the current plan. Measure completion against the
+        # current plan's ids only - a set-equality check against the
+        # (append-only, never-pruned) subtask_results keys would falsely
+        # report a fully successful revised plan as failed.
+        all_completed = all(
+            latest_status_by_subtask.get(subtask_id) == SubtaskStatus.COMPLETED
+            for subtask_id in current_plan_subtask_ids
         )
         try:
             if all_completed and plan_workspace_path != workspace_path:

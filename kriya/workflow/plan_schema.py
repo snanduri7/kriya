@@ -124,10 +124,16 @@ class VerificationMethod(BaseModel):
             "quality_gates": VerifierKind.COMPILE,
         }.get(self.tool_name or "")
         if self.verifier_kind is None:
-            self.verifier_kind = (
-                inferred if self.type == VerificationMethodType.TOOL
-                else VerifierKind.JUDGMENT
-            )
+            if self.type == VerificationMethodType.TOOL:
+                # A registered tool outside the known compile/test set (a
+                # custom health-check, deploy-smoke-test, etc.) still runs
+                # something concrete - default it to COMMAND rather than
+                # None, or requires_application_runtime would silently
+                # drop an explicit requires_runtime_execution=True for
+                # every non-builtin tool.
+                self.verifier_kind = inferred if inferred is not None else VerifierKind.COMMAND
+            else:
+                self.verifier_kind = VerifierKind.JUDGMENT
         if inferred is not None and self.verifier_kind is not inferred:
             raise ValueError(
                 f"tool_name={self.tool_name} requires verifier_kind={inferred.value}"

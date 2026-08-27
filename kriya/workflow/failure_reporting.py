@@ -9,6 +9,14 @@ pairs that with AttributionTier as-is (that vocabulary already answers
 "how confidently was this failure localized" and needs no translation of
 its own).
 
+Not to be confused with kriya/workflow/failure.py's FailureAttributionKind
+(SOURCE_DEFECT/PLAN_SCOPE_DEFECT/VERIFICATION_CONTRACT_DEFECT/TEST_DEFECT/
+INFRASTRUCTURE_DEFECT) - that answers a different question (WHO owns the
+repair, consumed authoritatively by retry_strategy.py) than this module's
+FailureCategory (a REPORTING-only "what kind of thing went wrong" bucket).
+Neither is a substitute for the other; see FailureAttributionKind's own
+docstring for the full distinction.
+
 Never consulted by retry logic, policy, or anything authoritative -
 Failure.type/AttributionTier themselves remain the sole source of truth
 for retry scoping (kriya/workflow/retry_strategy.py's own

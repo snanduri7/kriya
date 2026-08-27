@@ -24,6 +24,21 @@ from typing import Any, Dict, List, Optional
 
 
 class FailureAttributionKind(str, Enum):
+    """WHO owns the repair for a failure - source code, the plan, the
+    verification contract, a test, or the control plane. Deliberately a
+    different axis from attribution.py's AttributionTier, which answers
+    HOW confidently a failure was localized (self_diagnosis/locator/
+    architectural_owner/.../full_set) - not what a
+    kriya/workflow/failure_reporting.py-style second parallel taxonomy of
+    Failure.type itself. failure_reporting.py's module docstring documents
+    the deliberate choice not to re-taxonomize Failure.type for REPORTING;
+    this enum instead drives retry_strategy.py's actual repair-owner
+    routing (see classify_failure_attribution below) and both this kind
+    AND an AttributionTier are set on the SAME AttributionResult - they
+    are not competing classifications of the same question, and neither
+    should be extended without checking whether the other needs a
+    matching update."""
+
     SOURCE_DEFECT = "SOURCE_DEFECT"
     PLAN_SCOPE_DEFECT = "PLAN_SCOPE_DEFECT"
     VERIFICATION_CONTRACT_DEFECT = "VERIFICATION_CONTRACT_DEFECT"
@@ -37,6 +52,15 @@ def classify_failure_attribution(type_: str, message: str = "") -> FailureAttrib
         if (
             "RUNTIME_VERIFICATION_MISSING" in (message or "")
             or "SPEC COMPLIANCE INFRASTRUCTURE" in (message or "")
+            # The judge inferred only a build sequence for a goal that
+            # requires observable runtime behavior - same "the declared
+            # verification contract doesn't actually verify what it
+            # claims to" shape as RUNTIME_VERIFICATION_MISSING above, so
+            # it needs the same plan-revision path, not the
+            # verification/control-plane no-op INFRASTRUCTURE_DEFECT
+            # takes (see attempt.py's BEHAVIORAL_GOAL_WITH_BUILD_ONLY_
+            # VERIFICATION raise site).
+            or "BEHAVIORAL_GOAL_WITH_BUILD_ONLY_VERIFICATION" in (message or "")
         ):
             return FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT
         return FailureAttributionKind.INFRASTRUCTURE_DEFECT
