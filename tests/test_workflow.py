@@ -16,6 +16,8 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import (
     AttemptContext,
+    _brownfield_owner_contract_block,
+    _diagnosis_mismatch_bypass_reason,
     _operation_map,
     _record_self_correction_scope_conflict,
     _run_verification_basis_hash,
@@ -33,6 +35,12 @@ from kriya.workflow.file_resolution import (
     ground_java_entrypoint_in_no_build_file_projects,
     is_runnable_test_file,
     prefer_existing_artifact_owners,
+    find_brownfield_test_redirections,
+    find_brownfield_public_api_changes,
+    classify_api_recovery_file_roles,
+    find_explanatory_prose_contamination,
+    find_protected_api_reference_changes,
+    find_unrestored_public_api_contracts,
     strip_package_declaration_matching_source_root,
 )
 from kriya.workflow.edit_safety import (
@@ -47,7 +55,11 @@ from kriya.workflow.retry_strategy import (
     handle_attempt_failure,
     record_workspace_progress,
 )
-from kriya.workflow.state import GenerationState
+from kriya.workflow.state import (
+    APIContractRecovery,
+    APIContractRecoveryPhase,
+    GenerationState,
+)
 from kriya.workflow.checkpoint import (
     checkpoint_path,
     compute_config_fingerprint,
@@ -112,6 +124,77 @@ from kriya.workflow.workflow import (
     normalize_written_filepath,
     _resolve_file_locations,
 )
+
+
+def test_restore_public_contract_diagnosis_mismatch_cannot_veto():
+    state = GenerationState()
+    state.api_contract_recovery = APIContractRecovery.detected([], [], {})
+    state.api_contract_recovery.begin_restoration()
+
+    reason = _diagnosis_mismatch_bypass_reason(
+        state, MagicMock(), "CustomerDisplayNameFormatter.java", "class Candidate {}",
+    )
+
+    assert reason is not None
+    assert "deterministic exact-signature inspection" in reason
+
+
+def test_attempt_one_brownfield_contract_exposes_exact_existing_owner(tmp_path):
+    owner = tmp_path / "Formatter.java"
+    owner.write_text(
+        "package existing; public class Formatter { public String format(String x) { return x; } }"
+    )
+    ctx = MagicMock(workspace_path=str(tmp_path))
+
+    block = _brownfield_owner_contract_block(ctx, ["Formatter.java"])
+
+    assert "AUTHORITATIVE BROWNFIELD OWNER CONTRACT" in block
+    assert "package existing" in block
+    assert "public String format(String x)" in block
+    assert "Do not paste a planned replacement class" in block
+
+
+def test_api_contract_recovery_state_machine_requires_ordered_terminal_lifecycle():
+    recovery = APIContractRecovery.detected(
+        [{"owner": "Formatter.java", "removed_signature": "format(String)"}],
+        ["FormatterTest.java"],
+        {"Formatter.java": "API_OWNER", "FormatterTest.java": "EVIDENCE_TEST"},
+    )
+
+    assert recovery.phase is APIContractRecoveryPhase.DETECTED
+    recovery.begin_restoration()
+    recovery.owner_contract_restored()
+    recovery.candidate_gates_passed()
+    recovery.terminal_succeeded()
+
+    assert recovery.phase is APIContractRecoveryPhase.COMPLETE
+    assert recovery.transition_history == [
+        "DETECTED", "RESTORE_PUBLIC_CONTRACT", "REPAIR_BEHAVIOR",
+        "AWAIT_TERMINAL_SUCCESS", "COMPLETE",
+    ]
+
+
+def test_api_contract_recovery_cannot_skip_owner_restoration():
+    recovery = APIContractRecovery.detected([], [], {})
+
+    with pytest.raises(ValueError, match="illegal API contract recovery transition"):
+        recovery.owner_contract_restored()
+
+
+def test_intermediate_recovery_failure_does_not_poison_final_terminal_pass():
+    state = GenerationState()
+    state.gate_outcomes.append({
+        "attempt": 1,
+        "type": "api_contract_recovery_incomplete",
+        "success": False,
+    })
+    state.candidate_gates_succeeded = True
+    state.terminal_regression_succeeded = True
+    state.overall_attempt_succeeded = True
+    state.quality_gates_succeeded = True
+    state.api_contract_recovery = None
+
+    assert state.final_workflow_quality_passed() is True
 
 
 def test_required_verification_evidence_preserves_identity_and_only_resolves_builtin_gates():
@@ -778,6 +861,223 @@ def test_brownfield_owner_resolution_prefers_unique_existing_implementation(tmp_
         "src/CustomerDisplayNameFormatter.py",
         "tests/test_customer_display_name_formatter.py",
     ]
+
+
+def test_brownfield_gate_rejects_parallel_owner_and_test_redirection(tmp_path):
+    owner = "src/main/java/example/Customer.java"
+    test = "src/test/java/example/CustomerTest.java"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / test).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text("class Customer { String displayName() { return null; } }\n")
+    original_test = "class CustomerTest { Customer subject = new Customer(); }\n"
+    (tmp_path / test).write_text(original_test)
+
+    violations = find_brownfield_test_redirections(
+        str(tmp_path),
+        {
+            test: original_test,
+            "src/main/java/example/DisplayNameFormatter.java": "",
+        },
+        {
+            test: "class CustomerTest { DisplayNameFormatter subject = new DisplayNameFormatter(); }\n",
+            "src/main/java/example/DisplayNameFormatter.java": "class DisplayNameFormatter {}\n",
+        },
+    )
+
+    assert violations == [{
+        "existing_owner": owner,
+        "new_candidate": "src/main/java/example/DisplayNameFormatter.java",
+        "redirected_test": test,
+    }]
+
+
+def test_brownfield_gate_allows_new_coverage_that_keeps_existing_owner(tmp_path):
+    owner = "src/customer.py"
+    test = "tests/test_customer.py"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / test).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text("class Customer:\n    pass\n")
+    original_test = "def test_name():\n    subject = Customer()\n"
+    (tmp_path / test).write_text(original_test)
+
+    assert find_brownfield_test_redirections(
+        str(tmp_path),
+        {test: original_test},
+        {test: original_test + "\ndef test_missing_middle_name():\n    assert Customer()\n"},
+    ) == []
+
+
+def test_brownfield_bug_fix_preserves_referenced_public_api(tmp_path):
+    owner = "src/main/java/example/Customer.java"
+    caller = "src/test/java/example/CustomerTest.java"
+    original = "public class Customer { public String displayName(String middle) { return middle; } }\n"
+    renamed = "public class Customer { public String formattedName(String middle) { return middle; } }\n"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / caller).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("class CustomerTest { void test() { new Customer().displayName(null); } }\n")
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: renamed},
+        "Fix the null-handling defect in the display-name implementation",
+    )
+
+    assert violations == [{
+        "owner": owner,
+        "removed_signature": "displayName(String)",
+        "evidence_files": [caller],
+    }]
+
+
+def test_brownfield_bug_fix_allows_private_change_with_public_api_unchanged(tmp_path):
+    owner = "src/main/java/example/Customer.java"
+    caller = "src/test/java/example/CustomerTest.java"
+    original = "public class Customer { public String displayName() { return helper(); } private String helper() { return null; } }\n"
+    repaired = "public class Customer { public String displayName() { return helper(); } private String helper() { return \"\"; } }\n"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / caller).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("class CustomerTest { void test() { new Customer().displayName(); } }\n")
+
+    assert find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: repaired}, "Fix null handling",
+    ) == []
+
+
+def test_api_recovery_precheck_keeps_signature_and_callsite_evidence_authoritative():
+    owner = "src/Formatter.java"
+    test = "tests/FormatterTest.java"
+    recovery = {
+        "violations": [{
+            "owner": owner,
+            "removed_signature": "format(String, String, String)",
+            "evidence_files": [test],
+        }],
+        "protected_evidence_files": [test],
+    }
+    original = {test: "formatter.format(first, middle, last);"}
+    still_broken = {
+        owner: "public class Formatter { public String renamed(String a, String b, String c) { return a; } }",
+        test: "formatter.renamed(first, middle, last);",
+    }
+
+    assert find_unrestored_public_api_contracts(still_broken, recovery)
+    assert find_protected_api_reference_changes(original, still_broken, recovery) == [{
+        "evidence_file": test, "required_api": "format",
+        "baseline_call_count": 1, "final_call_count": 0,
+        "contract_reference_missing": True,
+        "missing_assertions": [],
+    }]
+
+
+def test_api_recovery_precheck_accepts_restored_signature_and_preserved_callsite():
+    owner = "src/Formatter.java"
+    test = "tests/FormatterTest.java"
+    recovery = {
+        "violations": [{
+            "owner": owner,
+            "removed_signature": "format(String, String, String)",
+            "evidence_files": [test],
+        }],
+        "protected_evidence_files": [test],
+    }
+    original = {test: "formatter.format(first, middle, last);"}
+    repaired = {
+        owner: "public class Formatter { public String format(String a, String b, String c) { return a; } }",
+        test: original[test] + "\n// additional null coverage",
+    }
+
+    assert find_unrestored_public_api_contracts(repaired, recovery) == []
+    assert find_protected_api_reference_changes(original, repaired, recovery) == []
+
+
+def test_api_evidence_allows_assertion_reordering_and_multiline_formatting():
+    test = "tests/FormatterTest.java"
+    recovery = {
+        "violations": [{
+            "owner": "src/Formatter.java",
+            "removed_signature": "format(String)",
+            "evidence_files": [test],
+        }],
+        "protected_evidence_files": [test],
+    }
+    original = {test: '''
+        assertEquals("A", formatter.format("a"));
+        assertNotNull(formatter.format("b"));
+    '''}
+    reformatted = {test: '''
+        assertNotNull(
+            formatter.format("b")
+        );
+        assertEquals(
+            "A",
+            formatter.format("a")
+        );
+    '''}
+    assert find_protected_api_reference_changes(original, reformatted, recovery) == []
+
+
+def test_api_evidence_allows_equivalent_callsite_consolidation():
+    test = "tests/FormatterTest.java"
+    recovery = {
+        "violations": [{
+            "owner": "src/Formatter.java",
+            "removed_signature": "format(String)",
+            "evidence_files": [test],
+        }],
+        "protected_evidence_files": [test],
+    }
+    original = {test: '''
+        formatter.format(value);
+        formatter.format(value);
+    '''}
+    consolidated = {test: "formatter.format(value);"}
+    assert find_protected_api_reference_changes(original, consolidated, recovery) == []
+
+
+def test_source_prose_contamination_is_rejected_before_sandbox_commit():
+    contamination = find_explanatory_prose_contamination(
+        "src/test/java/example/FormatterTest.java",
+        "class FormatterTest {\nThe error occurs because the API was renamed.\n}\n",
+    )
+    assert contamination == "line 2: The error occurs because the API was renamed."
+
+
+def test_commented_explanatory_text_is_not_source_prose_contamination():
+    assert find_explanatory_prose_contamination(
+        "src/Formatter.java", "class Formatter {\n// The issue is documented here.\n}\n",
+    ) is None
+
+
+def test_api_recovery_classifies_owner_test_caller_and_other_roles():
+    violations = [{
+        "owner": "src/Formatter.java",
+        "removed_signature": "format(String)",
+        "evidence_files": ["tests/FormatterTest.java", "src/App.java"],
+    }]
+    assert classify_api_recovery_file_roles(
+        violations, ["src/Formatter.java", "tests/FormatterTest.java", "src/App.java", "README.md"],
+    ) == {
+        "src/Formatter.java": "API_OWNER",
+        "tests/FormatterTest.java": "EVIDENCE_TEST",
+        "src/App.java": "EVIDENCE_CALLER",
+        "README.md": "OTHER",
+    }
+
+
+def test_explicit_api_migration_goal_relaxes_public_api_protection(tmp_path):
+    owner = "src/Formatter.java"
+    caller = "tests/FormatterTest.java"
+    original = "public class Formatter { public String format(String value) { return value; } }"
+    renamed = "public class Formatter { public String render(String value) { return value; } }"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / caller).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("formatter.format(value);")
+    assert find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: renamed},
+        "Migrate the public API signature from format to render and update callers",
+    ) == []
 
 
 def test_brownfield_owner_resolution_preserves_unique_exact_owner_package_path(tmp_path):
@@ -4086,12 +4386,12 @@ def test_progress_gate_stops_failure_family_churn_without_content_change():
     assert state.consecutive_no_progress_attempts == 0
 
 
-def test_repeated_anchor_failure_switches_protocol_without_widening_scope(tmp_path):
+def test_first_anchor_failure_switches_next_protocol_without_widening_scope(tmp_path):
     target = tmp_path / "Owner.py"
     target.write_text("value = 1\n")
     ctx = MagicMock(worktree_path=str(tmp_path), workspace_path=str(tmp_path))
     state = GenerationState()
-    state.budgets.anchor_failure_counts["Owner.py"] = 2
+    state.budgets.anchor_failure_counts["Owner.py"] = 1
 
     operations = _operation_map(
         ctx, ["Owner.py"], CodeOperation.REPAIR_WITH_PATCH, state,

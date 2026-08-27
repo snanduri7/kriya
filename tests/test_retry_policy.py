@@ -5,6 +5,17 @@ from kriya.workflow.operations import (
 from kriya.workflow.retry_policy import RetryAction, decide_retry_action
 
 
+def test_sticky_api_contract_recovery_outranks_ordinary_failure_routing():
+    decision = decide_retry_action(
+        retry_count=1, max_retries=4,
+        targeted_retry_count=1, targeted_max_retries=3,
+        has_implicated_files=True, has_missing_files=True,
+        has_fallback_model=True, fallback_targeted_attempted=False,
+        environment_failure=None, has_api_contract_recovery=True,
+    )
+    assert decision.action is RetryAction.API_CONTRACT_RECOVERY
+
+
 def test_operation_contracts_distinguish_repairs_creation_and_no_change():
     assert operation_for_attempt("missing_files", has_prior_failure=True) is CodeOperation.CREATE_FULL_FILE
     assert operation_for_attempt("targeted", has_prior_failure=True) is CodeOperation.REPAIR_WITH_PATCH
@@ -142,3 +153,28 @@ def test_retry_reducer_enforces_global_attempt_bound_after_per_failure_resets():
         attempt_number=8, max_total_attempts=8,
     )
     assert decision.action is RetryAction.STOP_EXHAUSTED
+
+
+def test_api_contract_recovery_uses_its_own_budget_not_targeted_budget():
+    decision = decide_retry_action(
+        retry_count=4, max_retries=4, targeted_retry_count=99,
+        targeted_max_retries=3, has_implicated_files=True,
+        has_missing_files=False, has_fallback_model=False,
+        fallback_targeted_attempted=False, environment_failure=None,
+        has_api_contract_recovery=True, api_contract_recovery_count=2,
+        api_contract_recovery_max_attempts=3,
+    )
+    assert decision.action is RetryAction.API_CONTRACT_RECOVERY
+
+
+def test_api_contract_recovery_stops_at_its_own_bound():
+    decision = decide_retry_action(
+        retry_count=0, max_retries=4, targeted_retry_count=0,
+        targeted_max_retries=3, has_implicated_files=True,
+        has_missing_files=False, has_fallback_model=False,
+        fallback_targeted_attempted=False, environment_failure=None,
+        has_api_contract_recovery=True, api_contract_recovery_count=3,
+        api_contract_recovery_max_attempts=3,
+    )
+    assert decision.action is RetryAction.STOP_EXHAUSTED
+    assert "API contract recovery" in decision.reason

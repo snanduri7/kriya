@@ -94,6 +94,8 @@ from kriya.workflow.file_resolution import (
     extract_expected_files,
     extract_planner_code_blocks,
     extract_target_test,
+    find_brownfield_test_redirections,
+    find_brownfield_public_api_changes,
     find_missing_expected_files,
     normalize_written_filepath,
 )
@@ -166,7 +168,7 @@ from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.review_context import build_review_batches, build_reviewer_verified_evidence
-from kriya.workflow.state import GenerationState
+from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
@@ -2553,6 +2555,82 @@ class WorkflowEngine:
                     )
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
+
+                final_candidate_contents = {}
+                for filepath in sorted(state.all_files_written):
+                    with open(
+                        os.path.join(worktree_path, filepath),
+                        "r", encoding="utf-8", errors="replace",
+                    ) as fh:
+                        final_candidate_contents[filepath] = fh.read()
+                ownership_violations = find_brownfield_test_redirections(
+                    workspace_path,
+                    state.all_original_contents,
+                    final_candidate_contents,
+                )
+                if ownership_violations:
+                    evidence = "; ".join(
+                        f"owner={item['existing_owner']}, candidate={item['new_candidate']}, "
+                        f"test={item['redirected_test']}"
+                        for item in ownership_violations
+                    )
+                    failure = Failure(
+                        type="brownfield_ownership_redirect",
+                        message=(
+                            "BROWNFIELD OWNERSHIP REJECTED: existing behavioral ownership "
+                            "cannot be transferred to a newly created parallel implementation "
+                            "by redirecting established tests. Modify the existing owner and "
+                            "retain its API; update tests only to extend expectations or coverage."
+                        ),
+                        raw_output=evidence,
+                        source="ownership_gate",
+                        authority="deterministic",
+                        file_locations=[
+                            FileLocation(filepath=item["redirected_test"])
+                            for item in ownership_violations
+                        ],
+                        likely_files=sorted({
+                            item["existing_owner"] for item in ownership_violations
+                        }),
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                api_violations = find_brownfield_public_api_changes(
+                    workspace_path,
+                    state.all_original_contents,
+                    final_candidate_contents,
+                    goal,
+                )
+                if api_violations:
+                    evidence = "; ".join(
+                        f"owner={item['owner']}, removed={item['removed_signature']}, "
+                        f"references={item['evidence_files']}"
+                        for item in api_violations
+                    )
+                    failure = Failure(
+                        type="brownfield_public_api_changed",
+                        message=(
+                            "BROWNFIELD PUBLIC API REJECTED: an established public signature "
+                            "referenced by existing tests or call sites was removed or renamed. "
+                            "Preserve the public API and repair private/internal implementation "
+                            "unless the goal explicitly requests an API migration."
+                        ),
+                        raw_output=evidence,
+                        source="ownership_gate",
+                        authority="deterministic",
+                        file_locations=[
+                            FileLocation(filepath=item["owner"])
+                            for item in api_violations
+                        ],
+                        likely_files=sorted({item["owner"] for item in api_violations}),
+                        diagnostics={
+                            "api_contract_recovery": {"violations": api_violations},
+                        },
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
                 state.gate_outcomes.append({
                     "attempt": state.attempt_number,
                     "type": "regression_test",
@@ -2560,6 +2638,14 @@ class WorkflowEngine:
                     "output": full_test_res.get("output", "")
                 })
                 state.terminal_regression_succeeded = True
+                if state.api_contract_recovery:
+                    state.api_contract_recovery.terminal_succeeded()
+                    logger.info(
+                        "API_CONTRACT_RECOVERY complete: deterministic contract checks, "
+                        "candidate gates, and terminal regression all passed; transitions=%s",
+                        state.api_contract_recovery.transition_history,
+                    )
+                    state.api_contract_recovery = None
                 state.record_event(RunEvent(
                     kind="terminal_regression.passed",
                     attempt=state.attempt_number,
@@ -2672,6 +2758,29 @@ class WorkflowEngine:
 
                 break
 
+            except RecoveryPhaseAdvanced as transition:
+                # A verified state-machine transition is progress, not a failed
+                # quality-gate attempt. It still consumes the dedicated model
+                # attempt budget, but must not enter generic failure routing or
+                # append a historical FAILED outcome.
+                state.budgets.api_contract_recovery_count += 1
+                state.record_event(RunEvent(
+                    kind="api_contract_recovery.phase_advanced",
+                    attempt=state.attempt_number,
+                    source="ownership_gate",
+                    authority=EventAuthority.AUTHORITATIVE,
+                    message=str(transition),
+                    details={
+                        "source_phase": transition.source,
+                        "target_phase": transition.target,
+                        "passed": True,
+                    },
+                ))
+                logger.info(
+                    "API_CONTRACT_RECOVERY TRANSITION PASSED - Attempt %d: %s",
+                    state.attempt_number, transition,
+                )
+                continue
             except Exception as e:
                 if await handle_attempt_failure(state, attempt_ctx, e):
                     break
@@ -2781,7 +2890,10 @@ class WorkflowEngine:
         if step_callback:
             step_callback("Review", review)
 
-        quality_passed = state.quality_gates_succeeded
+        # Final status is derived from terminal state, not from append-only
+        # failure history. An intermediate failed recovery attempt remains in
+        # diagnostics without poisoning an authoritative recovered PASS.
+        quality_passed = state.final_workflow_quality_passed()
         # A stable, short string identifying WHY this run failed, so a caller
         # (human or script) can always ask "why did this fail" the same way
         # rather than having to know which of several differently-shaped

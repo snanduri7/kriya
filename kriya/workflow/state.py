@@ -7,6 +7,7 @@ makes the next slices (an isolable attempt executor and retry-decision
 function) possible to unit-test without invoking the whole method.
 """
 from dataclasses import dataclass, field
+from enum import Enum
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -15,6 +16,127 @@ from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.triage import EngineeringRoute
 from kriya.workflow.process_profile import ProcessProfile
+
+
+class APIContractRecoveryPhase(str, Enum):
+    DETECTED = "DETECTED"
+    RESTORE_PUBLIC_CONTRACT = "RESTORE_PUBLIC_CONTRACT"
+    REPAIR_BEHAVIOR = "REPAIR_BEHAVIOR"
+    AWAIT_TERMINAL_SUCCESS = "AWAIT_TERMINAL_SUCCESS"
+    COMPLETE = "COMPLETE"
+
+
+class RecoveryPhaseAdvanced(Exception):
+    """Internal non-failure control flow for a verified recovery transition."""
+
+    def __init__(self, source: str, target: str) -> None:
+        self.source = source
+        self.target = target
+        super().__init__(f"{source} -> {target}")
+
+
+@dataclass
+class APIContractRecovery:
+    """Authoritative brownfield API recovery lifecycle.
+
+    This object—not retry prompts or the latest failure—owns recovery scope
+    and legal transitions. Diagnostics may be serialized and rehydrated, but
+    callers cannot silently skip owner restoration or terminal verification.
+    """
+
+    violations: List[Dict[str, Any]]
+    protected_evidence_files: Tuple[str, ...]
+    file_roles: Dict[str, str]
+    phase: APIContractRecoveryPhase = APIContractRecoveryPhase.DETECTED
+    transition_history: List[str] = field(
+        default_factory=lambda: [APIContractRecoveryPhase.DETECTED.value]
+    )
+
+    @classmethod
+    def detected(
+        cls, violations: List[Dict[str, Any]], protected_evidence_files,
+        file_roles: Dict[str, str],
+    ) -> "APIContractRecovery":
+        return cls(
+            violations=list(violations),
+            protected_evidence_files=tuple(sorted(set(protected_evidence_files))),
+            file_roles=dict(file_roles),
+        )
+
+    @classmethod
+    def from_diagnostics(cls, value: Dict[str, Any]) -> "APIContractRecovery":
+        recovery = cls.detected(
+            list(value.get("violations", [])),
+            value.get("protected_evidence_files", []),
+            value.get("file_roles", {}),
+        )
+        phase = APIContractRecoveryPhase(
+            value.get("phase", APIContractRecoveryPhase.DETECTED.value)
+        )
+        recovery.phase = phase
+        recovery.transition_history = list(
+            value.get("transition_history", [phase.value])
+        )
+        return recovery
+
+    @property
+    def owner_files(self) -> List[str]:
+        return sorted({item["owner"] for item in self.violations})
+
+    def _transition(
+        self, expected: APIContractRecoveryPhase, target: APIContractRecoveryPhase,
+    ) -> None:
+        if self.phase is not expected:
+            raise ValueError(
+                f"illegal API contract recovery transition: {self.phase.value} -> "
+                f"{target.value}; expected {expected.value}"
+            )
+        self.phase = target
+        self.transition_history.append(target.value)
+
+    def begin_restoration(self) -> None:
+        self._transition(
+            APIContractRecoveryPhase.DETECTED,
+            APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT,
+        )
+
+    def owner_contract_restored(self) -> None:
+        self._transition(
+            APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT,
+            APIContractRecoveryPhase.REPAIR_BEHAVIOR,
+        )
+
+    def candidate_gates_passed(self) -> None:
+        if self.phase is APIContractRecoveryPhase.REPAIR_BEHAVIOR:
+            self._transition(
+                APIContractRecoveryPhase.REPAIR_BEHAVIOR,
+                APIContractRecoveryPhase.AWAIT_TERMINAL_SUCCESS,
+            )
+
+    def terminal_succeeded(self) -> None:
+        if self.phase is APIContractRecoveryPhase.REPAIR_BEHAVIOR:
+            self.candidate_gates_passed()
+        self._transition(
+            APIContractRecoveryPhase.AWAIT_TERMINAL_SUCCESS,
+            APIContractRecoveryPhase.COMPLETE,
+        )
+
+    def to_diagnostics(self) -> Dict[str, Any]:
+        return {
+            "mode": "API_CONTRACT_RECOVERY",
+            "phase": self.phase.value,
+            "violations": self.violations,
+            "protected_evidence_files": list(self.protected_evidence_files),
+            "file_roles": self.file_roles,
+            "transition_history": list(self.transition_history),
+        }
+
+    # Read-only mapping compatibility for deterministic inspection helpers.
+    def get(self, key: str, default=None):
+        return self.to_diagnostics().get(key, default)
+
+    def __getitem__(self, key: str):
+        return self.to_diagnostics()[key]
 
 
 @dataclass
@@ -35,6 +157,10 @@ class RetryBudgets:
     # every targeted attempt" a bad trade). Exhausting this scoped budget falls
     # through to the full-set path's own budget/escalation, unchanged.
     targeted_retry_count: int = 0
+    # API contract restoration is an authoritative state machine, not an
+    # ordinary targeted compiler/test repair.  Keep its budget separate so
+    # logs and exhaustion never produce nonsensical values such as 4/3.
+    api_contract_recovery_count: int = 0
     # A single, one-shot opportunity per authoritative failure family to try a
     # TARGETED fix on the fallback model
     # before escalating all the way to a full-set regeneration (found live,
@@ -85,9 +211,9 @@ class RetryBudgets:
     # this check flagging it, so an unrelated, later mismatch on the same
     # file still gets its own first (bounded) veto.
     diagnosis_mismatch_veto_counts: Dict[str, int] = field(default_factory=dict)
-    # Consecutive anchor mismatches per authorized file. The first mismatch
-    # refreshes exact content for one more anchored attempt; the second changes
-    # only the edit protocol, never the file scope, to a full-file repair.
+    # Consecutive anchor mismatches per authorized file. After the first
+    # mismatch, the next attempt changes only the edit protocol—never the file
+    # scope—to a full-file repair, avoiding repeated skeleton/anchor failures.
     anchor_failure_counts: Dict[str, int] = field(default_factory=dict)
 
 
@@ -281,11 +407,25 @@ class GenerationState:
     # file outside an authoritative caller-provided write allowlist. This
     # is a plan/scope conflict, not another code-generation retry target.
     plan_scope_conflict: Optional[Dict[str, Any]] = None
+    # Sticky authoritative recovery contract established by the deterministic
+    # brownfield API gate. Unlike last_failure/error_context, this survives
+    # later compiler/test failures until every removed signature is restored.
+    api_contract_recovery: Optional[APIContractRecovery] = None
 
     def record_event(self, event: RunEvent) -> None:
         self.run_events.append(event)
         if event.failure_type:
             self.failure_ledger.record(event)
+
+    def final_workflow_quality_passed(self) -> bool:
+        """Return terminal workflow truth, never historical-attempt truth."""
+        return bool(
+            self.candidate_gates_succeeded
+            and self.terminal_regression_succeeded
+            and self.overall_attempt_succeeded
+            and self.quality_gates_succeeded
+            and self.api_contract_recovery is None
+        )
 
     def generation_metrics(self) -> Dict[str, Any]:
         """Content-free operational telemetry safe to persist in local traces."""

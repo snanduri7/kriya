@@ -75,6 +75,10 @@ def operation_for_attempt(mode: str, *, has_prior_failure: bool) -> CodeOperatio
         return CodeOperation.CREATE_FULL_FILE
     if mode in ("targeted", "fallback_targeted"):
         return CodeOperation.REPAIR_WITH_PATCH
+    if mode == "api_contract_recovery":
+        # Full-file repair avoids making restoration of a missing declaration
+        # depend on an anchor that may no longer exist in the bad candidate.
+        return CodeOperation.REPAIR_WITH_FULL_FILE
     return (
         CodeOperation.REPAIR_WITH_FULL_FILE
         if has_prior_failure else CodeOperation.CREATE_FULL_FILE

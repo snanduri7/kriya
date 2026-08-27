@@ -282,6 +282,303 @@ def prefer_existing_artifact_owners(
     return resolved
 
 
+_PRODUCTION_SOURCE_EXTENSIONS = {
+    ".py", ".java", ".kt", ".kts", ".groovy", ".rb", ".js", ".jsx",
+    ".ts", ".tsx", ".go", ".rs", ".cs", ".c", ".cc", ".cpp", ".h", ".hpp",
+}
+_DECLARED_OWNER_RE = re.compile(
+    r"\b(?:class|interface|record|enum|def|function|func|struct|trait)\s+([A-Za-z_$][\w$]*)",
+)
+
+
+def _behavioral_owner_identifiers(path: str, content: str) -> set[str]:
+    """Return bounded, language-neutral identifiers a test can reference."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    identifiers = {stem} if len(stem) >= 3 else set()
+    identifiers.update(
+        match for match in _DECLARED_OWNER_RE.findall(content or "") if len(match) >= 3
+    )
+    return identifiers
+
+
+def _references_any_identifier(content: str, identifiers: Iterable[str]) -> bool:
+    return any(
+        re.search(rf"(?<![\w$]){re.escape(identifier)}(?![\w$])", content or "")
+        for identifier in identifiers
+    )
+
+
+def find_brownfield_test_redirections(
+    workspace_path: str,
+    original_contents: Dict[str, str],
+    final_contents: Dict[str, str],
+) -> List[Dict[str, str]]:
+    """Detect a new parallel implementation taking over an existing owner's tests.
+
+    Existing tests are strong ownership evidence.  A violation requires all three
+    facts, so ordinary new production files and legitimate test extensions remain
+    allowed: an existing production owner was referenced before the run, a new
+    production candidate was created, and an existing test removed the old owner
+    reference while adding a reference to the new candidate.
+    """
+    new_candidates = []
+    for path, content in final_contents.items():
+        if original_contents.get(path, "") or is_runnable_test_file(path) or _is_test_or_doc_file(path):
+            continue
+        if os.path.splitext(path)[1].lower() not in _PRODUCTION_SOURCE_EXTENSIONS:
+            continue
+        new_candidates.append((path, _behavioral_owner_identifiers(path, content)))
+    if not new_candidates:
+        return []
+
+    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
+    existing_owners = []
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = [name for name in dirs if name not in ignored]
+        for filename in filenames:
+            path = os.path.relpath(os.path.join(root, filename), workspace_path)
+            if is_runnable_test_file(path) or _is_test_or_doc_file(path):
+                continue
+            if os.path.splitext(path)[1].lower() not in _PRODUCTION_SOURCE_EXTENSIONS:
+                continue
+            try:
+                with open(os.path.join(workspace_path, path), encoding="utf-8", errors="replace") as fh:
+                    content = fh.read()
+            except OSError:
+                continue
+            existing_owners.append((path, _behavioral_owner_identifiers(path, content)))
+
+    violations = []
+    for test_path, final_test in final_contents.items():
+        original_test = original_contents.get(test_path, "")
+        if not original_test or not is_runnable_test_file(test_path):
+            continue
+        for owner_path, owner_ids in existing_owners:
+            if not _references_any_identifier(original_test, owner_ids):
+                continue
+            if _references_any_identifier(final_test, owner_ids):
+                continue
+            for candidate_path, candidate_ids in new_candidates:
+                if (
+                    not _references_any_identifier(original_test, candidate_ids)
+                    and _references_any_identifier(final_test, candidate_ids)
+                ):
+                    violations.append({
+                        "existing_owner": owner_path,
+                        "new_candidate": candidate_path,
+                        "redirected_test": test_path,
+                    })
+    return violations
+
+
+_JAVA_PUBLIC_METHOD_RE = re.compile(
+    r"\bpublic\s+(?!class\b|interface\b|record\b|enum\b)(?:static\s+)?"
+    r"(?:final\s+)?(?:<[^>{}]+>\s*)?[\w.$<>?,\[\]\s]+\s+"
+    r"([A-Za-z_$][\w$]*)\s*\(([^)]*)\)",
+)
+_PYTHON_PUBLIC_FUNCTION_RE = re.compile(
+    r"^[ \t]*(?:async\s+)?def\s+([A-Za-z][A-Za-z0-9]*)\s*\(([^)]*)\)", re.MULTILINE,
+)
+
+
+def _normalized_public_signatures(path: str, content: str) -> Dict[str, str]:
+    """Extract stable public method/function signatures for common brownfield stacks."""
+    extension = os.path.splitext(path)[1].lower()
+    pattern = _JAVA_PUBLIC_METHOD_RE if extension in {".java", ".kt", ".kts", ".groovy"} else (
+        _PYTHON_PUBLIC_FUNCTION_RE if extension == ".py" else None
+    )
+    if pattern is None:
+        return {}
+    signatures = {}
+    for name, parameters in pattern.findall(content or ""):
+        if extension == ".py" and name.startswith("_"):
+            continue
+        normalized_parameters = re.sub(r"\s+", " ", parameters.strip())
+        if extension in {".java", ".groovy"}:
+            parameter_types = []
+            for parameter in filter(None, (part.strip() for part in parameters.split(","))):
+                parameter = re.sub(r"@\w+(?:\([^)]*\))?\s*", "", parameter)
+                parameter = re.sub(r"\bfinal\s+", "", parameter).strip()
+                parameter_types.append(re.sub(r"\s+[A-Za-z_$][\w$]*$", "", parameter))
+            normalized_parameters = ", ".join(parameter_types)
+        signatures[f"{name}({normalized_parameters})"] = name
+    return signatures
+
+
+def _goal_explicitly_requests_api_change(goal: str) -> bool:
+    return bool(re.search(
+        r"\b(?:rename|remove|replace|break|migrate)\b[^.\n]{0,50}"
+        r"\b(?:public\s+)?(?:api|signature|callers?)\b",
+        goal or "", re.IGNORECASE,
+    ))
+
+
+def find_brownfield_public_api_changes(
+    workspace_path: str,
+    original_contents: Dict[str, str],
+    final_contents: Dict[str, str],
+    goal: str,
+) -> List[Dict[str, Any]]:
+    """Reject model-preferred API renames during an ordinary brownfield repair.
+
+    A removed signature is blocking only when existing tests or call sites name
+    that API. Explicit API-migration requests are outside this repair guard.
+    """
+    if _goal_explicitly_requests_api_change(goal):
+        return []
+    evidence_contents: Dict[str, str] = {}
+    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = [name for name in dirs if name not in ignored]
+        for filename in filenames:
+            evidence_path = os.path.relpath(os.path.join(root, filename), workspace_path)
+            try:
+                with open(os.path.join(workspace_path, evidence_path), encoding="utf-8", errors="replace") as fh:
+                    evidence_contents[evidence_path] = fh.read()
+            except OSError:
+                continue
+
+    violations = []
+    for path, final_content in final_contents.items():
+        original_content = original_contents.get(path, "")
+        if not original_content or is_runnable_test_file(path) or _is_test_or_doc_file(path):
+            continue
+        original_signatures = _normalized_public_signatures(path, original_content)
+        final_signatures = _normalized_public_signatures(path, final_content)
+        for signature, api_name in sorted(original_signatures.items()):
+            if signature in final_signatures:
+                continue
+            evidence_files = sorted(
+                evidence_path for evidence_path, evidence_content in evidence_contents.items()
+                if evidence_path != path
+                and re.search(rf"(?<![\w$]){re.escape(api_name)}\s*\(", evidence_content)
+            )
+            if evidence_files:
+                violations.append({
+                    "owner": path,
+                    "removed_signature": signature,
+                    "evidence_files": evidence_files,
+                })
+    return violations
+
+
+def find_unrestored_public_api_contracts(
+    final_contents: Dict[str, str], recovery: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Cheap pre-gate check for a sticky API_CONTRACT_RECOVERY contract."""
+    if not recovery:
+        return []
+    missing = []
+    for violation in recovery.get("violations", []):
+        owner = violation["owner"]
+        signature = violation["removed_signature"]
+        if signature not in _normalized_public_signatures(owner, final_contents.get(owner, "")):
+            missing.append(dict(violation))
+    return missing
+
+
+def find_protected_api_reference_changes(
+    original_contents: Dict[str, str], final_contents: Dict[str, str],
+    recovery: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Prevent retries from erasing baseline references that prove the API contract."""
+    if not recovery:
+        return []
+    def balanced_invocations(content: str, name_pattern: str) -> set[str]:
+        """Extract formatting/order-insensitive call expressions with balanced parens."""
+        fingerprints = set()
+        for match in re.finditer(rf"\b({name_pattern})\s*\(", content or "", re.IGNORECASE):
+            depth = 1
+            index = match.end()
+            quote = None
+            escaped = False
+            while index < len(content) and depth:
+                char = content[index]
+                if quote:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == quote:
+                        quote = None
+                elif char in {'"', "'"}:
+                    quote = char
+                elif char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                index += 1
+            if depth == 0:
+                expression = content[match.start():index]
+                fingerprints.add(re.sub(r"\s+", "", expression))
+        return fingerprints
+
+    violations = []
+    for contract in recovery.get("violations", []):
+        api_name = contract["removed_signature"].split("(", 1)[0]
+        for path in contract.get("evidence_files", []):
+            if path not in final_contents:
+                continue
+            original = original_contents.get(path, "")
+            final = final_contents[path]
+            reference = re.compile(rf"(?<![\w$]){re.escape(api_name)}\s*\(")
+            baseline_count = len(reference.findall(original))
+            final_count = len(reference.findall(final))
+            baseline_assertions = balanced_invocations(
+                original, r"assert\w*|expect|should\w*",
+            )
+            final_assertions = balanced_invocations(
+                final, r"assert\w*|expect|should\w*",
+            )
+            missing_assertions = sorted(baseline_assertions - final_assertions)
+            # Contract evidence is presence-based, not cardinality-based. This
+            # permits equivalent duplicate calls to be consolidated while still
+            # refusing complete removal/redirection of the established API.
+            contract_reference_missing = baseline_count > 0 and final_count == 0
+            if contract_reference_missing or missing_assertions:
+                violations.append({
+                    "evidence_file": path,
+                    "required_api": api_name,
+                    "baseline_call_count": baseline_count,
+                    "final_call_count": final_count,
+                    "contract_reference_missing": contract_reference_missing,
+                    "missing_assertions": missing_assertions,
+                })
+    return violations
+
+
+def classify_api_recovery_file_roles(
+    violations: Iterable[Dict[str, Any]], all_files: Iterable[str] = (),
+) -> Dict[str, str]:
+    """Assign explicit recovery roles without repository- or PRV-specific names."""
+    roles: Dict[str, str] = {path: "OTHER" for path in all_files}
+    for violation in violations:
+        roles[violation["owner"]] = "API_OWNER"
+        for path in violation.get("evidence_files", []):
+            roles[path] = "EVIDENCE_TEST" if is_runnable_test_file(path) else "EVIDENCE_CALLER"
+    return roles
+
+
+_PROSE_CONTAMINATION_PATTERNS = (
+    re.compile(r"^\s*(?:The|This)\s+(?:error|failure|issue|code|test|method)\s+"
+               r"(?:is|was|occurs|fails|indicates|contains)\b", re.IGNORECASE),
+    re.compile(r"^\s*(?:The fix is|Looking at|To fix this|I (?:changed|updated|removed))\b", re.IGNORECASE),
+)
+
+
+def find_explanatory_prose_contamination(path: str, content: str) -> Optional[str]:
+    """Return an obvious un-commented model explanation embedded in source."""
+    if os.path.splitext(path)[1].lower() not in _PRODUCTION_SOURCE_EXTENSIONS:
+        return None
+    for line_number, line in enumerate((content or "").splitlines(), start=1):
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith(("//", "#", "/*", "*", "--")):
+            continue
+        if any(pattern.search(line) for pattern in _PROSE_CONTAMINATION_PATTERNS):
+            return f"line {line_number}: {stripped[:160]}"
+    return None
+
+
 def _resolve_maven_main_class(worktree_path: str) -> Optional[str]:
     """Scans src/main/java for a class with a real `public static void
     main(String[] args)` method and returns its fully-qualified name (package
