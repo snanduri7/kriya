@@ -532,3 +532,33 @@ async def test_validation_2_regression_attribution_redirects_away_from_the_throw
     assert result.tier == "self_diagnosis"
     assert result.files == ["src/main/resources/qpid-initial-config.json"]
     llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_grounded_architectural_owner_outranks_likely_file_guess():
+    failure = Failure(
+        type="goal_spec_compliance",
+        message="response field displayName is missing",
+        likely_files=["src/main/java/example/Customer.java"],
+        diagnostics={
+            "grounded_architectural_owners": [
+                "src/main/java/example/CustomerController.java"
+            ]
+        },
+    )
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure,
+        [
+            "src/main/java/example/Customer.java",
+            "src/main/java/example/CustomerController.java",
+        ],
+        0,
+        [],
+        llm,
+        lambda fp: None,
+    )
+    assert result.tier == "architectural_owner"
+    assert result.confidence == "high"
+    assert result.files == ["src/main/java/example/CustomerController.java"]
+    llm.complete.assert_not_called()

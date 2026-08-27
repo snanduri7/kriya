@@ -15,6 +15,7 @@ from kriya.workflow.plan_schema import (
     Subtask,
     VerificationMethod,
     VerificationMethodType,
+    VerifierKind,
     build_engineering_plan_from_planner_output,
 )
 from kriya.workflow.triage import ChangeKind
@@ -78,6 +79,28 @@ def test_verification_method_explicitly_declares_runtime_execution_requirement()
         requires_runtime_execution=True,
     )
     assert vm.requires_runtime_execution is True
+
+
+def test_test_runtime_means_test_process_not_application_runtime():
+    vm = VerificationMethod(
+        type=VerificationMethodType.TOOL,
+        description="execute unit tests",
+        tool_name="test",
+        requires_runtime_execution=True,
+    )
+    assert vm.verifier_kind is VerifierKind.TEST
+    assert vm.requires_application_runtime is False
+
+
+def test_application_runtime_verifier_explicitly_requires_application_execution():
+    vm = VerificationMethod(
+        type=VerificationMethodType.TOOL,
+        description="execute the application",
+        tool_name="run_app",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+        requires_runtime_execution=True,
+    )
+    assert vm.requires_application_runtime is True
 
 
 # --- AcceptanceCriterion ---

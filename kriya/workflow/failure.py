@@ -19,7 +19,32 @@ by design) since this is a pure data shape, trivial to unit-test in
 isolation from the retry loop itself.
 """
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+class FailureAttributionKind(str, Enum):
+    SOURCE_DEFECT = "SOURCE_DEFECT"
+    PLAN_SCOPE_DEFECT = "PLAN_SCOPE_DEFECT"
+    VERIFICATION_CONTRACT_DEFECT = "VERIFICATION_CONTRACT_DEFECT"
+    TEST_DEFECT = "TEST_DEFECT"
+    INFRASTRUCTURE_DEFECT = "INFRASTRUCTURE_DEFECT"
+
+
+def classify_failure_attribution(type_: str, message: str = "") -> FailureAttributionKind:
+    """Classify the repair owner before attempting file localization."""
+    if type_ == "verification_infrastructure_failure":
+        if (
+            "RUNTIME_VERIFICATION_MISSING" in (message or "")
+            or "SPEC COMPLIANCE INFRASTRUCTURE" in (message or "")
+        ):
+            return FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT
+        return FailureAttributionKind.INFRASTRUCTURE_DEFECT
+    if type_ in ("plan_scope_conflict", "ambiguous_planned_file_ownership"):
+        return FailureAttributionKind.PLAN_SCOPE_DEFECT
+    if type_ in ("test", "targeted_test", "regression_test", "test_acceptance"):
+        return FailureAttributionKind.TEST_DEFECT
+    return FailureAttributionKind.SOURCE_DEFECT
 
 
 @dataclass
@@ -155,6 +180,7 @@ class Failure:
     attribution_tier: Optional[str] = None
     attribution_confidence: Optional[str] = None
     attribution_reasoning: Optional[str] = None
+    attribution_kind: Optional[str] = None
     # MA6.6 - set only by a caller executing failure grounding within MA6's
     # structured subtask execution (kriya/workflow/subtask_executor.py);
     # None for every failure raised by the legacy, non-subtask-scoped
@@ -186,6 +212,9 @@ class Failure:
         literals (compile/targeted_test/test/run_verification/regression_test),
         each of which previously used a different type vocabulary than the
         except block's own fail_type derivation."""
+        attribution_kind = self.attribution_kind or classify_failure_attribution(
+            self.type, self.message,
+        ).value
         return {
             "attempt": self.attempt,
             "type": self.type,
@@ -203,6 +232,7 @@ class Failure:
             "attribution_tier": self.attribution_tier,
             "attribution_confidence": self.attribution_confidence,
             "attribution_reasoning": self.attribution_reasoning,
+            "attribution_kind": attribution_kind,
             "subtask_id": self.subtask_id,
             "plan_id": self.plan_id,
             "milestone_id": self.milestone_id,

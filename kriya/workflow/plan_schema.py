@@ -57,6 +57,14 @@ class VerificationMethodType(str, Enum):
     JUDGMENT = "judgment"
 
 
+class VerifierKind(str, Enum):
+    COMPILE = "compile"
+    TEST = "test"
+    APPLICATION_RUNTIME = "application_runtime"
+    COMMAND = "command"
+    JUDGMENT = "judgment"
+
+
 BUILTIN_QUALITY_GATE_VERIFIERS = frozenset({
     "quality_gates", "compile", "test", "tests", "regression",
 })
@@ -95,6 +103,7 @@ class VerificationMethod(BaseModel):
     type: VerificationMethodType
     description: str
     tool_name: Optional[str] = None
+    verifier_kind: Optional[VerifierKind] = None
     # Explicit semantic contract; avoids inferring runtime authority from a
     # technology, filename, or wording heuristic.
     requires_runtime_execution: bool = False
@@ -107,7 +116,34 @@ class VerificationMethod(BaseModel):
             raise ValueError(
                 "verification method type=judgment must not set tool_name - nothing deterministic runs it"
             )
+        inferred = {
+            "compile": VerifierKind.COMPILE,
+            "test": VerifierKind.TEST,
+            "tests": VerifierKind.TEST,
+            "regression": VerifierKind.TEST,
+            "quality_gates": VerifierKind.COMPILE,
+        }.get(self.tool_name or "")
+        if self.verifier_kind is None:
+            self.verifier_kind = (
+                inferred if self.type == VerificationMethodType.TOOL
+                else VerifierKind.JUDGMENT
+            )
+        if inferred is not None and self.verifier_kind is not inferred:
+            raise ValueError(
+                f"tool_name={self.tool_name} requires verifier_kind={inferred.value}"
+            )
         return self
+
+    @property
+    def requires_application_runtime(self) -> bool:
+        return bool(
+            self.requires_runtime_execution
+            and self.verifier_kind in (
+                VerifierKind.APPLICATION_RUNTIME,
+                VerifierKind.COMMAND,
+                VerifierKind.JUDGMENT,
+            )
+        )
 
 
 class AcceptanceCriterion(BaseModel):

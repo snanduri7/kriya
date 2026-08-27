@@ -97,6 +97,7 @@ from kriya.workflow.file_resolution import (
     find_brownfield_test_redirections,
     find_brownfield_public_api_changes,
     find_missing_expected_files,
+    include_response_construction_owners,
     normalize_written_filepath,
 )
 from kriya.workflow.evidence import EvidenceRecord
@@ -611,6 +612,8 @@ class WorkflowEngine:
         strict_dependency_index: bool = False,
         resolved_knowledge_coordinates: Optional[List[str]] = None,
         skill_engine_override: Optional[Any] = None,
+        execution_scope: str = "",
+        grounding_goal: str = "",
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -1626,10 +1629,16 @@ class WorkflowEngine:
             )
 
         # Brownfield ownership outranks creation of a parallel, similarly
-        # named artifact. Apply only to task-shaped requests; larger topology
-        # changes retain the Architect's explicit file set.
-        if engineering_route is not None and engineering_route.kind == ChangeKind.TASK:
+        # named artifact. Apply to bounded task/enhancement requests; larger
+        # topology changes retain the Architect's explicit file set.
+        if (
+            engineering_route is not None
+            and engineering_route.kind in (ChangeKind.TASK, ChangeKind.ENHANCEMENT)
+        ):
             architect_files = prefer_existing_artifact_owners(
+                architect_files, goal, workspace_path,
+            )
+            architect_files = include_response_construction_owners(
                 architect_files, goal, workspace_path,
             )
         if step_callback:
@@ -2063,6 +2072,8 @@ class WorkflowEngine:
                 else runtime_verification_required
             ),
             strict_spec_compliance=strict_spec_compliance,
+            execution_scope=execution_scope,
+            grounding_goal=grounding_goal,
         )
 
         from kriya.workflow.retry_policy import decide_for_state
@@ -2653,7 +2664,10 @@ class WorkflowEngine:
                     authority=EventAuthority.AUTHORITATIVE,
                     details={"passed": True, "terminal": True},
                 ))
-                log_quality_gate_banner("PASSED", state.attempt_number)
+                log_quality_gate_banner(
+                    "PASSED", state.attempt_number,
+                    scope=attempt_ctx.execution_scope,
+                )
 
                 # A semantically final-success checkpoint is legal only after
                 # every required terminal gate has passed.
@@ -2704,7 +2718,10 @@ class WorkflowEngine:
                     authority=EventAuthority.AUTHORITATIVE,
                     details={"passed": True, "applied": True},
                 ))
-                log_gate_banner("OVERALL ATTEMPT", "PASSED", state.attempt_number)
+                log_gate_banner(
+                    "OVERALL ATTEMPT", "PASSED", state.attempt_number,
+                    scope=attempt_ctx.execution_scope,
+                )
                 state.quality_gates_succeeded = True
 
                 # Authoritative work is durable now; release the sandbox

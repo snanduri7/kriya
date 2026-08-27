@@ -282,6 +282,67 @@ def prefer_existing_artifact_owners(
     return resolved
 
 
+_RESPONSE_SHAPE_GOAL_RE = re.compile(
+    r"\b(?:endpoint|response|payload|json|serializ\w*|present\w*|render\w*)\b",
+    re.IGNORECASE,
+)
+_RESPONSE_OWNER_PATH_RE = re.compile(
+    r"(?:controller|handler|resource|presenter|serializer|view|response|endpoint)",
+    re.IGNORECASE,
+)
+_RESPONSE_CONSTRUCTION_RE = re.compile(
+    r"\b(?:put|set|add|write|render|serializ\w*|toJson|response|payload)\s*\("
+    r"|\b(?:Map|dict|object|json)\b",
+    re.IGNORECASE,
+)
+
+
+def discover_response_construction_owners(
+    workspace_path: str, goal: str, planned_files: Iterable[str] = (),
+) -> List[str]:
+    """Find existing files that construct a requested endpoint/response shape.
+
+    Domain and service owners are insufficient when the repository explicitly
+    materializes responses in a controller/presenter/serializer. Candidates
+    must have both an architectural owner signal and response-construction
+    syntax; goal/planned-file vocabulary then grounds them to this request.
+    """
+    if not _RESPONSE_SHAPE_GOAL_RE.search(goal or ""):
+        return []
+    vocabulary = _semantic_tokens(goal or "")
+    for path in planned_files:
+        vocabulary.update(_artifact_name_tokens(path))
+    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
+    owners = []
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = [name for name in dirs if name not in ignored]
+        for filename in filenames:
+            path = os.path.relpath(os.path.join(root, filename), workspace_path)
+            if _is_test_or_doc_file(path) or not _RESPONSE_OWNER_PATH_RE.search(path):
+                continue
+            try:
+                with open(os.path.join(workspace_path, path), encoding="utf-8", errors="replace") as handle:
+                    content = handle.read()
+            except OSError:
+                continue
+            if not _RESPONSE_CONSTRUCTION_RE.search(content):
+                continue
+            candidate_tokens = _artifact_name_tokens(path) | _semantic_tokens(content[:4000])
+            if vocabulary & candidate_tokens:
+                owners.append(path)
+    return sorted(set(owners))
+
+
+def include_response_construction_owners(
+    planned_files: Iterable[str], goal: str, workspace_path: str,
+) -> List[str]:
+    """Add grounded existing response owners without replacing planned owners."""
+    planned = list(planned_files)
+    return list(dict.fromkeys(
+        planned + discover_response_construction_owners(workspace_path, goal, planned)
+    ))
+
+
 _PRODUCTION_SOURCE_EXTENSIONS = {
     ".py", ".java", ".kt", ".kts", ".groovy", ".rb", ".js", ".jsx",
     ".ts", ".tsx", ".go", ".rs", ".cs", ".c", ".cc", ".cpp", ".h", ".hpp",

@@ -735,6 +735,20 @@ def _floor_kind(multi_part_structure: bool, touches_shared_entrypoint: bool, cre
     return ChangeKind.TASK
 
 
+_ENHANCEMENT_LANGUAGE_RE = re.compile(
+    r"\b(?:enhance|extend|augment|add|include|expose|return|support)\w*\b"
+    r"[\s\S]{0,120}\b(?:existing|current|already|endpoint|response|service|system|behavior|feature)\b"
+    r"|\b(?:existing|current|already)\b[\s\S]{0,120}"
+    r"\b(?:enhance|extend|augment|add|include|expose|return|support)\w*\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_enhancement_language(goal: str) -> bool:
+    """Detect additive behavior requested against an existing system."""
+    return bool(_ENHANCEMENT_LANGUAGE_RE.search(goal or ""))
+
+
 @dataclass
 class EngineeringTriageService:
     """Assembles a fresh EngineeringRoute for one generation request.
@@ -765,6 +779,7 @@ class EngineeringTriageService:
         security_terms = _detect_security_terms(text)
         dependency_terms = _detect_dependency_terms(text)
         creation_language = _detect_creation_language(text)
+        enhancement_language = _detect_enhancement_language(text)
         repo_appears_empty = _workspace_appears_empty(workspace_path)
 
         graph_signals = _dependency_graph_signals(self.kernel, _extract_named_symbols(text))
@@ -787,6 +802,9 @@ class EngineeringTriageService:
         elif migration_language:
             kind = ChangeKind.REFACTOR
             reason_codes.append("migration_language_detected")
+        elif enhancement_language:
+            kind = ChangeKind.ENHANCEMENT
+            reason_codes.append("existing_system_enhancement_detected")
         else:
             kind = _floor_kind(multi_part_structure, touches_shared_entrypoint, creates_new_public_surface)
             if multi_part_structure:
@@ -823,6 +841,7 @@ class EngineeringTriageService:
             "scope_language": scope_language,
             "security_terms": security_terms,
             "dependency_terms": dependency_terms,
+            "enhancement_language": enhancement_language,
             "creation_language": creation_language,
             "repo_appears_empty": repo_appears_empty,
             "known_files_count": len(files),

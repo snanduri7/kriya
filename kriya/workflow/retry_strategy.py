@@ -23,9 +23,14 @@ import logging
 import os
 from typing import Optional
 
-from kriya.workflow.attribution import _detect_missing_build_manifest, attribute_failure, read_worktree_file
+from kriya.policy.errors import PolicyDeniedError
+from kriya.workflow.attribution import AttributionResult, _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.banners import log_gate_banner
-from kriya.workflow.failure import Failure
+from kriya.workflow.failure import (
+    Failure,
+    FailureAttributionKind,
+    classify_failure_attribution,
+)
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
     build_failure_signature,
@@ -33,7 +38,11 @@ from kriya.workflow.failure_grounding import (
     extract_error_search_terms,
     resolve_repository_locator_files,
 )
-from kriya.workflow.file_resolution import IncompleteGenerationError, classify_api_recovery_file_roles
+from kriya.workflow.file_resolution import (
+    IncompleteGenerationError,
+    classify_api_recovery_file_roles,
+    is_runnable_test_file,
+)
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.state import APIContractRecovery, GenerationState
@@ -54,6 +63,44 @@ _REPAIR_FEEDBACK_FAILURE_TYPES = {
     "structural_corruption",
     "unaddressed_error_location",
 }
+
+
+def _failure_from_validated_scope_denial(
+    error: Exception, ctx,
+) -> Optional[Failure]:
+    """Turn an exact denied existing production target into plan evidence."""
+    if not isinstance(error, PolicyDeniedError):
+        return None
+    if error.result.reason_code != "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE":
+        return None
+    if not isinstance(error.request.target, str) or not error.request.target:
+        return None
+    target = os.path.realpath(error.request.target)
+    worktree = os.path.realpath(ctx.worktree_path)
+    try:
+        relative = os.path.normpath(os.path.relpath(target, worktree))
+    except ValueError:
+        return None
+    if relative == ".." or relative.startswith(f"..{os.sep}"):
+        return None
+    # Automatic authority expansion is only justified for a real existing
+    # production owner. A hallucinated new path or test target remains a
+    # denied policy error and cannot mutate the approved plan.
+    if not os.path.isfile(target) or is_runnable_test_file(relative):
+        return None
+    message = (
+        "PLAN_SCOPE_DEFECT: generated repair targeted an existing production "
+        f"owner outside validated subtask scope: {relative}"
+    )
+    return Failure(
+        type="plan_scope_conflict",
+        message=message,
+        raw_output=str(error),
+        source="authorized_file_writer",
+        authority="deterministic",
+        likely_files=[relative],
+        diagnostics={"grounded_scope_owner_files": [relative]},
+    )
 
 
 def record_workspace_progress(
@@ -179,9 +226,13 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # message string later re-sniffed for its type by prefix-matching. A bare
     # Exception (shouldn't normally happen - defensive only) is wrapped the same
     # way so everything downstream always reads one shape.
-    failure: Failure = getattr(e, "failure", None) or Failure(
-        type="general_error", message=raw_error_context, raw_output=raw_error_context,
-        source="orchestrator",
+    failure: Failure = (
+        getattr(e, "failure", None)
+        or _failure_from_validated_scope_denial(e, ctx)
+        or Failure(
+            type="general_error", message=raw_error_context,
+            raw_output=raw_error_context, source="orchestrator",
+        )
     )
     failure_detail = (
         f"{attempt_mode}, full-set {state.budgets.retry_count}/{ctx.max_retries} + "
@@ -189,11 +240,20 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     )
     if failure.type == "regression_test":
         state.terminal_regression_succeeded = False
-        log_gate_banner("FULL REGRESSION", "FAILED", state.attempt_number, failure_detail)
+        log_gate_banner(
+            "FULL REGRESSION", "FAILED", state.attempt_number, failure_detail,
+            scope=ctx.execution_scope,
+        )
     elif not state.candidate_gates_succeeded:
-        log_gate_banner("CANDIDATE GATES", "FAILED", state.attempt_number, failure_detail)
+        log_gate_banner(
+            "CANDIDATE GATES", "FAILED", state.attempt_number, failure_detail,
+            scope=ctx.execution_scope,
+        )
     state.overall_attempt_succeeded = False
-    log_gate_banner("OVERALL ATTEMPT", "FAILED", state.attempt_number, failure_detail)
+    log_gate_banner(
+        "OVERALL ATTEMPT", "FAILED", state.attempt_number, failure_detail,
+        scope=ctx.execution_scope,
+    )
     previous_primary_failure = state.last_failure
     previous_error_source_context = dict(state.last_error_source_context)
     failure.attempt = state.attempt_number
@@ -446,16 +506,61 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 # owner in its candidate set. Fresh authoritative terminal
                 # evidence must be allowed to invalidate that stale scope.
                 self_diagnosed_files = None
-        attribution = await attribute_failure(
-            failure,
-            known_attribution_files,
-            state.budgets.retry_count,
-            ctx.chain,
-            ctx.developer.llm,
-            lambda fp: read_worktree_file(ctx.worktree_path, fp),
-            self_diagnosed_files=self_diagnosed_files,
-        )
+        attribution_kind = classify_failure_attribution(fail_type, failure.message)
+        failure.attribution_kind = attribution_kind.value
+        if attribution_kind is FailureAttributionKind.PLAN_SCOPE_DEFECT:
+            grounded_scope_owners = list(dict.fromkeys(
+                (failure.diagnostics or {}).get("grounded_scope_owner_files", [])
+            ))
+            attribution = AttributionResult(
+                tier="architectural_owner",
+                files=grounded_scope_owners,
+                confidence="high" if grounded_scope_owners else "low",
+                reasoning=(
+                    "AuthorizedFileWriter deterministically denied these existing production "
+                    "targets outside the validated subtask scope."
+                ),
+            )
+        elif attribution_kind in (
+            FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT,
+            FailureAttributionKind.INFRASTRUCTURE_DEFECT,
+        ):
+            attribution = AttributionResult(
+                tier="full_set", files=[], confidence="high",
+                reasoning=(
+                    f"{attribution_kind.value} is owned by the verification/control plane; "
+                    "production source-file attribution is intentionally disabled."
+                ),
+            )
+            if attribution_kind is FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT:
+                state.plan_scope_conflict = {
+                    "classification": attribution_kind.value,
+                    "reason_code": "VERIFICATION_CONTRACT_REVISION_REQUIRED",
+                    "failure_type": fail_type,
+                    "reason": attribution.reasoning,
+                    "required_files": [],
+                    "allowed_files": sorted(ctx.allowed_write_relpaths),
+                }
+        else:
+            attribution = await attribute_failure(
+                failure,
+                known_attribution_files,
+                state.budgets.retry_count,
+                ctx.chain,
+                ctx.developer.llm,
+                lambda fp: read_worktree_file(ctx.worktree_path, fp),
+                self_diagnosed_files=self_diagnosed_files,
+            )
         implicated = attribution.files
+        if (
+            attribution_kind is FailureAttributionKind.TEST_DEFECT
+            and any(not is_runnable_test_file(path) for path in implicated)
+        ):
+            # A test process produced the symptom, but deterministic/grounded
+            # localization selected production. The repair owner is therefore
+            # source, not the evidence-bearing test suite.
+            attribution_kind = FailureAttributionKind.SOURCE_DEFECT
+            failure.attribution_kind = attribution_kind.value
         if repository_regrounded_files and set(implicated) & set(repository_regrounded_files):
             attribution.reasoning = (
                 f"{attribution.reasoning} Terminal regression re-grounded the precise locator "
@@ -483,12 +588,16 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             outside_scope = sorted(set(implicated) - allowed_scope)
             if outside_scope:
                 state.plan_scope_conflict = {
-                    "classification": "PLAN_SCOPE_INSUFFICIENT",
+                    "classification": FailureAttributionKind.PLAN_SCOPE_DEFECT.value,
                     "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
                     "failure_type": fail_type,
                     "reason": attribution.reasoning,
                     "required_files": outside_scope,
                     "allowed_files": sorted(allowed_scope),
+                    "attribution_tier": attribution.tier,
+                    "grounded_owner_files": (
+                        outside_scope if attribution.tier == "architectural_owner" else []
+                    ),
                 }
         # For a QualityGateFailure type that appends its own gate_outcome at
         # the RAISE SITE (compile/test/regression_test/run_verification/
@@ -509,6 +618,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 outcome["attribution_tier"] = failure.attribution_tier
                 outcome["attribution_confidence"] = failure.attribution_confidence
                 outcome["attribution_reasoning"] = failure.attribution_reasoning
+                outcome["attribution_kind"] = failure.attribution_kind
         # A missing build manifest the Architect never asked for at all
         # (see _detect_missing_build_manifest) takes priority over normal
         # implication scoping - extract_implicated_files() can never name
@@ -594,7 +704,12 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                     state.last_error_source_context.get(lsp_filepath, "") + lsp_text
                 )
 
-    if state.last_attempt_mode == "api_contract_recovery":
+    if state.plan_scope_conflict is not None:
+        # This exits to the authoritative controller immediately. It is a
+        # plan transition, not an ordinary Developer retry, and must not burn
+        # any full-set/targeted recovery budget.
+        pass
+    elif state.last_attempt_mode == "api_contract_recovery":
         state.budgets.api_contract_recovery_count += 1
     elif state.last_attempt_mode in ("targeted", "missing_files"):
         if not failure_family_changed:

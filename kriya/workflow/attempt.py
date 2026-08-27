@@ -37,7 +37,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -427,6 +427,12 @@ class AttemptContext:
     allowed_write_relpaths: List[str] = field(default_factory=list)
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
+    # Human-readable identity for nested structured executions. Attempt
+    # numbers are local to each bounded run and otherwise collide in logs.
+    execution_scope: str = ""
+    # Original/global goal used only for deterministic architectural owner
+    # discovery when a bounded subtask's local wording omits that context.
+    grounding_goal: str = ""
 
 
 def _extract_grounded_contract_verdict(
@@ -471,11 +477,14 @@ def _record_self_correction_scope_conflict(
     if not required:
         return
     state.plan_scope_conflict = {
-        "classification": "PLAN_SCOPE_INSUFFICIENT",
+        "classification": "PLAN_SCOPE_DEFECT",
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
         "failure_type": failure_type,
         "required_files": required,
         "allowed_files": sorted(ctx.allowed_write_relpaths),
         "reason": "self-correction diagnosis requires a readable file outside approved write scope",
+        "attribution_tier": "self_correction",
+        "grounded_owner_files": [],
     }
 
 
@@ -3421,7 +3430,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # See SpecComplianceAgent's own docstring (kriya/agents/agent.py) for the live
     # incident (ignite_qpid_protocol milestone 1, 2026-08-21) this closes.
     if ctx.kernel.config.autonomy.spec_compliance_enabled:
-        spec_check_files = sorted(state.all_files_written)
+        # A bounded consumer is judged against both its own candidate and the
+        # already-verified upstream contracts it consumes. Restricting this to
+        # files written by the current subtask made compliance incorrectly say
+        # an upstream field/type was absent, then reopen a healthy owner.
+        spec_check_files = sorted(
+            set(state.all_files_written) | set(ctx.established_files)
+        )
         spec_file_contents: Dict[str, str] = {}
         for spec_path in spec_check_files:
             spec_full_path = os.path.join(ctx.worktree_path, spec_path)
@@ -3454,11 +3469,22 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the "
                 f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
             )
+            grounded_architectural_owners = discover_response_construction_owners(
+                ctx.worktree_path, ctx.grounding_goal or ctx.goal, spec_check_files,
+            )
             failure = _build_quality_gate_failure(
                 "goal_spec_compliance", message, message,
                 ctx.worktree_path, state.all_files_written, state.attempt_number,
-                extra_likely_files=spec_result.get("likely_files") or [],
+                extra_likely_files=list(dict.fromkeys(
+                    (spec_result.get("likely_files") or [])
+                    + grounded_architectural_owners
+                )),
             )
+            if grounded_architectural_owners:
+                failure.diagnostics = {
+                    **(failure.diagnostics or {}),
+                    "grounded_architectural_owners": grounded_architectural_owners,
+                }
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         state.gate_outcomes.append({
@@ -3481,4 +3507,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         authority=EventAuthority.AUTHORITATIVE,
         details={"passed": True, "terminal": False},
     ))
-    log_gate_banner("CANDIDATE GATES", "PASSED", state.attempt_number)
+    log_gate_banner(
+        "CANDIDATE GATES", "PASSED", state.attempt_number,
+        scope=ctx.execution_scope,
+    )

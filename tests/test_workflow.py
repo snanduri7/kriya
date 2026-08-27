@@ -14,6 +14,8 @@ from kriya.agents.agent import DeveloperAgent
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.workflow.attempt import (
     AttemptContext,
     _brownfield_owner_contract_block,
@@ -38,6 +40,7 @@ from kriya.workflow.file_resolution import (
     find_brownfield_test_redirections,
     find_brownfield_public_api_changes,
     classify_api_recovery_file_roles,
+    discover_response_construction_owners,
     find_explanatory_prose_contamination,
     find_protected_api_reference_changes,
     find_unrestored_public_api_contracts,
@@ -231,6 +234,43 @@ def test_required_compile_verification_stays_unresolved_when_gate_was_skipped():
     )
     assert evidence[0]["passed"] is None
     assert evidence[0]["source"] == "unresolved"
+
+
+def test_executed_targeted_test_satisfies_test_runtime_requirement():
+    requirements = [{
+        "type": "tool", "tool_name": "test", "verifier_kind": "test",
+        "description": "execute unit tests", "requires_runtime_execution": True,
+    }]
+    evidence = _build_required_verification_evidence(
+        requirements,
+        quality_gates_passed=True,
+        gate_outcomes=[{
+            "type": "targeted_test", "success": True,
+            "output": "Tests run: 2, Failures: 0, Errors: 0",
+        }],
+    )
+    assert evidence[0]["passed"] is True
+    assert evidence[0]["source"] == "authoritative_gate_outcome"
+
+
+def test_response_shape_owner_discovery_finds_existing_controller(tmp_path):
+    controller = tmp_path / "src/main/java/com/example/customer/CustomerController.java"
+    controller.parent.mkdir(parents=True)
+    controller.write_text(
+        'class CustomerController { Map details(Customer c) { Map m = new HashMap(); '
+        'm.put("id", c.id()); return m; } }'
+    )
+    (controller.parent / "CustomerService.java").write_text(
+        "class CustomerService { Customer find(long id) { return null; } }"
+    )
+
+    owners = discover_response_construction_owners(
+        str(tmp_path),
+        "Enhance the existing customer-details endpoint response with displayName",
+        ["src/main/java/com/example/customer/CustomerService.java"],
+    )
+
+    assert owners == ["src/main/java/com/example/customer/CustomerController.java"]
 
 
 def test_required_compile_verification_uses_authoritative_gate_outcome():
@@ -4426,11 +4466,14 @@ def test_self_correction_scope_conflict_enters_existing_plan_recovery_contract(t
     result = MagicMock(scope_conflict_files=["upstream.cfg"])
     _record_self_correction_scope_conflict(state, ctx, result, "run_verification")
     assert state.plan_scope_conflict == {
-        "classification": "PLAN_SCOPE_INSUFFICIENT",
+        "classification": "PLAN_SCOPE_DEFECT",
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
         "failure_type": "run_verification",
         "required_files": ["upstream.cfg"],
         "allowed_files": ["owned.py"],
         "reason": "self-correction diagnosis requires a readable file outside approved write scope",
+        "attribution_tier": "self_correction",
+        "grounded_owner_files": [],
     }
 
 
@@ -4760,6 +4803,54 @@ async def test_run_attempt_passes_when_spec_compliant(tmp_path):
 
     spec_compliance.check.assert_called_once()
     assert any(g.get("type") == "goal_spec_compliance" and g.get("success") for g in state.gate_outcomes)
+
+
+@pytest.mark.asyncio
+async def test_bounded_spec_compliance_includes_verified_upstream_files(tmp_path):
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    (tmp_path / "Customer.java").write_text(
+        "record Customer(String displayName) {}\n"
+    )
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "CustomerService.java",
+        "content": "class CustomerService { Customer find() { return null; } }\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": True,
+        "reasoning": "consumer and upstream contract are present",
+        "missing_requirements": [],
+        "likely_files": [],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        architect_files=["CustomerService.java"],
+        expected_files_upfront=["CustomerService.java"],
+        architect_basename_to_path={"CustomerService.java": "CustomerService.java"},
+        established_files=["Customer.java"],
+        spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    call = spec_compliance.check.await_args.kwargs
+    assert call["files_written"] == ["Customer.java", "CustomerService.java"]
+    assert "displayName" in call["file_contents"]["Customer.java"]
 
 
 @pytest.mark.asyncio
@@ -6944,12 +7035,55 @@ async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_auth
 
     assert should_break is True
     assert state.environment_failure is None
-    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_INSUFFICIENT"
+    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_DEFECT"
     assert state.plan_scope_conflict["reason_code"] == "PLAN_SCOPE_REVISION_REQUIRED"
     assert state.plan_scope_conflict["failure_type"] == "misdirected_edit"
     assert state.plan_scope_conflict["required_files"] == ["pom.xml"]
     assert state.plan_scope_conflict["allowed_files"] == ["src/App.java"]
+    assert state.plan_scope_conflict["attribution_tier"] == "judge"
+    assert state.plan_scope_conflict["grounded_owner_files"] == []
     assert state.plan_scope_conflict["reason"]
+
+
+@pytest.mark.asyncio
+async def test_denied_existing_production_target_immediately_drives_exact_scope_revision(tmp_path):
+    service = tmp_path / "src/CustomerService.java"
+    controller = tmp_path / "src/CustomerController.java"
+    service.parent.mkdir(parents=True)
+    service.write_text("class CustomerService {}\n")
+    controller.write_text("class CustomerController {}\n")
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        allowed_write_relpaths=["src/CustomerService.java"],
+    )
+    denial = PolicyDeniedError(
+        request=ActionRequest(
+            action_type=ActionType.WRITE_FILE,
+            target=str(controller),
+        ),
+        result=PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE",
+            explanation="outside service-only scope",
+        ),
+    )
+
+    should_break = await handle_attempt_failure(state, ctx, denial)
+
+    assert should_break is True
+    assert state.budgets.retry_count == 0
+    assert state.last_failure.type == "plan_scope_conflict"
+    assert state.last_failure.attribution_kind == "PLAN_SCOPE_DEFECT"
+    assert state.plan_scope_conflict["required_files"] == [
+        "src/CustomerController.java"
+    ]
+    assert state.plan_scope_conflict["grounded_owner_files"] == [
+        "src/CustomerController.java"
+    ]
+    assert state.plan_scope_conflict["attribution_tier"] == "architectural_owner"
 
 @pytest.mark.asyncio
 async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path):
