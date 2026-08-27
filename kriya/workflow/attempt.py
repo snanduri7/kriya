@@ -37,7 +37,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -1384,6 +1384,47 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         file_obj["filepath"] = normalized
         normalized_files.append(file_obj)
     files = normalized_files
+
+    # Sticky existing-owner resolution, applied on EVERY attempt/retry - not
+    # just the Architect's initial file list (see workflow.py's own call to
+    # this SAME function for that first pass, before any Developer call has
+    # happened at all). Found live, PRV-03 legacy (2026-08-27): the
+    # Architect-stage resolution correctly mapped an invented
+    # 'service/CustomerService.java' back to the real, existing
+    # 'CustomerService.java' on attempt 1 - but a LATER full-set retry (the
+    # Developer's own initiative, not the Architect's plan) reinvented the
+    # exact same parallel-package path again. Nothing re-applied that same
+    # resolution to a Developer response's own filepath choices on a later
+    # attempt, so it compiled as a genuine second declaration (a real
+    # "duplicate type" compile error), and every subsequent retry kept
+    # targeting the invented path for repair instead of the real owner -
+    # 5 further attempts burned entirely on malformed repair responses for
+    # a path that should never have reached disk. Reusing the SAME
+    # resolution function here (not a parallel duplicate implementation)
+    # closes the loop generically: a model-invented parallel-package path
+    # for an ALREADY-OWNED artifact is redirected back to the real owner
+    # before it's ever written, treated as a compile target, or targeted
+    # for repair - on every attempt, not just the first.
+    candidate_paths = [file_obj["filepath"] for file_obj in files]
+    resolved_paths = prefer_existing_artifact_owners(candidate_paths, ctx.goal, ctx.workspace_path)
+    if resolved_paths != candidate_paths:
+        for file_obj, resolved_path in zip(files, resolved_paths):
+            original_path = file_obj["filepath"]
+            if resolved_path != original_path:
+                logger.warning(
+                    "Redirected Developer-invented parallel-owner path '%s' back to sticky "
+                    "existing owner '%s' - the existing owner is authoritative; the invented "
+                    "path is abandoned before ever reaching disk.", original_path, resolved_path,
+                )
+            file_obj["filepath"] = resolved_path
+        # A redirect can now collide two entries onto the same real path
+        # (an invented duplicate remapped onto an owner this SAME response
+        # also wrote directly under its real name) - keep the LAST one,
+        # matching this function's own natural "later entry wins" order.
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for file_obj in files:
+            deduped[file_obj["filepath"]] = file_obj
+        files = list(deduped.values())
 
     # Brownfield ownership is enforced before any candidate byte reaches the
     # sandbox. Path resolution alone is insufficient: a model can target the

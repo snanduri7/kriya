@@ -379,6 +379,218 @@ class MismatchedFileTypeContentCheck(StaticCheck):
         return None
 
 
+def _extract_balanced_block(content: str, open_brace_index: int) -> Optional[str]:
+    """content[open_brace_index] must be '{'. Returns the substring from
+    that brace through its matching close brace (inclusive), tracking depth
+    naively (no string/comment awareness - callers that need exact statement
+    counts should re-run _strip_java_comments_and_strings on the result
+    first, matching this module's existing convention). None if the braces
+    never balance (truncated/malformed content)."""
+    depth = 0
+    for i in range(open_brace_index, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return content[open_brace_index:i + 1]
+    return None
+
+
+# Test-file detection by filename convention only (cheap, matches this
+# module's existing marker-file-existence philosophy) - real test-runner
+# frameworks for each ecosystem already enforce this same naming, so it's
+# not a guess: JUnit/Maven Surefire only picks up *Test.java/*Tests.java/
+# *IT.java by default, pytest only collects test_*.py/*_test.py, RSpec only
+# collects *_spec.rb.
+_TEST_FILE_RE = re.compile(
+    r"(^|/)(test_[^/]+\.py|[^/]+_test\.py|[^/]+_spec\.rb|[^/]+Test\.java|[^/]+Tests\.java|[^/]+IT\.java)$"
+)
+
+
+class VacuousTestAssertionCheck(StaticCheck):
+    """Catches a generated/modified test whose only "check" is a
+    constant-truth assertion - assertTrue(true)/assertFalse(false) (JUnit),
+    assertTrue(True)/assertFalse(False) (Python unittest), or a bare
+    `assert True` (pytest) - which passes unconditionally regardless of
+    whatever production behavior the test method's name claims to verify.
+    This is test-evasion, not prose contamination: Maven/pytest and Kriya's
+    own compile+test Quality Gate both report PASSED with zero actual
+    coverage of the intended behavior.
+
+    Found live, PRV-03 legacy (2026-08-27): CustomerControllerTest.java's
+    testDetailsWithMiddleName/testDetailsWithOnlyFirstNameAndLastName/
+    testDetailsWithOnlyFirstName/testDetailsWithEmptyStrings each construct
+    a mock CustomerService and a CustomerController, then never call the
+    controller at all - just `assertTrue(true); // Placeholder - actual
+    implementation would require controller refactor`. A production coding
+    agent must not ship a test that passes independent of whether the
+    feature it claims to verify exists.
+
+    Deliberately scoped to test files only (_TEST_FILE_RE, by filename
+    convention) so a legitimate assertTrue(true)-shaped expression appearing
+    anywhere in ordinary application code never false-positives."""
+
+    name = "vacuous_test_assertion"
+
+    _VACUOUS_PATTERNS = (
+        re.compile(r"\bassert(?:True)?\s*\(\s*true\s*\)", re.IGNORECASE),   # JUnit assertTrue(true)/assert(true)
+        re.compile(r"\bassertFalse\s*\(\s*false\s*\)", re.IGNORECASE),      # JUnit assertFalse(false)
+        re.compile(r"\bassertTrue\s*\(\s*True\s*\)"),                       # Python unittest
+        re.compile(r"\bassertFalse\s*\(\s*False\s*\)"),                     # Python unittest
+        re.compile(r"(?m)^\s*assert\s+True\s*(?:,.*)?$"),                   # bare pytest
+    )
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not _TEST_FILE_RE.search(filepath):
+                continue
+            for pattern in self._VACUOUS_PATTERNS:
+                m = pattern.search(content)
+                if m:
+                    return (
+                        f"{filepath} contains a constant-truth assertion ({m.group(0).strip()!r}) "
+                        "that passes unconditionally regardless of the actual production behavior "
+                        "being tested. A generated test must fail when the intended production "
+                        "behavior is absent or incorrect - replace this with a real assertion "
+                        "against the actual method/component under test, or remove the test if it "
+                        "cannot be written yet rather than faking a pass."
+                    )
+        return None
+
+
+class TestMethodLacksVerificationCheck(StaticCheck):
+    """Catches a @Test method whose body contains NO assertion/verification
+    call at all - not even a vacuous constant-truth one (see
+    VacuousTestAssertionCheck above for that narrower, stronger signal) - so
+    it passes unconditionally regardless of the code under test. The same
+    underlying test-evasion failure mode found live in PRV-03 legacy
+    (2026-08-27): several test methods there construct a mock service and
+    controller, comment that testing "would require a controller refactor",
+    and (in the vacuous-assertion cases) fall back to assertTrue(true) - but
+    the general shape (a @Test method that never calls any assertion at
+    all) is broader than that one confirmed line and worth its own gate.
+
+    A method carrying `@Test(expected = ...)` or containing
+    `assertThrows(`/`fail(`/`verify(` counts as verifying (exception-based
+    and Mockito-style checks legitimately don't need a bare assert* call).
+    Java/JUnit-specific, matching this module's established scope - a
+    pytest/RSpec equivalent would need its own detection shape, not guessed
+    at here."""
+
+    name = "test_method_lacks_verification"
+
+    _JAVA_TEST_METHOD_RE = re.compile(
+        r"@Test\b([^\n]*)\n\s*(?:public|protected|private)?\s*[\w<>\[\],\.\s]+\s+(\w+)\s*"
+        r"\([^)]*\)\s*(?:throws[^{]+)?\{"
+    )
+    _VERIFIES_RE = re.compile(
+        r"\bassert\w*\s*\(|\bAssertions\.|\bfail\s*\(|\bverify\s*\(|\bassertThrows\b|\bexpectThrows\b",
+        re.IGNORECASE,
+    )
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not filepath.endswith(".java") or not _TEST_FILE_RE.search(filepath):
+                continue
+            for m in self._JAVA_TEST_METHOD_RE.finditer(content):
+                annotation_args, method_name = m.group(1), m.group(2)
+                if "expected" in annotation_args:
+                    continue
+                body = _extract_balanced_block(content, m.end() - 1)
+                if body is None:
+                    continue
+                if not self._VERIFIES_RE.search(_strip_java_comments_and_strings(body)):
+                    return (
+                        f"{filepath}'s {method_name}() is a @Test method with no assertion or "
+                        "verification call anywhere in its body - it passes unconditionally "
+                        "regardless of whether the intended production behavior exists or is "
+                        "correct. A generated test must fail when the behavior it claims to test "
+                        "is absent or incorrect; add a real assertion or remove the test."
+                    )
+        return None
+
+
+class TestOverridesSubjectUnderTestCheck(StaticCheck):
+    """Catches a test that creates an ANONYMOUS SUBCLASS of the class it
+    claims to be testing and overrides the very method under test with a
+    reimplementation of that method's own logic, instead of exercising the
+    real production method. A test built this way can pass even when the
+    real production method is completely broken, since the override never
+    calls into it - the test only proves the test's OWN duplicate logic is
+    self-consistent.
+
+    Found live, PRV-03 hardened (2026-08-27): several tests in
+    CustomerServiceTest.java override CustomerController.details(...) with
+    a copy of the same response-building logic
+    (`m.put("displayName", c.displayName())`, ...) instead of calling the
+    real CustomerController the way that same file's own first test
+    correctly does. Distinct from mocking a genuine COLLABORATOR (the same
+    file legitimately overrides CustomerService.find(...) to return fixed
+    test data - a normal, one-line test double) - this fires only on an
+    override of a class the SAME FILE ALSO instantiates plainly elsewhere
+    (proof, from the file's own content, that the class is being directly
+    tested here, not merely used as a collaborator), and only when the
+    override body is non-trivial (3+ statements) rather than a one-line
+    delegate/stub - matching the real incident's shape (a multi-statement
+    reconstruction of the production method), not penalizing every override
+    indiscriminately. Deliberately NOT keyed off the test file's own name
+    (e.g. assuming "FooTest.java" tests "Foo") - the real PRV-03 incident's
+    file is misleadingly named CustomerServiceTest.java while its first,
+    correct test actually instantiates CustomerController plainly; a
+    filename-derived subject would have missed exactly the file that
+    proves this check is needed.
+
+    Java/JUnit-specific (the confirmed incident's own shape) - a Python/
+    Ruby equivalent (monkey-patching or subclassing the subject under test
+    in a mock) would need its own detection, not guessed at here."""
+
+    name = "test_overrides_subject_under_test"
+
+    _NEW_INSTANCE_RE = re.compile(r"new\s+(\w+)\s*\([^()]*\)\s*(\{|;)")
+    _OVERRIDE_METHOD_RE = re.compile(
+        r"@Override\s*(?:public|protected)?\s*[\w<>\[\],\.\s]+\s+(\w+)\s*\([^)]*\)\s*(?:throws[^{]+)?\{"
+    )
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not filepath.endswith(".java") or not _TEST_FILE_RE.search(filepath):
+                continue
+            plainly_instantiated = set()
+            anon_subclasses = []
+            for m in self._NEW_INSTANCE_RE.finditer(content):
+                class_name, delimiter = m.group(1), m.group(2)
+                if delimiter == ";":
+                    plainly_instantiated.add(class_name)
+                else:
+                    anon_subclasses.append((class_name, m.end() - 1))
+            for class_name, brace_index in anon_subclasses:
+                if class_name not in plainly_instantiated:
+                    continue
+                block = _extract_balanced_block(content, brace_index)
+                if not block:
+                    continue
+                for override_match in self._OVERRIDE_METHOD_RE.finditer(block):
+                    method_name = override_match.group(1)
+                    body = _extract_balanced_block(block, override_match.end() - 1)
+                    if not body:
+                        continue
+                    statement_count = _strip_java_comments_and_strings(body).count(";")
+                    if statement_count >= 3:
+                        return (
+                            f"{filepath} creates an anonymous subclass of {class_name} - a class "
+                            f"this same file also instantiates PLAINLY elsewhere, proving it's the "
+                            f"real subject under test here, not just a collaborator - and "
+                            f"overrides its own {method_name}(...) method with a "
+                            f"{statement_count}-statement reimplementation instead of exercising "
+                            f"the real {class_name}.{method_name}(...). This test can pass even if "
+                            f"the real {class_name} is broken. Instantiate the real {class_name} "
+                            "directly (as this file's own other test(s) do) and mock only genuine "
+                            "collaborators, not the class under test itself."
+                        )
+        return None
+
+
 # MA7.5 - real markers for each ecosystem PolymorphicValidator itself
 # already recognizes (kriya/tools/validate.py::_detect_stack, java/ruby/
 # python) plus npm/go - deliberately the SAME marker-file-existence
@@ -561,6 +773,9 @@ STATIC_CHECKS = [
     BareVerificationMarkerCheck(),
     TestContradictsVerificationMarkerCheck(),
     MismatchedFileTypeContentCheck(),
+    VacuousTestAssertionCheck(),
+    TestMethodLacksVerificationCheck(),
+    TestOverridesSubjectUnderTestCheck(),
 ]
 
 

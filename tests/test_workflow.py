@@ -5767,7 +5767,7 @@ async def test_run_attempt_targets_real_test_module_not_package_initializer(tmp_
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "task_tracker/store.py", "content": "class Store: pass\n"},
         {"filepath": "tests/__init__.py", "content": ""},
-        {"filepath": "tests/test_store.py", "content": "def test_store(): assert True\n"},
+        {"filepath": "tests/test_store.py", "content": "from task_tracker.store import Store\ndef test_store(): assert Store() is not None\n"},
     ])
     ctx = _minimal_attempt_ctx(
         tmp_path,
@@ -5800,7 +5800,7 @@ async def test_run_attempt_zero_test_target_falls_back_to_suite_without_model_re
     developer = AsyncMock()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "def add(a, b): return a + b\n"},
-        {"filepath": "test_app.py", "content": "def test_add(): assert True\n"},
+        {"filepath": "test_app.py", "content": "from app import add\ndef test_add(): assert add(1, 2) == 3\n"},
     ])
     ctx = _minimal_attempt_ctx(
         tmp_path,
@@ -6316,7 +6316,7 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_for_targeted_test(tmp_pat
     with open(os.path.join(str(tmp_path), "store.py"), "w", encoding="utf-8") as fh:
         fh.write(store_content)
     with open(os.path.join(str(tmp_path), "test_store.py"), "w", encoding="utf-8") as fh:
-        fh.write("def test_add():\n    assert True\n")
+        fh.write("from store import add\ndef test_add():\n    assert add(1) == 2\n")
     state.all_files_written = {"store.py", "test_store.py"}
     state.budgets.last_failure_signature = ("targeted_test", ("dummy",))
     state.error_context = "test_store.py::test_add failed"

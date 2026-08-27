@@ -203,6 +203,16 @@ _VALID_MIGRATION_MODES = ("legacy", "shadow", "enforce")
 # the other).
 _ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE = 4000
 
+# PRV-03 hardened finding (2026-08-27): a grounded owner's own repair can
+# surface a FURTHER grounded owner outside the just-revised scope (e.g.
+# CustomerController's fix needs Customer.java, whose own fix needs
+# CustomerService.java) - a chain, not a single hop. The recovery loop
+# below re-attempts revise_plan_for_grounded_scope_owner for each new
+# PLAN_SCOPE_DEFECT it sees, bounded by this constant so a pathological
+# oscillating diagnosis can't loop forever; once exhausted it falls
+# through to the existing upstream-owner fallback / termination path.
+_MAX_PLAN_SCOPE_REVISION_ATTEMPTS = 3
+
 
 class WorkflowControllerConfigurationError(ValueError):
     pass
@@ -657,6 +667,45 @@ def _transitive_dependents(plan: EngineeringPlan, subtask_id: str) -> set[str]:
                 dependents.add(st.id)
                 frontier.append(st.id)
     return dependents
+
+
+def _plan_scope_conflict_files(scope_conflict: Optional[Dict[str, object]]) -> List[str]:
+    """The file(s) a PLAN_SCOPE_DEFECT scope_conflict names as needing
+    authoritative plan revision - grounded_owner_files if present, else
+    required_files.
+
+    PRV-03 hardened (2026-08-27): a chain's SECOND hop can be attributed
+    through a different path than its first. retry_strategy.py only
+    populates grounded_owner_files when the offending attribution reached
+    "architectural_owner" tier (its own strongest, most direct signal - a
+    deterministic AuthorizedFileWriter write-scope denial always lands
+    there). A later hop in the SAME chain can instead surface through a
+    misdirected_edit-triggered lookup or another attribution path that
+    never reaches that tier, leaving grounded_owner_files empty even though
+    required_files is populated and classification is still
+    PLAN_SCOPE_DEFECT - retry_strategy.py already required
+    scope_conflict_is_grounded (high confidence, or fail_type ==
+    "misdirected_edit") before setting plan_scope_conflict at all, so
+    required_files is not a guess. Confirmed live: s2's second hop (needing
+    Customer.java, attributed via a misdirected_edit lookup after the
+    goal-spec-compliance failure) had grounded_owner_files == [] and
+    required_files == ["...Customer.java"], which silently ended the
+    revise-and-revalidate loop one hop early and fell to the weaker,
+    upstream-only resolve_scope_conflict_owners() fallback instead.
+
+    Safe to widen this way: revise_plan_for_grounded_scope_owner() itself
+    re-derives ownership from the PLAN's own declared file_owner() (or
+    treats a genuinely unowned path as newly owned by the failed subtask)
+    rather than trusting either list blindly, and every revision this
+    produces is revalidated by validate_plan() before being accepted - a
+    spurious entry here fails that revalidation closed instead of silently
+    corrupting the plan."""
+    scope_conflict = scope_conflict or {}
+    return list(
+        scope_conflict.get("grounded_owner_files")
+        or scope_conflict.get("required_files")
+        or []
+    )
 
 
 def revise_plan_for_grounded_scope_owner(
@@ -2143,11 +2192,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             predetermined_files = [pf.path for pf in subtask.planned_files]
             call_result = await _invoke_bounded_subtask(subtask, position)
             scope_conflict = call_result.get("plan_scope_conflict") or {}
-            grounded_scope_files = list(scope_conflict.get("grounded_owner_files") or [])
-            if (
-                scope_conflict.get("classification") == "PLAN_SCOPE_DEFECT"
-                and grounded_scope_files
-            ):
+            grounded_scope_files = _plan_scope_conflict_files(scope_conflict)
+            # PRV-03: a chain of grounded owners (each repair surfacing the
+            # NEXT file outside scope) needs repeated revise-and-revalidate
+            # passes, not just one - see _MAX_PLAN_SCOPE_REVISION_ATTEMPTS.
+            for _scope_revision_attempt in range(_MAX_PLAN_SCOPE_REVISION_ATTEMPTS):
+                if not (
+                    scope_conflict.get("classification") == "PLAN_SCOPE_DEFECT"
+                    and grounded_scope_files
+                ):
+                    break
                 revised_plan = revise_plan_for_grounded_scope_owner(
                     plan, subtask.id, grounded_scope_files, plan_workspace_path,
                 )
@@ -2219,6 +2273,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         execution_role="plan_scope_recovery",
                     )
                     scope_conflict = call_result.get("plan_scope_conflict") or {}
+                    grounded_scope_files = _plan_scope_conflict_files(scope_conflict)
                 else:
                     revision_failure_reason = (
                         "authoritative grounded-owner plan revision failed validation: "
@@ -2236,6 +2291,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         **scope_conflict,
                         "reason": revision_failure_reason,
                     }
+                    break
+            else:
+                if (
+                    scope_conflict.get("classification") == "PLAN_SCOPE_DEFECT"
+                    and grounded_scope_files
+                ):
+                    logger.error(
+                        "WorkflowController enforce run %r: subtask %r hit the bound of %d "
+                        "authoritative PLAN_SCOPE_DEFECT revision attempts and still surfaces a "
+                        "further grounded owner scope conflict (%s) - falling back to "
+                        "upstream-owner recovery; if that also cannot resolve it, this run "
+                        "terminates with the scope conflict unresolved.",
+                        run_id, subtask.id, _MAX_PLAN_SCOPE_REVISION_ATTEMPTS, grounded_scope_files,
+                    )
             owner_map = resolve_scope_conflict_owners(
                 plan, list(scope_conflict.get("required_files", [])), subtask,
             ) if scope_conflict else {}
