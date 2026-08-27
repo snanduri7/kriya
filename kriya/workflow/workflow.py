@@ -612,6 +612,7 @@ class WorkflowEngine:
         strict_dependency_index: bool = False,
         resolved_knowledge_coordinates: Optional[List[str]] = None,
         skill_engine_override: Optional[Any] = None,
+        execution_scope: str = "",
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -2070,6 +2071,7 @@ class WorkflowEngine:
                 else runtime_verification_required
             ),
             strict_spec_compliance=strict_spec_compliance,
+            execution_scope=execution_scope,
         )
 
         from kriya.workflow.retry_policy import decide_for_state
@@ -2660,7 +2662,10 @@ class WorkflowEngine:
                     authority=EventAuthority.AUTHORITATIVE,
                     details={"passed": True, "terminal": True},
                 ))
-                log_quality_gate_banner("PASSED", state.attempt_number)
+                log_quality_gate_banner(
+                    "PASSED", state.attempt_number,
+                    scope=attempt_ctx.execution_scope,
+                )
 
                 # A semantically final-success checkpoint is legal only after
                 # every required terminal gate has passed.
@@ -2711,7 +2716,10 @@ class WorkflowEngine:
                     authority=EventAuthority.AUTHORITATIVE,
                     details={"passed": True, "applied": True},
                 ))
-                log_gate_banner("OVERALL ATTEMPT", "PASSED", state.attempt_number)
+                log_gate_banner(
+                    "OVERALL ATTEMPT", "PASSED", state.attempt_number,
+                    scope=attempt_ctx.execution_scope,
+                )
                 state.quality_gates_succeeded = True
 
                 # Authoritative work is durable now; release the sandbox

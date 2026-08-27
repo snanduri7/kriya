@@ -4801,6 +4801,54 @@ async def test_run_attempt_passes_when_spec_compliant(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_bounded_spec_compliance_includes_verified_upstream_files(tmp_path):
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    (tmp_path / "Customer.java").write_text(
+        "record Customer(String displayName) {}\n"
+    )
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "CustomerService.java",
+        "content": "class CustomerService { Customer find() { return null; } }\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": True,
+        "reasoning": "consumer and upstream contract are present",
+        "missing_requirements": [],
+        "likely_files": [],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        architect_files=["CustomerService.java"],
+        expected_files_upfront=["CustomerService.java"],
+        architect_basename_to_path={"CustomerService.java": "CustomerService.java"},
+        established_files=["Customer.java"],
+        spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    call = spec_compliance.check.await_args.kwargs
+    assert call["files_written"] == ["Customer.java", "CustomerService.java"]
+    assert "displayName" in call["file_contents"]["Customer.java"]
+
+
+@pytest.mark.asyncio
 async def test_authoritative_spec_compliance_unknown_requires_review(tmp_path):
     state = GenerationState()
     developer = AsyncMock()

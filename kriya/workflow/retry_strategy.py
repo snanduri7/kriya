@@ -197,11 +197,20 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     )
     if failure.type == "regression_test":
         state.terminal_regression_succeeded = False
-        log_gate_banner("FULL REGRESSION", "FAILED", state.attempt_number, failure_detail)
+        log_gate_banner(
+            "FULL REGRESSION", "FAILED", state.attempt_number, failure_detail,
+            scope=ctx.execution_scope,
+        )
     elif not state.candidate_gates_succeeded:
-        log_gate_banner("CANDIDATE GATES", "FAILED", state.attempt_number, failure_detail)
+        log_gate_banner(
+            "CANDIDATE GATES", "FAILED", state.attempt_number, failure_detail,
+            scope=ctx.execution_scope,
+        )
     state.overall_attempt_succeeded = False
-    log_gate_banner("OVERALL ATTEMPT", "FAILED", state.attempt_number, failure_detail)
+    log_gate_banner(
+        "OVERALL ATTEMPT", "FAILED", state.attempt_number, failure_detail,
+        scope=ctx.execution_scope,
+    )
     previous_primary_failure = state.last_failure
     previous_error_source_context = dict(state.last_error_source_context)
     failure.attempt = state.attempt_number

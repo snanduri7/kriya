@@ -427,6 +427,9 @@ class AttemptContext:
     allowed_write_relpaths: List[str] = field(default_factory=list)
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
+    # Human-readable identity for nested structured executions. Attempt
+    # numbers are local to each bounded run and otherwise collide in logs.
+    execution_scope: str = ""
 
 
 def _extract_grounded_contract_verdict(
@@ -3421,7 +3424,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # See SpecComplianceAgent's own docstring (kriya/agents/agent.py) for the live
     # incident (ignite_qpid_protocol milestone 1, 2026-08-21) this closes.
     if ctx.kernel.config.autonomy.spec_compliance_enabled:
-        spec_check_files = sorted(state.all_files_written)
+        # A bounded consumer is judged against both its own candidate and the
+        # already-verified upstream contracts it consumes. Restricting this to
+        # files written by the current subtask made compliance incorrectly say
+        # an upstream field/type was absent, then reopen a healthy owner.
+        spec_check_files = sorted(
+            set(state.all_files_written) | set(ctx.established_files)
+        )
         spec_file_contents: Dict[str, str] = {}
         for spec_path in spec_check_files:
             spec_full_path = os.path.join(ctx.worktree_path, spec_path)
@@ -3492,4 +3501,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         authority=EventAuthority.AUTHORITATIVE,
         details={"passed": True, "terminal": False},
     ))
-    log_gate_banner("CANDIDATE GATES", "PASSED", state.attempt_number)
+    log_gate_banner(
+        "CANDIDATE GATES", "PASSED", state.attempt_number,
+        scope=ctx.execution_scope,
+    )

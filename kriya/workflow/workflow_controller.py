@@ -1896,6 +1896,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             target_position: int,
             *,
             recovery_context: str = "",
+            execution_role: str = "planned",
         ) -> Dict[str, Any]:
             target_goal = build_subtask_goal_text(target, target_position, total, plan=plan)
             target_files = [pf.path for pf in target.planned_files]
@@ -1924,6 +1925,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     vm.requires_application_runtime for vm in target.verification
                 ),
                 strict_spec_compliance=True,
+                execution_scope=f"subtask={target.id} role={execution_role}",
                 strict_dependency_index=bool(
                     process_profiles is not None
                     and getattr(process_profiles, "enabled", False) is True
@@ -2040,6 +2042,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     )
                     owner_result = await _invoke_bounded_subtask(
                         owner, owner_position, recovery_context=recovery_context,
+                        execution_role="owner_recovery",
                     )
                     owner_declared = {pf.path for pf in owner.planned_files}
                     owner_undeclared = sorted(
@@ -2124,6 +2127,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                 f"Upstream owner {owner_id} was repaired and re-verified. "
                                 "Re-run this consumer against the updated workspace."
                             ),
+                            execution_role="consumer_retry",
                         )
                     else:
                         for result_index, prior_result in enumerate(subtask_results):

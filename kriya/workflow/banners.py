@@ -22,7 +22,14 @@ logger = logging.getLogger(__name__)
 _QUALITY_GATE_BANNER_WIDTH = 70
 
 
-def log_gate_banner(label: str, status: str, attempt_number: int, detail: str = "") -> None:
+def log_gate_banner(
+    label: str,
+    status: str,
+    attempt_number: int,
+    detail: str = "",
+    *,
+    scope: str = "",
+) -> None:
     """Log one explicitly named attempt boundary without conflating stages.
 
     ``label`` distinguishes candidate checks, terminal regression, and the
@@ -32,6 +39,8 @@ def log_gate_banner(label: str, status: str, attempt_number: int, detail: str = 
     carries whatever line-level context the call site already had (retry
     mode, budget counts, the error itself) below the banner - the banner
     itself only needs to announce which attempt this is and how it went.
+    ``scope`` identifies a nested subtask/recovery execution whose local
+    attempt counter would otherwise be indistinguishable from its siblings.
 
     Deliberately no "N/M" denominator next to attempt_number: there is no
     single fixed ceiling attempt_number can be validly divided against - it
@@ -48,14 +57,19 @@ def log_gate_banner(label: str, status: str, attempt_number: int, detail: str = 
 
     Purely cosmetic (log-scanning aid for a human watching a run) - never
     gates or changes control flow."""
-    bar = "-" * _QUALITY_GATE_BANNER_WIDTH
     title = f"{label} - Attempt {attempt_number}: {status}"
-    message = f"\n{bar}\n{title.center(_QUALITY_GATE_BANNER_WIDTH)}\n{bar}"
+    if scope:
+        title += f" [{scope}]"
+    width = max(_QUALITY_GATE_BANNER_WIDTH, len(title) + 4)
+    bar = "-" * width
+    message = f"\n{bar}\n{title.center(width)}\n{bar}"
     if detail:
         message += f"\n{detail}"
     (logger.info if status == "PASSED" else logger.warning)(message)
 
 
-def log_quality_gate_banner(status: str, attempt_number: int, detail: str = "") -> None:
+def log_quality_gate_banner(
+    status: str, attempt_number: int, detail: str = "", *, scope: str = "",
+) -> None:
     """Backward-compatible terminal Quality Gate banner wrapper."""
-    log_gate_banner("QUALITY GATE", status, attempt_number, detail)
+    log_gate_banner("QUALITY GATE", status, attempt_number, detail, scope=scope)
