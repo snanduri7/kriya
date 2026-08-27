@@ -919,6 +919,9 @@ async def test_enforce_reopens_unique_upstream_owner_and_reruns_consumer(tmp_pat
         )
 
     assert result.legacy_result["status"] == "success"
+    assert result.legacy_result["quality_gates_passed"] is True
+    assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
+    assert result.legacy_result["last_subtask_result"]["quality_gates_passed"] is True
     assert len(calls) == 4
     assert calls[1]["allowed_write_relpaths"] == ["src/App.java"]
     assert calls[2]["allowed_write_relpaths"] == ["pom.xml"]

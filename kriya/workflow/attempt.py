@@ -37,7 +37,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, find_runnable_test_files, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -45,9 +45,13 @@ from kriya.workflow.context_budget import (
 )
 from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
-from kriya.workflow.retry_policy import RetryAction, decide_retry_action
+from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action
 from kriya.workflow.skill_extraction import _skill_verification_context
-from kriya.workflow.state import GenerationState
+from kriya.workflow.state import (
+    APIContractRecoveryPhase,
+    GenerationState,
+    RecoveryPhaseAdvanced,
+)
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.operations import (
     CodeOperation,
@@ -78,6 +82,39 @@ def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
     )
 
 
+def _brownfield_owner_contract_block(
+    ctx: "AttemptContext", target_files: Optional[List[str]], *, max_chars: int = 24000,
+) -> str:
+    """Expose exact existing-owner identity before first generation."""
+    sections = []
+    remaining = max_chars
+    for filepath in target_files or []:
+        source_path = os.path.join(ctx.workspace_path, filepath)
+        if not os.path.isfile(source_path):
+            continue
+        try:
+            with open(source_path, "r", encoding="utf-8", errors="replace") as handle:
+                source = handle.read()
+        except OSError:
+            continue
+        if remaining <= 0:
+            break
+        excerpt = source[:remaining]
+        remaining -= len(excerpt)
+        sections.append(f"=== EXISTING OWNER: {filepath} ===\n{excerpt}")
+    if not sections:
+        return ""
+    return (
+        "\n\n=== AUTHORITATIVE BROWNFIELD OWNER CONTRACT ===\n"
+        "Every file below already exists and is an in-place repair target. Preserve its "
+        "package/module identity, existing public type names, constructors, and public "
+        "method signatures. Do not paste a planned replacement class into the resolved "
+        "owner path. Existing tests and callers are contract evidence. Repair behavior "
+        "behind the existing API, preferring private/internal changes.\n\n"
+        + "\n\n".join(sections)
+    )
+
+
 def _operation_map(
     ctx: "AttemptContext", filepaths: List[str], attempt_operation: CodeOperation,
     state: Optional[GenerationState] = None,
@@ -91,7 +128,7 @@ def _operation_map(
     if state is not None:
         for filepath in filepaths:
             if (
-                state.budgets.anchor_failure_counts.get(filepath, 0) >= 2
+                state.budgets.anchor_failure_counts.get(filepath, 0) >= 1
                 and _target_exists(ctx, filepath)
             ):
                 operations[filepath] = CodeOperation.REPAIR_WITH_FULL_FILE
@@ -137,6 +174,28 @@ def _request_fallback_for_rejected_authoritative_target(
         and not state.budgets.fallback_targeted_attempted
     ):
         state.budgets.fallback_targeted_requested = True
+
+
+def _reject_explanatory_prose(
+    state: GenerationState, filepath: str, content: str,
+) -> None:
+    contamination = find_explanatory_prose_contamination(filepath, content)
+    if not contamination:
+        return
+    failure = Failure(
+        type="prose_contamination",
+        message=(
+            f"SOURCE PROSE CONTAMINATION in {filepath}: obvious explanatory text "
+            "was emitted as executable source; return code only or use the "
+            "language's comment syntax for genuine documentation."
+        ),
+        raw_output=contamination,
+        file_locations=[FileLocation(filepath=filepath)],
+        likely_files=[filepath], failed_content={filepath: content},
+        attempt=state.attempt_number,
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
 
 
 def _preserved_attribution_diagnostics(preserved_files: List[str]) -> Optional[dict]:
@@ -508,6 +567,16 @@ def _diagnosis_mismatch_bypass_reason(
     diagnosis text stays useful there, just never a blocking gate for these
     two cases) if the check should be skipped for this edit; None if the
     existing diagnosis-mismatch check should run and decide as before."""
+    # During owner restoration, prose-analysis agreement is advisory.  The
+    # exact baseline signature inspection below is the sole authority; this
+    # fuzzy heuristic must not veto a candidate before that inspection.
+    recovery = state.api_contract_recovery or {}
+    if recovery and recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
+        return (
+            "RESTORE_PUBLIC_CONTRACT is decided by deterministic exact-signature "
+            "inspection; diagnosis prose cannot veto owner restoration"
+        )
+
     # Bounded-veto policy, checked before anything else and independent of
     # fail_type: this check can reject a given FILE'S edit at most once per
     # run. Found live, 2026-08-17 (ignite_qpid_person, run b-10o): the
@@ -773,6 +842,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         fallback_targeted_attempted=state.budgets.fallback_targeted_attempted,
         environment_failure=None,
         fallback_targeted_requested=state.budgets.fallback_targeted_requested,
+        has_api_contract_recovery=bool(state.api_contract_recovery),
+        api_contract_recovery_count=state.budgets.api_contract_recovery_count,
     )
     # Recorded now, not derived by the caller afterward - see the field's own
     # docstring in kriya/workflow/state.py for why that would be unsafe.
@@ -782,7 +853,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     state.last_attempt_mode = (
         retry_decision.action.value
         if retry_decision.action in (
-            RetryAction.TARGETED, RetryAction.MISSING_FILES, RetryAction.FALLBACK_TARGETED,
+            RetryAction.API_CONTRACT_RECOVERY, RetryAction.TARGETED,
+            RetryAction.MISSING_FILES, RetryAction.FALLBACK_TARGETED,
         )
         else "full_set"
     )
@@ -791,6 +863,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # consolidation - derived from the single state.last_attempt_mode value
     # above rather than re-testing the same conditions a second time.
     use_targeted = state.last_attempt_mode == "targeted"
+    use_api_contract_recovery = state.last_attempt_mode == "api_contract_recovery"
     use_missing_files = state.last_attempt_mode == "missing_files"
     use_fallback_targeted = state.last_attempt_mode == "fallback_targeted"
     attempt_operation = operation_for_attempt(
@@ -836,7 +909,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         base_url_override = None
         api_key_override = None
         extra_body_override = None
-    elif use_targeted:
+    elif use_targeted or use_api_contract_recovery:
         # Targeted retry: always the primary model, never escalated
         # (see the budget comment above) - so the context budget is
         # always the primary model's own window, not a fallback's.
@@ -855,6 +928,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             base_code_context += ctx.learned_rag_context
 
+        if use_api_contract_recovery:
+            state.last_implicated_files = sorted({
+                item["owner"] for item in state.api_contract_recovery["violations"]
+            })
         retry_package = _retry_package_for_attempt(
             state, ctx,
             target_files=state.last_implicated_files,
@@ -871,7 +948,50 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             verification_contract_block=ctx.verification_contract_block,
             retry_package=retry_package,
         )
-        logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
+        if use_api_contract_recovery:
+            contract = state.api_contract_recovery
+            required = ", ".join(
+                f"{item['owner']}::{item['removed_signature']}"
+                for item in contract["violations"]
+            )
+            protected = ", ".join(contract["protected_evidence_files"])
+            baseline_owners = "\n\n".join(
+                f"=== EXACT BASELINE OWNER SOURCE: {owner} ===\n"
+                + state.all_original_contents.get(owner, "<baseline source unavailable>")[:12000]
+                for owner in sorted({item["owner"] for item in contract["violations"]})
+            )
+            if contract.phase in (
+                APIContractRecoveryPhase.REPAIR_BEHAVIOR,
+                APIContractRecoveryPhase.AWAIT_TERMINAL_SUCCESS,
+            ):
+                task_desc = (
+                    "=== API_CONTRACT_RECOVERY: REPAIR_BEHAVIOR ===\n"
+                    f"The following restored public contracts are immutable: {required}.\n"
+                    f"Protected baseline callers/tests are immutable evidence: {protected}.\n"
+                    "Now repair the requested behavior behind the existing public contract. "
+                    "Prefer private/internal helper changes. Do not rename, remove, replace, "
+                    "or redirect the public API.\n\n"
+                    f"Original goal:\n{ctx.goal}\n\n{baseline_owners}"
+                )
+            else:
+                task_desc = (
+                    "=== API_CONTRACT_RECOVERY: RESTORE_PUBLIC_CONTRACT ===\n"
+                    "This is the only objective for this phase.\n"
+                    f"Restore these exact public signatures in their existing owners: {required}.\n"
+                    "Do not solve the behavioral issue yet. Do not rename or replace a method. "
+                    "Do not modify protected callers/tests. The candidate is invalid unless "
+                    "every exact signature exists after this edit.\n"
+                    f"Protected contract evidence: {protected}.\n\n{baseline_owners}"
+                )
+            active_code_context = base_code_context + "\n\n" + baseline_owners
+            retry_error_context = task_desc
+            logger.info(
+                "API_CONTRACT_RECOVERY %s %d/%d: signatures=%s protected_evidence=%s",
+                contract.phase.value, state.budgets.api_contract_recovery_count + 1,
+                API_CONTRACT_RECOVERY_MAX_ATTEMPTS, required, protected,
+            )
+        else:
+            logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
 
         state.model_hops.append(ctx.kernel.config.llm.model)
 
@@ -879,7 +999,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files = await _run_developer_generation(
             state, ctx,
             task_description=task_desc,
-            design_context=ctx.design,
+            design_context=(task_desc if use_api_contract_recovery else ctx.design),
             existing_code_context=active_code_context,
             stream_callback=dev_stream,
             model_override=model_override,
@@ -1131,6 +1251,20 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 f"{', '.join(known_target_files)} instead of the full file set."
             )
 
+        if state.attempt_number == 1 and known_target_files:
+            owner_contract = _brownfield_owner_contract_block(ctx, known_target_files)
+            if owner_contract:
+                task_desc += owner_contract
+                active_code_context += owner_contract
+                logger.info(
+                    "Attempt 1 brownfield owner contract: preserving existing identity/API "
+                    "for %s.",
+                    ", ".join(
+                        path for path in known_target_files
+                        if os.path.isfile(os.path.join(ctx.workspace_path, path))
+                    ),
+                )
+
         # PlannerAgent's own prompt never asks for full code, but models
         # routinely over-deliver it anyway in fenced blocks inside the plan
         # text - Architect explicitly discards it, and Developer previously
@@ -1149,7 +1283,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # avoid a third, harder-to-verify code path that mixes Planner and
         # Developer output for the same attempt.
         reused_files = None
-        if state.budgets.retry_count == 0 and ctx.expected_files_upfront:
+        has_brownfield_targets = any(
+            os.path.isfile(os.path.join(ctx.workspace_path, path))
+            for path in (known_target_files or [])
+        )
+        if (
+            state.budgets.retry_count == 0 and ctx.expected_files_upfront
+            and not has_brownfield_targets
+        ):
             planner_blocks = extract_planner_code_blocks(ctx.plan, ctx.expected_files_upfront)
             if set(planner_blocks.keys()) == set(ctx.expected_files_upfront):
                 reused_files = [{"filepath": fp, "content": content} for fp, content in planner_blocks.items()]
@@ -1234,6 +1375,67 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         file_obj["filepath"] = normalized
         normalized_files.append(file_obj)
     files = normalized_files
+
+    # Brownfield ownership is enforced before any candidate byte reaches the
+    # sandbox. Path resolution alone is insufficient: a model can target the
+    # correct existing pathname while pasting an invented replacement class
+    # into it. Detect that contract removal now, not after compiler retries or
+    # terminal regression.
+    if state.attempt_number == 1 and not state.api_contract_recovery:
+        baseline_contents = {}
+        candidate_contents = {}
+        for file_obj in files:
+            filepath = file_obj["filepath"]
+            workspace_file = os.path.join(ctx.workspace_path, filepath)
+            if not os.path.isfile(workspace_file) or file_obj.get("content") is None:
+                continue
+            try:
+                with open(workspace_file, "r", encoding="utf-8", errors="replace") as handle:
+                    baseline_contents[filepath] = handle.read()
+            except OSError:
+                continue
+            candidate_contents[filepath] = file_obj["content"]
+        early_api_violations = find_brownfield_public_api_changes(
+            ctx.workspace_path, baseline_contents, candidate_contents, ctx.goal,
+        )
+        if early_api_violations:
+            state.all_original_contents.update(baseline_contents)
+            for evidence_path in sorted({
+                path
+                for item in early_api_violations
+                for path in item.get("evidence_files", [])
+            }):
+                if evidence_path in state.all_original_contents:
+                    continue
+                try:
+                    with open(
+                        os.path.join(ctx.workspace_path, evidence_path),
+                        "r", encoding="utf-8", errors="replace",
+                    ) as handle:
+                        state.all_original_contents[evidence_path] = handle.read()
+                except OSError:
+                    pass
+            failure = Failure(
+                type="brownfield_public_api_changed",
+                message=(
+                    "BROWNFIELD PUBLIC API REJECTED BEFORE WRITE: the candidate would "
+                    "replace or remove an established public signature. Restore the existing "
+                    "owner contract before behavioral repair."
+                ),
+                raw_output=str(early_api_violations),
+                source="ownership_gate", authority="deterministic",
+                file_locations=[
+                    FileLocation(filepath=item["owner"])
+                    for item in early_api_violations
+                ],
+                likely_files=sorted({item["owner"] for item in early_api_violations}),
+                diagnostics={
+                    "api_contract_recovery": {"violations": early_api_violations},
+                },
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
 
     # Enforce the selected response contract before attribution heuristics or
     # writes.  Classification is based on the target's real existence, so the
@@ -1697,6 +1899,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # run for this same file still gets its own bounded veto.
                 state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
+            _reject_explanatory_prose(state, filepath, new_content)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=new_content,
@@ -1817,12 +2020,58 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 else:
                     state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
+            _reject_explanatory_prose(state, filepath, content)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=content,
                 base_path=current_file_path,
                 expected_base_revision=content_revision(prior_content),
             ))
+
+    # Protected callers/tests are contract evidence, not repair targets.  An
+    # earlier rejected candidate may already have redirected them, so owner
+    # recovery restores their exact baseline content deterministically rather
+    # than asking the model to edit evidence.  This is deliberately limited to
+    # RESTORE_PUBLIC_CONTRACT and does not compare formatting or line order.
+    recovery = state.api_contract_recovery or {}
+    if recovery and recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
+        staged_targets = {staged.target_path for staged in staged_writes}
+        current_evidence = {}
+        for evidence_path in recovery.protected_evidence_files:
+            try:
+                with open(
+                    os.path.join(ctx.worktree_path, evidence_path),
+                    "r", encoding="utf-8", errors="replace",
+                ) as handle:
+                    current_evidence[evidence_path] = handle.read()
+            except OSError:
+                current_evidence[evidence_path] = ""
+        semantically_damaged = {
+            item["evidence_file"]
+            for item in find_protected_api_reference_changes(
+                state.all_original_contents, current_evidence, recovery,
+            )
+        }
+        for evidence_path in recovery.get("protected_evidence_files", []):
+            baseline = state.all_original_contents.get(evidence_path)
+            target_path = os.path.join(ctx.worktree_path, evidence_path)
+            if (
+                baseline is None or target_path in staged_targets
+                or evidence_path not in semantically_damaged
+            ):
+                continue
+            current = current_evidence[evidence_path]
+            if current != baseline:
+                staged_writes.append(StagedFileWrite(
+                    target_path=target_path,
+                    content=baseline,
+                    base_path=target_path,
+                    expected_base_revision=content_revision(current),
+                ))
+                logger.info(
+                    "RESTORE_PUBLIC_CONTRACT: deterministically restoring protected "
+                    "baseline evidence %s", evidence_path,
+                )
 
     # Nothing reaches the sandbox until every candidate has passed its cheap
     # deterministic checks.  The batch commit re-checks all source revisions
@@ -1864,6 +2113,86 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.files_written.append(filepath)
         state.all_files_written.add(filepath)
         logger.info(f"Committed generated/edited candidate to sandbox: {filepath}")
+
+    # A recovery candidate must restore its sticky baseline contract before
+    # any compiler, test runner, or LLM-backed gate is allowed to consume it.
+    if state.api_contract_recovery:
+        recovery_contents = {}
+        recovery_paths = {
+            item["owner"]
+            for item in state.api_contract_recovery.get("violations", [])
+        } | set(state.api_contract_recovery.get("protected_evidence_files", []))
+        for recovery_path in recovery_paths:
+            try:
+                with open(
+                    os.path.join(ctx.worktree_path, recovery_path),
+                    "r", encoding="utf-8", errors="replace",
+                ) as handle:
+                    recovery_contents[recovery_path] = handle.read()
+            except OSError:
+                recovery_contents[recovery_path] = ""
+        unrestored = find_unrestored_public_api_contracts(
+            recovery_contents, state.api_contract_recovery,
+        )
+        redirected = find_protected_api_reference_changes(
+            state.all_original_contents, recovery_contents, state.api_contract_recovery,
+        )
+        if unrestored:
+            required = "; ".join(
+                f"{item['owner']}::{item['removed_signature']}"
+                for item in unrestored
+            )
+            failure = Failure(
+                type="api_contract_recovery_incomplete",
+                message=(
+                    "API_CONTRACT_RECOVERY INCOMPLETE: restore every authoritative "
+                    f"baseline signature before quality gates ({required})."
+                ),
+                raw_output=str({"unrestored": unrestored}),
+                source="ownership_gate", authority="deterministic",
+                file_locations=[FileLocation(filepath=item["owner"]) for item in unrestored],
+                likely_files=sorted({item["owner"] for item in unrestored}),
+                diagnostics={"api_contract_recovery": state.api_contract_recovery.to_diagnostics()},
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if redirected:
+            failure = Failure(
+                type="api_contract_evidence_restore_required",
+                message=(
+                    "API_CONTRACT_RECOVERY EVIDENCE RESTORE REQUIRED: owner signatures "
+                    "are restored, but baseline callers/tests were redirected, removed, or "
+                    "weakened. Restore their original contract calls and assertions before gates."
+                ),
+                raw_output=str({"redirected": redirected}),
+                source="ownership_gate", authority="deterministic",
+                file_locations=[
+                    FileLocation(filepath=item["evidence_file"]) for item in redirected
+                ],
+                likely_files=sorted({item["evidence_file"] for item in redirected}),
+                diagnostics={"api_contract_recovery": state.api_contract_recovery.to_diagnostics()},
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
+            state.api_contract_recovery.owner_contract_restored()
+            logger.info(
+                "RESTORE_PUBLIC_CONTRACT pre-check passed; transitioning to "
+                "REPAIR_BEHAVIOR before quality gates."
+            )
+            raise RecoveryPhaseAdvanced(
+                APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT.value,
+                APIContractRecoveryPhase.REPAIR_BEHAVIOR.value,
+            )
+        logger.info(
+            "REPAIR_BEHAVIOR pre-check passed; baseline contract remains restored."
+        )
+        # Keep the contract sticky through candidate gates and terminal
+        # regression.  workflow.py clears it only after terminal regression
+        # passes; any intervening gate failure therefore returns to
+        # REPAIR_BEHAVIOR with the exact signature still authoritative.
 
     # A POM has no dependency on sibling source files, but it is now validated
     # after the atomic candidate batch so no quality gate can observe a partial
@@ -3143,6 +3472,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # The isolated candidate passed its inner checks. Terminal full regression
     # and application still remain, so this must never claim overall success.
     state.candidate_gates_succeeded = True
+    if state.api_contract_recovery:
+        state.api_contract_recovery.candidate_gates_passed()
     state.record_event(RunEvent(
         kind="candidate_gates.passed",
         attempt=state.attempt_number,

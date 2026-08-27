@@ -33,10 +33,10 @@ from kriya.workflow.failure_grounding import (
     extract_error_search_terms,
     resolve_repository_locator_files,
 )
-from kriya.workflow.file_resolution import IncompleteGenerationError
+from kriya.workflow.file_resolution import IncompleteGenerationError, classify_api_recovery_file_roles
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
-from kriya.workflow.state import GenerationState
+from kriya.workflow.state import APIContractRecovery, GenerationState
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.worktree import remove_git_worktree
 from kriya.workflow.retry_policy import RetryAction, decide_for_state
@@ -223,6 +223,33 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     else:
         state.last_failure = previous_primary_failure
     fail_type = failure.type
+    recovery_diagnostics = (failure.diagnostics or {}).get("api_contract_recovery")
+    if recovery_diagnostics:
+        violations = list(recovery_diagnostics.get("violations", []))
+        protected = sorted({
+            path for item in violations for path in item.get("evidence_files", [])
+        })
+        if recovery_diagnostics.get("mode") == "API_CONTRACT_RECOVERY":
+            state.api_contract_recovery = APIContractRecovery.from_diagnostics(
+                recovery_diagnostics
+            )
+            if state.api_contract_recovery.phase.value == "DETECTED":
+                state.api_contract_recovery.begin_restoration()
+        else:
+            state.api_contract_recovery = APIContractRecovery.detected(
+                violations,
+                protected,
+                classify_api_recovery_file_roles(
+                    violations,
+                    set(state.all_files_written) | set(ctx.established_files),
+                ),
+            )
+            state.api_contract_recovery.begin_restoration()
+        logger.warning(
+            "Entering API_CONTRACT_RECOVERY: authoritative signatures=%s protected_evidence=%s",
+            [f"{item['owner']}::{item['removed_signature']}" for item in violations],
+            protected,
+        )
     is_incomplete_generation = isinstance(e, IncompleteGenerationError)
 
     # Error-triggered live lookup: only for a REPEATED failure (same
@@ -502,6 +529,23 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             state.last_implicated_files = implicated if implicated else None
             state.last_missing_files = None
 
+    if state.api_contract_recovery:
+        # Later compiler/test failures remain diagnostic history; they cannot
+        # replace the authoritative owner/signature/call-site recovery scope.
+        state.last_implicated_files = sorted({
+            item["owner"] for item in state.api_contract_recovery["violations"]
+        })
+        state.last_missing_files = None
+        required = ", ".join(
+            f"{item['owner']}::{item['removed_signature']}"
+            for item in state.api_contract_recovery["violations"]
+        )
+        state.error_context = (
+            "API_CONTRACT_RECOVERY remains authoritative. Restore exact baseline "
+            f"signatures before addressing secondary failures: {required}.\n\n"
+            + raw_error_context
+        )
+
     # Generic across ANY compile error shape (see
     # extract_error_source_locations) - the exact broken source
     # line(s), read fresh from the worktree, keyed by file so the
@@ -550,7 +594,9 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                     state.last_error_source_context.get(lsp_filepath, "") + lsp_text
                 )
 
-    if state.last_attempt_mode in ("targeted", "missing_files"):
+    if state.last_attempt_mode == "api_contract_recovery":
+        state.budgets.api_contract_recovery_count += 1
+    elif state.last_attempt_mode in ("targeted", "missing_files"):
         if not failure_family_changed:
             state.budgets.targeted_retry_count += 1
         # When the narrow repair resolved its original defect and exposed a

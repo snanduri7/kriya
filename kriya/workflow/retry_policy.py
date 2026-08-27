@@ -4,7 +4,11 @@ from enum import Enum
 from typing import Optional
 
 
+API_CONTRACT_RECOVERY_MAX_ATTEMPTS = 3
+
+
 class RetryAction(str, Enum):
+    API_CONTRACT_RECOVERY = "api_contract_recovery"
     TARGETED = "targeted"
     MISSING_FILES = "missing_files"
     FALLBACK_TARGETED = "fallback_targeted"
@@ -39,6 +43,9 @@ def decide_retry_action(
     fallback_targeted_requested: bool = False,
     attempt_number: Optional[int] = None,
     max_total_attempts: Optional[int] = None,
+    has_api_contract_recovery: bool = False,
+    api_contract_recovery_count: int = 0,
+    api_contract_recovery_max_attempts: int = API_CONTRACT_RECOVERY_MAX_ATTEMPTS,
 ) -> RetryDecision:
     if environment_failure:
         return RetryDecision(RetryAction.STOP_ENVIRONMENT, environment_failure)
@@ -49,6 +56,16 @@ def decide_retry_action(
         return RetryDecision(
             RetryAction.STOP_EXHAUSTED,
             "global attempt bound reached across all failure families",
+        )
+    if has_api_contract_recovery:
+        if api_contract_recovery_count >= api_contract_recovery_max_attempts:
+            return RetryDecision(
+                RetryAction.STOP_EXHAUSTED,
+                "API contract recovery attempt budget exhausted",
+            )
+        return RetryDecision(
+            RetryAction.API_CONTRACT_RECOVERY,
+            "authoritative baseline API contract must be restored",
         )
     # fallback_targeted_requested only ever disqualifies TARGETED below (an
     # authoritative locator outranks another attempt by the SAME, already-
@@ -94,6 +111,9 @@ def decide_for_state(state, *, max_retries: int, targeted_max_retries: int, has_
         attempt_number=state.attempt_number,
         max_total_attempts=(
             max_retries + targeted_max_retries + (1 if has_fallback_model else 0)
+            + API_CONTRACT_RECOVERY_MAX_ATTEMPTS
             + state.budgets.best_of_n_candidates_tried
         ),
+        has_api_contract_recovery=bool(state.api_contract_recovery),
+        api_contract_recovery_count=state.budgets.api_contract_recovery_count,
     )
