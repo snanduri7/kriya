@@ -49,7 +49,7 @@ The regression still encoded the earlier non-fatal artifact behavior after autho
 
 ### What changed
 
-- Required authoritative MODEL subtasks to declare a non-empty `planned_files` scope; unbounded plans now stop with `UNBOUNDED_MODEL_SUBTASK` without falling back to whole-goal legacy generation.
+- Required authoritative MODEL subtasks to declare a non-empty `planned_files` scope; unbounded plans now stop with `MODEL_SUBTASK_MISSING_PLANNED_FILES` without falling back to whole-goal legacy generation.
 - Threaded each subtask's declared verification methods through the mature generation workflow and returned identity-preserving verification evidence.
 - Allowed only explicit built-in compile/test Quality Gate aliases to be resolved from the existing gate result. Arbitrary tools and judgment checks remain unresolved until real evidence exists, producing `NEEDS_REVIEW` rather than self-certification.
 - Expanded contract-shape invalidation from direct consumers to the complete downstream milestone dependency graph.
