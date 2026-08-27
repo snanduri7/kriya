@@ -37,7 +37,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -3454,11 +3454,22 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the "
                 f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
             )
+            grounded_architectural_owners = discover_response_construction_owners(
+                ctx.worktree_path, ctx.goal, spec_check_files,
+            )
             failure = _build_quality_gate_failure(
                 "goal_spec_compliance", message, message,
                 ctx.worktree_path, state.all_files_written, state.attempt_number,
-                extra_likely_files=spec_result.get("likely_files") or [],
+                extra_likely_files=list(dict.fromkeys(
+                    (spec_result.get("likely_files") or [])
+                    + grounded_architectural_owners
+                )),
             )
+            if grounded_architectural_owners:
+                failure.diagnostics = {
+                    **(failure.diagnostics or {}),
+                    "grounded_architectural_owners": grounded_architectural_owners,
+                }
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         state.gate_outcomes.append({

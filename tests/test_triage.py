@@ -268,6 +268,20 @@ def test_to_dict_not_escalated_when_max_was_already_at_its_ceiling():
 
 
 @pytest.mark.asyncio
+async def test_existing_system_additive_behavior_routes_as_enhancement(tmp_path):
+    (tmp_path / "CustomerController.java").write_text("class CustomerController {}")
+
+    route = await EngineeringTriageService().classify(
+        "Enhance the existing customer endpoint to return an optional displayName field.",
+        str(tmp_path),
+        known_files=["CustomerController.java"],
+    )
+
+    assert route.kind is ChangeKind.ENHANCEMENT
+    assert "existing_system_enhancement_detected" in route.reason_codes
+
+
+@pytest.mark.asyncio
 async def test_contained_bug_fix_with_acceptance_bullets_remains_one_task(tmp_path):
     (tmp_path / "formatter.py").write_text("def format_name(value): return value")
     route = await EngineeringTriageService().classify(

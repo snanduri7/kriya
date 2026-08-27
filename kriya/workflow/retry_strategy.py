@@ -23,9 +23,13 @@ import logging
 import os
 from typing import Optional
 
-from kriya.workflow.attribution import _detect_missing_build_manifest, attribute_failure, read_worktree_file
+from kriya.workflow.attribution import AttributionResult, _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.banners import log_gate_banner
-from kriya.workflow.failure import Failure
+from kriya.workflow.failure import (
+    Failure,
+    FailureAttributionKind,
+    classify_failure_attribution,
+)
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
     build_failure_signature,
@@ -33,7 +37,11 @@ from kriya.workflow.failure_grounding import (
     extract_error_search_terms,
     resolve_repository_locator_files,
 )
-from kriya.workflow.file_resolution import IncompleteGenerationError, classify_api_recovery_file_roles
+from kriya.workflow.file_resolution import (
+    IncompleteGenerationError,
+    classify_api_recovery_file_roles,
+    is_runnable_test_file,
+)
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.state import APIContractRecovery, GenerationState
@@ -446,16 +454,48 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 # owner in its candidate set. Fresh authoritative terminal
                 # evidence must be allowed to invalidate that stale scope.
                 self_diagnosed_files = None
-        attribution = await attribute_failure(
-            failure,
-            known_attribution_files,
-            state.budgets.retry_count,
-            ctx.chain,
-            ctx.developer.llm,
-            lambda fp: read_worktree_file(ctx.worktree_path, fp),
-            self_diagnosed_files=self_diagnosed_files,
-        )
+        attribution_kind = classify_failure_attribution(fail_type, failure.message)
+        failure.attribution_kind = attribution_kind.value
+        if attribution_kind in (
+            FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT,
+            FailureAttributionKind.INFRASTRUCTURE_DEFECT,
+        ):
+            attribution = AttributionResult(
+                tier="full_set", files=[], confidence="high",
+                reasoning=(
+                    f"{attribution_kind.value} is owned by the verification/control plane; "
+                    "production source-file attribution is intentionally disabled."
+                ),
+            )
+            if attribution_kind is FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT:
+                state.plan_scope_conflict = {
+                    "classification": attribution_kind.value,
+                    "reason_code": "VERIFICATION_CONTRACT_REVISION_REQUIRED",
+                    "failure_type": fail_type,
+                    "reason": attribution.reasoning,
+                    "required_files": [],
+                    "allowed_files": sorted(ctx.allowed_write_relpaths),
+                }
+        else:
+            attribution = await attribute_failure(
+                failure,
+                known_attribution_files,
+                state.budgets.retry_count,
+                ctx.chain,
+                ctx.developer.llm,
+                lambda fp: read_worktree_file(ctx.worktree_path, fp),
+                self_diagnosed_files=self_diagnosed_files,
+            )
         implicated = attribution.files
+        if (
+            attribution_kind is FailureAttributionKind.TEST_DEFECT
+            and any(not is_runnable_test_file(path) for path in implicated)
+        ):
+            # A test process produced the symptom, but deterministic/grounded
+            # localization selected production. The repair owner is therefore
+            # source, not the evidence-bearing test suite.
+            attribution_kind = FailureAttributionKind.SOURCE_DEFECT
+            failure.attribution_kind = attribution_kind.value
         if repository_regrounded_files and set(implicated) & set(repository_regrounded_files):
             attribution.reasoning = (
                 f"{attribution.reasoning} Terminal regression re-grounded the precise locator "
@@ -509,6 +549,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 outcome["attribution_tier"] = failure.attribution_tier
                 outcome["attribution_confidence"] = failure.attribution_confidence
                 outcome["attribution_reasoning"] = failure.attribution_reasoning
+                outcome["attribution_kind"] = failure.attribution_kind
         # A missing build manifest the Architect never asked for at all
         # (see _detect_missing_build_manifest) takes priority over normal
         # implication scoping - extract_implicated_files() can never name

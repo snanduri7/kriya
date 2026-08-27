@@ -97,6 +97,7 @@ from kriya.workflow.file_resolution import (
     find_brownfield_test_redirections,
     find_brownfield_public_api_changes,
     find_missing_expected_files,
+    include_response_construction_owners,
     normalize_written_filepath,
 )
 from kriya.workflow.evidence import EvidenceRecord
@@ -1626,10 +1627,16 @@ class WorkflowEngine:
             )
 
         # Brownfield ownership outranks creation of a parallel, similarly
-        # named artifact. Apply only to task-shaped requests; larger topology
-        # changes retain the Architect's explicit file set.
-        if engineering_route is not None and engineering_route.kind == ChangeKind.TASK:
+        # named artifact. Apply to bounded task/enhancement requests; larger
+        # topology changes retain the Architect's explicit file set.
+        if (
+            engineering_route is not None
+            and engineering_route.kind in (ChangeKind.TASK, ChangeKind.ENHANCEMENT)
+        ):
             architect_files = prefer_existing_artifact_owners(
+                architect_files, goal, workspace_path,
+            )
+            architect_files = include_response_construction_owners(
                 architect_files, goal, workspace_path,
             )
         if step_callback:

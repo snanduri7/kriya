@@ -338,7 +338,7 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
         "downstream_requirements": downstream,
         "verification_targets": [vm.description for vm in subtask.verification],
         "runtime_execution_required": any(
-            vm.requires_runtime_execution for vm in subtask.verification
+            vm.requires_application_runtime for vm in subtask.verification
         ),
     }
     return "--- bounded subtask semantic context ---\n" + json.dumps(payload, indent=2, sort_keys=True)
@@ -368,6 +368,7 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     '[{"path": "...", "action": "create|modify|delete"}], "provides": ["..."], '
     '"requires": [], "relevant_global_invariants": ["..."], "verification": '
     '[{"type": "tool", "description": "...", "tool_name": "compile", '
+    '"verifier_kind": "compile", '
     '"requires_runtime_execution": false}], '
     '"acceptance_criteria_ids": ["ac1"]}], "acceptance_criteria": '
     '[{"id": "ac1", "description": "...", "method": "judgment"}], '
@@ -378,7 +379,9 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "the implementation subtask performs any necessary analysis before editing its owned file. "
     "A verification entry must always be an object, never a "
     "string. A judgment verification must omit tool_name. A tool verification must name a real "
-    "registered tool; use tool_name=compile for compilation and tool_name=test for tests. Every "
+    "registered tool; use tool_name=compile/verifier_kind=compile for compilation and "
+    "tool_name=test/verifier_kind=test for tests. Use verifier_kind=application_runtime only "
+    "when the plan explicitly requires executing the application. Every "
     "acceptance criterion may be assigned only to a stage capable of demonstrating it. Every "
     "requires value must exactly equal one provides value from exactly one "
     "declared dependency. Preserve goal-derived invariants without inventing unspecified choices."
@@ -455,7 +458,7 @@ def build_structured_plan_repair_prompt(
     if "STRUCTURED_PLAN_SCHEMA_INVALID" in reason_codes:
         targeted_correction += (
             "- Repair every schema-invalid field to the system contract. In particular, each "
-            "verification item must be an object with type, description, and "
+            "verification item must be an object with type, description, verifier_kind, and "
             "requires_runtime_execution; never use a string verification item.\n"
         )
     if "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
@@ -501,9 +504,9 @@ def build_structured_plan_repair_prompt(
         "- Preserve or add goal-derived global_invariants, relevant_global_invariants, and stable "
         "provides/requires metadata; every requires string must exactly equal one provides string "
         "from exactly one declared dependency.\n"
-        "- Every verification item must be an object with type, description, and "
-        "requires_runtime_execution; use type=tool/tool_name=compile for compilation, "
-        "type=tool/tool_name=test for tests, and type=judgment without tool_name for "
+        "- Every verification item must be an object with type, description, verifier_kind, and "
+        "requires_runtime_execution; use type=tool/tool_name=compile/verifier_kind=compile for compilation, "
+        "type=tool/tool_name=test/verifier_kind=test for tests, and type=judgment without tool_name for "
         "semantic/runtime checks; never emit a verification string.\n"
         "- Map each acceptance criterion only to a stage capable of directly proving it; runtime "
         "output criteria belong on the runnable entrypoint stage.\n"
@@ -561,9 +564,9 @@ def build_authoritative_planner_request(
         "provides, requires, and complete depends_on edges.\n"
         "- Each requires string must exactly match one provides string from exactly one upstream "
         "subtask, and that provider must appear in depends_on.\n"
-        "- Every verification entry must be an object with type, description, and "
-        "requires_runtime_execution. Use type=tool with tool_name=compile for compilation and "
-        "tool_name=test for tests. Use type=judgment without tool_name for semantic/runtime checks. "
+        "- Every verification entry must be an object with type, description, verifier_kind, and "
+        "requires_runtime_execution. Use type=tool with tool_name=compile/verifier_kind=compile for compilation and "
+        "tool_name=test/verifier_kind=test for tests. Use type=judgment without tool_name for semantic/runtime checks. "
         "Never emit verification strings.\n"
         "- Assign an acceptance_criteria id only to a subtask that can directly demonstrate it. "
         "An application-output or round-trip criterion belongs on the runnable entrypoint stage, "
@@ -571,7 +574,9 @@ def build_authoritative_planner_request(
         "- Build/config stages may use compile or test verification. Any original-request "
         "requirement for observable application behavior must also be verified by an entrypoint-owning "
         "stage that actually runs the application, observes the required result, and confirms clean exit; "
-        "set requires_runtime_execution=true on that verification method and false on build-only checks.\n"
+        "set verifier_kind=application_runtime and requires_runtime_execution=true only on that "
+        "explicit application verifier, and false on build-only checks. Successful test execution "
+        "satisfies a test verifier and must not synthesize an application-runtime requirement.\n"
         "- Do not copy these protocol rules into global_invariants; derive those only from the "
         "original product request above. Do not invent unspecified implementation choices.\n"
         + route_guidance
@@ -1916,7 +1921,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 allowed_write_relpaths=target_files,
                 required_verification=[vm.model_dump(mode="json") for vm in target.verification],
                 runtime_verification_required=any(
-                    vm.requires_runtime_execution for vm in target.verification
+                    vm.requires_application_runtime for vm in target.verification
                 ),
                 strict_spec_compliance=True,
                 strict_dependency_index=bool(

@@ -165,8 +165,8 @@ from kriya.workflow.plan_schema import EngineeringPlan
 
 logger = logging.getLogger(__name__)
 
-# MA6.6 - "subtask_scope"/"subtask_dependency" are NEW tiers, ranked
-# between "locator" and "judge": no real file:line evidence beats a
+# MA6.6 - structural tiers are ranked between "locator" and "judge": no
+# real file:line evidence beats a
 # locator, but "we structurally know what this subtask was allowed to
 # touch" (SubtaskExecutor never lets a MODEL-tagged subtask touch anything
 # outside its own planned_files - MA6 invariant 4) is stronger evidence
@@ -177,7 +177,8 @@ logger = logging.getLogger(__name__)
 # non-MA6 caller passes neither, so this ordering change is a pure
 # addition with zero effect on any failure attributed today.
 AttributionTier = Literal[
-    "self_diagnosis", "locator", "subtask_scope", "subtask_dependency", "judge", "triage", "full_set",
+    "self_diagnosis", "locator", "architectural_owner", "subtask_scope",
+    "subtask_dependency", "judge", "triage", "full_set",
 ]
 Confidence = Literal["high", "medium", "low"]
 
@@ -382,6 +383,29 @@ def _attribute_from_judge_evidence(failure: Failure, known_files: List[str]) -> 
         tier="judge", files=files, confidence="medium",
         reasoning="Already-validated likely_files (e.g. RunVerifierAgent.grade()'s own inference, "
         "or an anchored-edit's known filepath) or a filename substring match, with no precise line locator.",
+    )
+
+
+def _attribute_from_grounded_architectural_owner(
+    failure: Failure,
+) -> Optional[AttributionResult]:
+    """Use deterministic repository ownership discovered by a compliance gate.
+
+    Unlike a judge's likely-file suggestion, these paths were selected by a
+    source scan for the concrete response-construction role named by the goal.
+    They therefore carry enough authority to revise an underspecified plan.
+    """
+    files = list(dict.fromkeys(
+        (failure.diagnostics or {}).get("grounded_architectural_owners", [])
+    ))
+    if not files:
+        return None
+    return AttributionResult(
+        tier="architectural_owner", files=files, confidence="high",
+        reasoning=(
+            "Deterministic repository analysis found existing architectural owner(s) "
+            "for the missing goal behavior."
+        ),
     )
 
 
@@ -610,6 +634,14 @@ async def attribute_failure(
         )
 
     result = _attribute_from_locator(failure, known_files)
+    if result:
+        return result
+
+    # A compliance gate's deterministic repository-owner scan is stronger
+    # than the executing subtask's originally approved scope: discovering
+    # that the plan omitted the actual owner is precisely the signal that
+    # must be allowed to request scope revision.
+    result = _attribute_from_grounded_architectural_owner(failure)
     if result:
         return result
 

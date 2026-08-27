@@ -38,6 +38,7 @@ from kriya.workflow.file_resolution import (
     find_brownfield_test_redirections,
     find_brownfield_public_api_changes,
     classify_api_recovery_file_roles,
+    discover_response_construction_owners,
     find_explanatory_prose_contamination,
     find_protected_api_reference_changes,
     find_unrestored_public_api_contracts,
@@ -231,6 +232,43 @@ def test_required_compile_verification_stays_unresolved_when_gate_was_skipped():
     )
     assert evidence[0]["passed"] is None
     assert evidence[0]["source"] == "unresolved"
+
+
+def test_executed_targeted_test_satisfies_test_runtime_requirement():
+    requirements = [{
+        "type": "tool", "tool_name": "test", "verifier_kind": "test",
+        "description": "execute unit tests", "requires_runtime_execution": True,
+    }]
+    evidence = _build_required_verification_evidence(
+        requirements,
+        quality_gates_passed=True,
+        gate_outcomes=[{
+            "type": "targeted_test", "success": True,
+            "output": "Tests run: 2, Failures: 0, Errors: 0",
+        }],
+    )
+    assert evidence[0]["passed"] is True
+    assert evidence[0]["source"] == "authoritative_gate_outcome"
+
+
+def test_response_shape_owner_discovery_finds_existing_controller(tmp_path):
+    controller = tmp_path / "src/main/java/com/example/customer/CustomerController.java"
+    controller.parent.mkdir(parents=True)
+    controller.write_text(
+        'class CustomerController { Map details(Customer c) { Map m = new HashMap(); '
+        'm.put("id", c.id()); return m; } }'
+    )
+    (controller.parent / "CustomerService.java").write_text(
+        "class CustomerService { Customer find(long id) { return null; } }"
+    )
+
+    owners = discover_response_construction_owners(
+        str(tmp_path),
+        "Enhance the existing customer-details endpoint response with displayName",
+        ["src/main/java/com/example/customer/CustomerService.java"],
+    )
+
+    assert owners == ["src/main/java/com/example/customer/CustomerController.java"]
 
 
 def test_required_compile_verification_uses_authoritative_gate_outcome():
