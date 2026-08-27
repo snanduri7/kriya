@@ -199,6 +199,54 @@ What counts as "failure" differs by role, deliberately conservative so a legitim
 - **Planner, Architect, Reviewer** (free text): only a hard call failure - connection error, timeout, HTTP error, an `local_only` egress block. A brief plan or review is never retried just for being brief.
 - **RunVerifier, SkillGapAgent** (JSON-mode): the same hard-call-failure signal, plus an unparseable response - if the first model doesn't even return valid JSON, the next candidate is tried before falling back to that role's existing safe-default behavior.
 
+### 2.2 Control Plane, Policy, and Structured Execution
+
+A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.
+
+**The fast path - `runtime_profile`**: instead of hand-tuning the individual fields below, pick one named preset:
+```yaml
+runtime_profile: hardened   # or: legacy | validated | (omit for no change)
+```
+- `legacy` - the original pipeline only; equivalent to leaving this whole section unset.
+- `validated` - triage and process profiles are live, structured plans run in shadow mode (real LLM/control-plane work happens, but never affects the real generated output).
+- `hardened` - `validated` plus real enforce-mode execution: bounded, per-subtask write authority and fail-closed verification.
+
+A `kriya.yaml` may set `runtime_profile` **or** hand-tune `engineering_triage`/`process_profiles`/`workflow_controller` directly, never both - combining them raises a config error at load time. `runtime_profile` never touches `execution_policy.mode` (see below) - that stays audit-only regardless of preset.
+
+**`engineering_triage`** - classifies each request's shape (`task`/`enhancement`/`milestone`/`refactor`) and risk:
+```yaml
+engineering_triage:
+  enabled: false      # turn classification on and log it
+  shadow_mode: true   # keep the result from affecting anything (must stay true until process_profiles.enabled is also true)
+```
+
+**`process_profiles`** - whether a resolved classification actually changes pipeline behavior (context depth, approval requirements):
+```yaml
+process_profiles:
+  enabled: false
+  enforce_approval: false
+  enforce_context_depth: false
+  enforce_verification_depth: false   # rejected if set true - verification depth is telemetry-only by design; a triage misclassification must never be able to reduce regression-test coverage
+```
+
+**`execution_policy`** - audit logging of consequential actions (file writes, commands, network calls, package installs, git operations) against a deterministic policy engine:
+```yaml
+execution_policy:
+  enabled: true    # default on - this has been logging safely at 6 real call sites since it shipped
+  mode: audit      # "enforce" is rejected at config load time; audit-only by binding decision, independent of runtime_profile
+```
+This is audit/telemetry only - it never denies or blocks an action on its own. The one real enforcement Kriya applies today is a narrow, separate, always-on mechanism (goal-source-file protection, workspace containment, a small set of hard-invariant denials) that isn't gated by this section at all - see `docs/design.md` §8.5.
+
+**`workflow_controller`** - routes real `generate`/`generate --from-milestones` calls through structured, validated per-subtask execution:
+```yaml
+workflow_controller:
+  enabled: false   # off by default - shadow mode still makes real LLM calls of its own, budget/network accordingly if you turn this on
+  mode: shadow     # "shadow": runs alongside the real pipeline, never affects its outcome. "enforce": real bounded per-subtask execution and write authority.
+```
+`mode: enforce` requires `enabled: true`. Under enforce, every `MODEL`-tagged subtask must declare a non-empty set of files it's allowed to write (`planned_files`) or the plan is rejected outright rather than falling back to an unbounded whole-goal write; every write is checked against that exact allowlist. `TOOL`-tagged subtasks (arbitrary tool/command execution) are refused outright in enforce mode, not silently skipped.
+
+**Operator visibility**: `kriya doctor` reports the current workspace's control-plane state regardless of whether any of the above is enabled - workspace identity, whether `ControlState` matches the real on-disk workspace (drift detection), and contract/artifact record counts.
+
 ---
 
 ## 3. Core Commands
