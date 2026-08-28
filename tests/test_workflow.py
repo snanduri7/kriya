@@ -5142,6 +5142,17 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         approve_web_lookup=AsyncMock(return_value=False),
     )
     defaults.update(overrides)
+    # Mirrors run_generation_workflow's/WorkflowController's own "resolve
+    # once, against workspace_path, before any mutation" pattern (kriya/
+    # workflow/migration.py) - a caller that already knows the resolution it
+    # wants (most tests, which pass no migration intent at all) can override
+    # migration_resolution directly; every other test gets the real resolver
+    # run against its own fixture goal/workspace, matching production.
+    if "migration_resolution" not in overrides:
+        from kriya.workflow.migration import resolve_migration_resolution
+        defaults["migration_resolution"] = resolve_migration_resolution(
+            defaults.get("grounding_goal") or defaults["goal"], defaults["workspace_path"],
+        )
     return AttemptContext(**defaults)
 
 

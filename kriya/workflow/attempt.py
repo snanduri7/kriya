@@ -71,7 +71,7 @@ from kriya.workflow.acceptance import (
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.verification_authority import deterministic_sequence_kind
-from kriya.workflow.migration import find_migration_incomplete, resolve_authorized_dependency_removals, resolve_migration_obligation
+from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, find_migration_incomplete
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
@@ -453,6 +453,18 @@ class AttemptContext:
     # Original/global goal used only for deterministic architectural owner
     # discovery when a bounded subtask's local wording omits that context.
     grounding_goal: str = ""
+    # The run's ONE, already-resolved MigrationObligation (or explicit
+    # NOT_APPLICABLE/INDETERMINATE), resolved ONCE by the top-level caller
+    # (run_generation_workflow for a plain/Legacy run, WorkflowController for
+    # a Hardened enforce run - both against the immutable PRE-mutation
+    # baseline workspace) and threaded through unchanged to every attempt -
+    # never re-resolved here. See kriya/workflow/migration.py's own
+    # docstring (PRV-05 run 6, 2026-08-28) for why re-deriving source/target
+    # identity from whatever state the repository happens to be in at each
+    # call site is itself the defect this field exists to close. None means
+    # no caller has resolved anything yet (matches every existing test's/
+    # checkpoint's default, same as required_verification's own default).
+    migration_resolution: Optional["MigrationResolution"] = None
 
 
 def _extract_grounded_contract_verdict(
@@ -2611,11 +2623,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # below used to unconditionally reject ANY pom.xml dependency
             # removal, restoring Gson every time the subtask that owns
             # pom.xml tried to remove it - even though the top-level goal
-            # explicitly authorizes replacing it. Resolved once per attempt
-            # from the SAME grounding goal the migration-completion check
-            # (further below) already uses, not re-derived independently.
-            authorized_dependency_removals=resolve_authorized_dependency_removals(
-                ctx.grounding_goal or ctx.goal, ctx.workspace_path,
+            # explicitly authorizes replacing it. PRV-05 run 6 (2026-08-28):
+            # re-resolving authorization from CURRENT (possibly already-
+            # mutated) workspace state per attempt was itself timing-
+            # sensitive - read from the run's ONE already-resolved
+            # migration_resolution instead (see AttemptContext.migration_
+            # resolution's own docstring), never re-derived here.
+            authorized_dependency_removals=(
+                set(ctx.migration_resolution.obligation.source_artifacts)
+                if ctx.migration_resolution is not None
+                and ctx.migration_resolution.status == MigrationResolutionStatus.RESOLVED
+                and ctx.migration_resolution.obligation is not None
+                else set()
             ),
         )
 
@@ -3777,26 +3796,33 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # Compliance and is never overridable by it - an explicit, objectively-
     # testable migration obligation (see kriya/workflow/migration.py's own
     # docstring for the PRV-05, 2026-08-28 incident) must not be reopened by
-    # a semantic verdict that disagrees. resolve_migration_obligation only
-    # ever returns non-None for a goal that explicitly expresses replacement
-    # intent AND has unambiguous repository grounding for source/target -
-    # every other goal pays only the cost of one quick regex check.
+    # a semantic verdict that disagrees.
     #
-    # ctx.grounding_goal or ctx.goal (not ctx.goal alone): found live, PRV-05
-    # (2026-08-28 rerun) - this check never fired for ANY subtask across a
-    # full run, even though s2's own migration genuinely completed with
-    # Gson still declared. Root cause: a bounded subtask's own ctx.goal is
-    # its NARROW per-subtask description (e.g. "Modify JsonService.java to
-    # use the new JSON library..." for s2) - the explicit "replace X" intent
-    # only appears in the PLAN's original top-level goal text. Every other
-    # deterministic architectural-owner discovery call in this module already
-    # prefers ctx.grounding_goal for exactly this reason (see that field's
-    # own docstring on AttemptContext); this call site had simply never been
-    # updated to match when it was added.
-    migration_obligation = resolve_migration_obligation(
-        ctx.grounding_goal or ctx.goal, ctx.workspace_path, ctx.architect_files,
+    # PRV-05 run 6 (2026-08-28): this used to call resolve_migration_
+    # obligation() fresh, per attempt, against ctx.workspace_path - re-
+    # inferring source/target identity from whatever state the repository
+    # happened to be in at that moment, which is exactly the timing-
+    # sensitive defect this module's own docstring now documents. Reads the
+    # run's ONE already-resolved migration_resolution instead (see
+    # AttemptContext.migration_resolution's own docstring) - identity is
+    # fixed; only find_migration_incomplete's completion CHECK still runs
+    # fresh, against this attempt's own current candidate tree, which is
+    # exactly what it's for.
+    #
+    # Only relevant to THIS attempt when its own scope (architect_files)
+    # actually touches the obligation's grounded consumer(s) or the
+    # manifest (pom.xml) - an unrelated subtask elsewhere in the same plan
+    # must not be failed for a migration it was never responsible for.
+    migration_obligation = (
+        ctx.migration_resolution.obligation
+        if ctx.migration_resolution is not None
+        and ctx.migration_resolution.status == MigrationResolutionStatus.RESOLVED
+        else None
     )
-    if migration_obligation:
+    subtask_owns_migration_scope = migration_obligation is not None and bool(
+        set(ctx.architect_files) & (set(migration_obligation.grounded_consumers) | {"pom.xml"})
+    )
+    if subtask_owns_migration_scope:
         migration_gap = find_migration_incomplete(migration_obligation, ctx.worktree_path)
         if migration_gap:
             message = (

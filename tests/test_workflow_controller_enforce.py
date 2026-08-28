@@ -1420,7 +1420,7 @@ async def test_enforce_global_final_state_check_fails_closed_on_its_own_internal
     internal bug in IT must not silently fall back to trusting the
     per-subtask gates (the same silent-degrade shape as the false-PASS bug
     this check exists to close). Must downgrade to failure, not success,
-    when resolve_migration_obligation_for_workspace itself raises."""
+    when resolve_migration_resolution itself raises."""
     (tmp_path / "pom.xml").write_text("<project></project>\n")
     plan = EngineeringPlan(
         plan_id="run1", kind=ChangeKind.TASK,
@@ -1434,7 +1434,7 @@ async def test_enforce_global_final_state_check_fails_closed_on_its_own_internal
 
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3, patch(
-        "kriya.workflow.migration.resolve_migration_obligation_for_workspace",
+        "kriya.workflow.workflow_controller.resolve_migration_resolution",
         side_effect=RuntimeError("simulated validator bug"),
     ):
         controller = WorkflowController(we)

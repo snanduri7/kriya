@@ -16,7 +16,7 @@ MigrationObligation resolution is deliberately ecosystem-general in SHAPE
 (migration_kind/source_identity/target_identity/source_artifacts/
 target_artifacts/grounded_consumers) even though this first version only
 ships a Maven/Java adapter (_parse_maven_dependency_artifacts, Java import
-scanning) - see resolve_migration_obligation's own docstring for why source/
+scanning) - see resolve_migration_resolution's own docstring for why source/
 target identity is resolved from repository grounding rather than literal
 goal-text name matching, and why that keeps this module free of any
 Gson/Jackson special-casing (those names only ever appear in this module's
@@ -32,14 +32,57 @@ level migration-aware sequencing) - scoped to exactly the confirmed failure
 shape (an explicit dependency/technology replacement goal, terminal
 completion evidence) per the same "smallest repair scope" principle already
 used for EXISTING_CONTRACT_PRESERVATION (PRV-03) and
-UNREQUESTED_ARCHITECTURAL_SURFACE (PRV-04)."""
+UNREQUESTED_ARCHITECTURAL_SURFACE (PRV-04).
+
+PRV-05 run 6 (2026-08-28) found a second, deeper defect in the FIRST version
+of this module: resolve_migration_obligation() re-derived source/target
+identity from CURRENT repository state at every call site (per-attempt
+dependency authorization, the terminal gate), using an "exactly one unused
+dependency = the target" heuristic. That heuristic is timing-sensitive by
+construction - before the migration, the real target (e.g. Jackson) looks
+unused and resolves correctly; by the time the migration is DONE, the real
+SOURCE (e.g. Gson) looks unused instead, so the same heuristic inverts its
+own interpretation. Worse, an entirely unrelated dependency (JUnit - a test
+framework, never a candidate for a production JSON-library replacement)
+could tip the "exactly one" count into ambiguous at either end, degrading
+resolution to None and silently disabling both the authorization check (so
+the preservation validator fights the migration) and the terminal gate (so
+an incomplete migration still reports PASSED).
+
+The fix is architectural, not just a smarter heuristic: migration identity
+is a goal-level invariant, not a snapshot property of the repository at
+whatever moment it happens to be queried. resolve_migration_resolution() is
+now the ONLY entry point for identity resolution, is meant to be called
+EXACTLY ONCE per run against the immutable PRE-mutation baseline workspace,
+and returns a MigrationResolution (NOT_APPLICABLE / RESOLVED / INDETERMINATE)
+that the caller persists (AttemptContext.migration_resolution) and reuses
+everywhere - the per-attempt authorization check, the per-subtask completion
+check, and the terminal gate all consume the SAME resolved obligation rather
+than each re-inferring their own. find_migration_incomplete() still runs
+fresh against whatever candidate tree is being checked (that's its actual
+job: is the CURRENT state consistent with the FIXED obligation) - only
+identity resolution moved to run once.
+
+The heuristic itself was also narrowed: candidates are restricted to
+production-scope Maven dependencies (anything but the effectively-Maven-
+default `compile`/unspecified/`runtime` scopes is excluded - most
+concretely, `<scope>test</scope>`, matching the real PRV-05 fixture's own
+JUnit declaration) before the "exactly one unused / exactly one used" count
+is taken, and only production (non test-tree) `.java` files are scanned for
+usage. This is a generic Maven dependency-scope signal, not JSON/Gson/
+Jackson-specific - it just happens to be exactly what's needed to keep an
+unrelated test-framework dependency out of a production library migration's
+candidate set."""
 import os
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
 _IGNORED_DIRS = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
+_NON_PRODUCTION_SCOPES = {"test", "provided", "system"}
+_TEST_PATH_SEGMENT_RE = re.compile(r"(^|[\\/])tests?([\\/]|$)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -50,6 +93,26 @@ class MigrationObligation:
     source_artifacts: List[str]
     target_artifacts: List[str]
     grounded_consumers: List[str]
+
+
+class MigrationResolutionStatus(str, Enum):
+    # No explicit replacement intent in the goal, or no Maven manifest to
+    # resolve against - this run simply isn't a dependency migration.
+    NOT_APPLICABLE = "not_applicable"
+    # Source/target identity resolved unambiguously from the baseline.
+    RESOLVED = "resolved"
+    # The goal expresses replacement intent, but source/target identity
+    # can't be resolved confidently from repository grounding - unlike
+    # NOT_APPLICABLE, callers must NOT silently treat this as "no migration
+    # obligation applies" (see this module's own docstring, PRV-05 run 6).
+    INDETERMINATE = "indeterminate"
+
+
+@dataclass(frozen=True)
+class MigrationResolution:
+    status: MigrationResolutionStatus
+    obligation: Optional[MigrationObligation] = None
+    reason: str = ""
 
 
 # Narrow, high-precision-only (matching this codebase's established
@@ -87,8 +150,17 @@ def _parse_maven_dependency_artifacts(pom_content: str) -> List[Dict[str, str]]:
         artifact = dep.find(f"{ns}artifactId")
         if group is None or artifact is None or not (group.text or "").strip() or not (artifact.text or "").strip():
             continue
-        artifacts.append({"group": group.text.strip(), "artifact": artifact.text.strip()})
+        scope_el = dep.find(f"{ns}scope")
+        scope = (scope_el.text or "").strip().lower() if scope_el is not None and scope_el.text else "compile"
+        artifacts.append({"group": group.text.strip(), "artifact": artifact.text.strip(), "scope": scope})
     return artifacts
+
+
+def _is_test_source_path(relpath: str) -> bool:
+    """Generic Maven/Gradle convention (src/test/java/...), not a JSON- or
+    Gson/Jackson-specific check - matches any path with a "test"/"tests"
+    path segment, workspace-relative or not, case-insensitively."""
+    return bool(_TEST_PATH_SEGMENT_RE.search(relpath.replace(os.sep, "/")))
 
 
 # Strips generic Maven-artifact-naming suffixes so an artifactId correlates
@@ -134,78 +206,100 @@ def _scan_java_files(root_path: str) -> Dict[str, str]:
     return files
 
 
-def resolve_migration_obligation(
-    goal: str, workspace_path: str, target_files: List[str],
-) -> Optional[MigrationObligation]:
-    """Resolves source/target identity from repository GROUNDING, not from
+def resolve_migration_resolution(goal: str, workspace_path: str) -> MigrationResolution:
+    """THE canonical, single entry point for migration-obligation identity
+    resolution. Call this EXACTLY ONCE per run, against the immutable
+    PRE-mutation baseline workspace, and persist the result (e.g.
+    AttemptContext.migration_resolution) for every other call site to reuse
+    - never call this again later against a partially- or fully-mutated
+    tree. See this module's own top-of-file docstring (PRV-05 run 6,
+    2026-08-28) for why re-resolving identity at multiple points in time is
+    itself the defect this function exists to close, not just a smarter
+    heuristic.
+
+    Resolves source/target identity from repository GROUNDING, not from
     literal names in the goal text - PRV-05's real goal ("the JSON library
     already approved for this repository") never names either library at
     all, so a name-matching approach would miss the exact incident this
-    exists to catch. Instead: a Maven dependency declared but imported by
-    NOTHING anywhere in the baseline workspace is a plausible dormant
-    "already approved" target; among the goal's own grounded scope
-    (`target_files`), a dependency imported by exactly one of those files is
-    the plausible replacement source. Deliberately conservative at every
-    ambiguous branch (zero or 2+ dormant dependencies, zero or 2+ candidate
-    sources) - returns None rather than guess, matching this module's
-    established practice (find_established_stack_drift et al.) of a missed
-    catch costing nothing beyond skipping this one extra check, while a
-    false positive could wrongly block a legitimate PASS.
+    exists to catch. Among PRODUCTION-scope Maven dependencies only (see
+    _NON_PRODUCTION_SCOPES - a test-scoped dependency like JUnit can never be
+    a source or target of a production library replacement, so it's excluded
+    before any ambiguity count is taken, not just at usage-scanning time): a
+    dependency imported by NOTHING in the baseline's production `.java`
+    files is the plausible dormant "already approved" target; a dependency
+    imported by at least one production file is the plausible replacement
+    source. Deliberately conservative - fewer than 2 production dependencies,
+    or no dormant candidate at all, means this Maven-migration pattern
+    simply doesn't apply (NOT_APPLICABLE); 2+ dormant candidates or 2+ active
+    candidates means the goal's own replacement intent can't be resolved
+    confidently (INDETERMINATE - callers must not silently treat this as "no
+    obligation applies").
 
     Only fires when the goal expresses explicit replacement intent
     (_goal_expresses_replacement_intent) - a goal with no such intent never
     even reaches the (more expensive) repository-grounding scan."""
     if not _goal_expresses_replacement_intent(goal):
-        return None
+        return MigrationResolution(MigrationResolutionStatus.NOT_APPLICABLE, reason="goal expresses no replacement intent")
     pom_path = os.path.join(workspace_path, "pom.xml")
     if not os.path.isfile(pom_path):
-        return None
+        return MigrationResolution(MigrationResolutionStatus.NOT_APPLICABLE, reason="no pom.xml (Maven adapter only)")
     try:
         with open(pom_path, "r", encoding="utf-8", errors="replace") as fh:
             pom_content = fh.read()
     except OSError:
-        return None
+        return MigrationResolution(MigrationResolutionStatus.NOT_APPLICABLE, reason="pom.xml unreadable")
+
     artifacts = _parse_maven_dependency_artifacts(pom_content)
-    if len(artifacts) < 2:
-        return None
+    production_artifacts = [a for a in artifacts if a.get("scope", "compile") not in _NON_PRODUCTION_SCOPES]
+    if len(production_artifacts) < 2:
+        return MigrationResolution(
+            MigrationResolutionStatus.NOT_APPLICABLE, reason="fewer than 2 production-scope dependencies declared",
+        )
 
     java_files = _scan_java_files(workspace_path)
+    production_files = {
+        path: content for path, content in java_files.items() if not _is_test_source_path(path)
+    }
+
     usage: Dict[str, Set[str]] = {}
-    for artifact in artifacts:
+    for artifact in production_artifacts:
         key = f"{artifact['group']}:{artifact['artifact']}"
         tokens = _artifact_import_tokens(artifact["artifact"])
         usage[key] = {
-            path for path, content in java_files.items()
+            path for path, content in production_files.items()
             if _file_imports_any_token(content, tokens)
         }
 
     unused = {key for key, files in usage.items() if not files}
-    if len(unused) != 1:
-        return None
+    used = {key for key, files in usage.items() if files}
+    if not unused or not used:
+        return MigrationResolution(
+            MigrationResolutionStatus.NOT_APPLICABLE,
+            reason="no dormant production-scope dependency candidate found",
+        )
+    if len(unused) != 1 or len(used) != 1:
+        return MigrationResolution(
+            MigrationResolutionStatus.INDETERMINATE,
+            reason=(
+                f"goal expresses replacement intent but source/target dependency identity is "
+                f"ambiguous: {len(used)} candidate source(s), {len(unused)} candidate target(s)"
+            ),
+        )
+
+    source_key = next(iter(used))
     target_key = next(iter(unused))
+    source_artifact = next(a for a in production_artifacts if f"{a['group']}:{a['artifact']}" == source_key)
+    target_artifact = next(a for a in production_artifacts if f"{a['group']}:{a['artifact']}" == target_key)
 
-    grounded_scope = set(target_files) & set(java_files)
-    if not grounded_scope:
-        return None
-    candidate_sources = {
-        key for key, files in usage.items()
-        if key != target_key and files & grounded_scope
-    }
-    if len(candidate_sources) != 1:
-        return None
-    source_key = next(iter(candidate_sources))
-
-    source_artifact = next(a for a in artifacts if f"{a['group']}:{a['artifact']}" == source_key)
-    target_artifact = next(a for a in artifacts if f"{a['group']}:{a['artifact']}" == target_key)
-
-    return MigrationObligation(
+    obligation = MigrationObligation(
         migration_kind="dependency_or_technology_replacement",
         source_identity=source_artifact["artifact"],
         target_identity=target_artifact["artifact"],
         source_artifacts=[source_key],
         target_artifacts=[target_key],
-        grounded_consumers=sorted(usage[source_key] & grounded_scope),
+        grounded_consumers=sorted(usage[source_key]),
     )
+    return MigrationResolution(MigrationResolutionStatus.RESOLVED, obligation=obligation)
 
 
 def find_migration_incomplete(
@@ -290,49 +384,3 @@ def find_migration_incomplete(
     }
 
 
-def resolve_migration_obligation_for_workspace(
-    goal: str, workspace_path: str,
-) -> Optional[MigrationObligation]:
-    """resolve_migration_obligation grounded against every known .java file
-    in the workspace, not one subtask's own narrow planned-file scope - for
-    a caller (the global final-state check, kriya/workflow/
-    workflow_controller.py) that needs to know whether an obligation exists
-    at all across the WHOLE plan's final applied state, independent of
-    which one file happened to establish it. Same grounding shape as
-    resolve_authorized_dependency_removals above, for the same reason."""
-    java_files = _scan_java_files(workspace_path)
-    return resolve_migration_obligation(goal, workspace_path, sorted(java_files.keys()))
-
-
-def resolve_authorized_dependency_removals(goal: str, workspace_path: str) -> "set[str]":
-    """Maven artifact keys (group:artifact) an explicit migration goal
-    authorizes REMOVING - the SOURCE side of whatever
-    resolve_migration_obligation would resolve, grounded against every known
-    .java file in the workspace rather than one subtask's own narrow
-    planned-file list.
-
-    Found live, PRV-05 (2026-08-28, run 5): PolymorphicValidator.
-    run_compile_check()'s dependency-preservation check (kriya/tools/
-    validate.py) unconditionally rejects ANY pom.xml dependency removal,
-    with zero awareness of an explicit, goal-authorized migration - it
-    restored Gson every time s1 (the subtask that OWNS pom.xml) tried to
-    remove it, even though the top-level goal explicitly says to replace
-    it. resolve_migration_obligation's own grounded_scope requirement
-    (target_files must intersect a real .java consumer) is the wrong shape
-    for THIS caller: a subtask that only owns pom.xml (planned_files=
-    ['pom.xml'], not a .java file at all) can never itself supply a
-    grounded consumer, so it would never get authorization to remove
-    anything under the stricter API. This function grounds against every
-    known .java file in the workspace instead, since the question being
-    asked here is only "is removing this dependency authorized by the goal
-    at all" - not "which specific file consumes it," which is
-    find_migration_incomplete's job at terminal validation time.
-
-    Returns the SOURCE artifact key(s) - safe to remove - or an empty set
-    when no unambiguous, goal-authorized migration can be resolved (same
-    conservative degrade as resolve_migration_obligation itself: a missed
-    authorization just means the existing preservation rule stays in
-    force, never a security regression)."""
-    java_files = _scan_java_files(workspace_path)
-    obligation = resolve_migration_obligation(goal, workspace_path, sorted(java_files.keys()))
-    return set(obligation.source_artifacts) if obligation else set()

@@ -121,6 +121,9 @@ from kriya.workflow.context_package import (
 from kriya.workflow.context_projection import project_implementation_source, render_established_file_context
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.workflow.migration import (
+    MigrationResolution, MigrationResolutionStatus, find_migration_incomplete, resolve_migration_resolution,
+)
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
@@ -2093,6 +2096,26 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             for path in planned_paths
         }
         plan_workspace_path = create_git_worktree(workspace_path)
+        # Resolved ONCE, here, against workspace_path - the real, immutable
+        # PRE-mutation baseline, before plan_workspace_path accumulates any
+        # subtask's committed writes - and reused unchanged by every bounded
+        # subtask's own attempt AND the terminal global gate below. Found
+        # live, PRV-05 run 6 (2026-08-28): re-resolving source/target
+        # identity from CURRENT (progressively-mutated) workspace state at
+        # each call site is itself the defect (see kriya/workflow/
+        # migration.py's own docstring) - a migration obligation is a
+        # goal-level invariant, not something to rediscover at every point
+        # in time. Wrapped in its own try/except (not just the terminal
+        # gate's) - an internal bug HERE must also fail closed, at the
+        # terminal gate below, rather than propagate as an unhandled
+        # exception that crashes the whole enforce run.
+        try:
+            migration_resolution = resolve_migration_resolution(goal, workspace_path)
+        except Exception as e:
+            migration_resolution = MigrationResolution(
+                MigrationResolutionStatus.INDETERMINATE,
+                reason=f"migration resolution itself raised ({type(e).__name__}: {e})",
+            )
         established_file_context: Dict[str, str] = {}
         subtask_results: List[SubtaskResult] = []
         subtask_call_results: List[Dict[str, Any]] = []
@@ -2146,6 +2169,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 strict_spec_compliance=True,
                 execution_scope=f"subtask={target.id} role={execution_role}",
                 grounding_goal=goal,
+                migration_resolution=migration_resolution,
                 strict_dependency_index=bool(
                     process_profiles is not None
                     and getattr(process_profiles, "enabled", False) is True
@@ -2689,32 +2713,42 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # for a migration. Found live, PRV-05 (2026-08-28, run 5): the
         # per-subtask migration-completion check (kriya/workflow/attempt.py)
         # only ever sees the ONE subtask's own grounded scope; this is the
-        # same check re-run once, here, against the real, fully-applied
-        # workspace_path - the authoritative terminal state - after every
-        # subtask has already completed and its output has already been
-        # committed above. Deliberately additive-only (can downgrade
-        # all_completed to False, never upgrade it) - but NOT best-effort on
-        # its own failure. Four distinct outcomes, not two: no obligation
-        # applies (continue), obligation satisfied (continue), obligation
-        # unsatisfied (fail), and the check itself raising (ALSO fail - not
-        # silently trust the per-subtask gates). That last distinction
-        # matters specifically because this check is authoritative and
-        # deterministic: an internal bug in the one validator built to catch
-        # a false PASS must not itself become a path BACK to a false PASS -
-        # the same silent-degrade shape as the bug this check exists to
-        # close in the first place. A goal with no migration intent at all
-        # can't realistically reach this except clause (_goal_expresses_
-        # replacement_intent is a cheap regex gate checked first, before any
-        # file I/O), so fail-closed here only ever activates for a goal that
-        # already looks like a migration - not a broad new failure surface
-        # for ordinary tasks.
+        # same completion check re-run once, here, against the real,
+        # fully-applied workspace_path - the authoritative terminal state -
+        # after every subtask has already completed and its output has
+        # already been committed above.
+        #
+        # PRV-05 run 6 (2026-08-28): this used to RE-RESOLVE identity too
+        # (resolve_migration_obligation_for_workspace against the final,
+        # already-migrated tree) - by the time migration is done, the real
+        # SOURCE looks "unused" and the heuristic inverts itself, silently
+        # resolving None and never reaching find_migration_incomplete at
+        # all. Reuses the run's ONE `migration_resolution`, resolved once
+        # above against the immutable baseline, instead - identity is fixed;
+        # only completion is checked here, against the final tree, which is
+        # exactly what find_migration_incomplete is for.
+        #
+        # Three distinct outcomes, not two: NOT_APPLICABLE (continue -
+        # obligation satisfied or no migration intent at all), RESOLVED-and-
+        # satisfied (continue), RESOLVED-and-unsatisfied (fail). INDETERMINATE
+        # is ALSO a fail, not a silent continue: the goal explicitly expressed
+        # replacement intent but this run could never confidently establish
+        # what was being replaced with what - claiming success on an
+        # unconfirmed migration obligation is the exact false-PASS shape this
+        # gate exists to prevent, so an unresolved identity must not default
+        # to "no obligation applies." The check itself raising is handled the
+        # same way - fail closed, never silently trust the per-subtask gates.
+        # A goal with no migration intent at all can't realistically reach
+        # either failure path (_goal_expresses_replacement_intent is a cheap
+        # regex gate checked first, before any file I/O), so this only ever
+        # activates for a goal that already looks like a migration - not a
+        # broad new failure surface for ordinary tasks.
         global_migration_gap: Optional[str] = None
         if all_completed:
             try:
-                from kriya.workflow.migration import find_migration_incomplete, resolve_migration_obligation_for_workspace
-                obligation = resolve_migration_obligation_for_workspace(goal, workspace_path)
-                if obligation:
-                    gap = find_migration_incomplete(obligation, workspace_path)
+                if migration_resolution.status == MigrationResolutionStatus.RESOLVED:
+                    obligation = migration_resolution.obligation
+                    gap = find_migration_incomplete(obligation, workspace_path) if obligation else None
                     if gap:
                         global_migration_gap = (
                             "MIGRATION INCOMPLETE (global final-state check): the goal "
@@ -2722,6 +2756,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             f"{gap['target_identity']}, but {', '.join(gap['reason_codes'])}."
                         )
                         all_completed = False
+                elif migration_resolution.status == MigrationResolutionStatus.INDETERMINATE:
+                    global_migration_gap = (
+                        "MIGRATION OBLIGATION INDETERMINATE (global final-state check): the goal "
+                        "explicitly expresses replacement intent, but source/target dependency "
+                        f"identity could not be resolved confidently ({migration_resolution.reason}). "
+                        "Refusing to report success on an unconfirmed migration obligation."
+                    )
+                    all_completed = False
             except Exception as e:
                 global_migration_gap = (
                     "MIGRATION FINAL-STATE CHECK INDETERMINATE: the deterministic terminal "

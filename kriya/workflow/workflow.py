@@ -42,6 +42,7 @@ from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.workflow.migration import MigrationResolution, resolve_migration_resolution
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.policy.telemetry import build_decision_record
 
@@ -616,6 +617,7 @@ class WorkflowEngine:
         skill_engine_override: Optional[Any] = None,
         execution_scope: str = "",
         grounding_goal: str = "",
+        migration_resolution: Optional["MigrationResolution"] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -2040,6 +2042,24 @@ class WorkflowEngine:
                 "Refusing to generate directly in the application workspace."
             ) from e
 
+        # Resolved ONCE, here, against workspace_path BEFORE any Developer
+        # write happens (worktree_path above is an isolated copy - writes
+        # never touch workspace_path directly until the approval/copy-back
+        # step at the very end of this call) - mirrors write_scope_mode's own
+        # "resolved once, read everywhere" pattern below. A caller that
+        # already resolved this identity once for the whole run (e.g.
+        # WorkflowController, across several bounded-subtask calls) passes
+        # migration_resolution directly so every subtask's own attempt reuses
+        # the SAME resolution rather than each one re-deriving its own from
+        # its own (already-progressed) plan_workspace_path. See kriya/
+        # workflow/migration.py's own docstring (PRV-05 run 6, 2026-08-28)
+        # for why re-resolving per call site is itself the defect this
+        # closes.
+        resolved_migration_resolution = (
+            migration_resolution if migration_resolution is not None
+            else resolve_migration_resolution(goal, workspace_path)
+        )
+
         # Loop-invariant - nothing in this object is reassigned across retry
         # attempts, so it's built once here rather than reconstructed per
         # iteration. See kriya/workflow/attempt.py for what actually happens
@@ -2108,6 +2128,7 @@ class WorkflowEngine:
             strict_spec_compliance=strict_spec_compliance,
             execution_scope=execution_scope,
             grounding_goal=grounding_goal,
+            migration_resolution=resolved_migration_resolution,
         )
 
         from kriya.workflow.retry_policy import decide_for_state

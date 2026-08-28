@@ -9,8 +9,9 @@ import os
 
 from kriya.workflow.migration import (
     MigrationObligation,
+    MigrationResolutionStatus,
     find_migration_incomplete,
-    resolve_migration_obligation,
+    resolve_migration_resolution,
 )
 
 _POM_BOTH = (
@@ -57,23 +58,26 @@ def _write(root, pom, service_content):
     svc.write_text(service_content)
 
 
-def test_resolve_migration_obligation_no_replacement_intent_returns_none(tmp_path):
+def test_resolve_migration_resolution_no_replacement_intent_is_not_applicable(tmp_path):
     """No explicit migration goal -> the validator must not invent an
     obligation, matching this codebase's established narrow-intent-gate
     convention (e.g. file_resolution.py's _goal_explicitly_requests_api_change)."""
     _write(tmp_path, _POM_BOTH, _GSON_SERVICE)
-    assert resolve_migration_obligation(
-        "Add a displayName field to Customer", str(tmp_path), _TARGET_FILES,
-    ) is None
+    resolution = resolve_migration_resolution("Add a displayName field to Customer", str(tmp_path))
+    assert resolution.status == MigrationResolutionStatus.NOT_APPLICABLE
+    assert resolution.obligation is None
 
 
-def test_resolve_migration_obligation_grounds_source_and_target_from_repo_state(tmp_path):
+def test_resolve_migration_resolution_grounds_source_and_target_from_repo_state(tmp_path):
     """Neither Gson nor Jackson is literally named in the goal text - source
-    is resolved as whatever the grounded consumer currently imports, target
-    as whichever OTHER declared dependency is used nowhere in the baseline
-    repo (PRV-05's own fixture shape: both already declared, only one used)."""
+    is resolved as whichever production-scope dependency is currently used,
+    target as whichever OTHER production-scope dependency is used nowhere in
+    the baseline repo (PRV-05's own fixture shape: both already declared,
+    only one used)."""
     _write(tmp_path, _POM_BOTH, _GSON_SERVICE)
-    obligation = resolve_migration_obligation(_GOAL, str(tmp_path), _TARGET_FILES)
+    resolution = resolve_migration_resolution(_GOAL, str(tmp_path))
+    assert resolution.status == MigrationResolutionStatus.RESOLVED
+    obligation = resolution.obligation
     assert obligation is not None
     assert obligation.source_identity == "gson"
     assert obligation.target_identity == "jackson-databind"
@@ -81,15 +85,18 @@ def test_resolve_migration_obligation_grounds_source_and_target_from_repo_state(
     assert obligation.migration_kind == "dependency_or_technology_replacement"
 
 
-def test_resolve_migration_obligation_no_pom_returns_none(tmp_path):
+def test_resolve_migration_resolution_no_pom_is_not_applicable(tmp_path):
     (tmp_path / _TARGET_FILES[0]).parent.mkdir(parents=True)
     (tmp_path / _TARGET_FILES[0]).write_text(_GSON_SERVICE)
-    assert resolve_migration_obligation(_GOAL, str(tmp_path), _TARGET_FILES) is None
+    resolution = resolve_migration_resolution(_GOAL, str(tmp_path))
+    assert resolution.status == MigrationResolutionStatus.NOT_APPLICABLE
 
 
-def test_resolve_migration_obligation_ambiguous_when_no_dormant_dependency(tmp_path):
-    """Both declared dependencies are already in use somewhere - no single
-    dormant "already approved" candidate, so this must not guess."""
+def test_resolve_migration_resolution_not_applicable_when_no_dormant_dependency(tmp_path):
+    """Both declared dependencies are already in use somewhere - no dormant
+    "already approved" candidate exists at all, so this Maven-migration
+    pattern simply doesn't fit (NOT_APPLICABLE), distinct from the genuinely
+    ambiguous case below (2+ dormant candidates)."""
     root = tmp_path
     (root / "pom.xml").write_text(_POM_BOTH)
     svc = root / _TARGET_FILES[0]
@@ -100,7 +107,77 @@ def test_resolve_migration_obligation_ambiguous_when_no_dormant_dependency(tmp_p
         "package com.example;\nimport com.fasterxml.jackson.databind.ObjectMapper;\n"
         "public class Other { ObjectMapper m; }\n"
     )
-    assert resolve_migration_obligation(_GOAL, str(root), _TARGET_FILES) is None
+    resolution = resolve_migration_resolution(_GOAL, str(root))
+    assert resolution.status == MigrationResolutionStatus.NOT_APPLICABLE
+    assert resolution.obligation is None
+
+
+def test_resolve_migration_resolution_indeterminate_when_multiple_dormant_candidates(tmp_path):
+    """Two production-scope dependencies both look dormant (unused) - the
+    goal DOES express replacement intent, so this ambiguity must be reported
+    as INDETERMINATE, never silently downgraded to "no obligation applies" -
+    PRV-05 run 6 (2026-08-28) found that exact silent downgrade is what let
+    a false PASS through both the per-attempt authorization check and the
+    terminal gate."""
+    pom = (
+        "<project><dependencies>\n"
+        "<dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId>"
+        "<version>2.11.0</version></dependency>\n"
+        "<dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId>"
+        "<version>2.17.2</version></dependency>\n"
+        "<dependency><groupId>com.squareup.moshi</groupId><artifactId>moshi</artifactId>"
+        "<version>1.15.0</version></dependency>\n"
+        "</dependencies></project>\n"
+    )
+    _write(tmp_path, pom, _GSON_SERVICE)
+    resolution = resolve_migration_resolution(_GOAL, str(tmp_path))
+    assert resolution.status == MigrationResolutionStatus.INDETERMINATE
+    assert resolution.obligation is None
+
+
+def test_resolve_migration_resolution_excludes_test_scoped_dependency_from_ambiguity(tmp_path):
+    """PRV-05 run 6 regression (2026-08-28): a declared but currently-unused
+    TEST-scoped dependency (JUnit) must NOT count as a second "dormant"
+    candidate and push resolution into ambiguity - it's structurally
+    irrelevant to a production library replacement. Reproduces the exact
+    live fixture shape: Gson (used, production), Jackson (unused, production
+    - the real target), JUnit (unused, declared <scope>test</scope>, no test
+    file exists yet). Before this fix, resolve_migration_obligation() found
+    TWO unused candidates (Jackson AND JUnit) and returned None, which left
+    the dependency-preservation validator fighting the migration for the
+    entire live run."""
+    pom = (
+        "<project><dependencies>\n"
+        "<dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId>"
+        "<version>2.11.0</version></dependency>\n"
+        "<dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId>"
+        "<version>2.17.2</version></dependency>\n"
+        "<dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId>"
+        "<version>5.10.2</version><scope>test</scope></dependency>\n"
+        "</dependencies></project>\n"
+    )
+    _write(tmp_path, pom, _GSON_SERVICE)
+    resolution = resolve_migration_resolution(_GOAL, str(tmp_path))
+    assert resolution.status == MigrationResolutionStatus.RESOLVED
+    assert resolution.obligation.source_identity == "gson"
+    assert resolution.obligation.target_identity == "jackson-databind"
+
+
+def test_resolve_migration_resolution_excludes_test_source_files_from_usage_scan(tmp_path):
+    """A test file importing the target library must not make it look
+    "used" and knock it out of target-candidacy - matches the real PRV-05
+    fixture shape once JsonServiceTest.java (Jackson-based) exists
+    alongside a still-Gson-based production JsonService.java."""
+    _write(tmp_path, _POM_BOTH, _GSON_SERVICE)
+    test_file = tmp_path / "src/test/java/com/example/JsonServiceTest.java"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text(
+        "package com.example;\nimport com.fasterxml.jackson.databind.ObjectMapper;\n"
+        "class JsonServiceTest { ObjectMapper m; }\n"
+    )
+    resolution = resolve_migration_resolution(_GOAL, str(tmp_path))
+    assert resolution.status == MigrationResolutionStatus.RESOLVED
+    assert resolution.obligation.target_identity == "jackson-databind"
 
 
 def _obligation():
