@@ -1402,6 +1402,73 @@ async def test_enforce_discards_successful_earlier_subtask_when_plan_fails(
     assert persisted.subtask_written_files == {}
 
 
+@pytest.mark.asyncio
+async def test_enforce_terminal_commit_resolves_dependency_ordered_same_path_ownership(
+    tmp_path, monkeypatch,
+):
+    """Regression test (2026-08-28): plan_validation.py's own
+    AMBIGUOUS_PLANNED_FILE_OWNERSHIP check legitimately allows the same
+    path to be owned by a dependency-ordered chain of subtasks (e.g. an
+    "identify usages" stage and a later "migrate" stage both touching
+    pom.xml). The terminal-commit assembly used to build one StagedFileWrite
+    per (subtask, planned_file) pair, so a plan shaped exactly like this fed
+    commit_revision_grounded_batch's own duplicate-target-path guard a
+    genuine duplicate and crashed with BatchCommitError instead of
+    completing. The fix resolves to exactly one write per unique path,
+    sourced from the last owner in real dependency/execution order."""
+    same_path = "pom.xml"
+    (tmp_path / same_path).write_text("<project>original</project>\n")
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="identify usages", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=same_path, action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="s2", description="migrate dependency", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path=same_path, action=FileAction.MODIFY)],
+            ),
+        ],
+    )
+    sandbox = tmp_path / "plan-sandbox"
+
+    def create_plan_sandbox(workspace):
+        shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+        return str(sandbox)
+
+    monkeypatch.setattr(
+        "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+    )
+    monkeypatch.setattr(
+        "kriya.workflow.workflow_controller.remove_git_worktree",
+        lambda workspace, candidate: shutil.rmtree(candidate),
+    )
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (sandbox / same_path).write_text("<project>s1 content</project>\n")
+        else:
+            (sandbox / same_path).write_text("<project>s2 final content</project>\n")
+        return {"status": "success", "quality_gates_passed": True, "files": [same_path]}
+
+    we = _workflow_engine()
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "migrate dependency", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert result.legacy_result["quality_gates_passed"] is True
+    assert (tmp_path / same_path).read_text() == "<project>s2 final content</project>\n"
+    assert not sandbox.exists()
+
+
 # --- enforce mode fully replaces legacy, never runs it too ---
 
 @pytest.mark.asyncio

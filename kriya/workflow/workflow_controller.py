@@ -2801,38 +2801,60 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         try:
             if all_completed and plan_workspace_path != workspace_path:
                 terminal_writes: List[StagedFileWrite] = []
-                for planned_subtask in plan.subtasks:
+                # plan_validation.py's AMBIGUOUS_PLANNED_FILE_OWNERSHIP check
+                # legitimately allows the same path to be owned by a
+                # dependency-ordered sequential chain of subtasks (e.g. an
+                # "identify usages" stage and a later "migrate" stage both
+                # touching pom.xml) - so plan.subtasks can list the same
+                # planned_file.path more than once. Building one StagedFileWrite
+                # per (subtask, planned_file) pair here fed
+                # commit_revision_grounded_batch's own duplicate-target-path
+                # guard a genuine duplicate and hard-crashed terminal commit
+                # for any such plan. Resolve to exactly ONE entry per unique
+                # path instead: walk subtasks in real dependency/execution
+                # order (not plan.subtasks' possibly-unordered list order) and
+                # let the last owner's declared action win - plan_workspace_path
+                # is a single worktree shared by every subtask, so its on-disk
+                # content already reflects that final, validated state.
+                subtasks_by_id = {subtask.id: subtask for subtask in plan.subtasks}
+                execution_ordered_subtasks = [
+                    subtasks_by_id[sid] for sid in topological_subtask_order(plan) if sid in subtasks_by_id
+                ]
+                final_action_by_path: Dict[str, FileAction] = {}
+                for planned_subtask in execution_ordered_subtasks:
                     for planned_file in planned_subtask.planned_files:
-                        if planned_file.action == FileAction.DELETE:
-                            candidate_path = os.path.join(plan_workspace_path, planned_file.path)
-                            if os.path.exists(candidate_path):
-                                raise RuntimeError(
-                                    f"Terminal plan candidate did not delete approved file {planned_file.path!r}"
-                                )
-                            target_path = os.path.join(workspace_path, planned_file.path)
-                            terminal_writes.append(StagedFileWrite(
-                                target_path=target_path,
-                                content="",
-                                base_path=target_path,
-                                expected_base_revision=original_plan_revisions[planned_file.path],
-                                delete=True,
-                            ))
-                            continue
-                        candidate_path = os.path.join(plan_workspace_path, planned_file.path)
-                        try:
-                            with open(candidate_path, "r", encoding="utf-8", errors="replace") as handle:
-                                candidate_content = handle.read()
-                        except OSError as error:
+                        final_action_by_path[planned_file.path] = planned_file.action
+                for path, action in final_action_by_path.items():
+                    if action == FileAction.DELETE:
+                        candidate_path = os.path.join(plan_workspace_path, path)
+                        if os.path.exists(candidate_path):
                             raise RuntimeError(
-                                f"Terminal plan candidate is missing approved file {planned_file.path!r}: {error}"
-                            ) from error
-                        target_path = os.path.join(workspace_path, planned_file.path)
+                                f"Terminal plan candidate did not delete approved file {path!r}"
+                            )
+                        target_path = os.path.join(workspace_path, path)
                         terminal_writes.append(StagedFileWrite(
                             target_path=target_path,
-                            content=candidate_content,
+                            content="",
                             base_path=target_path,
-                            expected_base_revision=original_plan_revisions[planned_file.path],
+                            expected_base_revision=original_plan_revisions[path],
+                            delete=True,
                         ))
+                        continue
+                    candidate_path = os.path.join(plan_workspace_path, path)
+                    try:
+                        with open(candidate_path, "r", encoding="utf-8", errors="replace") as handle:
+                            candidate_content = handle.read()
+                    except OSError as error:
+                        raise RuntimeError(
+                            f"Terminal plan candidate is missing approved file {path!r}: {error}"
+                        ) from error
+                    target_path = os.path.join(workspace_path, path)
+                    terminal_writes.append(StagedFileWrite(
+                        target_path=target_path,
+                        content=candidate_content,
+                        base_path=target_path,
+                        expected_base_revision=original_plan_revisions[path],
+                    ))
                 commit_revision_grounded_batch(terminal_writes, workspace_path=workspace_path)
             elif not all_completed and plan_workspace_path != workspace_path:
                 # No subtask output reached the user workspace. A later resume
