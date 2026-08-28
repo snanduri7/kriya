@@ -165,3 +165,20 @@ def test_find_migration_incomplete_preserves_public_api_shape_on_pass(tmp_path):
     _write(tmp_path, _POM_JACKSON_ONLY, _JACKSON_SERVICE)
     assert "public String serialize(Object c)" in _JACKSON_SERVICE
     assert find_migration_incomplete(_obligation(), str(tmp_path)) is None
+
+
+def test_find_migration_incomplete_names_the_manifest_when_consumer_is_fully_migrated(tmp_path):
+    """Regression test for PRV-05 (2026-08-28 rerun): JsonService fully
+    migrated to Jackson (no remaining source usage anywhere), but pom.xml
+    still declares Gson. unmigrated_consumers and source_usage_files are
+    BOTH correctly empty here - nothing is wrong with any consumer file -
+    but the failure must still be able to point somewhere: manifest_files
+    names pom.xml, the actual file that needs the fix (typically owned by
+    a DIFFERENT, already-completed subtask)."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    gap = find_migration_incomplete(_obligation(), str(tmp_path))
+    assert gap is not None
+    assert gap["reason_codes"] == ["SOURCE_DEPENDENCY_REMAINS"]
+    assert gap["unmigrated_consumers"] == []
+    assert gap["source_usage_files"] == []
+    assert gap["manifest_files"] == ["pom.xml"]

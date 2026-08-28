@@ -257,6 +257,19 @@ def find_migration_incomplete(
         return None
 
     reason_codes = []
+    # manifest_files: evidence for the two reason codes that are purely
+    # about the DECLARATION (pom.xml), not any .java file's content - found
+    # live, PRV-05 (2026-08-28): when JsonService is fully migrated (no
+    # remaining source usage) but pom.xml still declares the old dependency,
+    # BOTH source_usage_files and unmigrated_consumers are correctly empty -
+    # there's real nothing wrong with any consumer file - but that left the
+    # resulting failure with NO likely_files at all, unable to point the
+    # retry/attribution pipeline at the one file that actually needs fixing
+    # (pom.xml, typically owned by a DIFFERENT, already-completed subtask).
+    manifest_files: List[str] = []
+    if not target_present or not source_absent:
+        if os.path.isfile(os.path.join(worktree_path, "pom.xml")):
+            manifest_files.append("pom.xml")
     if not target_present:
         reason_codes.append("TARGET_DEPENDENCY_MISSING")
     if not source_absent:
@@ -273,4 +286,5 @@ def find_migration_incomplete(
         "grounded_consumers": obligation.grounded_consumers,
         "source_usage_files": source_usage_files,
         "unmigrated_consumers": unmigrated_consumers,
+        "manifest_files": manifest_files,
     }

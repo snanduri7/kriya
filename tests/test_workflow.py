@@ -21,6 +21,7 @@ from kriya.workflow.attempt import (
     AttemptContext,
     _brownfield_owner_contract_block,
     _diagnosis_mismatch_bypass_reason,
+    _directly_executable_verifiers,
     _operation_map,
     _record_self_correction_scope_conflict,
     _run_verification_basis_hash,
@@ -1163,6 +1164,126 @@ async def test_run_attempt_hard_rejects_a_write_under_deny_all_write_scope(tmp_p
     assert not (tmp_path / "unexpected.py").exists()
 
 
+_TOOL_TEST_VERIFIER = {
+    "type": "tool", "description": "run tests", "tool_name": "test",
+    "verifier_kind": "test", "requires_runtime_execution": False,
+}
+
+
+def test_directly_executable_verifiers_excludes_judgment_requirements():
+    """A judgment/requires_runtime_execution verifier needs the runtime-
+    verification machinery deep inside run_attempt() - deliberately NOT
+    handled by the direct-execution short-circuit yet (see
+    _run_verification_only_attempt's own docstring)."""
+    assert _directly_executable_verifiers([
+        {"type": "judgment", "description": "runtime check", "requires_runtime_execution": True},
+    ]) == []
+    assert _directly_executable_verifiers([_TOOL_TEST_VERIFIER]) == [_TOOL_TEST_VERIFIER]
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_verification_only_subtask_never_invokes_developer(tmp_path):
+    """First-class verification execution path regression test (PRV-05,
+    2026-08-28): a verification-only subtask (write_scope_mode=DENY_ALL)
+    with a directly-executable declared verifier must run that verifier
+    DIRECTLY - zero Developer/LLM calls, no candidate write attempt. Found
+    live: without this, the SAME subtask burned 6 attempts (escalating to
+    the fallback model) rediscovering, by trial and error, that it had
+    nothing to write, before a runtime-verification side effect happened to
+    produce the evidence a direct verifier call would have produced
+    immediately."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for a verification-only subtask"),
+    )
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal="Run regression tests to confirm behavior is preserved",
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+        allowed_write_relpaths=[], write_scope_mode=WriteScopeMode.DENY_ALL,
+        required_verification=[_TOOL_TEST_VERIFIER],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": "BUILD SUCCESS"},
+    ) as mock_run_tests:
+        await run_attempt(state, ctx)
+
+    assert mock_run_tests.called
+    assert not developer.run_generation.called
+    assert state.candidate_gates_succeeded is True
+    assert any(outcome["type"] == "test" and outcome["success"] for outcome in state.gate_outcomes)
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_verification_only_subtask_raises_typed_failure_on_test_failure(tmp_path):
+    """A real verifier failure must still surface as a normal typed
+    QualityGateFailure (type="test") - the existing failure-attribution/
+    recovery machinery handles it exactly as any other subtask failure;
+    this path doesn't invent a new recovery mechanism."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for a verification-only subtask"),
+    )
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal="Run regression tests to confirm behavior is preserved",
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+        allowed_write_relpaths=[], write_scope_mode=WriteScopeMode.DENY_ALL,
+        required_verification=[_TOOL_TEST_VERIFIER],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": False, "output": "Tests run: 3, Failures: 1"},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "test"
+    assert not developer.run_generation.called
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_verification_only_subtask_falls_through_without_a_direct_verifier(tmp_path):
+    """Safety net: a verification-only subtask declaring ONLY a judgment/
+    runtime-execution verifier (not yet directly executable) must fall
+    through to the ordinary Developer path unchanged - still fully
+    protected by DENY_ALL (proven separately), just not yet optimized for
+    this shape."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal="Run the application and confirm it starts",
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+        allowed_write_relpaths=[], write_scope_mode=WriteScopeMode.DENY_ALL,
+        required_verification=[{
+            "type": "judgment", "description": "runtime check", "requires_runtime_execution": True,
+        }],
+    )
+
+    # Falls through to the ordinary (Developer-driven) path rather than
+    # silently short-circuiting to success with no evidence - proven by the
+    # Developer actually being invoked, not by any particular outcome (an
+    # empty architect_files/Developer response here happens to be a
+    # trivially valid "nothing to generate" attempt, matching this
+    # session's own predetermined_architect_files=[] fix).
+    await run_attempt(state, ctx)
+
+    assert developer.run_generation.called
+
+
 _APP_MAIN_JAVA = (
     "package com.example;\n"
     "public class App {\n"
@@ -1372,6 +1493,51 @@ async def test_run_attempt_rejects_incomplete_migration_before_spec_compliance(t
     assert exc_info.value.failure.type == "migration_incomplete"
     assert owner in exc_info.value.failure.likely_files
     default_spec_compliance.check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_migration_check_uses_grounding_goal_for_bounded_subtask(tmp_path):
+    """Regression test for PRV-05 (2026-08-28 rerun): the migration check
+    never fired for ANY subtask across a full live run, even though the
+    migration genuinely completed with Gson still declared. Root cause: a
+    bounded subtask's own ctx.goal is its narrow per-subtask description
+    (e.g. "Modify JsonService.java to use the new JSON library..." for the
+    real s2) - the explicit "replace X" intent only appears in the plan's
+    original top-level goal text, threaded separately as ctx.grounding_goal.
+    This pins that the migration check reads ctx.grounding_goal, matching
+    every other deterministic architectural-owner discovery call in this
+    module."""
+    state = GenerationState()
+    state.attempt_number = 0
+    owner = "src/main/java/com/example/JsonService.java"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(_PRV05_GSON_JSON_SERVICE)
+    (tmp_path / "pom.xml").write_text(_PRV05_POM_BOTH)
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": owner, "content": _PRV05_GSON_JSON_SERVICE,
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        goal="Modify JsonService.java to use the new JSON library for serialization and deserialization operations",
+        grounding_goal=_PRV05_GOAL,
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={"JsonService.java": owner},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "migration_incomplete"
 
 
 @pytest.mark.asyncio

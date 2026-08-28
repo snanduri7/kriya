@@ -149,6 +149,52 @@ async def test_planned_file_has_exactly_one_owner(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_planned_file_with_dependency_ordered_co_owners_is_not_ambiguous(tmp_path):
+    """Regression test for PRV-05 (2026-08-28 rerun): a real dependency-
+    migration plan had two STRICTLY SEQUENTIAL stages both legitimately
+    declare the same file (an early "identify usages" stage, then a later
+    "migrate to the new API" stage depending on it transitively through the
+    chain in between) - genuinely safe, since the later stage can only ever
+    run after the earlier one's output already exists. Must NOT be flagged
+    the same way as two independent/parallel subtasks racing to write the
+    same path (see test_planned_file_has_exactly_one_owner above, which
+    stays ambiguous - no dependency relationship between its two owners)."""
+    (tmp_path / "shared.json").write_text("{}")
+    first = _model_subtask(
+        id="s1", planned_files=[PlannedFile(path="shared.json", action=FileAction.MODIFY)],
+    )
+    middle = _model_subtask(
+        id="s2", depends_on=["s1"], planned_files=[PlannedFile(path="other.txt", action=FileAction.CREATE)],
+    )
+    last = _model_subtask(
+        id="s3", depends_on=["s2"], planned_files=[PlannedFile(path="shared.json", action=FileAction.MODIFY)],
+    )
+    result = await validate_plan(_plan([first, middle, last]), workspace_path=str(tmp_path))
+    assert result.valid is True
+    assert "AMBIGUOUS_PLANNED_FILE_OWNERSHIP" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_planned_file_with_only_partially_ordered_co_owners_is_still_ambiguous(tmp_path):
+    """Three co-owners where two are dependency-ordered but the third has
+    NO relationship to either - the set as a whole is still not a single
+    unambiguous sequence, so this must stay rejected."""
+    (tmp_path / "shared.json").write_text("{}")
+    first = _model_subtask(
+        id="s1", planned_files=[PlannedFile(path="shared.json", action=FileAction.MODIFY)],
+    )
+    last = _model_subtask(
+        id="s2", depends_on=["s1"], planned_files=[PlannedFile(path="shared.json", action=FileAction.MODIFY)],
+    )
+    unrelated = _model_subtask(
+        id="s3", planned_files=[PlannedFile(path="shared.json", action=FileAction.MODIFY)],
+    )
+    result = await validate_plan(_plan([first, last, unrelated]), workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert "AMBIGUOUS_PLANNED_FILE_OWNERSHIP" in result.reason_codes
+
+
+@pytest.mark.asyncio
 async def test_unknown_depends_on_reference_is_an_error(tmp_path):
     plan = _plan([_model_subtask(id="s1", depends_on=["ghost"])])
     result = await validate_plan(plan, workspace_path=str(tmp_path))

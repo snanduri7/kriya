@@ -436,6 +436,15 @@ class AttemptContext:
     # UNRESTRICTED, matching every plain (non-bounded-subtask) generate call
     # and every existing test's own expectations unchanged.
     write_scope_mode: WriteScopeMode = WriteScopeMode.UNRESTRICTED
+    # The subtask's own declared verifiers (VerificationMethod.model_dump()
+    # dicts) - only consulted when write_scope_mode == DENY_ALL, to execute
+    # them directly instead of entering ordinary Developer generation (see
+    # run_attempt()'s own verification-only branch, and _run_verification_
+    # only_attempt's docstring, for the PRV-05, 2026-08-28 incident this
+    # closes: a verification-only subtask used to still enter the Developer
+    # mutation/retry pipeline, burning several attempts discovering it had
+    # nothing to write before its own required verification ever ran).
+    required_verification: List[Dict[str, Any]] = field(default_factory=list)
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
     # Human-readable identity for nested structured executions. Attempt
@@ -827,12 +836,143 @@ def _build_workspace_type_index(state: GenerationState, ctx: "AttemptContext") -
         return {}
 
 
+def _directly_executable_verifiers(required_verification: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """type=tool verifiers naming a BUILTIN_QUALITY_GATE_VERIFIERS tool_name
+    (compile/test/tests/regression/quality_gates) - the ones
+    _run_verification_only_attempt can execute directly via
+    PolymorphicValidator, the same deterministic gate every ordinary
+    implementation-subtask attempt already uses. A judgment/requires_
+    runtime_execution verifier (RunVerifierAgent-based runtime execution)
+    is deliberately NOT included - that machinery lives deep inside this
+    module's own Developer/Quality-Gates loop and extracting it safely is a
+    larger, separate lift; see this function's own caller for what happens
+    when a verification-only subtask declares ONLY that kind of verifier."""
+    from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS
+    return [
+        requirement for requirement in required_verification
+        if requirement.get("type") == "tool"
+        and requirement.get("tool_name") in BUILTIN_QUALITY_GATE_VERIFIERS
+    ]
+
+
+async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptContext) -> None:
+    """First-class execution path for a verification-only subtask
+    (ctx.write_scope_mode == WriteScopeMode.DENY_ALL): executes its own
+    declared deterministic verifier(s) directly against the existing
+    worktree content - no Developer invocation, no candidate write attempt,
+    no retry loop of its own. Raises QualityGateFailure (the same typed
+    shape an ordinary compile/test failure already raises) the moment any
+    verifier fails, so the EXISTING failure-attribution/recovery machinery
+    handles it exactly as it would any other subtask failure - this
+    function does not invent a new recovery path.
+
+    Found live, PRV-05 (2026-08-28): before this existed, a verification-
+    only subtask (files=[], DENY_ALL) still entered the ordinary Developer
+    mutation/retry pipeline. Every attempt's Developer response inevitably
+    tried to write SOMETHING (it has no other protocol), DENY_ALL correctly
+    rejected each one, and the loop burned 6 attempts (escalating to the
+    fallback model) before a runtime-verification side effect happened to
+    produce the exact evidence a direct verifier call would have produced
+    on attempt 1. Confirmed live evidence, same run: real `mvn -e test`
+    exit-0 evidence WAS produced, but under gate_outcome type="run_verification"
+    (the runtime-verification path's own type) while the plan's declared
+    requirement was type=tool/tool_name=test - workflow.py's
+    _build_required_verification_evidence() only matches a tool/test
+    requirement against type in {"test","targeted_test","regression_test"}
+    outcomes, so the real evidence was never connected to the obligation.
+    Running the DECLARED verifier directly here (via the same
+    PolymorphicValidator.run_tests()/run_compile_check() every ordinary
+    attempt already uses) records the gate_outcome under the SAME type the
+    requirement itself expects, closing that mismatch as a side effect of
+    fixing the real problem (verification-only subtasks running the wrong
+    execution path) rather than patching the symptom (evidence-matching
+    logic) directly."""
+    from kriya.tools.validate import PolymorphicValidator
+
+    state.attempt_number += 1
+    state.candidate_gates_succeeded = False
+    validator = PolymorphicValidator(
+        ctx.worktree_path, original_workspace_path=ctx.workspace_path,
+        autonomy_cfg=ctx.kernel.config.autonomy,
+    )
+    known_files = sorted(set(ctx.established_files))
+
+    for requirement in _directly_executable_verifiers(ctx.required_verification):
+        tool_name = requirement.get("tool_name")
+        if tool_name == "compile":
+            result = validator.run_compile_check(known_files)
+            outcome_type = "compile"
+        else:
+            # test/tests/regression/quality_gates all ultimately mean "run
+            # the test suite" for this direct-execution path - quality_gates
+            # additionally implies compile must pass first.
+            if tool_name == "quality_gates":
+                compile_result = validator.run_compile_check(known_files)
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number, "type": "compile",
+                    "success": compile_result["success"], "output": compile_result.get("output", ""),
+                })
+                if not compile_result["success"]:
+                    failure = Failure(
+                        type="compile",
+                        message=f"COMPILATION FAILURE (verification-only subtask):\n{compile_result.get('output', '')}",
+                        raw_output=compile_result.get("output", ""), attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+            result = validator.run_tests()
+            outcome_type = "test"
+        state.gate_outcomes.append({
+            "attempt": state.attempt_number, "type": outcome_type,
+            "success": result["success"], "output": result.get("output", ""),
+        })
+        if not result["success"]:
+            failure = Failure(
+                type=outcome_type,
+                message=(
+                    f"{outcome_type.upper()} FAILURE (verification-only subtask):\n"
+                    f"{result.get('output', '')}"
+                ),
+                raw_output=result.get("output", ""), attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+    state.candidate_gates_succeeded = True
+    state.record_event(RunEvent(
+        kind="candidate_gates.passed",
+        attempt=state.attempt_number,
+        source="workflow",
+        authority=EventAuthority.AUTHORITATIVE,
+        details={"passed": True, "terminal": False, "verification_only": True},
+    ))
+    log_gate_banner(
+        "CANDIDATE GATES", "PASSED", state.attempt_number,
+        scope=ctx.execution_scope,
+    )
+
+
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """Runs one Developer + Quality Gates attempt. Mutates state in place
     (files_written, gate_outcomes, model_hops, run_verification_*, etc.).
     Raises QualityGateFailure or IncompleteGenerationError on any gate
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
+    if (
+        ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+        and _directly_executable_verifiers(ctx.required_verification)
+    ):
+        # Verification-only subtask with at least one directly-executable
+        # verifier - take the whole rest of this function out of the loop
+        # entirely (see _run_verification_only_attempt's own docstring for
+        # why). Falls through to the ordinary path below ONLY when no
+        # required_verification entry is directly executable (e.g. a
+        # judgment/runtime-execution-only verifier) - still fully protected
+        # by DENY_ALL either way, just not yet optimized for that shape.
+        state.terminal_regression_succeeded = False
+        state.overall_attempt_succeeded = False
+        await _run_verification_only_attempt(state, ctx)
+        return
     state.attempt_number += 1
     state.candidate_gates_succeeded = False
     state.terminal_regression_succeeded = False
@@ -3631,7 +3771,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # ever returns non-None for a goal that explicitly expresses replacement
     # intent AND has unambiguous repository grounding for source/target -
     # every other goal pays only the cost of one quick regex check.
-    migration_obligation = resolve_migration_obligation(ctx.goal, ctx.workspace_path, ctx.architect_files)
+    #
+    # ctx.grounding_goal or ctx.goal (not ctx.goal alone): found live, PRV-05
+    # (2026-08-28 rerun) - this check never fired for ANY subtask across a
+    # full run, even though s2's own migration genuinely completed with
+    # Gson still declared. Root cause: a bounded subtask's own ctx.goal is
+    # its NARROW per-subtask description (e.g. "Modify JsonService.java to
+    # use the new JSON library..." for s2) - the explicit "replace X" intent
+    # only appears in the PLAN's original top-level goal text. Every other
+    # deterministic architectural-owner discovery call in this module already
+    # prefers ctx.grounding_goal for exactly this reason (see that field's
+    # own docstring on AttemptContext); this call site had simply never been
+    # updated to match when it was added.
+    migration_obligation = resolve_migration_obligation(
+        ctx.grounding_goal or ctx.goal, ctx.workspace_path, ctx.architect_files,
+    )
     if migration_obligation:
         migration_gap = find_migration_incomplete(migration_obligation, ctx.worktree_path)
         if migration_gap:
@@ -3644,9 +3798,20 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             failure = _build_quality_gate_failure(
                 "migration_incomplete", message, message,
                 ctx.worktree_path, state.all_files_written, state.attempt_number,
-                extra_likely_files=(
-                    migration_gap["unmigrated_consumers"] or migration_gap["source_usage_files"]
-                ),
+                # Union, not "first non-empty wins": found live, PRV-05
+                # (2026-08-28 rerun) - a fully-migrated consumer with the
+                # dependency still declared leaves BOTH unmigrated_consumers
+                # and source_usage_files empty, so the failure had no
+                # likely_files at all and couldn't point the retry/
+                # attribution pipeline at the one file that actually needs
+                # fixing (typically pom.xml, owned by a different, already-
+                # completed subtask - see migration.py's own manifest_files
+                # docstring).
+                extra_likely_files=list(dict.fromkeys(
+                    migration_gap["unmigrated_consumers"]
+                    + migration_gap["source_usage_files"]
+                    + migration_gap["manifest_files"]
+                )),
             )
             failure.diagnostics = {
                 **(failure.diagnostics or {}),

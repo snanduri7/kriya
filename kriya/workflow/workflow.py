@@ -2085,6 +2085,7 @@ class WorkflowEngine:
             established_files=established_files or [],
             protected_relpath=protected_relpath,
             allowed_write_relpaths=list(allowed_write_relpaths or []),
+            required_verification=list(required_verification or []),
             # Resolved ONCE, here, mirroring AuthorizedFileWriter's own
             # backward-compatible inference (kriya/policy/filesystem.py) so
             # every write-gate call site downstream (kriya/workflow/

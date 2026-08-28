@@ -93,6 +93,55 @@ def _acyclic(subtasks: List[Subtask]) -> bool:
     return visited == len(subtasks)
 
 
+def _transitive_dependencies(subtasks: List[Subtask]) -> Dict[str, "set[str]"]:
+    """id -> the set of every OTHER subtask id it depends on, directly or
+    transitively (its own id never included). Assumes the graph is already
+    known-acyclic (callers check that separately) - a cycle would recurse
+    forever here. Memoized per call since real plans reuse the same
+    upstream subtask across many downstream dependents."""
+    by_id = {st.id: st for st in subtasks}
+    memo: Dict[str, "set[str]"] = {}
+
+    def resolve(subtask_id: str) -> "set[str]":
+        if subtask_id in memo:
+            return memo[subtask_id]
+        memo[subtask_id] = set()  # cycle guard - real cycles are rejected elsewhere
+        result: "set[str]" = set()
+        for dep in by_id[subtask_id].depends_on if subtask_id in by_id else []:
+            if dep not in by_id:
+                continue
+            result.add(dep)
+            result |= resolve(dep)
+        memo[subtask_id] = result
+        return result
+
+    return {st.id: resolve(st.id) for st in subtasks}
+
+
+def _forms_sequential_ownership_chain(
+    owner_ids: List[str], transitive_deps: Dict[str, "set[str]"],
+) -> bool:
+    """True when every pair of co-owners is dependency-ORDERED - one
+    transitively depends on the other, in either direction - so the whole
+    set forms a single, unambiguous evolutionary sequence for that file.
+    Found live, PRV-05 (2026-08-28 rerun): a real dependency-migration plan
+    legitimately had TWO strictly sequential stages both declare
+    JsonService.java (an early "identify usages" stage, then a later
+    "migrate to the new API" stage depending on it through the chain in
+    between) - genuinely safe, since the later stage can only ever run
+    after the earlier one's output already exists, with no ordering
+    ambiguity about which edit happens first. Two co-owners with NO
+    dependency relationship between them (parallel, or in unrelated
+    branches) are NOT covered by this - that shape is the real "which one
+    wins" ambiguity this whole check exists to catch, unchanged."""
+    for i in range(len(owner_ids)):
+        for j in range(i + 1, len(owner_ids)):
+            a, b = owner_ids[i], owner_ids[j]
+            if b not in transitive_deps.get(a, set()) and a not in transitive_deps.get(b, set()):
+                return False
+    return True
+
+
 async def validate_plan(
     plan: EngineeringPlan,
     *,
@@ -166,7 +215,8 @@ async def validate_plan(
             if dep not in id_set:
                 errors.append(f"subtask {st.id!r} depends_on unknown subtask id {dep!r}")
 
-    if not _acyclic(plan.subtasks):
+    graph_is_acyclic = _acyclic(plan.subtasks)
+    if not graph_is_acyclic:
         errors.append("subtask dependency graph contains a cycle")
 
     file_owners: Dict[str, List[str]] = {}
@@ -176,7 +226,22 @@ async def validate_plan(
             file_owners.setdefault(planned_file.path, []).append(st.id)
         for capability in st.provides:
             capability_providers.setdefault(capability, []).append(st.id)
-    ambiguous_files = {path: owners for path, owners in file_owners.items() if len(owners) != 1}
+    # A file with 2+ owners is ambiguous UNLESS every pair of co-owners is
+    # dependency-ORDERED (one transitively depends on the other) - a
+    # genuinely sequential evolutionary ownership (e.g. a dependency-
+    # migration plan's "identify usages" stage and its later "migrate to
+    # the new API" stage both legitimately touching the same file, in a
+    # fixed, unambiguous order) is not the same hazard as two independent/
+    # parallel subtasks racing to write the same path. Found live, PRV-05
+    # (2026-08-28 rerun) - see _forms_sequential_ownership_chain's own
+    # docstring for the exact incident. Skipped entirely when the graph is
+    # already known-cyclic (that's its own separate, more fundamental
+    # error - a "sequential" judgment is meaningless without a real order).
+    transitive_deps = _transitive_dependencies(plan.subtasks) if graph_is_acyclic else {}
+    ambiguous_files = {
+        path: owners for path, owners in file_owners.items()
+        if len(owners) != 1 and not (transitive_deps and _forms_sequential_ownership_chain(owners, transitive_deps))
+    }
     if ambiguous_files:
         errors.append(f"planned file ownership must be unique: {ambiguous_files}")
         reason_codes.append("AMBIGUOUS_PLANNED_FILE_OWNERSHIP")
