@@ -197,8 +197,46 @@ class ObligationLedger:
         return regression
 
     def current(self, obligation_id: str) -> Optional[ObligationRecord]:
+        """The obligation's AUTHORITATIVE state (spec §16), never a bare
+        "last written" lookup - a lower-authority record arriving after an
+        already-established higher-authority one must not become "current"
+        (spec §3.3: "an LLM-based evaluator must never invalidate a
+        requirement already conclusively satisfied by stronger
+        authoritative evidence"). Bug found and fixed 2026-08-28: this used
+        to return history[-1] unconditionally - correct for every producer
+        in this codebase TODAY (plan_validation.py/migration.py only ever
+        record DETERMINISTIC, so every real sequence is single-authority
+        and history[-1] happened to already be right) but silently wrong
+        the moment any JUDGMENT/GROUNDED producer starts writing to the
+        ledger, which this architecture explicitly anticipates (see
+        SpecComplianceAgent's authority=JUDGMENT).
+
+        Algorithm: walk history in order, keeping the most recent record
+        whose authority is same-or-higher than the authority of the record
+        currently held as authoritative. A record with LOWER authority than
+        the one already established is skipped entirely - it still exists
+        in history() (nothing here hides or discards it), it simply never
+        becomes the authoritative state. This is the exact same precedence
+        comparison record() already uses for regression detection
+        (authority.precedence() >= previous.authority.precedence()) -
+        deliberately reusing the identical rule rather than a second,
+        driftable one."""
         history = self._history.get(obligation_id)
-        return history[-1] if history else None
+        if not history:
+            return None
+        authoritative = history[0]
+        for rec in history[1:]:
+            if rec.authority.precedence() >= authoritative.authority.precedence():
+                authoritative = rec
+        return authoritative
+
+    def authoritative_state(self, obligation_id: str) -> Optional[ObligationRecord]:
+        """Alias for current() - spec §14 names this explicitly as its own
+        method. current() has always meant "authoritative state," never a
+        raw last-write lookup (see its own docstring) - a separate,
+        non-arbitrated getter is deliberately NOT provided, since that
+        would just reintroduce the same footgun under a different name."""
+        return self.current(obligation_id)
 
     def history(self, obligation_id: str) -> List[ObligationRecord]:
         return list(self._history.get(obligation_id, []))

@@ -71,12 +71,56 @@ def test_record_does_not_flag_regression_from_lower_authority():
     """A JUDGMENT-authority VIOLATED must never be treated as regressing a
     DETERMINISTIC-authority SATISFIED - that's the whole point of
     precedence: the lower-authority claim simply loses, it isn't even a
-    real regression event."""
+    real regression event. Also - the whole point of precedence, not just
+    the regression signal - current() must not have flipped either; see
+    test_authoritative_state_* below for the dedicated coverage of that."""
     ledger = ObligationLedger()
     ledger.record(_rec("a", ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC, revision=0))
     event = ledger.record(_rec("a", ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT, revision=1))
     assert event is None
     assert ledger.regressions == []
+    assert ledger.current("a").status == ObligationStatus.SATISFIED
+
+
+# --- Spec §16/§49 "Authority" required tests: current()/authoritative_state()
+# must implement real precedence arbitration, not a bare last-write lookup.
+# Bug found and fixed 2026-08-28 - current() used to return history[-1]
+# unconditionally, which happened to be correct for every producer that
+# exists today (all DETERMINISTIC-only) but was silently wrong for any
+# mixed-authority sequence. See current()'s own docstring in obligations.py. ---
+
+def test_authoritative_state_deterministic_satisfied_survives_later_judgment_violated():
+    """Doc §16 example 1, verbatim."""
+    ledger = ObligationLedger()
+    ledger.record(_rec("a", ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC, revision=0))
+    ledger.record(_rec("a", ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT, revision=1))
+    assert ledger.current("a").status == ObligationStatus.SATISFIED
+    assert ledger.authoritative_state("a").status == ObligationStatus.SATISFIED
+
+
+def test_authoritative_state_judgment_satisfied_overridden_by_later_deterministic_violated():
+    """Doc §16 example 2, verbatim."""
+    ledger = ObligationLedger()
+    ledger.record(_rec("a", ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT, revision=0))
+    ledger.record(_rec("a", ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC, revision=1))
+    assert ledger.current("a").status == ObligationStatus.VIOLATED
+
+
+def test_authoritative_state_ignores_any_number_of_repeated_lower_authority_records():
+    ledger = ObligationLedger()
+    ledger.record(_rec("a", ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC, revision=0))
+    ledger.record(_rec("a", ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT, revision=1))
+    ledger.record(_rec("a", ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT, revision=2))
+    ledger.record(_rec("a", ObligationStatus.VIOLATED, authority=ObligationAuthority.GROUNDED, revision=3))
+    assert ledger.current("a").status == ObligationStatus.SATISFIED
+
+
+def test_authoritative_state_same_authority_as_established_can_still_update():
+    ledger = ObligationLedger()
+    ledger.record(_rec("a", ObligationStatus.SATISFIED, authority=ObligationAuthority.GROUNDED, revision=0))
+    ledger.record(_rec("a", ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT, revision=1))
+    ledger.record(_rec("a", ObligationStatus.VIOLATED, authority=ObligationAuthority.GROUNDED, revision=2))
+    assert ledger.current("a").status == ObligationStatus.VIOLATED
 
 
 def test_detect_oscillation_true_for_violated_satisfied_violated():
@@ -152,6 +196,20 @@ def test_unresolved_terminal_obligations_includes_pending():
     ledger = ObligationLedger()
     ledger.record(_rec("still-pending", ObligationStatus.PENDING, terminal_required=True))
     assert [r.id for r in ledger.unresolved_terminal_obligations()] == ["still-pending"]
+
+
+def test_unresolved_terminal_obligations_includes_indeterminate():
+    """Doc §42/§49/§56: a material INDETERMINATE must not produce terminal
+    PASS either - the real live producer is workflow_controller.py's
+    terminal migration gate when MigrationResolutionStatus.INDETERMINATE
+    fires (migration.identity_resolution), reproduced here at the unit
+    level so this status's own terminal-blocking behavior has direct
+    coverage independent of the full WorkflowController harness."""
+    ledger = ObligationLedger()
+    ledger.record(_rec(
+        "migration.identity_resolution", ObligationStatus.INDETERMINATE, terminal_required=True,
+    ))
+    assert [r.id for r in ledger.unresolved_terminal_obligations()] == ["migration.identity_resolution"]
 
 
 def test_unresolved_terminal_obligations_empty_when_all_satisfied():

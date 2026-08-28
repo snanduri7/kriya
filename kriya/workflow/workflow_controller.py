@@ -129,6 +129,7 @@ from kriya.workflow.obligations import (
     ObligationAuthority,
     ObligationKind,
     ObligationLedger,
+    ObligationRecord,
     ObligationStatus,
 )
 from kriya.workflow.plan_schema import (
@@ -136,6 +137,7 @@ from kriya.workflow.plan_schema import (
     ExecutionMethod,
     ExecutionRole,
     FileAction,
+    FileOwnershipRelation,
     PlannedFile,
     Subtask,
     VerificationMethodType,
@@ -2341,29 +2343,52 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             call_result = await _invoke_bounded_subtask(subtask, position)
             scope_conflict = call_result.get("plan_scope_conflict") or {}
             grounded_scope_files = _plan_scope_conflict_files(scope_conflict)
-            # MA8 (spec §30, "owner is a completed predecessor"): a
-            # DETERMINISTIC-authority obligation (currently only the
-            # migration gate's authoritative_files, attribution tier
-            # "authoritative_deterministic" - see attribution.py) naming a
-            # file that a REAL, already-declared UPSTREAM subtask in THIS
-            # validated plan owns is a "reopen a completed predecessor"
-            # case, not an architecture-discovery case. Falling into the
-            # merge loop just below (revise_plan_for_grounded_scope_owner)
-            # would silently STRIP that predecessor of a legitimately
-            # planned responsibility and fold it into the current subtask
-            # instead of just re-running the predecessor - exactly the
-            # "silently edit across stage boundaries" the spec forbids.
-            # Skip straight to the existing reopen-owner path below (which
-            # already walks depends_on transitively - PAST_ORDERED by
-            # construction) whenever a real upstream owner is found; when
-            # none is found (unowned/unrelated file) fall through to the
-            # unchanged merge behavior below, matching the spec's separate
-            # "no owner -> plan/scope defect" rule.
+            # MA8 (spec §30): a DETERMINISTIC-authority obligation
+            # (currently only the migration gate's authoritative_files,
+            # attribution tier "authoritative_deterministic" - see
+            # attribution.py) naming a file some OTHER real subtask in this
+            # validated plan already owns must never be silently folded
+            # into the failing subtask via the merge loop just below
+            # (revise_plan_for_grounded_scope_owner, designed for genuine
+            # architecture-discovery - PRV-03/04's own case) - that would
+            # be exactly the "silently edit across stage boundaries" the
+            # spec forbids, whether the true owner already ran (a
+            # completed predecessor that should be REOPENED, not stripped)
+            # or hasn't run yet / sits outside this subtask's own
+            # dependency chain entirely (a genuine plan inconsistency that
+            # should surface for revision, not be auto-resolved).
+            #
+            # - PAST_ORDERED (a real upstream owner, found via
+            #   resolve_scope_conflict_owners which walks depends_on
+            #   transitively): skip the merge loop entirely so control
+            #   falls through to the existing reopen-owner path below.
+            # - FUTURE_ORDERED / UNRELATED (owned by some other subtask,
+            #   but not upstream - resolve_scope_conflict_owners finds
+            #   nothing for it, yet classify_file_ownership confirms it
+            #   isn't UNOWNED either): also skip the merge loop, but this
+            #   time the reopen-owner path finds nothing either (it only
+            #   ever looks upstream) - the scope conflict then surfaces
+            #   unresolved via the existing PLAN_SCOPE_REVISION_REQUIRED
+            #   aggregation below (`scope_conflict_result`), which is
+            #   exactly the doc's own "treat as plan inconsistency... do
+            #   not cross-edit silently" outcome, achieved by NOT resolving
+            #   it automatically rather than by inventing a new failure path.
+            # - Genuinely UNOWNED (nobody in the plan declared this file at
+            #   all): leave grounded_scope_files untouched - the merge
+            #   loop's own "no owner -> plan/scope defect -> use the
+            #   existing authoritative plan revision mechanism" behavior is
+            #   correct for this case and stays exactly as it was.
             if (
                 scope_conflict.get("classification") == "PLAN_SCOPE_DEFECT"
                 and scope_conflict.get("attribution_tier") == "authoritative_deterministic"
                 and grounded_scope_files
-                and resolve_scope_conflict_owners(plan, grounded_scope_files, subtask)
+                and (
+                    resolve_scope_conflict_owners(plan, grounded_scope_files, subtask)
+                    or any(
+                        plan.classify_file_ownership(subtask.id, path) != FileOwnershipRelation.UNOWNED
+                        for path in grounded_scope_files
+                    )
+                )
             ):
                 grounded_scope_files = []
             # PRV-03: a chain of grounded owners (each repair surfacing the
@@ -2891,6 +2916,27 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         f"identity could not be resolved confidently ({migration_resolution.reason}). "
                         "Refusing to report success on an unconfirmed migration obligation."
                     )
+                    # MA8 (spec §3.4/§9's own example: "migration identity
+                    # cannot be resolved safely: INDETERMINATE") - this was
+                    # the one status ObligationStatus already defined but no
+                    # producer ever actually recorded, so
+                    # unresolved_terminal_obligations()'s own INDETERMINATE
+                    # handling stayed dead code. No MigrationObligation
+                    # exists to derive source_identity/target_identity from
+                    # here (that's exactly WHY resolution is indeterminate),
+                    # so the id is plan-level, not per-migration-requirement.
+                    if obligation_ledger is not None:
+                        obligation_ledger.record(ObligationRecord(
+                            id="migration.identity_resolution",
+                            kind=ObligationKind.MIGRATION_COMPLETION,
+                            status=ObligationStatus.INDETERMINATE,
+                            authority=ObligationAuthority.DETERMINISTIC,
+                            description="migration source/target dependency identity could not be "
+                                        "resolved confidently from the immutable pre-mutation baseline",
+                            source="migration.terminal_gate", revision="terminal",
+                            evidence={"reason": migration_resolution.reason},
+                            terminal_required=True,
+                        ))
                     all_completed = False
             except Exception as e:
                 global_migration_gap = (

@@ -1094,6 +1094,89 @@ async def test_enforce_reopens_completed_predecessor_for_authoritative_determini
 
 
 @pytest.mark.asyncio
+async def test_enforce_surfaces_unrelated_owner_scope_conflict_as_plan_revision_required_instead_of_merging(tmp_path):
+    """MA8 (spec §30, 'owner is unrelated/parallel'): a DETERMINISTIC-
+    authority scope conflict naming a file owned by a subtask that is
+    NEITHER an upstream predecessor NOR unowned (s3 here has no
+    dependency relationship with the failing s2 at all) must not be
+    silently merged into the failing subtask (the architecture-discovery
+    path) OR silently reopened (the completed-predecessor path only ever
+    looks upstream) - it must surface as an unresolved PLAN_SCOPE_
+    REVISION_REQUIRED result, per the spec's own 'treat as plan
+    inconsistency... do not cross-edit silently' instruction. Compare
+    test_enforce_reopens_completed_predecessor_for_authoritative_
+    deterministic_scope_conflict_instead_of_merging just above (the
+    PAST_ORDERED case, which DOES auto-resolve) and test_enforce_revises_
+    service_scope_to_grounded_controller_and_continues just below (the
+    architectural_owner-tier case, deliberately unaffected by this)."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="unrelated setup", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="src/A.java", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="consumer", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="src/B.java", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s3", description="unrelated parallel owner", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="src/C.java", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (tmp_path / "src").mkdir(exist_ok=True)
+            (tmp_path / "src" / "A.java").write_text("class A {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["src/A.java"]}
+        return {
+            "status": "failed", "quality_gates_passed": False, "files": [],
+            "plan_scope_conflict": {
+                "classification": "PLAN_SCOPE_DEFECT",
+                "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                "failure_type": "migration_incomplete",
+                "required_files": ["src/C.java"],
+                "grounded_owner_files": [],
+                "attribution_tier": "authoritative_deterministic",
+                "allowed_files": ["src/B.java"],
+            },
+        }
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    # Only s1 and s2's own (failed) call happened - no merge re-invoke, no
+    # reopen re-invoke, and s3 (topologically free to run) never had to.
+    assert len(calls) == 2
+    assert result.legacy_result["status"] != "success"
+    assert result.legacy_result.get("reason_codes") == ["PLAN_SCOPE_REVISION_REQUIRED"]
+    assert result.legacy_result["plan_scope_conflict"]["required_files"] == ["src/C.java"]
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_subtasks = approved["plan"]["subtasks"]
+    # Ownership must remain exactly as originally planned - src/C.java
+    # still belongs to s3, never merged into s2.
+    assert any(
+        item["id"] == "s3" and "src/C.java" in [pf["path"] for pf in item["planned_files"]]
+        for item in approved_subtasks
+    )
+    assert not any(
+        item["id"] == "s2" and "src/C.java" in [pf["path"] for pf in item["planned_files"]]
+        for item in approved_subtasks
+    )
+
+
+@pytest.mark.asyncio
 async def test_enforce_revises_service_scope_to_grounded_controller_and_continues(tmp_path):
     service = "src/CustomerService.java"
     controller = "src/CustomerController.java"
