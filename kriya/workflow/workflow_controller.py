@@ -148,7 +148,7 @@ from kriya.workflow.edit_safety import (
     commit_revision_grounded_batch,
     read_file_revision,
 )
-from kriya.workflow.plan_validation import validate_plan
+from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.planning_diagnostics import (
     bounded_repository_evidence,
     persist_planning_attempt_diagnostic,
@@ -1565,6 +1565,7 @@ class WorkflowController:
         if plan is None:
             notes.append("structured output parsed but produced zero subtasks")
             return None, (), (), None, notes
+        plan, _ = canonicalize_planned_file_actions(plan, workspace_path)
 
         record_plan_created(ledger, plan)
 
@@ -1878,6 +1879,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # everywhere in one run. See this module's own docstring for the two
         # concrete run #8 defects this closes.
         obligation_ledger = ObligationLedger()
+        # raw_plan is the Planner's own asserted output, before
+        # canonicalize_planned_file_actions() derives create/modify from
+        # real repository state - kept only so the resume-hash comparison
+        # below (current_plan_hash = raw_plan.content_hash()) reflects what
+        # the Planner actually said, not a Kriya-derived detail. A file a
+        # completed subtask already wrote legitimately flips create->modify
+        # between the original planning call and a later resume replan of
+        # the SAME goal/intent; hashing the canonicalized plan would make
+        # that legitimate, expected drift look like "a different plan,"
+        # wrongly refusing an otherwise-valid resume (found via this
+        # session's own regression sweep, not a live incident).
+        raw_plan: Optional[EngineeringPlan] = None
         while True:
             errors: List[str] = []
             reason_codes: List[str] = []
@@ -1894,13 +1907,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 else:
                     reason_codes.append("STRUCTURED_PLAN_PARSE_FAILED")
             else:
-                plan = build_engineering_plan_from_planner_output(
+                raw_plan = build_engineering_plan_from_planner_output(
                     structured_output, plan_id=run_id, kind=route.kind,
                 )
-                if plan is None:
+                if raw_plan is None:
                     errors.append("structured output parsed but produced zero subtasks")
                     reason_codes.append("STRUCTURED_PLAN_EMPTY")
                 else:
+                    plan, _ = canonicalize_planned_file_actions(raw_plan, workspace_path)
                     tool_subtasks = [
                         st.id for st in plan.subtasks
                         if st.execution_method == ExecutionMethod.TOOL
@@ -2069,7 +2083,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 stage.id.upper(), [pf.path for pf in stage.planned_files], stage.depends_on,
             )
         record_plan_created(ledger, plan)
-        current_plan_hash = plan.content_hash()
+        assert raw_plan is not None
+        current_plan_hash = raw_plan.content_hash()
 
         execution_context = await self._build_context(
             goal, plan, workspace_path, route, control_context, control_state,

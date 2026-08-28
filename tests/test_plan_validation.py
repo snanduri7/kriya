@@ -18,7 +18,7 @@ from kriya.workflow.plan_schema import (
     VerifierKind,
 )
 from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
-from kriya.workflow.plan_validation import validate_plan
+from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.triage import ChangeKind
 
 
@@ -674,3 +674,90 @@ async def test_unresolved_terminal_obligations_empty_once_plan_fully_valid(tmp_p
     )
     assert result.valid, result.errors
     assert ledger.unresolved_terminal_obligations() == []
+
+
+# --- canonicalize_planned_file_actions (PRV-05 run #10, 2026-08-28): the
+# planner declared action=modify for a test file that did not yet exist and
+# reproduced that same wrong value across two full repair rounds despite
+# explicit, evidence-grounded correction instructions - confirmed via the
+# live run's own persisted planning diagnostics (repository_evidence
+# consistent throughout, same single obligation violated identically all
+# three revisions). create/modify is fully derivable from os.path.exists(),
+# so it should never need a repair round at all. ---
+
+def test_canonicalize_corrects_modify_to_create_for_nonexistent_file(tmp_path):
+    _run8_workspace(tmp_path)
+    original = _run8_plan("s4", FileAction.MODIFY)
+    corrected, corrections = canonicalize_planned_file_actions(original, str(tmp_path))
+    assert corrected.subtask_by_id("s4").planned_files[0].action == FileAction.CREATE
+    assert len(corrections) == 1
+    assert "src/test/java/com/example/JsonServiceTest.java" in corrections[0]
+    # The input plan is never mutated - only the returned copy is corrected.
+    assert original.subtask_by_id("s4").planned_files[0].action == FileAction.MODIFY
+
+
+def test_canonicalize_corrects_create_to_modify_for_existing_file(tmp_path):
+    _run8_workspace(tmp_path)
+    original = _run8_plan("s4", FileAction.CREATE)  # s4's own action is already correct
+    original.subtask_by_id("s1").planned_files[0].action = FileAction.CREATE  # forced wrong: JsonService.java DOES exist on disk
+    corrected, corrections = canonicalize_planned_file_actions(original, str(tmp_path))
+    assert corrected.subtask_by_id("s1").planned_files[0].action == FileAction.MODIFY
+    assert len(corrections) == 1
+
+
+def test_canonicalize_leaves_already_correct_actions_unchanged(tmp_path):
+    _run8_workspace(tmp_path)
+    plan = _run8_plan("s4", FileAction.CREATE)
+    corrected, corrections = canonicalize_planned_file_actions(plan, str(tmp_path))
+    assert corrections == []
+    assert corrected.subtask_by_id("s1").planned_files[0].action == FileAction.MODIFY
+    assert corrected.subtask_by_id("s4").planned_files[0].action == FileAction.CREATE
+
+
+def test_canonicalize_never_touches_delete_even_when_path_missing(tmp_path):
+    _run8_workspace(tmp_path)
+    plan = _run8_plan("s4", FileAction.DELETE)
+    corrected, corrections = canonicalize_planned_file_actions(plan, str(tmp_path))
+    assert corrections == []
+    assert corrected.subtask_by_id("s4").planned_files[0].action == FileAction.DELETE
+
+
+def test_canonicalize_does_not_leak_correction_across_repeated_calls_on_the_same_input(tmp_path):
+    """Regression guard for the non-mutating contract itself: calling
+    canonicalize_planned_file_actions twice against the SAME input plan
+    object, against two different baseline states (e.g. a test double or
+    resume path that reuses one plan instance across calls), must not let
+    the first call's correction leak into what the second call sees as the
+    plan's original declared action."""
+    _run8_workspace(tmp_path)
+    plan = _run8_plan("s4", FileAction.MODIFY)  # file does not exist yet
+    canonicalize_planned_file_actions(plan, str(tmp_path))
+    assert plan.subtask_by_id("s4").planned_files[0].action == FileAction.MODIFY
+
+    (tmp_path / "src/test/java/com/example/JsonServiceTest.java").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "src/test/java/com/example/JsonServiceTest.java").write_text("class JsonServiceTest {}\n")
+    corrected, corrections = canonicalize_planned_file_actions(plan, str(tmp_path))
+    assert corrected.subtask_by_id("s4").planned_files[0].action == FileAction.MODIFY
+    assert corrections == []
+
+
+@pytest.mark.asyncio
+async def test_canonicalize_then_validate_plan_closes_run10_incident_without_repair(tmp_path):
+    """The exact run #10 shape, end to end: a fresh plan where the planner
+    declared action=modify for a file that does not exist yet - after
+    canonicalization runs (as the real caller now does before validate_plan),
+    the plan must validate clean on the very first attempt, with zero
+    PLANNED_FILE_ACTION_MISMATCH and zero VIOLATED action_consistency
+    obligation - no repair round required at all."""
+    _run8_workspace(tmp_path)
+    plan = _run8_plan("s4", FileAction.MODIFY)
+    plan, _ = canonicalize_planned_file_actions(plan, str(tmp_path))
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    assert result.valid, result.errors
+    assert "PLANNED_FILE_ACTION_MISMATCH" not in result.reason_codes
+    assert ledger.current(
+        "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency"
+    ).status == ObligationStatus.SATISFIED

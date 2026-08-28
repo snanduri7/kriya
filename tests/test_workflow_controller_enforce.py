@@ -552,6 +552,39 @@ async def test_enforce_calls_run_generation_workflow_once_per_subtask(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_enforce_canonicalizes_wrong_action_instead_of_repairing(tmp_path):
+    """Regression test (PRV-05 run #10, 2026-08-28): the Planner declared
+    action=modify for a file that does not exist yet - previously this
+    always cost a PLANNED_FILE_ACTION_MISMATCH repair round, and the live
+    incident showed the model can fail to correct it even across two full
+    rounds. canonicalize_planned_file_actions() now fixes this before
+    validate_plan() ever sees it, so the plan must validate on the very
+    first Planner call - zero repair rounds, zero extra planner.run() calls."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a new file", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.MODIFY)],  # wrong: a.py doesn't exist yet
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(
+        return_value={"status": "success", "quality_gates_passed": True, "files": []},
+    )
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 1, "a real defect must not have required any repair round"
+    # canonicalize_planned_file_actions() never mutates the Planner's own
+    # object - only the corrected copy used for validation/execution.
+    assert plan.subtasks[0].planned_files[0].action == FileAction.MODIFY
+
+
+@pytest.mark.asyncio
 async def test_enforce_reuses_one_skill_registry_and_projects_resolved_knowledge(tmp_path):
     from kriya.config import AppConfig
     from kriya.tools.knowledge import GapReport

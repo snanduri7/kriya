@@ -6,6 +6,14 @@ Reviewer (MA6 invariant 1) - every check here is a deterministic graph/
 filesystem/registry lookup, same spirit as kriya/workflow/triage.py's own
 "never asked of a model" ImpactVector components.
 
+canonicalize_planned_file_actions() (PRV-05 run #10, 2026-08-28) takes the
+same "never ask a model for what Kriya can derive" principle one step
+further: called by the caller BEFORE validate_plan(), it returns a corrected
+copy of the plan with each planned file's create/modify action normalized
+against real repository state, rather than rejecting the plan and spending
+a bounded repair attempt asking the Planner to reproduce metadata that is
+fully mechanical.
+
 validate_plan() checks, in order: unique subtask ids, all depends_on
 references resolve, the dependency graph is acyclic, every planned file
 either already exists or is explicitly marked `action=create`, every
@@ -147,6 +155,58 @@ def _forms_sequential_ownership_chain(
             if b not in transitive_deps.get(a, set()) and a not in transitive_deps.get(b, set()):
                 return False
     return True
+
+
+def canonicalize_planned_file_actions(
+    plan: EngineeringPlan, workspace_path: str,
+) -> "tuple[EngineeringPlan, List[str]]":
+    """Deterministically corrects each planned file's create/modify action
+    against real repository state, returning a corrected copy of `plan`
+    (the input is never mutated - see below) to hand to validate_plan(),
+    rather than rejecting a wrong action and asking the Planner to
+    reproduce baseline-existence metadata Kriya can look up exactly itself.
+
+    Found live, PRV-05 run #10 (2026-08-28, Hardened): the local planner
+    model declared action=modify for a test file that did not yet exist,
+    and reproduced the byte-identical wrong value across two full repair
+    rounds despite build_structured_plan_repair_prompt's PLANNED_FILE_ACTION_
+    MISMATCH guidance naming the exact subtask, path, and required fix each
+    time - confirmed not a baseline-authority disagreement (the repository_
+    evidence handed to the planner was consistent and correct throughout,
+    never listing the file) and not a shifting-obligation issue (the same
+    single obligation failed identically all three revisions), so spending
+    bounded repair attempts asking the model to get this one field right is
+    pointless - it is fully determined by os.path.exists() and needs no
+    model judgment at all.
+
+    action=delete is deliberately left untouched - it is the Planner's own
+    declared intent to remove something, never silently invented by this
+    function - so a delete of a path that does not exist stays a real,
+    unfixable validation error requiring a genuine repair, not silent
+    normalization into a plan the Planner never actually asked for.
+
+    Returns a deep copy rather than mutating `plan` in place: in real
+    production use build_engineering_plan_from_planner_output() always
+    hands back a freshly-parsed object, so this distinction is invisible -
+    but a caller (or test double) that reuses one EngineeringPlan instance
+    across multiple calls must not have an earlier call's baseline-derived
+    correction silently leak into a later one made against different repo
+    state."""
+    corrected_plan = plan.model_copy(deep=True)
+    corrections: List[str] = []
+    for st in corrected_plan.subtasks:
+        for pf in st.planned_files:
+            if pf.action == FileAction.DELETE:
+                continue
+            exists = os.path.exists(os.path.join(workspace_path, pf.path))
+            correct_action = FileAction.MODIFY if exists else FileAction.CREATE
+            if pf.action != correct_action:
+                corrections.append(
+                    f"subtask {st.id!r} planned file {pf.path!r}: normalized action "
+                    f"{pf.action.value!r} -> {correct_action.value!r} (baseline_exists={exists})"
+                )
+                pf.action = correct_action
+    return corrected_plan, corrections
 
 
 async def validate_plan(
