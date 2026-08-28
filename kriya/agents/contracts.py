@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from kriya.workflow.plan_schema import PlannerStructuredOutput
+from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, PlannerStructuredOutput
 from kriya.workflow.triage import ChangeKind
 
 logger = logging.getLogger(__name__)
@@ -541,6 +541,39 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
             obj.pop("tool_name", None)
             obj.pop("tool_arguments", None)
 
+    def _heal_stale_tool_name_on_runtime_verification(verification: Dict[str, Any]) -> None:
+        """A verification entry occasionally carries a build-tool tool_name
+        (compile/test/tests/regression/quality_gates) copy-pasted from a
+        sibling entry, while its OWN verifier_kind/requires_runtime_execution
+        already unambiguously and consistently describe a RUNTIME check
+        instead - found live, PRV-06 rerun (2026-08-28): the last subtask's
+        verification kept tool_name="compile" ("tool_name=compile requires
+        verifier_kind=compile") while its own verifier_kind=
+        "application_runtime" and requires_runtime_execution=true both
+        already agreed with its own description ("Execute the application...
+        check console output") - only tool_name was the stale, inconsistent
+        field, byte-identical and non-convergent across all 3 bounded repair
+        attempts. type=tool REQUIRES a tool_name (VerificationMethod's own
+        _tool_name_matches_type), so the only safe reshape when the
+        explicitly-stated verifier_kind disagrees with what tool_name
+        implies is judgment/no-tool - never invents new information
+        (verifier_kind and requires_runtime_execution are kept exactly as
+        the model already stated them; only the inconsistent type/tool_name
+        pairing is corrected to match what the OTHER two fields already
+        agree on). Deliberately narrow: only fires when the EXPLICIT
+        verifier_kind is itself runtime-shaped (application_runtime/
+        command) - a compile-vs-test tool_name/verifier_kind mismatch (both
+        build-time, genuinely ambiguous which one is the mistake) is left
+        for real validation/repair, not silently reinterpreted here."""
+        if not isinstance(verification, dict) or verification.get("type") != "tool":
+            return
+        if verification.get("tool_name") not in BUILTIN_QUALITY_GATE_VERIFIERS:
+            return
+        if verification.get("verifier_kind") in ("application_runtime", "command"):
+            verification["type"] = "judgment"
+            verification.pop("tool_name", None)
+            verification.pop("tool_arguments", None)
+
     for subtask in parsed.get("subtasks") or []:
         if not isinstance(subtask, dict):
             continue
@@ -554,6 +587,7 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
                 subtask["depends_on"] = deduped
 
         for verification in subtask.get("verification") or []:
+            _heal_stale_tool_name_on_runtime_verification(verification)
             _heal_tool_pair(verification, "type", "tool", "judgment")
 
     for criterion in parsed.get("acceptance_criteria") or []:

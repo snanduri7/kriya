@@ -13,7 +13,7 @@ unambiguous downgrade/removal, never a guess at new information."""
 import json
 
 from kriya.agents.contracts import parse_planner_structured_output
-from kriya.workflow.plan_schema import ExecutionMethod, GlobalInvariant, VerificationMethodType
+from kriya.workflow.plan_schema import ExecutionMethod, GlobalInvariant, VerificationMethodType, VerifierKind
 
 
 def _plan_text(plan_json):
@@ -269,3 +269,93 @@ def test_new_shape_global_invariants_with_a_stray_old_subtask_key_still_resolves
     }))
     assert err is None
     assert output.subtasks[0].relevant_global_invariant_ids == ["gi1"]
+
+
+# --- PRV-06 rerun self-healing: stale build-tool tool_name on a runtime check ---
+
+def test_stale_compile_tool_name_on_runtime_verification_is_reshaped_to_judgment():
+    """Live incident (PRV-06 rerun, 2026-08-28): the last subtask's own
+    runtime-verification entry kept tool_name="compile" (byte-identical,
+    non-convergent across all 3 bounded repair attempts - "tool_name=compile
+    requires verifier_kind=compile") while its OWN verifier_kind and
+    requires_runtime_execution already agreed with its own description that
+    this is an application-runtime check, not a compile check. Only
+    tool_name was the stale, copy-pasted field."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s5", "description": "Execute the application with sample input and check output.",
+            "execution_method": "model", "acceptance_criteria_ids": [],
+            "verification": [{
+                "type": "tool", "description": "Run the app and confirm output.",
+                "tool_name": "compile", "verifier_kind": "application_runtime",
+                "requires_runtime_execution": True,
+            }],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    v = output.subtasks[0].verification[0]
+    assert v.type == VerificationMethodType.JUDGMENT
+    assert v.tool_name is None
+    assert v.verifier_kind == VerifierKind.APPLICATION_RUNTIME
+    assert v.requires_runtime_execution is True
+
+
+def test_stale_test_tool_name_on_command_verification_is_reshaped_to_judgment():
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": [],
+            "verification": [{
+                "type": "tool", "description": "run a health-check command",
+                "tool_name": "test", "verifier_kind": "command",
+                "requires_runtime_execution": True,
+            }],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    v = output.subtasks[0].verification[0]
+    assert v.type == VerificationMethodType.JUDGMENT
+    assert v.tool_name is None
+    assert v.verifier_kind == VerifierKind.COMMAND
+
+
+def test_compile_vs_test_tool_name_mismatch_is_left_alone_not_reinterpreted():
+    """Deliberately narrow: when the explicit verifier_kind disagrees with
+    tool_name but is ITSELF still build-time (test vs. compile), that's a
+    genuinely ambiguous case - which of the two build-time signals is the
+    mistake isn't inferrable the way a runtime-vs-build-time mismatch is.
+    Left for real schema validation to reject and real repair to resolve,
+    not silently reinterpreted here."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": [],
+            "verification": [{
+                "type": "tool", "description": "run tests",
+                "tool_name": "compile", "verifier_kind": "test",
+                "requires_runtime_execution": False,
+            }],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert output is None
+    assert "verifier_kind=compile" in err
+
+
+def test_consistent_compile_verification_is_left_alone():
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": [],
+            "verification": [{
+                "type": "tool", "description": "compile it",
+                "tool_name": "compile", "verifier_kind": "compile",
+                "requires_runtime_execution": False,
+            }],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    v = output.subtasks[0].verification[0]
+    assert v.type == VerificationMethodType.TOOL
+    assert v.tool_name == "compile"
+    assert v.verifier_kind == VerifierKind.COMPILE
