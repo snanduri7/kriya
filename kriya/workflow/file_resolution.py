@@ -577,6 +577,122 @@ def find_brownfield_public_api_changes(
     return violations
 
 
+_JAVA_MAIN_ENTRYPOINT_RE = re.compile(
+    r"\bpublic\s+static\s+void\s+main\s*\(\s*String\s*(?:\[\s*\]|\.\.\.)\s*\w+\s*\)"
+)
+
+
+def _goal_explicitly_requests_new_entrypoint(goal: str) -> bool:
+    """Mirrors _goal_explicitly_requests_api_change's own narrow, high-
+    precision-only convention (see that function) - a false negative here
+    only costs one more retry cycle on a genuinely wanted new entrypoint; a
+    false positive would silently disable this whole gate for the goal that
+    needed it most."""
+    return bool(re.search(
+        r"\b(?:add|create|introduce|new)\b[^.\n]{0,60}"
+        r"\b(?:new\s+)?(?:entry\s*point|entrypoint|main\s+class|"
+        r"cli\s+command|application\s+entrypoint)\b",
+        goal or "", re.IGNORECASE,
+    ))
+
+
+def find_unrequested_architectural_surfaces(
+    workspace_path: str,
+    original_contents: Dict[str, str],
+    final_contents: Dict[str, str],
+    goal: str,
+) -> List[Dict[str, Any]]:
+    """UNREQUESTED_ARCHITECTURAL_SURFACE: reject a candidate that introduces a
+    NEW executable entrypoint (Java `public static void main(String[] args)`,
+    in either production or test source) into a repository that already has
+    an established one, when the goal never asked for a second one.
+
+    This is deliberately framed as the general case, not "reject main() in
+    test files": the underlying failure is that verification strategy is
+    allowed to mutate the product's real architectural surface - a test file
+    growing a scaffolding main() is just the one CONFIRMED shape of it (see
+    below). A narrower rule keyed on the test-filename convention would have
+    missed the sibling incident where the SAME mistake lands in a production
+    file instead (e.g. a second Application/Main class introduced purely to
+    print a verification verdict). Scoped for now to Java main() entrypoints
+    only - REST endpoints, CLI subcommands, schedulers, and bootstrap classes
+    are the same failure family in spirit (verification-owned architecture),
+    but each needs its own confirmed live incident and detection shape before
+    being added here, matching this module's own established practice (see
+    find_brownfield_public_api_changes's sibling docstrings) of extending a
+    real signal rather than guessing at unconfirmed ones.
+
+    Found live, PRV-04 (2026-08-27): the goal asked to extend the existing
+    shared `App.main(String[] args)` entrypoint - done correctly, in place.
+    The SAME generation also introduced a brand-new `public static void
+    main(String[] args)` into AppTest.java, whose entire body was
+    `System.out.println("[VERIFICATION] PASS");` - runtime-verification
+    scaffolding satisfied by giving a TEST file its own executable
+    entrypoint, instead of using the real application entrypoint, an
+    existing test, or a harness-level invocation. "Confirm exactly one
+    intended application entrypoint remains" - the goal's own acceptance
+    criterion - no longer held once that second main() existed.
+
+    Symmetric with find_brownfield_public_api_changes: same signature shape
+    (workspace_path, original_contents, final_contents, goal ->
+    List[violation dict]), same pre-write call site convention (compare a
+    candidate against real baseline content before any byte reaches the
+    worktree), same goal-explicit-request escape hatch. Deliberately does
+    NOT reuse the api_contract_recovery phased state machine (RESTORE_
+    PUBLIC_CONTRACT -> REPAIR_BEHAVIOR) - that machine exists because
+    restoring a REMOVED contract and then repairing behavior behind it are
+    two genuinely separate concerns needing two prompts. Here the whole fix
+    is one concern ("remove the unrequested surface"), so a plain typed
+    Failure with likely_files set is sufficient to ground a normal targeted
+    retry at this file - see this function's call site in attempt.py."""
+    if _goal_explicitly_requests_new_entrypoint(goal):
+        return []
+
+    # Baseline = every REAL entrypoint already on disk in the workspace,
+    # independent of whether this candidate batch touches that file at all -
+    # mirrors find_brownfield_public_api_changes's own full-repo evidence
+    # walk immediately above, for the same reason: a candidate's own
+    # `original_contents` only covers files THIS batch is about to write,
+    # but "is there already an established entrypoint ANYWHERE in this
+    # repo" must be answered against the whole workspace.
+    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
+    baseline_entrypoints: set = set()
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = [name for name in dirs if name not in ignored]
+        for filename in filenames:
+            if not filename.endswith(".java"):
+                continue
+            full_path = os.path.join(root, filename)
+            try:
+                with open(full_path, encoding="utf-8", errors="replace") as fh:
+                    content = fh.read()
+            except OSError:
+                continue
+            if _JAVA_MAIN_ENTRYPOINT_RE.search(content):
+                baseline_entrypoints.add(os.path.relpath(full_path, workspace_path))
+
+    if not baseline_entrypoints:
+        # Nothing established yet (a genuinely first-ever entrypoint, e.g. a
+        # brand-new greenfield project) - no baseline to protect, matching
+        # find_established_stack_drift's own "nothing established" no-op.
+        return []
+
+    violations = []
+    for path, final_content in sorted(final_contents.items()):
+        if not path.endswith(".java"):
+            continue
+        original_content = original_contents.get(path, "")
+        already_had_entrypoint = bool(_JAVA_MAIN_ENTRYPOINT_RE.search(original_content))
+        introduces_entrypoint = bool(_JAVA_MAIN_ENTRYPOINT_RE.search(final_content))
+        if introduces_entrypoint and not already_had_entrypoint:
+            violations.append({
+                "file": path,
+                "baseline_entrypoints": sorted(baseline_entrypoints),
+                "reason_code": "UNREQUESTED_ARCHITECTURAL_SURFACE",
+            })
+    return violations
+
+
 def find_unrestored_public_api_contracts(
     final_contents: Dict[str, str], recovery: Optional[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:

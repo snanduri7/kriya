@@ -43,6 +43,7 @@ from kriya.workflow.file_resolution import (
     discover_response_construction_owners,
     find_explanatory_prose_contamination,
     find_protected_api_reference_changes,
+    find_unrequested_architectural_surfaces,
     find_unrestored_public_api_contracts,
     strip_package_declaration_matching_source_root,
 )
@@ -1126,6 +1127,145 @@ async def test_run_attempt_rejects_contract_change_on_a_later_attempt_not_just_t
 
     assert exc_info.value.failure.type == "brownfield_public_api_changed"
     assert owner in exc_info.value.failure.likely_files
+
+
+_APP_MAIN_JAVA = (
+    "package com.example;\n"
+    "public class App {\n"
+    "    public static void main(String[] args) {\n"
+    "        System.out.println(\"hi\");\n"
+    "    }\n"
+    "}\n"
+)
+
+
+def test_unrequested_architectural_surface_allows_extending_existing_entrypoint(tmp_path):
+    """UNREQUESTED_ARCHITECTURAL_SURFACE only blocks a NEW entrypoint - the
+    existing App.main(...) being extended in place, with no new main()
+    anywhere, is exactly the shape PRV-04's own production change used and
+    must stay allowed."""
+    owner = "src/App.java"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(_APP_MAIN_JAVA)
+    extended = _APP_MAIN_JAVA.replace('"hi"', '"hi extended"')
+
+    assert find_unrequested_architectural_surfaces(
+        str(tmp_path), {owner: _APP_MAIN_JAVA}, {owner: extended}, "extend App to print a summary",
+    ) == []
+
+
+def test_unrequested_architectural_surface_rejects_second_entrypoint_in_test_file(tmp_path):
+    """UNREQUESTED_ARCHITECTURAL_SURFACE: PRV-04 (2026-08-27) - a runtime-
+    verification pass gave AppTest.java its own main() instead of reusing
+    the real, already-correctly-extended App.main(...) entrypoint."""
+    owner = "src/App.java"
+    new_file = "src/AppTest.java"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(_APP_MAIN_JAVA)
+    candidate = (
+        "public class AppTest {\n"
+        "    public static void main(String[] args) {\n"
+        "        System.out.println(\"[VERIFICATION] PASS\");\n"
+        "    }\n"
+        "}\n"
+    )
+
+    violations = find_unrequested_architectural_surfaces(
+        str(tmp_path), {new_file: ""}, {new_file: candidate}, "extend App to print a summary",
+    )
+    assert violations == [{
+        "file": new_file,
+        "baseline_entrypoints": [owner],
+        "reason_code": "UNREQUESTED_ARCHITECTURAL_SURFACE",
+    }]
+
+
+def test_unrequested_architectural_surface_rejects_second_entrypoint_in_production_file(tmp_path):
+    """Deliberately NOT keyed to test-filename convention - the same mistake
+    landing in a production file (e.g. a second Application/Main class) is
+    the same failure family, not a different, uncovered one."""
+    owner = "src/App.java"
+    new_file = "src/Bootstrap.java"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(_APP_MAIN_JAVA)
+    candidate = _APP_MAIN_JAVA.replace("App", "Bootstrap")
+
+    violations = find_unrequested_architectural_surfaces(
+        str(tmp_path), {new_file: ""}, {new_file: candidate}, "extend App to print a summary",
+    )
+    assert violations == [{
+        "file": new_file,
+        "baseline_entrypoints": [owner],
+        "reason_code": "UNREQUESTED_ARCHITECTURAL_SURFACE",
+    }]
+
+
+def test_unrequested_architectural_surface_allows_explicit_goal_request(tmp_path):
+    owner = "src/App.java"
+    new_file = "src/Bootstrap.java"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(_APP_MAIN_JAVA)
+    candidate = _APP_MAIN_JAVA.replace("App", "Bootstrap")
+
+    assert find_unrequested_architectural_surfaces(
+        str(tmp_path), {new_file: ""}, {new_file: candidate},
+        "add a new entrypoint Bootstrap for batch jobs",
+    ) == []
+
+
+def test_unrequested_architectural_surface_allows_first_ever_entrypoint(tmp_path):
+    """No baseline entrypoint anywhere yet (a genuine greenfield project) -
+    nothing established to protect, matching find_established_stack_drift's
+    own no-op-when-nothing-established convention."""
+    owner = "src/App.java"
+    assert find_unrequested_architectural_surfaces(
+        str(tmp_path), {owner: ""}, {owner: _APP_MAIN_JAVA}, "create a hello world app",
+    ) == []
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_unrequested_second_entrypoint(tmp_path):
+    """Same run_attempt()-level wiring as the EXISTING_CONTRACT_PRESERVATION
+    regression test above, for UNREQUESTED_ARCHITECTURAL_SURFACE: the
+    pre-write gate must reject the candidate before it ever reaches compile,
+    grounded to the exact offending file."""
+    state = GenerationState()
+    state.attempt_number = 0
+    owner = "src/App.java"
+    new_file = "src/AppTest.java"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(_APP_MAIN_JAVA)
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": new_file,
+        "content": (
+            "public class AppTest {\n"
+            "    public static void main(String[] args) {\n"
+            "        System.out.println(\"[VERIFICATION] PASS\");\n"
+            "    }\n"
+            "}\n"
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal="extend App to print a summary",
+        architect_files=[new_file], expected_files_upfront=[new_file],
+        architect_basename_to_path={"AppTest.java": new_file},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "unrequested_architectural_surface"
+    assert new_file in exc_info.value.failure.likely_files
 
 
 def test_api_recovery_precheck_keeps_signature_and_callsite_evidence_authoritative():

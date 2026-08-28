@@ -37,7 +37,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -1518,6 +1518,67 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 diagnostics={
                     "api_contract_recovery": {"violations": early_api_violations},
                 },
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        # UNREQUESTED_ARCHITECTURAL_SURFACE: verification strategy must not be
+        # allowed to mutate the product's real architectural surface. Same
+        # pre-write timing, same goal-explicit-request escape hatch, same
+        # typed-Failure + likely_files targeted-retry pattern as the
+        # brownfield-API check above (deliberately NOT the api_contract_
+        # recovery phased state machine - see find_unrequested_architectural_
+        # surfaces's own docstring for why this needs only a single-shot fix,
+        # not a two-phase restore-then-repair). Found live, PRV-04
+        # (2026-08-27): a runtime-verification pass added its own `public
+        # static void main(...)` to a brand-new AppTest.java instead of
+        # reusing the real, correctly-extended App.main(...) entrypoint.
+        #
+        # Deliberately NOT reusing baseline_contents/candidate_contents from
+        # the brownfield-API check above: that loop skips any file that
+        # doesn't already exist in the workspace (os.path.isfile(...) guard),
+        # since a REMOVED/CHANGED public signature is only a meaningful
+        # concept for a pre-existing owner. The confirmed PRV-04 incident is
+        # the opposite shape - a brand-NEW file introducing an entrypoint -
+        # so this needs every file_obj in the response, existing or not.
+        surface_original_contents: Dict[str, str] = {}
+        surface_candidate_contents: Dict[str, str] = {}
+        for file_obj in files:
+            filepath = file_obj["filepath"]
+            if file_obj.get("content") is None:
+                continue
+            workspace_file = os.path.join(ctx.workspace_path, filepath)
+            if os.path.isfile(workspace_file):
+                try:
+                    with open(workspace_file, "r", encoding="utf-8", errors="replace") as handle:
+                        surface_original_contents[filepath] = handle.read()
+                except OSError:
+                    pass
+            surface_candidate_contents[filepath] = file_obj["content"]
+        surface_violations = find_unrequested_architectural_surfaces(
+            ctx.workspace_path, surface_original_contents, surface_candidate_contents, ctx.goal,
+        )
+        if surface_violations:
+            failure = Failure(
+                type="unrequested_architectural_surface",
+                message=(
+                    "UNREQUESTED ARCHITECTURAL SURFACE REJECTED BEFORE WRITE: the candidate "
+                    "introduces a new executable entrypoint (public static void main(...)) "
+                    "that this repository's existing baseline entrypoint(s) "
+                    f"({', '.join(sorted({e for v in surface_violations for e in v['baseline_entrypoints']}))}) "
+                    "did not have, and the goal never asked for a second one. Verification "
+                    "strategy must not alter persistent application architecture - remove this "
+                    "entrypoint; if runtime verification needs to run something, invoke the "
+                    "existing entrypoint, an existing test, or a harness-level command instead."
+                ),
+                raw_output=str(surface_violations),
+                source="ownership_gate", authority="deterministic",
+                file_locations=[
+                    FileLocation(filepath=item["file"]) for item in surface_violations
+                ],
+                likely_files=sorted({item["file"] for item in surface_violations}),
+                diagnostics={"reason_code": "UNREQUESTED_ARCHITECTURAL_SURFACE"},
                 attempt=state.attempt_number,
             )
             state.gate_outcomes.append(failure.to_gate_outcome())
