@@ -38,6 +38,7 @@ def test_failure_to_gate_outcome_shape():
         "milestone_id": None,
         "planned_files": [],
         "verification_target": None,
+        "authoritative_files": [],
     }
 
 
