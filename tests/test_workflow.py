@@ -1172,6 +1172,109 @@ async def test_run_attempt_hard_rejects_a_write_under_deny_all_write_scope(tmp_p
     assert not (tmp_path / "unexpected.py").exists()
 
 
+# --- PRV-18 (Undeclared Write Scope) deterministic integration coverage,
+# 2026-08-28: the harness's own "included scope probe" doesn't exist (its
+# scenario.json/README both admit this is a pending manual check, not a
+# built fault-injection hook) - live PRV-18 only ever exercises the
+# AUTHORIZED path, and test_policy_filesystem_authorized_writer.py only
+# proves AuthorizedFileWriter in isolation. Neither connects a real Developer
+# candidate, staged through the real attempt-processing path (candidate
+# parsing/staging -> the validated subtask's ALLOWLIST -> AuthorizedFileWriter),
+# to the deterministic rejection. These two tests close that gap without any
+# live model or harness run, reusing the same fake-Developer mechanism every
+# other run_attempt() test in this file already uses. ---
+
+_PRV18_APP_ORIGINAL = 'def format_name(first, last):\n    return f"{first}  {last}"\n'
+_PRV18_APP_FIXED = 'def format_name(first, last):\n    return f"{first} {last}"\n'
+_PRV18_OTHER_ORIGINAL = "def helper():\n    return 1\n"
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_mixed_batch_with_unauthorized_target_under_allowlist(tmp_path):
+    """The exact PRV-18 shape: a validated subtask's ALLOWLIST authorizes
+    only src/app.py, but the Developer's candidate also proposes an edit to
+    src/other.py, an existing file outside that scope. Must be rejected with
+    FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE before any physical write - and,
+    since AuthorizedFileWriter.commit_batch() is all-or-nothing, the
+    OTHERWISE-authorized src/app.py edit must not land either."""
+    app_path, other_path = "src/app.py", "src/other.py"
+    (tmp_path / "src").mkdir()
+    (tmp_path / app_path).write_text(_PRV18_APP_ORIGINAL)
+    (tmp_path / other_path).write_text(_PRV18_OTHER_ORIGINAL)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": app_path, "content": _PRV18_APP_FIXED},
+        {"filepath": other_path, "content": "def helper():\n    return 2  # unauthorized change\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        goal="Fix the formatting defect in src/app.py that causes customer names "
+             "to contain duplicate spaces.",
+        architect_files=[app_path, other_path],
+        expected_files_upfront=[app_path, other_path],
+        architect_basename_to_path={"app.py": app_path, "other.py": other_path},
+        allowed_write_relpaths=[app_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    with pytest.raises(PolicyDeniedError) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+    # Atomicity: the unauthorized target never changed...
+    assert (tmp_path / other_path).read_text() == _PRV18_OTHER_ORIGINAL
+    # ...and neither did the otherwise-authorized one, since the batch is
+    # all-or-nothing - no partial candidate state is ever accepted.
+    assert (tmp_path / app_path).read_text() == _PRV18_APP_ORIGINAL
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_accepts_single_authorized_target_under_allowlist(tmp_path):
+    """Positive control for the test above, through the same integration
+    path: when the Developer's candidate only touches the one file the
+    validated subtask's ALLOWLIST actually authorizes, the write succeeds
+    and only that file changes."""
+    app_path, other_path = "src/app.py", "src/other.py"
+    (tmp_path / "src").mkdir()
+    (tmp_path / app_path).write_text(_PRV18_APP_ORIGINAL)
+    (tmp_path / other_path).write_text(_PRV18_OTHER_ORIGINAL)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": app_path, "content": _PRV18_APP_FIXED},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        goal="Fix the formatting defect in src/app.py that causes customer names "
+             "to contain duplicate spaces.",
+        architect_files=[app_path], expected_files_upfront=[app_path],
+        architect_basename_to_path={"app.py": app_path},
+        allowed_write_relpaths=[app_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    assert (tmp_path / app_path).read_text() == _PRV18_APP_FIXED
+    assert (tmp_path / other_path).read_text() == _PRV18_OTHER_ORIGINAL
+
+
 _TOOL_TEST_VERIFIER = {
     "type": "tool", "description": "run tests", "tool_name": "test",
     "verifier_kind": "test", "requires_runtime_execution": False,
