@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.config.config import AutonomyConfig
 from kriya.policy.enforcement import enforce_hard_invariants
@@ -98,11 +98,29 @@ class PolymorphicValidator:
         original_workspace_path: Optional[str] = None,
         autonomy_cfg: Optional[AutonomyConfig] = None,
         java_home_override: Optional[str] = None,
+        authorized_dependency_removals: Optional[Iterable[str]] = None,
     ) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
+        # 'group:artifact' keys the caller has already determined are
+        # explicitly authorized for removal by the goal (kriya/workflow/
+        # migration.py::resolve_authorized_dependency_removals) - excluded
+        # from the dependency-regression check below. Plain Optional[Iterable
+        # [str]] rather than importing that module's own richer type here:
+        # kriya/tools/ never depends on kriya/workflow/ anywhere else in this
+        # codebase, and this is a deliberately thin, ownership-agnostic
+        # boundary rather than a new layering exception. Found live, PRV-05
+        # (2026-08-28, run 5): this check used to reject ANY pom.xml
+        # dependency removal unconditionally, restoring Gson every time the
+        # subtask that owns pom.xml tried to remove it - even though the
+        # top-level goal explicitly authorized replacing it. Defaults to
+        # None (no exclusions), so every caller that doesn't pass this stays
+        # byte-for-byte unchanged - this remains a hard rejection for any
+        # dependency removal that ISN'T backed by a resolved, goal-explicit
+        # migration.
+        self.authorized_dependency_removals = frozenset(authorized_dependency_removals or ())
         # When set (kriya/workflow/workflow.py's _resolve_java_home_override),
         # forces every subprocess this validator launches (mvn compile/test/exec,
         # javac fallback) to run under this specific JDK home via the JAVA_HOME
@@ -529,7 +547,10 @@ class PolymorphicValidator:
                 if os.path.exists(orig_pom) and os.path.exists(new_pom):
                     orig_deps = self._get_pom_dependencies(orig_pom)
                     new_deps = self._get_pom_dependencies(new_pom)
-                    missing_deps = [d for d in orig_deps if d not in new_deps]
+                    missing_deps = [
+                        d for d in orig_deps
+                        if d not in new_deps and d not in self.authorized_dependency_removals
+                    ]
                     if missing_deps:
                         return {
                             "success": False,

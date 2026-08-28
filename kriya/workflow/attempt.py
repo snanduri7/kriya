@@ -71,7 +71,7 @@ from kriya.workflow.acceptance import (
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.verification_authority import deterministic_sequence_kind
-from kriya.workflow.migration import find_migration_incomplete, resolve_migration_obligation
+from kriya.workflow.migration import find_migration_incomplete, resolve_authorized_dependency_removals, resolve_migration_obligation
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
@@ -2607,6 +2607,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         validator = PolymorphicValidator(
             ctx.worktree_path, original_workspace_path=ctx.workspace_path,
             autonomy_cfg=ctx.kernel.config.autonomy,
+            # PRV-05 (2026-08-28, run 5): the dependency-preservation check
+            # below used to unconditionally reject ANY pom.xml dependency
+            # removal, restoring Gson every time the subtask that owns
+            # pom.xml tried to remove it - even though the top-level goal
+            # explicitly authorizes replacing it. Resolved once per attempt
+            # from the SAME grounding goal the migration-completion check
+            # (further below) already uses, not re-derived independently.
+            authorized_dependency_removals=resolve_authorized_dependency_removals(
+                ctx.grounding_goal or ctx.goal, ctx.workspace_path,
+            ),
         )
 
         if not state.toolchain_checked:

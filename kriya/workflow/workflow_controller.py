@@ -2681,6 +2681,56 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         finally:
             if plan_workspace_path != workspace_path:
                 remove_git_worktree(workspace_path, plan_workspace_path)
+
+        # Global final-state validation: every subtask can pass its own
+        # LOCAL Quality Gates while a plan-wide obligation is still globally
+        # unsatisfied in the final applied state - "s1 PASSED, s2 PASSED,
+        # s3 PASSED, s4 PASSED, therefore overall PASSED" is insufficient
+        # for a migration. Found live, PRV-05 (2026-08-28, run 5): the
+        # per-subtask migration-completion check (kriya/workflow/attempt.py)
+        # only ever sees the ONE subtask's own grounded scope; this is the
+        # same check re-run once, here, against the real, fully-applied
+        # workspace_path - the authoritative terminal state - after every
+        # subtask has already completed and its output has already been
+        # committed above. Deliberately additive-only (can downgrade
+        # all_completed to False, never upgrade it) - but NOT best-effort on
+        # its own failure. Four distinct outcomes, not two: no obligation
+        # applies (continue), obligation satisfied (continue), obligation
+        # unsatisfied (fail), and the check itself raising (ALSO fail - not
+        # silently trust the per-subtask gates). That last distinction
+        # matters specifically because this check is authoritative and
+        # deterministic: an internal bug in the one validator built to catch
+        # a false PASS must not itself become a path BACK to a false PASS -
+        # the same silent-degrade shape as the bug this check exists to
+        # close in the first place. A goal with no migration intent at all
+        # can't realistically reach this except clause (_goal_expresses_
+        # replacement_intent is a cheap regex gate checked first, before any
+        # file I/O), so fail-closed here only ever activates for a goal that
+        # already looks like a migration - not a broad new failure surface
+        # for ordinary tasks.
+        global_migration_gap: Optional[str] = None
+        if all_completed:
+            try:
+                from kriya.workflow.migration import find_migration_incomplete, resolve_migration_obligation_for_workspace
+                obligation = resolve_migration_obligation_for_workspace(goal, workspace_path)
+                if obligation:
+                    gap = find_migration_incomplete(obligation, workspace_path)
+                    if gap:
+                        global_migration_gap = (
+                            "MIGRATION INCOMPLETE (global final-state check): the goal "
+                            f"explicitly requires replacing {gap['source_identity']} with "
+                            f"{gap['target_identity']}, but {', '.join(gap['reason_codes'])}."
+                        )
+                        all_completed = False
+            except Exception as e:
+                global_migration_gap = (
+                    "MIGRATION FINAL-STATE CHECK INDETERMINATE: the deterministic terminal "
+                    f"migration validator itself raised ({type(e).__name__}: {e}) - refusing to "
+                    "report success on an unverifiable terminal obligation rather than silently "
+                    "trusting the per-subtask gates."
+                )
+                all_completed = False
+
         needs_review = any(r.status == SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
         final_plan_lifecycle = "completed" if all_completed else "needs_review" if needs_review else "failed"
         save_approved_plan(
@@ -2697,6 +2747,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "subtask_results": [r.to_dict() for r in subtask_results],
             "files": sorted(established_file_context.keys()),
         }
+        if global_migration_gap:
+            aggregated["global_migration_gap"] = global_migration_gap
+            logger.error(
+                f"WorkflowController enforce run {run_id!r}: {global_migration_gap}"
+            )
         if knowledge_gap_break is not None:
             # Overrides status/run_id above (not quality_gates_passed/subtask_
             # results/files - those stay honest) so the CLI's real, already-built

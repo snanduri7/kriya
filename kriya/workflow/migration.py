@@ -288,3 +288,51 @@ def find_migration_incomplete(
         "unmigrated_consumers": unmigrated_consumers,
         "manifest_files": manifest_files,
     }
+
+
+def resolve_migration_obligation_for_workspace(
+    goal: str, workspace_path: str,
+) -> Optional[MigrationObligation]:
+    """resolve_migration_obligation grounded against every known .java file
+    in the workspace, not one subtask's own narrow planned-file scope - for
+    a caller (the global final-state check, kriya/workflow/
+    workflow_controller.py) that needs to know whether an obligation exists
+    at all across the WHOLE plan's final applied state, independent of
+    which one file happened to establish it. Same grounding shape as
+    resolve_authorized_dependency_removals above, for the same reason."""
+    java_files = _scan_java_files(workspace_path)
+    return resolve_migration_obligation(goal, workspace_path, sorted(java_files.keys()))
+
+
+def resolve_authorized_dependency_removals(goal: str, workspace_path: str) -> "set[str]":
+    """Maven artifact keys (group:artifact) an explicit migration goal
+    authorizes REMOVING - the SOURCE side of whatever
+    resolve_migration_obligation would resolve, grounded against every known
+    .java file in the workspace rather than one subtask's own narrow
+    planned-file list.
+
+    Found live, PRV-05 (2026-08-28, run 5): PolymorphicValidator.
+    run_compile_check()'s dependency-preservation check (kriya/tools/
+    validate.py) unconditionally rejects ANY pom.xml dependency removal,
+    with zero awareness of an explicit, goal-authorized migration - it
+    restored Gson every time s1 (the subtask that OWNS pom.xml) tried to
+    remove it, even though the top-level goal explicitly says to replace
+    it. resolve_migration_obligation's own grounded_scope requirement
+    (target_files must intersect a real .java consumer) is the wrong shape
+    for THIS caller: a subtask that only owns pom.xml (planned_files=
+    ['pom.xml'], not a .java file at all) can never itself supply a
+    grounded consumer, so it would never get authorization to remove
+    anything under the stricter API. This function grounds against every
+    known .java file in the workspace instead, since the question being
+    asked here is only "is removing this dependency authorized by the goal
+    at all" - not "which specific file consumes it," which is
+    find_migration_incomplete's job at terminal validation time.
+
+    Returns the SOURCE artifact key(s) - safe to remove - or an empty set
+    when no unambiguous, goal-authorized migration can be resolved (same
+    conservative degrade as resolve_migration_obligation itself: a missed
+    authorization just means the existing preservation rule stays in
+    force, never a security regression)."""
+    java_files = _scan_java_files(workspace_path)
+    obligation = resolve_migration_obligation(goal, workspace_path, sorted(java_files.keys()))
+    return set(obligation.source_artifacts) if obligation else set()

@@ -1361,6 +1361,95 @@ async def test_enforce_derives_and_persists_real_artifacts_on_full_success(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_enforce_global_final_state_check_downgrades_success_when_migration_incomplete(tmp_path):
+    """Regression test for PRV-05 (2026-08-28, run 5): every subtask passing
+    its own LOCAL Quality Gates is not sufficient for a migration - the
+    goal explicitly authorized replacing Gson with Jackson, but the final
+    applied workspace still has Gson declared/used. Even though every
+    per-subtask run_generation_workflow() call here is mocked to report
+    unconditional success (proving this is a NEW, additional check, not a
+    side effect of the per-subtask one), the global final-state check must
+    still downgrade the overall result."""
+    (tmp_path / "pom.xml").write_text(
+        "<project><dependencies>\n"
+        "<dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId>"
+        "<version>2.11.0</version></dependency>\n"
+        "<dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId>"
+        "<version>2.17.2</version></dependency>\n"
+        "</dependencies></project>\n"
+    )
+    owner = tmp_path / "src/main/java/com/example/JsonService.java"
+    owner.parent.mkdir(parents=True)
+    owner.write_text(
+        "package com.example;\n"
+        "import com.google.gson.Gson;\n"
+        "public class JsonService {\n"
+        " private final Gson gson=new Gson();\n"
+        " public String serialize(Object c){ return gson.toJson(c); }\n"
+        "}\n"
+    )
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="migrate JsonService.java to the new JSON library",
+            execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="src/main/java/com/example/JsonService.java", action=FileAction.MODIFY)],
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        result = await controller.execute(
+            "Replace the existing JSON serialization library with the JSON library already "
+            "approved for this repository.",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    assert result.legacy_result["quality_gates_passed"] is False
+    assert "global_migration_gap" in result.legacy_result
+    assert "SOURCE_DEPENDENCY_REMAINS" in result.legacy_result["global_migration_gap"]
+
+
+@pytest.mark.asyncio
+async def test_enforce_global_final_state_check_fails_closed_on_its_own_internal_error(tmp_path):
+    """The global final-state check is authoritative and deterministic - an
+    internal bug in IT must not silently fall back to trusting the
+    per-subtask gates (the same silent-degrade shape as the false-PASS bug
+    this check exists to close). Must downgrade to failure, not success,
+    when resolve_migration_obligation_for_workspace itself raises."""
+    (tmp_path / "pom.xml").write_text("<project></project>\n")
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="migrate the library", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="pom.xml", action=FileAction.MODIFY)],
+        )],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3, patch(
+        "kriya.workflow.migration.resolve_migration_obligation_for_workspace",
+        side_effect=RuntimeError("simulated validator bug"),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute(
+            "Replace the existing JSON serialization library with the JSON library already "
+            "approved for this repository.",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    assert result.legacy_result["quality_gates_passed"] is False
+    assert "INDETERMINATE" in result.legacy_result["global_migration_gap"]
+
+
+@pytest.mark.asyncio
 async def test_enforce_does_not_derive_artifacts_when_a_subtask_fails(tmp_path):
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "myproj"\n')
     plan = _two_subtask_plan()
