@@ -1595,6 +1595,74 @@ async def test_run_attempt_raises_spec_compliance_indeterminate_after_two_indete
     assert spec_compliance.check.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_run_attempt_suppresses_spec_compliance_indeterminate_when_migration_already_satisfied(tmp_path):
+    """Regression test for a real live PRV-05 defect (2026-08-28, Legacy
+    run, 11-attempt exhaustion): the migration was ALREADY fully and
+    correctly complete (confirmed directly against the real worktree
+    files, not just the log) by attempt 5, but SpecComplianceAgent kept
+    returning a self-contradictory indeterminate verdict ("the code still
+    uses Jackson... does not show replacement of any prior library" - a
+    direction hallucination, not a real gap) - which used to raise
+    unconditionally with zero reference to the obligation ledger, even
+    though the sibling 'not compliant, with actual named requirements'
+    branch already arbitrated against exactly this class of contradiction.
+    A genuinely correct candidate got destabilized into full budget
+    exhaustion by this gap. Must now be suppressed (treated as compliant)
+    when every current migration obligation is deterministically
+    SATISFIED, mirroring the existing arbitration for the other branch."""
+    state = GenerationState()
+    state.attempt_number = 0
+    owner = "JsonService.java"
+    (tmp_path / owner).write_text("class JsonService {}\n")
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": owner, "content": "class JsonService {}\n",
+    }])
+    indeterminate_verdict = {
+        "compliant": False, "status": "indeterminate",
+        "reasoning": "the code still uses Jackson and does not show replacement of any prior library",
+        "missing_requirements": [], "likely_files": [],
+    }
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value=indeterminate_verdict)
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+
+    ledger = ObligationLedger()
+    for code in (
+        "migration.target_dependency_present", "migration.source_dependency_absent",
+        "migration.source_usage_absent", "migration.grounded_consumer_uses_target",
+    ):
+        ledger.record(ObligationRecord(
+            id=code, kind=ObligationKind.MIGRATION_COMPLETION,
+            status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+            description=code, source="test", revision=1,
+        ))
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal="Replace Gson with the already-approved Jackson library",
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+        spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+        obligation_ledger=ledger,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    assert spec_compliance.check.call_count == 2
+
+
 def test_api_recovery_precheck_keeps_signature_and_callsite_evidence_authoritative():
     owner = "src/Formatter.java"
     test = "tests/FormatterTest.java"

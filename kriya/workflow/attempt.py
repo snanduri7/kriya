@@ -1016,6 +1016,23 @@ def _spec_compliance_authoritative_context(ledger: Optional[ObligationLedger]) -
     )
 
 
+def _migration_obligations_all_satisfied(ledger: Optional[ObligationLedger]) -> bool:
+    """True only when the ledger has at least one current MIGRATION_
+    COMPLETION obligation and every one of them is SATISFIED. Shared
+    precondition for every SpecCompliance arbitration path below - a
+    JUDGMENT-authority verdict may only ever be suppressed/overridden when
+    the DETERMINISTIC migration gate has fully confirmed the fact it
+    contradicts; a still-VIOLATED (or no-obligation-recorded-at-all) case
+    means judgment and determinism simply agree, or there's nothing to
+    arbitrate against, and the LLM verdict must stand."""
+    if not ledger:
+        return False
+    migration_records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+    return bool(migration_records) and not any(
+        rec.status == ObligationStatus.VIOLATED for rec in migration_records
+    )
+
+
 def _spec_requirements_contradicting_authority(
     missing_requirements: List[str], ledger: Optional[ObligationLedger],
 ) -> Tuple[List[str], List[str]]:
@@ -1038,11 +1055,9 @@ def _spec_requirements_contradicting_authority(
     Never touches a requirement while ANY current migration obligation is
     still VIOLATED - that is judgment and determinism agreeing, not a
     contradiction to arbitrate away."""
-    if not ledger:
+    if not _migration_obligations_all_satisfied(ledger):
         return list(missing_requirements), []
     migration_records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
-    if not migration_records or any(rec.status == ObligationStatus.VIOLATED for rec in migration_records):
-        return list(missing_requirements), []
     # Tokenized (split on "-"/"_"), not the raw identity string as a single
     # substring: an artifactId like "jackson-databind" must still correlate
     # with prose that names the human-friendly library "Jackson" - found
@@ -4059,17 +4074,52 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 authoritative_context=authoritative_context,
             )
         if spec_result.get("status") == "indeterminate":
-            message = (
-                "SPEC COMPLIANCE INDETERMINATE: the compliance check returned an "
-                "internally contradictory verdict (compliant=false naming no concrete "
-                f"missing requirement) twice in a row: {spec_result['reasoning']}"
-            )
-            failure = Failure(
-                type="spec_compliance_indeterminate", message=message, raw_output=message,
-                attempt=state.attempt_number,
-            )
-            state.gate_outcomes.append(failure.to_gate_outcome())
-            raise QualityGateFailure(failure)
+            if _migration_obligations_all_satisfied(ctx.obligation_ledger):
+                # MA8 follow-up (found live, PRV-05, 2026-08-28): this branch
+                # used to raise unconditionally, with ZERO reference to
+                # ctx.obligation_ledger, even though the sibling "not
+                # compliant, with actual named requirements" branch just
+                # below already arbitrates against it. A candidate whose
+                # migration was ALREADY fully and correctly complete
+                # (confirmed live: the real worktree files, not just the
+                # log - pom.xml, JsonService.java, JacksonConfig.java all
+                # correct) got destabilized into an 11-attempt budget
+                # exhaustion by this exact gap - the model's own repeated
+                # verdict ("the code still uses Jackson... does not show
+                # replacement of any prior library") is the same direction-
+                # hallucination class this whole gate exists to catch, just
+                # reached through the indeterminate shape instead of a
+                # named-requirement one. The up-front authoritative_context
+                # prompt addition alone did not prevent it - confirming the
+                # spec's own "do not trust the prompt alone" warning live.
+                # Same suppression treatment as the arbitrated-requirements
+                # branch below: normalize to compliant so the rest of this
+                # function's existing success path handles it, rather than
+                # adding a second, parallel success path.
+                logger.warning(
+                    "Quality Gates: Goal spec compliance returned an internally "
+                    "contradictory INDETERMINATE verdict twice in a row while every "
+                    "current migration obligation is deterministically SATISFIED - "
+                    "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY, suppressed (treated as "
+                    "compliant, not used to trigger retry): %s",
+                    spec_result.get("reasoning"),
+                )
+                spec_result = {
+                    "compliant": True, "reasoning": spec_result.get("reasoning", ""),
+                    "missing_requirements": [], "likely_files": [],
+                }
+            else:
+                message = (
+                    "SPEC COMPLIANCE INDETERMINATE: the compliance check returned an "
+                    "internally contradictory verdict (compliant=false naming no concrete "
+                    f"missing requirement) twice in a row: {spec_result['reasoning']}"
+                )
+                failure = Failure(
+                    type="spec_compliance_indeterminate", message=message, raw_output=message,
+                    attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
         if spec_result.get("status") == "unknown" and ctx.strict_spec_compliance:
             message = (
                 "SPEC COMPLIANCE INFRASTRUCTURE FAILURE: authoritative execution cannot "
