@@ -2736,7 +2736,7 @@ async def test_spec_compliance_check_flags_missing_named_field():
     assert result["likely_files"] == ["Protocol.java"]
 
 @pytest.mark.asyncio
-async def test_spec_compliance_check_false_verdict_with_no_missing_requirements_is_treated_as_compliant():
+async def test_spec_compliance_check_false_verdict_with_no_missing_requirements_is_indeterminate():
     """Regression test for a real live bug, 2026-08-25 (protocol_encoder_java,
     3 separate rounds of the same run): the goal had zero concrete/literal
     requirements, and the model's own reasoning correctly said so ("the goal
@@ -2744,7 +2744,15 @@ async def test_spec_compliance_check_false_verdict_with_no_missing_requirements_
     against the code"), but still returned compliant=false with an empty
     missing_requirements list - self-contradictory per this gate's own
     contract, since a false verdict is only supposed to mean something when
-    it names at least one concrete missing identifier/value."""
+    it names at least one concrete missing identifier/value.
+
+    Used to be silently forced to compliant=True here. Found live, PRV-05
+    (2026-08-28): that fail-open converted a REAL migration failure (the
+    model's own reasoning correctly identified "the pom.xml shows both
+    Jackson and Gson dependencies, indicating no replacement occurred") into
+    a fabricated PASS. Now returns status="indeterminate" instead of
+    guessing either way - see attempt.py's spec-compliance call site for the
+    bounded-reevaluation-then-fail-closed policy that consumes this."""
     cfg = AppConfig()
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=json.dumps({
@@ -2761,7 +2769,8 @@ async def test_spec_compliance_check_false_verdict_with_no_missing_requirements_
         file_contents={"Main.java": "class Main {}"},
     )
 
-    assert result["compliant"] is True
+    assert result["compliant"] is False
+    assert result["status"] == "indeterminate"
     assert result["missing_requirements"] == []
 
 @pytest.mark.asyncio

@@ -120,9 +120,11 @@ from kriya.workflow.context_package import (
 )
 from kriya.workflow.context_projection import project_implementation_source, render_established_file_context
 from kriya.workflow.control_context import WorkflowControlContext
+from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
+    ExecutionRole,
     FileAction,
     PlannedFile,
     Subtask,
@@ -375,8 +377,8 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "nothing else: no Markdown, code fences, prose, or rationale. Decompose the request into the "
     "smallest safe set of bounded implementation subtasks. Use this top-level shape: "
     '{"global_invariants": ["..."], "subtasks": [{"id": "s1", "description": "...", '
-    '"execution_method": "model", "depends_on": [], "planned_files": '
-    '[{"path": "...", "action": "create|modify|delete"}], "provides": ["..."], '
+    '"execution_method": "model", "execution_role": "implementation", "depends_on": [], '
+    '"planned_files": [{"path": "...", "action": "create|modify|delete"}], "provides": ["..."], '
     '"requires": [], "relevant_global_invariants": ["..."], "verification": '
     '[{"type": "tool", "description": "...", "tool_name": "compile", '
     '"verifier_kind": "compile", '
@@ -384,12 +386,15 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     '"acceptance_criteria_ids": ["ac1"]}], "acceptance_criteria": '
     '[{"id": "ac1", "description": "...", "method": "judgment"}], '
     '"extension_points": [], "refactor_baseline": null}. '
-    "Every model subtask must own every file it may change. Verification-only work belongs in "
-    "verification or acceptance_criteria. Each planned path must be owned by exactly one model "
-    "subtask. Do not emit a model subtask solely to analyze, inspect, research, or explain code; "
-    "the implementation subtask performs any necessary analysis before editing its owned file. "
-    "A verification entry must always be an object, never a "
-    "string. A judgment verification must omit tool_name. A tool verification must name a real "
+    "Every model subtask has an execution_role: implementation or verification. An implementation "
+    "subtask must own every file it may change in planned_files. A verification subtask (e.g. "
+    "\"run the regression suite and confirm existing behavior is preserved\") MUST set "
+    "execution_role=verification, planned_files=[] (it never writes anything), and at least one "
+    "real entry in verification - never invent a file for it. Each planned path must be owned by "
+    "exactly one implementation subtask. Do not emit an implementation subtask solely to analyze, "
+    "inspect, research, or explain code; the implementation subtask performs any necessary "
+    "analysis before editing its owned file. A verification entry must always be an object, never "
+    "a string. A judgment verification must omit tool_name. A tool verification must name a real "
     "registered tool; use tool_name=compile/verifier_kind=compile for compilation and "
     "tool_name=test/verifier_kind=test for tests. Use verifier_kind=application_runtime only "
     "when the plan explicitly requires executing the application. Every "
@@ -461,10 +466,11 @@ def build_structured_plan_repair_prompt(
     if "MODEL_SUBTASK_MISSING_PLANNED_FILES" in reason_codes:
         targeted_correction += (
             "- For each named unscoped MODEL subtask: if it is a non-editing build/test/run/output "
-            "check, REMOVE it from subtasks, redirect any downstream depends_on edges to its own "
-            "dependencies, and move its acceptance criteria plus an equivalent verification entry "
-            "onto the nearest implementation dependency. If it genuinely edits files, retain it only "
-            "with the exact real planned_files it owns. Never invent a fake file for a check.\n"
+            "check, set its execution_role to verification (keep it as its own subtask, keep its "
+            "depends_on and acceptance_criteria_ids) and give it at least one concrete verification "
+            "entry - do NOT remove it or invent a planned_files path for it. If it genuinely edits "
+            "files, retain it as execution_role=implementation with the exact real planned_files it "
+            "owns. Never invent a fake file for a check.\n"
         )
     if "STRUCTURED_PLAN_SCHEMA_INVALID" in reason_codes:
         targeted_correction += (
@@ -521,9 +527,12 @@ def build_structured_plan_repair_prompt(
         "semantic/runtime checks; never emit a verification string.\n"
         "- Map each acceptance criterion only to a stage capable of directly proving it; runtime "
         "output criteria belong on the runnable entrypoint stage.\n"
-        "- Every execution_method=model subtask MUST declare every file it may modify in planned_files.\n"
-        "- Verification-only build/test/run/output checks belong in verification or acceptance_criteria, "
-        "not in a MODEL subtask with no files.\n"
+        "- Every execution_role=implementation subtask MUST declare every file it may modify in "
+        "planned_files.\n"
+        "- A non-editing build/test/run/output check is its own subtask with "
+        "execution_role=verification, planned_files=[], and at least one concrete verification "
+        "entry - never a MODEL subtask with no files and no verification entry, and never a fake "
+        "planned_files path invented just to pass validation.\n"
         + targeted_correction
         + "- Do not emit TOOL subtasks: authoritative enforce mode has no policy-mediated TOOL router yet.\n"
         "- Output the complete corrected JSON object, not a patch, explanation, or Markdown plan.\n\n"
@@ -561,11 +570,16 @@ def build_authoritative_planner_request(
         "Emit no prose, Markdown, code fences, rationale, or architecture essay.\n"
         "Authoritative structured-plan protocol (planning metadata, not product requirements):\n"
         "- Do not emit execution_method=tool subtasks; this execution path has no policy-mediated "
-        "TOOL router. Represent non-editing checks as verification or acceptance criteria.\n"
-        "- Every MODEL subtask must own at least one exact planned_files path.\n"
-        "- Each planned_files path must be owned by exactly one MODEL subtask. Do not create a "
-        "MODEL subtask solely to analyze, inspect, research, or explain code; fold necessary "
-        "analysis into the implementation subtask that owns and edits the file.\n"
+        "TOOL router.\n"
+        "- Every MODEL subtask sets execution_role: implementation or verification. An "
+        "implementation subtask must own at least one exact planned_files path. A verification "
+        "subtask (a non-editing build/test/run/output check, e.g. regression confirmation) sets "
+        "execution_role=verification, planned_files=[], and at least one concrete verification "
+        "entry - never a fake planned_files path.\n"
+        "- Each planned_files path must be owned by exactly one implementation MODEL subtask. Do "
+        "not create an implementation subtask solely to analyze, inspect, research, or explain "
+        "code; fold necessary analysis into the implementation subtask that owns and edits the "
+        "file.\n"
         "- Existing local workspace paths available as repository evidence are: "
         f"{json.dumps(repository_candidates or [])}. For modify/delete actions, select the exact "
         "relevant existing path from this evidence. Do not invent a parallel replacement when a "
@@ -1851,7 +1865,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     reason_codes.extend(validation.reason_codes)
                     unbounded_model_subtasks = [
                         st.id for st in plan.subtasks
-                        if st.execution_method == ExecutionMethod.MODEL and not st.planned_files
+                        if st.execution_method == ExecutionMethod.MODEL
+                        and st.execution_role != ExecutionRole.VERIFICATION
+                        and not st.planned_files
                     ]
                     invalid_subtask_ids.extend(unbounded_model_subtasks)
                     if unbounded_model_subtasks and not any(
@@ -2113,6 +2129,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 predetermined_design=target_goal,
                 predetermined_architect_files=target_files,
                 allowed_write_relpaths=target_files,
+                # DENY_ALL for a verification-role subtask - enforced at the
+                # real write gate (AuthorizedFileWriter), not merely implied
+                # by target_files being empty. Every other subtask keeps
+                # today's inferred ALLOWLIST/UNRESTRICTED behavior (None ->
+                # run_generation_workflow's own backward-compatible
+                # inference).
+                write_scope_mode=(
+                    WriteScopeMode.DENY_ALL if target.execution_role == ExecutionRole.VERIFICATION
+                    else None
+                ),
                 required_verification=[vm.model_dump(mode="json") for vm in target.verification],
                 runtime_verification_required=any(
                     vm.requires_application_runtime for vm in target.verification

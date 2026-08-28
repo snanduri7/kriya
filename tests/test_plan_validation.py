@@ -9,11 +9,13 @@ from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
     ExecutionMethod,
+    ExecutionRole,
     FileAction,
     PlannedFile,
     Subtask,
     VerificationMethod,
     VerificationMethodType,
+    VerifierKind,
 )
 from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.triage import ChangeKind
@@ -48,6 +50,31 @@ async def test_authoritative_validation_rejects_model_subtask_without_planned_fi
     assert result.valid is False
     assert any("declares no planned_files" in error for error in result.errors)
     assert result.reason_codes == ["MODEL_SUBTASK_MISSING_PLANNED_FILES"]
+
+
+@pytest.mark.asyncio
+async def test_authoritative_validation_exempts_verification_role_from_missing_planned_files(tmp_path):
+    """Regression test for PRV-05 (2026-08-28): a genuine, non-mutating
+    regression-verification subtask (execution_role=verification) has zero
+    planned_files by construction - this must NOT trip the same rule that
+    catches a genuinely unbounded IMPLEMENTATION-role subtask. See
+    ExecutionRole's own docstring (plan_schema.py) for the full incident:
+    the Planner's identical s4 subtask was rejected 3 attempts running,
+    because enforce mode had no legal shape for what it was correctly
+    trying to express."""
+    subtask = _model_subtask(
+        execution_role=ExecutionRole.VERIFICATION,
+        verification=[VerificationMethod(
+            type=VerificationMethodType.TOOL, description="run tests",
+            tool_name="test", verifier_kind=VerifierKind.TEST,
+        )],
+    )
+    plan = _plan([subtask])
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), require_model_planned_files=True,
+    )
+    assert result.valid is True
+    assert "MODEL_SUBTASK_MISSING_PLANNED_FILES" not in result.reason_codes
 
 
 @pytest.mark.asyncio

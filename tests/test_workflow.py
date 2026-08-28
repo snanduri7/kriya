@@ -15,6 +15,7 @@ from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.filesystem import WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.workflow.attempt import (
     AttemptContext,
@@ -1129,6 +1130,39 @@ async def test_run_attempt_rejects_contract_change_on_a_later_attempt_not_just_t
     assert owner in exc_info.value.failure.likely_files
 
 
+@pytest.mark.asyncio
+async def test_run_attempt_hard_rejects_a_write_under_deny_all_write_scope(tmp_path):
+    """WriteScopeMode.DENY_ALL regression test (PRV-05, 2026-08-28): even if
+    the Developer (a bug, a misbehaving model, or a recovery/fallback loop)
+    still returns a file to write for a verification-only subtask, the real
+    write gate (AuthorizedFileWriter) must reject it deterministically -
+    this must not depend on planned_files/allowed_write_relpaths being empty
+    by construction alone. See WriteScopeMode's own docstring
+    (kriya/policy/filesystem.py) for why this is the real security boundary,
+    not the Planner-side validation rule."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "unexpected.py", "content": "print('should never be written')\n",
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal="Run regression tests",
+        architect_files=[], expected_files_upfront=[],
+        architect_basename_to_path={},
+        allowed_write_relpaths=[],
+        write_scope_mode=WriteScopeMode.DENY_ALL,
+    )
+
+    with pytest.raises(PolicyDeniedError) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.result.reason_code == "WRITE_SCOPE_DENY_ALL"
+    assert not (tmp_path / "unexpected.py").exists()
+
+
 _APP_MAIN_JAVA = (
     "package com.example;\n"
     "public class App {\n"
@@ -1266,6 +1300,125 @@ async def test_run_attempt_rejects_unrequested_second_entrypoint(tmp_path):
 
     assert exc_info.value.failure.type == "unrequested_architectural_surface"
     assert new_file in exc_info.value.failure.likely_files
+
+
+_PRV05_POM_BOTH = (
+    "<project><dependencies>\n"
+    "<dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId>"
+    "<version>2.11.0</version></dependency>\n"
+    "<dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId>"
+    "<version>2.17.2</version></dependency>\n"
+    "</dependencies></project>\n"
+)
+_PRV05_GSON_JSON_SERVICE = (
+    "package com.example;\n"
+    "import com.google.gson.Gson;\n"
+    "public class JsonService {\n"
+    " private final Gson gson=new Gson();\n"
+    " public String serialize(Object c){ return gson.toJson(c); }\n"
+    "}\n"
+)
+_PRV05_GOAL = (
+    "Replace the existing JSON serialization library with the JSON library "
+    "already approved for this repository."
+)
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_incomplete_migration_before_spec_compliance(tmp_path):
+    """MIGRATION_INCOMPLETE regression test for PRV-05 (2026-08-28): a
+    candidate that leaves the goal's explicit migration unfinished (both
+    dependencies still declared, the grounded existing owner still using
+    the old library) must be rejected deterministically, BEFORE Spec
+    Compliance ever runs - Spec Compliance itself hallucinated the
+    migration direction mid-run in the real incident and must never get a
+    chance to override this gate. The Developer response here doesn't even
+    touch pom.xml/JsonService.java (an unrelated README write) - matching
+    the real incident's own final shape: nothing about the migration
+    actually changed by the time Quality Gates were reached."""
+    state = GenerationState()
+    state.attempt_number = 0
+    owner = "src/main/java/com/example/JsonService.java"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    (tmp_path / owner).write_text(_PRV05_GSON_JSON_SERVICE)
+    (tmp_path / "pom.xml").write_text(_PRV05_POM_BOTH)
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": owner, "content": _PRV05_GSON_JSON_SERVICE,
+    }])
+    default_spec_compliance = AsyncMock()
+    default_spec_compliance.check = AsyncMock(return_value={
+        "compliant": True, "reasoning": "should never be reached", "missing_requirements": [], "likely_files": [],
+    })
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal=_PRV05_GOAL,
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={"JsonService.java": owner},
+        spec_compliance=default_spec_compliance,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "migration_incomplete"
+    assert owner in exc_info.value.failure.likely_files
+    default_spec_compliance.check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_raises_spec_compliance_indeterminate_after_two_indeterminate_verdicts(tmp_path):
+    """SPEC_COMPLIANCE_INDETERMINATE regression test (2026-08-28): the
+    fail-open bug this replaces used to silently treat this exact shape as
+    compliant=True. Now it must retry once (still bounded - not a retry-
+    budget spend) and, if still indeterminate, stop rather than fabricate a
+    verdict either way."""
+    state = GenerationState()
+    state.attempt_number = 0
+    owner = "app.py"
+    (tmp_path / owner).write_text("print('hi')\n")
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": owner, "content": "print('hi')\n",
+    }])
+    indeterminate_verdict = {
+        "compliant": False, "status": "indeterminate",
+        "reasoning": "self-contradictory verdict", "missing_requirements": [], "likely_files": [],
+    }
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value=indeterminate_verdict)
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal="Print a greeting",
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+        spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "spec_compliance_indeterminate"
+    assert spec_compliance.check.call_count == 2
 
 
 def test_api_recovery_precheck_keeps_signature_and_callsite_evidence_authoritative():
@@ -9482,6 +9635,43 @@ async def test_predetermined_design_alone_without_plan_raises():
         await we.run_generation_workflow(
             goal="x", workspace_path="/tmp", predetermined_design="only the design",
         )
+
+
+@pytest.mark.asyncio
+async def test_predetermined_architect_files_deliberately_empty_is_not_replaced_by_heuristic_fallback(tmp_path):
+    """Regression test for PRV-05 (2026-08-28): predetermined_architect_files=[]
+    (an EMPTY list, not None) is a deliberate zero-file plan - a bounded
+    execution_role=verification subtask (kriya/workflow/plan_schema.py)
+    legitimately owns no planned_files by construction. Before this fix,
+    `if not architect_files:` treated [] and None identically, silently
+    discarding the deliberate empty list and replacing it with whatever
+    _resolve_file_paths_from_design happened to regex out of the subtask's
+    own prose description - defeating the whole point of a non-mutating
+    subtask before it even reached the write gate. The Developer here
+    returns zero files (mirroring a real verification-only subtask that
+    writes nothing); the run must complete without inventing any file."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "[]",  # Developer: zero files (verification-only subtask writes nothing)
+        "Review: Approved",  # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Run regression tests to confirm behavior is preserved",
+        workspace_path=str(tmp_path),
+        predetermined_plan="Run the regression suite",
+        predetermined_design="Run the regression suite",
+        predetermined_architect_files=[],
+    )
+
+    assert res["files"] == []
 
 
 @pytest.mark.asyncio

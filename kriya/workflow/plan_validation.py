@@ -39,6 +39,7 @@ from kriya.workflow.plan_schema import (
     BUILTIN_QUALITY_GATE_VERIFIERS,
     EngineeringPlan,
     ExecutionMethod,
+    ExecutionRole,
     FileAction,
     Subtask,
     VerificationMethodType,
@@ -211,7 +212,23 @@ async def validate_plan(
                 reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
 
     for st in plan.subtasks:
-        if require_model_planned_files and st.execution_method == ExecutionMethod.MODEL and not st.planned_files:
+        # execution_role=verification is EXEMPT here, not weakened: Subtask's
+        # own model_validator (plan_schema.py) already requires a
+        # verification-role subtask to have zero planned_files AND at least
+        # one concrete verifier - this rule exists to catch an
+        # IMPLEMENTATION-role model subtask with no modification scope
+        # (a genuinely unbounded write), a different failure than "this
+        # subtask is intentionally non-mutating." Found live, PRV-05
+        # (2026-08-28): a real, needed regression-verification subtask (zero
+        # files by design, a populated `verification` list) had no legal
+        # encoding before execution_role existed - see ExecutionRole's own
+        # docstring for the full incident.
+        if (
+            require_model_planned_files
+            and st.execution_method == ExecutionMethod.MODEL
+            and st.execution_role != ExecutionRole.VERIFICATION
+            and not st.planned_files
+        ):
             errors.append(
                 f"subtask {st.id!r} uses execution_method=model but declares no planned_files; "
                 "authoritative execution requires a non-empty modification scope"

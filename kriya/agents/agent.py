@@ -2552,22 +2552,32 @@ class SpecComplianceAgent(BaseAgent):
         # gate's own contract (system_prompt above, and the class docstring) is that a
         # FALSE verdict only means something when it names at least one concrete,
         # missing identifier/value - by definition, a false verdict with nothing listed
-        # as missing is self-contradictory. Weaker local models pattern-match
-        # negation-heavy reasoning ("does NOT contain...") into compliant=false despite
-        # concluding there's nothing to flag. Treat the (required-to-be-populated on a
-        # real failure) missing_requirements list as authoritative over an ambiguous
-        # compliant field, matching this gate's own fail-open design (see check()'s
-        # docstring above) - deliberately one-directional: never override the opposite
-        # case (compliant=true with requirements listed), which wasn't observed live
-        # and risks turning real passes into failures instead of the reverse.
+        # as missing is self-contradictory.
+        #
+        # Used to silently force compliant=True here (treating the missing_requirements
+        # list as authoritative over an ambiguous compliant field). Found live, PRV-05
+        # (2026-08-28): that fail-open turned a REAL migration failure into a fabricated
+        # PASS. The check's own reasoning literally said "the pom.xml shows both Jackson
+        # and Gson dependencies, indicating no replacement occurred" - a concrete,
+        # correctly-identified failure - but because it didn't ALSO restate that as a
+        # `missing_requirements` entry, this branch silently discarded it. Now returns
+        # status="indeterminate" instead of guessing either way; the caller (attempt.py)
+        # owns the retry/fail-closed policy for this ambiguous shape - deterministic
+        # goal obligations (when one applies) settle the question first, a bounded single
+        # re-evaluation is attempted next, and only if it's STILL indeterminate does the
+        # caller stop rather than fabricate a verdict.
         if not compliant and not missing_requirements:
             logger.warning(
                 "Spec Compliance check() returned compliant=False with an empty "
                 "missing_requirements list (self-contradictory per this gate's own "
-                "contract) - treating as compliant rather than trusting the ambiguous "
-                f"verdict. Reasoning was: {parsed.get('reasoning')!r}"
+                "contract) - returning status=indeterminate rather than guessing either "
+                f"way. Reasoning was: {parsed.get('reasoning')!r}"
             )
-            compliant = True
+            return {
+                "compliant": False, "status": "indeterminate",
+                "reasoning": parsed.get("reasoning") or "",
+                "missing_requirements": [], "likely_files": likely_files,
+            }
         return {
             "compliant": compliant,
             "reasoning": parsed.get("reasoning") or "",

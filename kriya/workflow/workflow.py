@@ -41,6 +41,7 @@ from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriag
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.filesystem import WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.policy.telemetry import build_decision_record
 
@@ -606,6 +607,7 @@ class WorkflowEngine:
         predetermined_architect_files: Optional[List[str]] = None,
         protected_source_file: Optional[str] = None,
         allowed_write_relpaths: Optional[List[str]] = None,
+        write_scope_mode: Optional[WriteScopeMode] = None,
         required_verification: Optional[List[Dict[str, Any]]] = None,
         runtime_verification_required: Optional[bool] = None,
         strict_spec_compliance: bool = False,
@@ -1614,7 +1616,22 @@ class WorkflowEngine:
                 stream_callback=architect_stream
             )
             _save_stage_checkpoint("design", plan=plan, design=design, architect_files=architect_files)
-        if not architect_files:
+        # predetermined_architect_files=[] (an EMPTY list, not None) is a
+        # deliberate zero-file plan, not a broken one - a bounded subtask
+        # execution_role=verification subtask (kriya/workflow/plan_schema.py)
+        # legitimately owns no planned_files by construction. Only fall back
+        # to heuristic extraction when nothing was actually predetermined
+        # (predetermined_architect_files is None): a genuinely missing/
+        # malformed Architect file-list block, or an old checkpoint saved
+        # before architect_files existed at all. Found live, PRV-05
+        # (2026-08-28): before this distinction existed, an intentionally
+        # empty predetermined list was indistinguishable from "missing" here
+        # (`not []` and `not None` are both True), so a verification-only
+        # subtask's empty planned_files would have been silently discarded
+        # and replaced with whatever this heuristic happened to regex out of
+        # the subtask's own prose description - defeating the whole point of
+        # a non-mutating subtask before it even reached the write gate.
+        if not architect_files and predetermined_architect_files is None:
             # The Architect's response had no valid JSON file-list block (see
             # ArchitectAgent.run_with_file_list/kriya/agents/contracts.py), or
             # this is an old checkpoint saved before architect_files existed at
@@ -2068,6 +2085,20 @@ class WorkflowEngine:
             established_files=established_files or [],
             protected_relpath=protected_relpath,
             allowed_write_relpaths=list(allowed_write_relpaths or []),
+            # Resolved ONCE, here, mirroring AuthorizedFileWriter's own
+            # backward-compatible inference (kriya/policy/filesystem.py) so
+            # every write-gate call site downstream (kriya/workflow/
+            # attempt.py) reads the SAME unambiguous value instead of each
+            # re-deriving it from allowed_write_relpaths' truthiness - see
+            # WriteScopeMode's own docstring for the PRV-05 incident this
+            # closes. A caller that already knows its scope (e.g.
+            # WorkflowController's bounded-subtask execution, for a
+            # verification-role subtask) passes write_scope_mode directly;
+            # every other caller keeps today's behavior exactly.
+            write_scope_mode=(
+                write_scope_mode if write_scope_mode is not None
+                else (WriteScopeMode.ALLOWLIST if allowed_write_relpaths else WriteScopeMode.UNRESTRICTED)
+            ),
             runtime_verification_required=(
                 goal_requires_runtime_behavior(goal)
                 if runtime_verification_required is None

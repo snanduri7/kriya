@@ -9,6 +9,7 @@ from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
     ExecutionMethod,
+    ExecutionRole,
     FileAction,
     PlannedFile,
     PlannerStructuredOutput,
@@ -53,6 +54,29 @@ def test_planned_file_rejects_blank_path():
 def test_planned_file_accepts_a_real_relative_path():
     pf = PlannedFile(path="src/a.py", action=FileAction.MODIFY)
     assert pf.path == "src/a.py"
+
+
+def test_planned_file_rejects_glob_wildcard_path():
+    """Regression test for a real live bug, PRV-05 (2026-08-28): the Planner
+    returned "src/main/java/**/*.java" as a planned_files[].path - a glob
+    pattern, not a real file. Nothing rejected it, so every downstream
+    consumer (Developer generation, the write loop, the compile gate)
+    treated the literal string as an actual filename for the rest of the
+    run - every retry failed identically against a file that could never
+    satisfy javac's "class X must be declared in a file named X.java" rule,
+    since the "filename" itself was never a real name at all."""
+    with pytest.raises(ValidationError):
+        PlannedFile(path="src/main/java/**/*.java", action=FileAction.MODIFY)
+
+
+def test_planned_file_rejects_single_star_wildcard_path():
+    with pytest.raises(ValidationError):
+        PlannedFile(path="src/main/*.java", action=FileAction.MODIFY)
+
+
+def test_planned_file_rejects_bracket_glob_path():
+    with pytest.raises(ValidationError):
+        PlannedFile(path="src/main/[A-Z]*.java", action=FileAction.MODIFY)
 
 
 # --- VerificationMethod ---
@@ -182,6 +206,45 @@ def test_subtask_semantic_contract_metadata_round_trips():
     assert restored.provides == ["build.ready"]
     assert restored.requires == ["config.ready"]
     assert restored.relevant_global_invariants == ["runtime must exit cleanly"]
+
+
+# --- ExecutionRole (PRV-05, 2026-08-28) ---
+
+def test_subtask_execution_role_defaults_to_implementation():
+    """Backward compatibility: every plan/checkpoint predating this field
+    deserializes unchanged."""
+    st = _model_subtask()
+    assert st.execution_role == ExecutionRole.IMPLEMENTATION
+
+
+def test_subtask_verification_role_accepts_zero_planned_files():
+    st = _model_subtask(
+        execution_role=ExecutionRole.VERIFICATION,
+        planned_files=[],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.TOOL, description="run tests",
+            tool_name="test", verifier_kind=VerifierKind.TEST,
+        )],
+    )
+    assert st.execution_role == ExecutionRole.VERIFICATION
+    assert st.planned_files == []
+
+
+def test_subtask_verification_role_rejects_planned_files():
+    """A verification-only subtask must never own writable files - the
+    complementary invariant to PRV-04's UNREQUESTED_ARCHITECTURAL_SURFACE:
+    verification observes and judges, it does not mutate architecture."""
+    with pytest.raises(ValidationError):
+        _model_subtask(
+            execution_role=ExecutionRole.VERIFICATION,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.MODIFY)],
+            verification=[VerificationMethod(type=VerificationMethodType.JUDGMENT, description="check")],
+        )
+
+
+def test_subtask_verification_role_requires_at_least_one_verifier():
+    with pytest.raises(ValidationError):
+        _model_subtask(execution_role=ExecutionRole.VERIFICATION, planned_files=[])
 
 
 # --- EngineeringPlan ---

@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
-from kriya.policy.filesystem import AuthorizedFileWriter
+from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
     apply_anchored_edits,
@@ -71,6 +71,7 @@ from kriya.workflow.acceptance import (
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.verification_authority import deterministic_sequence_kind
+from kriya.workflow.migration import find_migration_incomplete, resolve_migration_obligation
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
@@ -425,6 +426,16 @@ class AttemptContext:
     # protect, matches every existing call site's behavior unchanged.
     protected_relpath: Optional[str] = None
     allowed_write_relpaths: List[str] = field(default_factory=list)
+    # Explicit write-scope policy (kriya/policy/filesystem.py::WriteScopeMode)
+    # - resolved ONCE, by run_generation_workflow(), before AttemptContext is
+    # built, so every write-gate call site in this module reads the SAME
+    # unambiguous value instead of each re-inferring its own meaning from
+    # allowed_write_relpaths' truthiness (the exact ambiguity that let a
+    # verification-only subtask's intended DENY_ALL silently degrade to
+    # "no restriction" - found live, PRV-05, 2026-08-28). Defaults to
+    # UNRESTRICTED, matching every plain (non-bounded-subtask) generate call
+    # and every existing test's own expectations unchanged.
+    write_scope_mode: WriteScopeMode = WriteScopeMode.UNRESTRICTED
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
     # Human-readable identity for nested structured executions. Attempt
@@ -2233,6 +2244,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         ctx.worktree_path,
         protected_relpaths=(ctx.protected_relpath,) if ctx.protected_relpath else (),
         allowed_relpaths=ctx.allowed_write_relpaths,
+        write_scope_mode=ctx.write_scope_mode,
     ).commit_batch(staged_writes)
     changed_files = [
         os.path.relpath(staged.target_path, ctx.worktree_path)
@@ -2580,7 +2592,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     worktree_path=ctx.worktree_path,
                     validator=validator,
                     files_in_scope=compile_known_files,
-                    writable_files=(ctx.allowed_write_relpaths or compile_known_files),
+                    # DENY_ALL means never writable here either - a bug in
+                    # this recovery/fallback loop must not be able to bypass
+                    # the same invariant AuthorizedFileWriter enforces at the
+                    # real write gate below (see WriteScopeMode's own
+                    # docstring for why "recovery paths can accidentally
+                    # bypass otherwise correct invariants" is a confirmed,
+                    # not hypothetical, risk here).
+                    writable_files=(
+                        [] if ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+                        else (ctx.allowed_write_relpaths or compile_known_files)
+                    ),
                     compile_error_output=compile_res["output"],
                     active_code_context=active_code_context,
                     max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
@@ -2806,7 +2828,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         worktree_path=ctx.worktree_path,
                         validator=validator,
                         files_in_scope=list(state.all_files_written),
-                        writable_files=(ctx.allowed_write_relpaths or list(state.all_files_written)),
+                        # See the compile-gate self-correction call site's own
+                        # comment (above, this module) for why DENY_ALL is
+                        # checked explicitly here too.
+                        writable_files=(
+                            [] if ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+                            else (ctx.allowed_write_relpaths or list(state.all_files_written))
+                        ),
                         compile_error_output=test_res["output"],
                         active_code_context=active_code_context,
                         max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
@@ -3360,8 +3388,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 worktree_path=ctx.worktree_path,
                                 validator=validator,
                                 files_in_scope=run_verification_known_files,
+                                # See the compile-gate self-correction call
+                                # site's own comment above for why DENY_ALL is
+                                # checked explicitly here too.
                                 writable_files=(
-                                    ctx.allowed_write_relpaths or list(state.all_files_written)
+                                    [] if ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+                                    else (ctx.allowed_write_relpaths or list(state.all_files_written))
                                 ),
                                 compile_error_output=(
                                     f"RUNTIME VERIFICATION FAILURE (plain nonzero exit): {grade['reasoning']}"
@@ -3591,6 +3623,39 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         except Exception as ex:
                             logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
 
+    # Quality Gates: Migration Completion. Deliberately runs BEFORE Spec
+    # Compliance and is never overridable by it - an explicit, objectively-
+    # testable migration obligation (see kriya/workflow/migration.py's own
+    # docstring for the PRV-05, 2026-08-28 incident) must not be reopened by
+    # a semantic verdict that disagrees. resolve_migration_obligation only
+    # ever returns non-None for a goal that explicitly expresses replacement
+    # intent AND has unambiguous repository grounding for source/target -
+    # every other goal pays only the cost of one quick regex check.
+    migration_obligation = resolve_migration_obligation(ctx.goal, ctx.workspace_path, ctx.architect_files)
+    if migration_obligation:
+        migration_gap = find_migration_incomplete(migration_obligation, ctx.worktree_path)
+        if migration_gap:
+            message = (
+                "MIGRATION INCOMPLETE: the goal explicitly requires replacing "
+                f"{migration_gap['source_identity']} with {migration_gap['target_identity']}, but "
+                f"{', '.join(migration_gap['reason_codes'])}. Grounded consumer(s) that must use "
+                f"{migration_gap['target_identity']}: {', '.join(migration_gap['grounded_consumers']) or 'none'}."
+            )
+            failure = _build_quality_gate_failure(
+                "migration_incomplete", message, message,
+                ctx.worktree_path, state.all_files_written, state.attempt_number,
+                extra_likely_files=(
+                    migration_gap["unmigrated_consumers"] or migration_gap["source_usage_files"]
+                ),
+            )
+            failure.diagnostics = {
+                **(failure.diagnostics or {}),
+                "reason_code": "MIGRATION_INCOMPLETE",
+                "reason_codes": migration_gap["reason_codes"],
+            }
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
     # Quality Gates: Goal Spec Compliance. Compiling, passing tests, and (when
     # applicable) runtime verification above all structurally can't catch a goal's
     # LITERALLY named requirement (an exact field/method/class name, an exact type,
@@ -3623,6 +3688,33 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         spec_result = await ctx.spec_compliance.check(
             goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
         )
+        if spec_result.get("status") == "indeterminate":
+            # SpecComplianceAgent.check() returns this when the model's own
+            # verdict is internally contradictory (compliant=false naming no
+            # concrete missing requirement) - used to be silently forced to
+            # compliant=True (see that method's own docstring for the PRV-05,
+            # 2026-08-28 incident this closes: a real migration failure the
+            # model's own reasoning had already identified became a
+            # fabricated PASS). One bounded re-evaluation, not a retry-budget
+            # spend - if it's STILL indeterminate, stop rather than guess
+            # either way; trusting a bare compliant=false here would just
+            # move the same problem (an unreliable LLM verdict as sole
+            # authority) in the opposite direction.
+            spec_result = await ctx.spec_compliance.check(
+                goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
+            )
+        if spec_result.get("status") == "indeterminate":
+            message = (
+                "SPEC COMPLIANCE INDETERMINATE: the compliance check returned an "
+                "internally contradictory verdict (compliant=false naming no concrete "
+                f"missing requirement) twice in a row: {spec_result['reasoning']}"
+            )
+            failure = Failure(
+                type="spec_compliance_indeterminate", message=message, raw_output=message,
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
         if spec_result.get("status") == "unknown" and ctx.strict_spec_compliance:
             message = (
                 "SPEC COMPLIANCE INFRASTRUCTURE FAILURE: authoritative execution cannot "

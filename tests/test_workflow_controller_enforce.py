@@ -259,8 +259,13 @@ def test_plan_repair_prompt_is_json_only_and_gives_exact_unscoped_check_correcti
     )
     assert "Return only one complete JSON object" in prompt
     assert "Do not use Markdown or code fences" in prompt
-    assert "REMOVE it from subtasks" in prompt
-    assert "redirect any downstream depends_on edges" in prompt
+    # PRV-05 (2026-08-28): a non-editing check subtask is now corrected by
+    # setting execution_role=verification and keeping it as its own subtask
+    # (see ExecutionRole's own docstring, kriya/workflow/plan_schema.py) -
+    # not by removing it, which the Planner's own repeated identical plan
+    # proved doesn't reflect what a real regression-verification step needs.
+    assert "set its execution_role to verification" in prompt
+    assert "do NOT remove it" in prompt
     assert "Never invent a fake file" in prompt
 
 
@@ -389,7 +394,11 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     request = build_authoritative_planner_request("Build one runnable application.")
     assert "Original product request:\nBuild one runnable application." in request
     assert "Do not emit execution_method=tool subtasks" in request
-    assert "Represent non-editing checks as verification" in request
+    # PRV-05 (2026-08-28): a non-editing check now gets its own
+    # execution_role=verification subtask (see ExecutionRole's own
+    # docstring, kriya/workflow/plan_schema.py) rather than being folded
+    # into an implementation subtask's verification/acceptance_criteria.
+    assert "execution_role: implementation or verification" in request
     assert "not product requirements" in request
     assert "Return only one complete JSON object" in request
     assert "Emit no prose" in request
@@ -399,7 +408,7 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     assert "exactly match one provides string" in request
     assert "tool_name=compile" in request
     assert "runnable entrypoint stage" in request
-    assert "Each planned_files path must be owned by exactly one MODEL subtask" in request
+    assert "Each planned_files path must be owned by exactly one implementation MODEL subtask" in request
     assert "solely to analyze, inspect, research, or explain code" in request
 
 

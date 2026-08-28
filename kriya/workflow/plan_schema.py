@@ -27,6 +27,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from kriya.workflow.triage import ChangeKind
 
 
+_GLOB_WILDCARD_CHARS = frozenset("*?[")
+
+
 def _non_blank_relative_path(path: str, *, label: str) -> str:
     cleaned = (path or "").strip()
     if not cleaned:
@@ -35,6 +38,26 @@ def _non_blank_relative_path(path: str, *, label: str) -> str:
         raise ValueError(f"{label} must be workspace-relative, not absolute: {cleaned!r}")
     if ".." in cleaned.replace("\\", "/").split("/"):
         raise ValueError(f"{label} must not contain '..' path-traversal segments: {cleaned!r}")
+    # Found live, PRV-05 (2026-08-28): the Planner returned
+    # "src/main/java/**/*.java" as a planned_files[].path - a glob pattern,
+    # not a real file. Nothing here rejected it, so every downstream
+    # consumer (Developer generation, the write loop, the compile gate)
+    # treated the literal string "**/*.java" as an actual filename for the
+    # rest of the run, writing real Java source to a file literally named
+    # that on disk - every retry failed identically ("class X is public,
+    # should be declared in a file named X.java") since javac can never
+    # resolve a wildcard as a class-name-matching path, and the model's own
+    # (correct) diagnosis had nowhere to go: it's never asked to name a real
+    # file. A PlannedFile names exactly ONE concrete file; a subtask that
+    # genuinely needs to touch every file in a directory must enumerate
+    # them, not describe them with a pattern - matching this model's own
+    # docstring ("this model only enforces the path SHAPE"), a wildcard is
+    # a shape defect, not a repo-reality one, so it belongs here rather than
+    # in plan_validation.py's cross-field checks.
+    if any(char in cleaned for char in _GLOB_WILDCARD_CHARS):
+        raise ValueError(
+            f"{label} must name one concrete file, not a glob/wildcard pattern: {cleaned!r}"
+        )
     return cleaned
 
 
@@ -45,6 +68,29 @@ class ExecutionMethod(str, Enum):
 
     MODEL = "model"
     TOOL = "tool"
+
+
+class ExecutionRole(str, Enum):
+    """WHAT a Subtask is for, orthogonal to execution_method (HOW it runs).
+    Found live, PRV-05 (2026-08-28): enforce mode forbids execution_method=
+    tool entirely (TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE) while also requiring
+    every execution_method=model subtask to declare planned_files
+    (MODEL_SUBTASK_MISSING_PLANNED_FILES) - leaving no legal shape for a
+    genuinely non-mutating regression/runtime verification step. The
+    Planner's own repeated plan (3 attempts, byte-identical) was not a bad
+    plan; the schema had no category for what it was correctly trying to
+    express (see this field's own validators on Subtask for the concrete
+    shape a VERIFICATION-role subtask must take).
+
+    Deliberately an explicit field the Planner sets, not something inferred
+    from planned_files being empty - an inferred signal encodes intent
+    indirectly and makes future plan validation harder to reason about (the
+    same reasoning already applied to VerificationMethod.verifier_kind's own
+    "explicit semantic contract; avoids inferring runtime authority from a
+    technology, filename, or wording heuristic" design)."""
+
+    IMPLEMENTATION = "implementation"
+    VERIFICATION = "verification"
 
 
 class VerificationMethodType(str, Enum):
@@ -198,6 +244,10 @@ class Subtask(BaseModel):
     id: str
     description: str
     execution_method: ExecutionMethod
+    # Defaults to IMPLEMENTATION - every plan/test/checkpoint that predates
+    # this field (2026-08-28) deserializes as an ordinary implementation
+    # subtask, unchanged behavior, no migration needed.
+    execution_role: ExecutionRole = ExecutionRole.IMPLEMENTATION
     tool_name: Optional[str] = None
     tool_arguments: Dict[str, Any] = Field(default_factory=dict)
     depends_on: List[str] = Field(default_factory=list)
@@ -235,6 +285,28 @@ class Subtask(BaseModel):
                 f"subtask {self.id!r} has execution_method=model but sets tool_arguments - "
                 "tool_arguments only applies to execution_method=tool"
             )
+        if self.execution_role == ExecutionRole.VERIFICATION:
+            # Mirrors PRV-04's own EXISTING_CONTRACT_PRESERVATION reasoning at
+            # the workflow-engine level ("verification must not alter
+            # persistent application architecture") - here it's structural,
+            # enforced on the plan itself before anything runs: a
+            # verification-role subtask requires zero writable files (forbid
+            # repository writes) and at least one concrete verifier
+            # (bounded verifier commands/evidence, not just a description).
+            if self.planned_files:
+                raise ValueError(
+                    f"subtask {self.id!r} has execution_role=verification but declares "
+                    f"planned_files {[pf.path for pf in self.planned_files]!r} - a verification-only "
+                    "subtask must never own writable files; give it execution_role=implementation "
+                    "instead if it genuinely edits files"
+                )
+            if not self.verification:
+                raise ValueError(
+                    f"subtask {self.id!r} has execution_role=verification but declares no "
+                    "verification entries - a verification-only subtask must name at least one "
+                    "concrete verifier (compile/test/application_runtime/judgment), not just a "
+                    "description"
+                )
         if self.id in self.depends_on:
             raise ValueError(f"subtask {self.id!r} cannot depend on itself")
         if len(set(self.depends_on)) != len(self.depends_on):

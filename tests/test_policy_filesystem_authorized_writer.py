@@ -14,6 +14,7 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import (
     AuthorizedFileWriter,
     FilesystemScope,
+    WriteScopeMode,
     is_within_scope,
     make_workspace_scope,
 )
@@ -184,6 +185,84 @@ def test_commit_batch_raises_and_writes_nothing_when_the_goal_source_file_is_tar
     assert exc_info.value.result.reason_code == "GOAL_SOURCE_FILE_PROTECTED"
     with open(target) as f:
         assert f.read() == "# The real goal\n"
+
+
+# --- WriteScopeMode (PRV-05, 2026-08-28): allowed_relpaths=() used to
+# ambiguously mean "no restriction" - the same falsy value every ordinary
+# top-level `kriya generate` call ALSO passes to mean unrestricted writes -
+# so a verification-only subtask's intended "write nothing" silently became
+# "write anywhere". write_scope_mode makes the three real policies explicit
+# and unambiguous; see WriteScopeMode's own docstring for the full incident.
+
+def test_deny_all_rejects_any_write_regardless_of_allowed_relpaths(workspace):
+    writer = AuthorizedFileWriter(workspace, write_scope_mode=WriteScopeMode.DENY_ALL)
+    result = writer.authorize(os.path.join(workspace, "anything.py"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "WRITE_SCOPE_DENY_ALL"
+
+
+def test_deny_all_rejects_even_a_path_present_in_allowed_relpaths(workspace):
+    """DENY_ALL is unconditional - it must not be defeatable by a caller
+    that also (incorrectly) passes a non-empty allowed_relpaths."""
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["a.py"], write_scope_mode=WriteScopeMode.DENY_ALL,
+    )
+    result = writer.authorize(os.path.join(workspace, "a.py"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "WRITE_SCOPE_DENY_ALL"
+
+
+def test_allowlist_mode_allows_listed_file(workspace):
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["a.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "a.py"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_allowlist_mode_rejects_unlisted_file(workspace):
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["a.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "b.py"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+
+
+def test_unrestricted_mode_preserves_existing_behavior(workspace):
+    writer = AuthorizedFileWriter(workspace, write_scope_mode=WriteScopeMode.UNRESTRICTED)
+    result = writer.authorize(os.path.join(workspace, "anything.py"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_write_scope_mode_omitted_infers_unrestricted_from_empty_allowed_relpaths(workspace):
+    """Backward compatibility: every call site written before write_scope_mode
+    existed (every ordinary top-level `kriya generate` call) passes an empty
+    allowed_relpaths meaning "no restriction" - must stay unchanged."""
+    writer = AuthorizedFileWriter(workspace)
+    result = writer.authorize(os.path.join(workspace, "anything.py"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_write_scope_mode_omitted_infers_allowlist_from_nonempty_allowed_relpaths(workspace):
+    """Backward compatibility: every existing bounded-subtask call site that
+    already passes a real allowed_relpaths list keeps its exact prior
+    ALLOWLIST behavior."""
+    writer = AuthorizedFileWriter(workspace, allowed_relpaths=["a.py"])
+    allowed = writer.authorize(os.path.join(workspace, "a.py"))
+    denied = writer.authorize(os.path.join(workspace, "b.py"))
+    assert allowed.decision != PolicyDecision.DENY
+    assert denied.decision == PolicyDecision.DENY
+    assert denied.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+
+
+def test_deny_all_commit_file_raises_and_writes_nothing(workspace):
+    writer = AuthorizedFileWriter(workspace, write_scope_mode=WriteScopeMode.DENY_ALL)
+    target = os.path.join(workspace, "app.py")
+    with pytest.raises(PolicyDeniedError) as exc_info:
+        writer.commit_file(target, "print(1)", expected_revision=content_revision(""))
+    assert exc_info.value.result.reason_code == "WRITE_SCOPE_DENY_ALL"
+    assert not os.path.exists(target)
 
 
 # --- AuthorizedFileWriter.commit_file / commit_batch: real enforcement ---

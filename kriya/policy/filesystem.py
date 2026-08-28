@@ -54,7 +54,8 @@ silently narrowing or silently reusing the broad set.
 
 import os
 from dataclasses import dataclass
-from typing import Dict, Iterable, Sequence, Tuple
+from enum import Enum
+from typing import Dict, Iterable, Optional, Sequence, Tuple
 
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
@@ -64,6 +65,34 @@ from kriya.workflow.edit_safety import (
     commit_revision_grounded_batch,
     commit_revision_grounded_file,
 )
+
+
+class WriteScopeMode(str, Enum):
+    """Explicit write-scope policy for one AuthorizedFileWriter instance -
+    makes the previously-overloaded meaning of an empty `allowed_relpaths`
+    unambiguous. Found live, PRV-05 (2026-08-28): a verification-only
+    subtask (kriya/workflow/plan_schema.py::ExecutionRole.VERIFICATION)
+    passed allowed_relpaths=() intending "write nothing", but this class's
+    own enforcement only activated `if self._allowed_relpaths and ...` - an
+    empty collection was silently treated as "no restriction" instead,
+    because that is ALSO what every ordinary top-level `kriya generate` call
+    means when it passes the same empty collection (it never scopes writes
+    at all). One falsy value cannot honestly carry both meanings.
+
+    UNRESTRICTED: allowed_relpaths ignored - existing top-level generation
+        behavior, unchanged.
+    ALLOWLIST: writes permitted only to paths in allowed_relpaths.
+    DENY_ALL: no persistent write is permitted at all, regardless of
+        allowed_relpaths - enforced here, in the writer itself, not merely
+        implied by an empty planned_files list or a Planner-side validation
+        rule. A bug anywhere upstream (Developer, retry/self-correction
+        recovery loop) that somehow still requests a write cannot grant
+        repository mutation once this mode is set - the real security
+        boundary, not a convenience check."""
+
+    UNRESTRICTED = "unrestricted"
+    ALLOWLIST = "allowlist"
+    DENY_ALL = "deny_all"
 
 _ENFORCEMENT_SENSITIVE_PATH_PATTERNS: Tuple[str, ...] = (
     r"(^|/)\.ssh(/|$)",
@@ -126,6 +155,7 @@ class AuthorizedFileWriter:
         self, workspace_root: str, extra_writable_roots: Sequence[str] = (),
         protected_relpaths: Sequence[str] = (),
         allowed_relpaths: Sequence[str] = (),
+        write_scope_mode: Optional[WriteScopeMode] = None,
     ) -> None:
         self._scope = make_workspace_scope(workspace_root, extra_writable_roots)
         # A dedicated ExecutionPolicy instance with the NARROWER
@@ -157,6 +187,19 @@ class AuthorizedFileWriter:
         self._allowed_relpaths = frozenset(
             os.path.normpath(p) for p in allowed_relpaths if p
         )
+        # Backward-compatible inference when the caller doesn't pass
+        # write_scope_mode explicitly: every call site written before this
+        # mode existed either passed a non-empty allowlist (ALLOWLIST,
+        # unchanged) or nothing at all (UNRESTRICTED, unchanged) - so every
+        # existing caller's behavior is preserved byte-for-byte without
+        # needing to be touched. A caller that needs DENY_ALL (or wants
+        # ALLOWLIST/UNRESTRICTED stated explicitly rather than inferred)
+        # passes write_scope_mode directly.
+        if write_scope_mode is None:
+            write_scope_mode = (
+                WriteScopeMode.ALLOWLIST if self._allowed_relpaths else WriteScopeMode.UNRESTRICTED
+            )
+        self._write_scope_mode = write_scope_mode
 
     def authorize(self, target_path: str) -> PolicyResult:
         if not is_within_scope(self._scope, target_path):
@@ -169,13 +212,31 @@ class AuthorizedFileWriter:
                 ),
                 matched_rule="filesystem.authorized_writer.outside_scope",
             )
+        if self._write_scope_mode == WriteScopeMode.DENY_ALL:
+            # Unconditional - no persistent write is permitted in this mode,
+            # regardless of allowed_relpaths/protected_relpaths content. The
+            # real security boundary for a verification-only execution
+            # context (kriya/workflow/plan_schema.py::ExecutionRole.
+            # VERIFICATION): even a bug in the Developer or a retry/self-
+            # correction recovery loop that somehow still requests a write
+            # cannot grant repository mutation once this mode is set.
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="WRITE_SCOPE_DENY_ALL",
+                explanation=(
+                    f"'{target_path}' cannot be written - this execution context is "
+                    "write_scope_mode=DENY_ALL (a non-mutating verification-only context); no "
+                    "persistent repository write is permitted."
+                ),
+                matched_rule="filesystem.authorized_writer.deny_all",
+            )
         target_relpath = None
-        if self._protected_relpaths or self._allowed_relpaths:
+        if self._protected_relpaths or self._write_scope_mode == WriteScopeMode.ALLOWLIST:
             try:
                 target_relpath = os.path.normpath(os.path.relpath(_canonical(target_path), self._workspace_root))
             except ValueError:
                 target_relpath = None
-        if self._allowed_relpaths and target_relpath not in self._allowed_relpaths:
+        if self._write_scope_mode == WriteScopeMode.ALLOWLIST and target_relpath not in self._allowed_relpaths:
             return PolicyResult(
                 decision=PolicyDecision.DENY,
                 reason_code="FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE",
