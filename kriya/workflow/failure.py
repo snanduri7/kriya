@@ -66,7 +66,15 @@ def classify_failure_attribution(type_: str, message: str = "") -> FailureAttrib
         return FailureAttributionKind.INFRASTRUCTURE_DEFECT
     if type_ in ("plan_scope_conflict", "ambiguous_planned_file_ownership"):
         return FailureAttributionKind.PLAN_SCOPE_DEFECT
-    if type_ in ("test", "targeted_test", "regression_test", "test_acceptance"):
+    if type_ in (
+        "test", "targeted_test", "regression_test", "test_acceptance",
+        # PRV-06 (2026-08-28): a process/fork-termination failure still needs
+        # the SAME repair-owner routing as an ordinary test failure (the
+        # existing scope-widening/PLAN_SCOPE_DEFECT path already reaches a
+        # causal producer file correctly, confirmed live) - only the label
+        # and the guidance shown to the model change, not who owns repair.
+        "test_process_terminated",
+    ):
         return FailureAttributionKind.TEST_DEFECT
     return FailureAttributionKind.SOURCE_DEFECT
 
@@ -137,8 +145,16 @@ class Failure:
     different package than Y expects. A Java language-level fact, not a
     missing import - no amount of retrying the SAME package layout can ever
     resolve it; see find_cross_package_symbol_mismatch() in
-    kriya/workflow/failure_grounding.py), or "general_error" (fallback
-    for a bare, non-QualityGateFailure Exception).
+    kriya/workflow/failure_grounding.py), "test_process_terminated" (the test
+    runner's own PROCESS was killed mid-run - e.g. Maven Surefire's
+    "SurefireBooterForkException"/"forked VM terminated"/"VM crash or
+    System.exit called?" - not an ordinary assertion failure. A structural
+    process-boundary/testability conflict: already-written production code
+    terminates the process on a path a test invokes in-process; found live,
+    PRV-06, 2026-08-28 - see detect_process_termination_signature() in
+    kriya/workflow/failure_grounding.py and ObligationKind.
+    PROCESS_BOUNDARY_COMPATIBILITY in kriya/workflow/obligations.py), or
+    "general_error" (fallback for a bare, non-QualityGateFailure Exception).
     """
     type: str
     message: str

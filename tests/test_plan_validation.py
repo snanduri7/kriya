@@ -11,6 +11,7 @@ from kriya.workflow.plan_schema import (
     ExecutionMethod,
     ExecutionRole,
     FileAction,
+    GlobalInvariant,
     PlannedFile,
     Subtask,
     VerificationMethod,
@@ -91,16 +92,16 @@ async def test_semantic_requirement_requires_provider_dependency_edge(tmp_path):
         id="build", planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
     ).model_copy(update={
         "provides": ["build.dependencies.ready"],
-        "relevant_global_invariants": ["required platform dependencies are resolved"],
+        "relevant_global_invariant_ids": ["gi1"],
     })
     consumer = _model_subtask(
         id="app", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
     ).model_copy(update={
         "requires": ["build.dependencies.ready"],
-        "relevant_global_invariants": ["required platform dependencies are resolved"],
+        "relevant_global_invariant_ids": ["gi1"],
     })
     plan = _plan([provider, consumer]).model_copy(update={
-        "global_invariants": ["required platform dependencies are resolved"],
+        "global_invariants": [GlobalInvariant(id="gi1", statement="required platform dependencies are resolved")],
     })
 
     result = await validate_plan(
@@ -117,16 +118,16 @@ async def test_semantic_requirement_accepts_unique_provider_with_dependency_edge
         id="config", planned_files=[PlannedFile(path="config.xml", action=FileAction.CREATE)],
     ).model_copy(update={
         "provides": ["runtime.config.ready"],
-        "relevant_global_invariants": ["runtime configuration is externally defined"],
+        "relevant_global_invariant_ids": ["gi1"],
     })
     consumer = _model_subtask(
         id="app", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
     ).model_copy(update={
         "requires": ["runtime.config.ready"], "depends_on": ["config"],
-        "relevant_global_invariants": ["runtime configuration is externally defined"],
+        "relevant_global_invariant_ids": ["gi1"],
     })
     plan = _plan([provider, consumer]).model_copy(update={
-        "global_invariants": ["runtime configuration is externally defined"],
+        "global_invariants": [GlobalInvariant(id="gi1", statement="runtime configuration is externally defined")],
     })
 
     result = await validate_plan(
@@ -134,6 +135,137 @@ async def test_semantic_requirement_accepts_unique_provider_with_dependency_edge
     )
 
     assert result.valid is True
+
+
+# --- global invariant referential integrity (PRV-06, 2026-08-28) ---
+
+@pytest.mark.asyncio
+async def test_subtask_referencing_unknown_global_invariant_id_is_an_error(tmp_path):
+    subtask = _model_subtask(
+        id="s1", planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+    ).model_copy(update={"relevant_global_invariant_ids": ["gi_ghost"]})
+    plan = _plan([subtask]).model_copy(update={
+        "global_invariants": [GlobalInvariant(id="gi1", statement="a real invariant")],
+    })
+
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+
+    assert result.valid is False
+    assert result.reason_codes == ["UNKNOWN_GLOBAL_INVARIANT"]
+    assert any(
+        "gi_ghost" in e and "declared ids are" in e and "gi1" in e for e in result.errors
+    )
+
+
+@pytest.mark.asyncio
+async def test_compound_global_invariant_referenced_by_multiple_subtasks_is_valid(tmp_path):
+    """Regression test for PRV-06 (2026-08-28): a compound invariant
+    ("retrieve the value from that service and print it") legitimately
+    decomposes across two subtasks that each only implement HALF of it.
+    Before ids existed, each subtask's paraphrased sub-clause could never
+    exactly match the compound top-level string, so this exact shape
+    non-convergently failed two full bounded repair rounds live. By id,
+    both subtasks simply reference the SAME whole invariant - no
+    paraphrase, no partial statement, no repair needed."""
+    compound = GlobalInvariant(
+        id="gi_retrieve_print",
+        statement="The application must retrieve the value from that service and print it.",
+    )
+    retrieve_subtask = _model_subtask(
+        id="s2", planned_files=[PlannedFile(path="Service.java", action=FileAction.CREATE)],
+    ).model_copy(update={
+        "provides": ["svc"], "relevant_global_invariant_ids": ["gi_retrieve_print"],
+    })
+    print_subtask = _model_subtask(
+        id="s3", depends_on=["s2"],
+        planned_files=[PlannedFile(path="Main.java", action=FileAction.CREATE)],
+    ).model_copy(update={
+        "requires": ["svc"], "relevant_global_invariant_ids": ["gi_retrieve_print"],
+    })
+    plan = _plan([retrieve_subtask, print_subtask]).model_copy(update={
+        "global_invariants": [compound],
+    })
+
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), require_semantic_contracts=True,
+    )
+
+    assert result.valid is True
+    assert "UNKNOWN_GLOBAL_INVARIANT" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_subtask_with_no_relevant_global_invariants_still_flagged_missing(tmp_path):
+    # SUBTASK_GLOBAL_INVARIANTS_MISSING only projects across a real
+    # multi-subtask plan (validate_plan's own require_semantic_contracts
+    # branch is gated on len(plan.subtasks) > 1) - a single-subtask plan
+    # has nothing to "project" invariants across.
+    covered = _model_subtask(
+        id="s1", planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+    ).model_copy(update={"relevant_global_invariant_ids": ["gi1"]})
+    uncovered = _model_subtask(
+        id="s2", depends_on=["s1"], planned_files=[PlannedFile(path="b.py", action=FileAction.CREATE)],
+    )
+    plan = _plan([covered, uncovered]).model_copy(update={
+        "global_invariants": [GlobalInvariant(id="gi1", statement="a real invariant")],
+    })
+
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), require_semantic_contracts=True,
+    )
+
+    assert result.valid is False
+    assert "SUBTASK_GLOBAL_INVARIANTS_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_invariant_reference_obligation_recorded_violated_then_satisfied(tmp_path):
+    """MA8 binding for global invariant references (PRV-06, 2026-08-28):
+    an unknown-id reference is recorded VIOLATED with the subtask as owner;
+    once the repair swaps in a declared id, the SAME obligation id flips to
+    SATISFIED and - because it just transitioned - relevant_for_preservation
+    surfaces it, so the next repair prompt is told to keep it. This is the
+    same regression-prevention mechanism already proven for planned-file
+    metadata (run #8), now covering invariant references too."""
+    gi = GlobalInvariant(id="gi1", statement="a real invariant")
+    bad = _model_subtask(
+        id="s1", planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+    ).model_copy(update={"relevant_global_invariant_ids": ["gi_ghost"]})
+    good = _model_subtask(
+        id="s1", planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+    ).model_copy(update={"relevant_global_invariant_ids": ["gi1"]})
+
+    ledger = ObligationLedger()
+    await validate_plan(
+        _plan([bad]).model_copy(update={"global_invariants": [gi]}),
+        workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    assert ledger.current("plan.subtask.s1.invariant_ref.gi_ghost").status == ObligationStatus.VIOLATED
+    assert ledger.current("plan.subtask.s1.invariant_ref.gi_ghost").owner_subtask_id == "s1"
+
+    result = await validate_plan(
+        _plan([good]).model_copy(update={"global_invariants": [gi]}),
+        workspace_path=str(tmp_path), obligation_ledger=ledger, revision=1,
+    )
+    assert result.valid is True
+    satisfied = ledger.current("plan.subtask.s1.invariant_ref.gi1")
+    assert satisfied.status == ObligationStatus.SATISFIED
+
+    # Same must_preserve computation workflow_controller.py's real repair
+    # loop uses: currently-violated PLAN_STRUCTURAL_VALIDITY ids feed
+    # relevant_for_preservation. Revision 0's now-abandoned "gi_ghost"
+    # reference is still on record as VIOLATED (nothing re-visits an id no
+    # longer referenced) and shares this record's owner_subtask_id="s1",
+    # which is what actually surfaces the newly-satisfied "gi1" reference
+    # for preservation - not a global truth, an owner-scoped one.
+    currently_violated_ids = [
+        rec.id for rec in ledger.current_by_kind(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
+        if rec.status == ObligationStatus.VIOLATED
+    ]
+    preserved = ledger.relevant_for_preservation(
+        ObligationKind.PLAN_STRUCTURAL_VALIDITY, currently_violated_ids,
+    )
+    assert satisfied.id in {rec.id for rec in preserved}
 
 
 @pytest.mark.asyncio

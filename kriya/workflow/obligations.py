@@ -61,15 +61,27 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 class ObligationKind(str, Enum):
-    """Deliberately just the three kinds run #8 actually produced evidence
-    for. Do not add a new kind speculatively - add one only when a live
-    incident, like this one, demonstrates the need (matching this
-    codebase's established discipline for every other typed-Failure/
-    reason-code addition in this module family)."""
+    """Do not add a new kind speculatively - add one only when a live
+    incident demonstrates the need (matching this codebase's established
+    discipline for every other typed-Failure/reason-code addition in this
+    module family).
+
+    PROCESS_BOUNDARY_COMPATIBILITY (PRV-06, 2026-08-28): a live incident
+    where a greenfield entrypoint (App.java) reasonably terminated the
+    process on invalid input, and a separately-generated test (AppTest.java)
+    reasonably invoked that entrypoint in-process - individually correct,
+    together an unresolvable conflict (a JUnit test invoking a
+    System.exit()-calling main() kills the Surefire fork outright). The
+    Developer's own repair oscillated (System.exit -> return -> System.exit)
+    across 11 attempts because no cross-revision signal existed distinguishing
+    "still the same structural conflict" from "a fresh, different failure" -
+    this kind exists to make that distinction trackable the same way
+    PLAN_STRUCTURAL_VALIDITY already tracks planned-file-action regressions."""
 
     PLAN_STRUCTURAL_VALIDITY = "plan_structural_validity"
     MIGRATION_COMPLETION = "migration_completion"
     GOAL_SPEC_REQUIREMENT = "goal_spec_requirement"
+    PROCESS_BOUNDARY_COMPATIBILITY = "process_boundary_compatibility"
 
 
 class ObligationStatus(str, Enum):

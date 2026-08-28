@@ -397,11 +397,11 @@ class PlannerAgent(BaseAgent):
             "After your Markdown plan, ALSO include a fenced ```json code block (the LAST thing in your "
             "response) with this exact shape - a structured breakdown of your plan into independent "
             "subtasks, used for tooling, in ADDITION TO (never instead of) the Markdown plan above:\n"
-            '{"global_invariants": ["one concise goal-wide invariant"], '
+            '{"global_invariants": [{"id": "gi1", "statement": "one concise goal-wide invariant"}], '
             '"subtasks": [{"id": "s1", "description": "...", "execution_method": "model", '
             '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete"}], '
             '"provides": ["capability.stable.name"], "requires": [], '
-            '"relevant_global_invariants": ["exact invariant text from global_invariants"], '
+            '"relevant_global_invariant_ids": ["gi1"], '
             '"acceptance_criteria_ids": ["ac1"]}], '
             '"acceptance_criteria": [{"id": "ac1", "description": "...", "method": "judgment"}], '
             '"extension_points": [], "refactor_baseline": null}\n'
@@ -418,8 +418,17 @@ class PlannerAgent(BaseAgent):
             "semantic producer/consumer relationships explicit with stable provides/requires names; "
             "a requires entry MUST have exactly one provider and that provider MUST be in depends_on. "
             "Derive concise global_invariants from the original request (runtime, platform, architecture, "
-            "integration, entrypoint, and packaging constraints) and copy the relevant exact strings into "
-            "each subtask's relevant_global_invariants. Keep all overall request constraints relevant "
+            "integration, entrypoint, and packaging constraints), each with a short stable id and a "
+            "statement, and reference the relevant ones by id in each subtask's "
+            "relevant_global_invariant_ids - never restate or paraphrase the statement text on the "
+            "subtask, and never invent an id that wasn't first declared in global_invariants. A "
+            "subtask relevant to only part of a compound invariant still references that invariant's "
+            "whole id. If a stage's entrypoint may terminate the process and another stage's tests "
+            "are expected to exercise it directly, keep the process-terminating call separate from "
+            "the directly-tested logic (a thin wrapper performs termination; tests target the "
+            "underlying logic that returns a result instead of terminating) - applies to any "
+            "process-termination mechanism, no specific method name or file structure required. "
+            "Keep all overall request constraints relevant "
             "to each subtask explicit in that subtask's description "
             "and mapped acceptance criteria; later bounded execution cannot safely infer omitted requirements. If you "
             "cannot confidently produce this breakdown, still include your best-effort attempt rather "

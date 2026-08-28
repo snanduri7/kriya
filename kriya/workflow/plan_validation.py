@@ -279,7 +279,7 @@ async def validate_plan(
             )
             reason_codes.append("SUBTASK_SEMANTIC_CONTRACT_MISSING")
         missing_invariant_projection = [
-            st.id for st in plan.subtasks if not st.relevant_global_invariants
+            st.id for st in plan.subtasks if not st.relevant_global_invariant_ids
         ]
         if missing_invariant_projection:
             errors.append(
@@ -352,14 +352,46 @@ async def validate_plan(
         errors.append(f"semantic capabilities must have exactly one provider: {ambiguous_capabilities}")
         reason_codes.append("AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER")
 
-    invariant_set = set(plan.global_invariants)
+    # PRV-06 (2026-08-28): checked by id, never by re-matching free text -
+    # see GlobalInvariant's own docstring (plan_schema.py) for why a
+    # literal-string-equality check between two independently-generated
+    # natural-language fields is the wrong contract (non-convergent across
+    # bounded repair when a compound invariant naturally decomposes at the
+    # subtask level).
+    invariant_ids = {gi.id for gi in plan.global_invariants}
     for st in plan.subtasks:
-        unknown_invariants = sorted(set(st.relevant_global_invariants) - invariant_set)
-        if unknown_invariants:
+        unknown_ids = sorted(set(st.relevant_global_invariant_ids) - invariant_ids)
+        if unknown_ids:
             errors.append(
-                f"subtask {st.id!r} references unknown global invariant(s): {unknown_invariants}"
+                f"subtask {st.id!r} references unknown global invariant id(s): {unknown_ids}; "
+                f"declared ids are {sorted(invariant_ids)}"
             )
             reason_codes.append("UNKNOWN_GLOBAL_INVARIANT")
+        if obligation_ledger is not None:
+            for ref_id in st.relevant_global_invariant_ids:
+                # Same DETERMINISTIC PLAN_STRUCTURAL_VALIDITY recording
+                # pattern as file ownership above, one record per (subtask,
+                # referenced id) pair - id derived from the two already-
+                # stable strings, not the invariant's free-text statement.
+                # Lets the repair loop's own relevant_for_preservation()
+                # surface "this subtask's reference already resolved" as a
+                # MUST PRESERVE item on the next repair round, closing the
+                # same regression-prevention gap PRV-05 run #8 found for
+                # planned-file metadata (see build_structured_plan_repair_
+                # prompt's own must_preserve docstring).
+                obligation_ledger.record(ObligationRecord(
+                    id=f"plan.subtask.{st.id}.invariant_ref.{ref_id}",
+                    kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+                    status=(
+                        ObligationStatus.VIOLATED if ref_id in unknown_ids else ObligationStatus.SATISFIED
+                    ),
+                    authority=ObligationAuthority.DETERMINISTIC,
+                    description=f"subtask {st.id!r} references a declared global invariant id",
+                    source="plan_validation.validate_plan", revision=revision,
+                    evidence={"subtask_id": st.id, "invariant_id": ref_id},
+                    owner_subtask_id=st.id,
+                    terminal_required=True,
+                ))
         for requirement in st.requires:
             providers = capability_providers.get(requirement, [])
             if not providers:

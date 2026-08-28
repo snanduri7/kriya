@@ -12,6 +12,7 @@ from kriya.workflow.plan_schema import (
     ExecutionRole,
     FileAction,
     FileOwnershipRelation,
+    GlobalInvariant,
     PlannedFile,
     PlannerStructuredOutput,
     Subtask,
@@ -201,12 +202,35 @@ def test_subtask_valid_model_subtask_with_dependency():
 def test_subtask_semantic_contract_metadata_round_trips():
     subtask = _model_subtask(
         provides=["build.ready"], requires=["config.ready"],
-        relevant_global_invariants=["runtime must exit cleanly"],
+        relevant_global_invariant_ids=["gi1"],
     )
     restored = Subtask.model_validate(subtask.model_dump(mode="json"))
     assert restored.provides == ["build.ready"]
     assert restored.requires == ["config.ready"]
-    assert restored.relevant_global_invariants == ["runtime must exit cleanly"]
+    assert restored.relevant_global_invariant_ids == ["gi1"]
+
+
+# --- GlobalInvariant (PRV-06, 2026-08-28) ---
+
+def test_global_invariant_rejects_blank_id():
+    with pytest.raises(ValidationError):
+        GlobalInvariant(id=" ", statement="must exit cleanly")
+
+
+def test_global_invariant_rejects_blank_statement():
+    with pytest.raises(ValidationError):
+        GlobalInvariant(id="gi1", statement=" ")
+
+
+def test_engineering_plan_rejects_duplicate_global_invariant_ids():
+    with pytest.raises(ValidationError):
+        EngineeringPlan(
+            plan_id="p1", kind=ChangeKind.TASK, subtasks=[_model_subtask()],
+            global_invariants=[
+                GlobalInvariant(id="gi1", statement="a"),
+                GlobalInvariant(id="gi1", statement="b"),
+            ],
+        )
 
 
 # --- ExecutionRole (PRV-05, 2026-08-28) ---
@@ -272,7 +296,7 @@ def test_engineering_plan_resolves_only_unique_file_owner():
     )
     plan = EngineeringPlan(
         plan_id="p1", kind=ChangeKind.TASK, subtasks=[owner],
-        global_invariants=["one application"],
+        global_invariants=[GlobalInvariant(id="gi1", statement="one application")],
     )
     assert plan.file_owner("pom.xml") == owner
     assert plan.file_owner("missing.xml") is None

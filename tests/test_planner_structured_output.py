@@ -13,7 +13,7 @@ unambiguous downgrade/removal, never a guess at new information."""
 import json
 
 from kriya.agents.contracts import parse_planner_structured_output
-from kriya.workflow.plan_schema import ExecutionMethod, VerificationMethodType
+from kriya.workflow.plan_schema import ExecutionMethod, GlobalInvariant, VerificationMethodType
 
 
 def _plan_text(plan_json):
@@ -194,3 +194,78 @@ def test_subtask_verification_method_tool_with_no_tool_name_downgrades_to_judgme
     assert err is None
     assert output.subtasks[0].verification[0].type == VerificationMethodType.JUDGMENT
     assert output.subtasks[0].verification[0].tool_name is None
+
+
+# --- PRV-06 self-healing: pre-existing List[str] global_invariants shape ---
+
+def test_flat_string_global_invariants_are_reshaped_into_ids():
+    output, err = parse_planner_structured_output(_plan_text({
+        "global_invariants": ["must target Java 17", "must exit cleanly"],
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": [],
+            "relevant_global_invariants": ["must target Java 17"],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    assert [gi.statement for gi in output.global_invariants] == ["must target Java 17", "must exit cleanly"]
+    ids = [gi.id for gi in output.global_invariants]
+    assert output.subtasks[0].relevant_global_invariant_ids == [ids[0]]
+
+
+def test_flat_string_global_invariants_assign_stable_sequential_ids():
+    output, err = parse_planner_structured_output(_plan_text({
+        "global_invariants": ["first", "second"],
+        "subtasks": [{"id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": []}],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    assert [gi.id for gi in output.global_invariants] == ["gi1", "gi2"]
+
+
+def test_subtask_string_with_no_matching_statement_is_left_unresolved_not_dropped():
+    """A shape gap (old key, wrong type) gets mechanically reshaped; a real
+    CONTENT defect (a reference that never matches any declared invariant)
+    must still surface as a real, unresolved reference - self-heal never
+    papers over that, it just stops the shape itself from masking it."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "global_invariants": ["must target Java 17"],
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": [],
+            "relevant_global_invariants": ["a completely different, unrelated statement"],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    assert output.subtasks[0].relevant_global_invariant_ids == ["a completely different, unrelated statement"]
+
+
+def test_already_new_shape_global_invariants_pass_through_unchanged():
+    output, err = parse_planner_structured_output(_plan_text({
+        "global_invariants": [{"id": "gi1", "statement": "must exit cleanly"}],
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": [],
+            "relevant_global_invariant_ids": ["gi1"],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    assert output.global_invariants == [GlobalInvariant(id="gi1", statement="must exit cleanly")]
+    assert output.subtasks[0].relevant_global_invariant_ids == ["gi1"]
+
+
+def test_new_shape_global_invariants_with_a_stray_old_subtask_key_still_resolves_by_id():
+    """Mixed shape: the model got global_invariants right (new id/statement
+    objects) but one subtask still emitted the old relevant_global_invariants
+    text key out of habit - healed by matching against the already-new
+    global_invariants' statements, not just the all-strings top-level case."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "global_invariants": [{"id": "gi1", "statement": "must exit cleanly"}],
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": [],
+            "relevant_global_invariants": ["must exit cleanly"],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    assert output.subtasks[0].relevant_global_invariant_ids == ["gi1"]

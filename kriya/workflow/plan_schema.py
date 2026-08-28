@@ -245,6 +245,48 @@ class AcceptanceCriterion(BaseModel):
         return self
 
 
+class GlobalInvariant(BaseModel):
+    """One plan-wide constraint, with a stable id a Subtask references
+    instead of restating the free-text statement. PRV-06 (2026-08-28, real
+    live-validation finding): before this type existed, global_invariants
+    was List[str] and Subtask.relevant_global_invariants was ALSO List[str],
+    with plan_validation.py checking literal set membership between the
+    two - i.e. natural language was doing double duty as both MEANING and
+    IDENTITY. A compound invariant ("...retrieve the value from that
+    service and print it.") naturally decomposes into narrower per-subtask
+    statements ("...retrieve the value from that service.") that are
+    semantically correct but never byte-identical to the original sentence,
+    so the exact-match check failed and stayed failed across two full
+    bounded repair rounds (the model was never told verbatim reuse was the
+    contract, and had no other way to satisfy it) - a total run failure on
+    an otherwise well-decomposed plan. Splitting statement (what the LLM
+    authors and reasons about) from id (what the validator checks
+    referential integrity against) removes that failure mode without
+    fuzzy/substring/semantic matching - referencing an id is exactly as
+    reliable as the existing provides/requires slug contract already is
+    (zero mismatches across the same live run that broke on invariant
+    text)."""
+
+    id: str
+    statement: str
+
+    @field_validator("id")
+    @classmethod
+    def _non_blank_id(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("global invariant id must not be blank")
+        return v
+
+    @field_validator("statement")
+    @classmethod
+    def _non_blank_statement(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("global invariant statement must not be blank")
+        return v
+
+
 class Subtask(BaseModel):
     """One execution unit within an EngineeringPlan - MA6 invariant 2: the
     Developer/tool receives exactly one of these at a time, never the
@@ -274,7 +316,9 @@ class Subtask(BaseModel):
     verification: List[VerificationMethod] = Field(default_factory=list)
     provides: List[str] = Field(default_factory=list)
     requires: List[str] = Field(default_factory=list)
-    relevant_global_invariants: List[str] = Field(default_factory=list)
+    # References GlobalInvariant.id, never restated invariant text - see
+    # GlobalInvariant's own docstring for why (PRV-06).
+    relevant_global_invariant_ids: List[str] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -284,7 +328,7 @@ class Subtask(BaseModel):
             raise ValueError("subtask id must not be blank")
         return v
 
-    @field_validator("provides", "requires", "relevant_global_invariants")
+    @field_validator("provides", "requires", "relevant_global_invariant_ids")
     @classmethod
     def _normalize_semantic_entries(cls, values: List[str]) -> List[str]:
         return [(value or "").strip() for value in values]
@@ -329,7 +373,7 @@ class Subtask(BaseModel):
             raise ValueError(f"subtask {self.id!r} cannot depend on itself")
         if len(set(self.depends_on)) != len(self.depends_on):
             raise ValueError(f"subtask {self.id!r} lists a duplicate dependency in depends_on")
-        for field_name in ("provides", "requires", "relevant_global_invariants"):
+        for field_name in ("provides", "requires", "relevant_global_invariant_ids"):
             values = getattr(self, field_name)
             if any(not (value or "").strip() for value in values):
                 raise ValueError(f"subtask {self.id!r} has a blank {field_name} entry")
@@ -354,7 +398,7 @@ class EngineeringPlan(BaseModel):
     acceptance_criteria: List[AcceptanceCriterion] = Field(default_factory=list)
     extension_points: List[str] = Field(default_factory=list)
     refactor_baseline: Optional[str] = None
-    global_invariants: List[str] = Field(default_factory=list)
+    global_invariants: List[GlobalInvariant] = Field(default_factory=list)
 
     @field_validator("plan_id")
     @classmethod
@@ -373,13 +417,11 @@ class EngineeringPlan(BaseModel):
 
     @field_validator("global_invariants")
     @classmethod
-    def _valid_global_invariants(cls, values: List[str]) -> List[str]:
-        cleaned = [(value or "").strip() for value in values]
-        if any(not value for value in cleaned):
-            raise ValueError("global_invariants must not contain blank entries")
-        if len(set(cleaned)) != len(cleaned):
-            raise ValueError("global_invariants must not contain duplicates")
-        return cleaned
+    def _valid_global_invariants(cls, values: List[GlobalInvariant]) -> List[GlobalInvariant]:
+        ids = [gi.id for gi in values]
+        if len(set(ids)) != len(ids):
+            raise ValueError("global_invariants must not contain duplicate ids")
+        return values
 
     def subtask_by_id(self, subtask_id: str) -> Optional[Subtask]:
         for subtask in self.subtasks:
@@ -479,7 +521,7 @@ class PlannerStructuredOutput(BaseModel):
     acceptance_criteria: List[AcceptanceCriterion] = Field(default_factory=list)
     extension_points: List[str] = Field(default_factory=list)
     refactor_baseline: Optional[str] = None
-    global_invariants: List[str] = Field(default_factory=list)
+    global_invariants: List[GlobalInvariant] = Field(default_factory=list)
 
 
 def build_engineering_plan_from_planner_output(

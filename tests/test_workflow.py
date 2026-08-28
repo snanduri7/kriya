@@ -23,6 +23,8 @@ from kriya.workflow.attempt import (
     _diagnosis_mismatch_bypass_reason,
     _directly_executable_verifiers,
     _operation_map,
+    _process_boundary_obligation_id,
+    _record_process_boundary_obligation,
     _record_self_correction_scope_conflict,
     _run_verification_basis_hash,
     _spec_requirements_contradicting_authority,
@@ -1273,6 +1275,278 @@ async def test_run_attempt_accepts_single_authorized_target_under_allowlist(tmp_
 
     assert (tmp_path / app_path).read_text() == _PRV18_APP_FIXED
     assert (tmp_path / other_path).read_text() == _PRV18_OTHER_ORIGINAL
+
+
+# --- process-boundary/testability obligation (PRV-06, 2026-08-28) ---
+
+def test_record_process_boundary_obligation_violated_then_satisfied():
+    ledger = ObligationLedger()
+    state = GenerationState()
+    state.attempt_number = 1
+    fake_ctx = type("FakeCtx", (), {"obligation_ledger": ledger, "current_subtask_id": "s3"})()
+
+    # A SATISFIED call with nothing on record yet is a no-op.
+    _record_process_boundary_obligation(fake_ctx, state, violated=False, evidence={})
+    assert ledger.current(_process_boundary_obligation_id("s3")) is None
+
+    # (2) first occurrence: VIOLATED, recurrence=false, both as the return
+    # value AND as a durable fact on the record's own evidence.
+    is_recurrence_1 = _record_process_boundary_obligation(
+        fake_ctx, state, violated=True, evidence={"detected_via": "test"},
+    )
+    rec = ledger.current(_process_boundary_obligation_id("s3"))
+    assert is_recurrence_1 is False
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.owner_subtask_id == "s3"
+    assert rec.kind == ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY
+    assert rec.revision == 1
+    assert rec.evidence["recurrence"] is False
+    assert rec.evidence["current_attempt"] == 1
+    assert "prior_violation_attempt" not in rec.evidence
+
+    # (3) same conflict, same subtask, still unresolved: recurrence=true,
+    # with prior_violation_attempt pointing at the first occurrence.
+    state.attempt_number = 3
+    is_recurrence_2 = _record_process_boundary_obligation(
+        fake_ctx, state, violated=True, evidence={"detected_via": "test"},
+    )
+    rec_recur = ledger.current(_process_boundary_obligation_id("s3"))
+    assert is_recurrence_2 is True
+    assert rec_recur.evidence["recurrence"] is True
+    assert rec_recur.evidence["prior_violation_attempt"] == 1
+    assert rec_recur.evidence["current_attempt"] == 3
+
+    # (5) resolved: SATISFIED clears it...
+    state.attempt_number = 4
+    _record_process_boundary_obligation(fake_ctx, state, violated=False, evidence={})
+    rec2 = ledger.current(_process_boundary_obligation_id("s3"))
+    assert rec2.status == ObligationStatus.SATISFIED
+    assert rec2.revision == 4
+
+    # ...so a LATER, unrelated violation for the same subtask does not
+    # inherit stale recurrence from the resolved earlier conflict.
+    state.attempt_number = 5
+    is_recurrence_3 = _record_process_boundary_obligation(
+        fake_ctx, state, violated=True, evidence={"detected_via": "test"},
+    )
+    rec3 = ledger.current(_process_boundary_obligation_id("s3"))
+    assert is_recurrence_3 is False
+    assert rec3.evidence["recurrence"] is False
+    assert "prior_violation_attempt" not in rec3.evidence
+
+
+def test_record_process_boundary_obligation_recurrence_is_scoped_per_subtask():
+    """(4) A different subtask's violation must never be treated as a
+    recurrence of another subtask's - each gets its own obligation id (the
+    subtask id is baked into the id itself), and recurrence only compares
+    an obligation against its OWN prior record."""
+    ledger = ObligationLedger()
+    state = GenerationState()
+    state.attempt_number = 1
+    ctx_s3 = type("FakeCtx", (), {"obligation_ledger": ledger, "current_subtask_id": "s3"})()
+    ctx_s5 = type("FakeCtx", (), {"obligation_ledger": ledger, "current_subtask_id": "s5"})()
+
+    _record_process_boundary_obligation(ctx_s3, state, violated=True, evidence={})
+    is_recurrence_s5 = _record_process_boundary_obligation(ctx_s5, state, violated=True, evidence={})
+
+    assert is_recurrence_s5 is False
+    rec_s3 = ledger.current(_process_boundary_obligation_id("s3"))
+    rec_s5 = ledger.current(_process_boundary_obligation_id("s5"))
+    assert rec_s3.id != rec_s5.id
+    assert rec_s5.evidence["recurrence"] is False
+
+
+def test_record_process_boundary_obligation_noop_without_subtask_id():
+    """A plain Legacy run has no subtask id to anchor cross-attempt identity
+    on - must not write anything, matching every other owner_subtask_id-
+    keyed obligation in this module family."""
+    ledger = ObligationLedger()
+    state = GenerationState()
+    state.attempt_number = 1
+    fake_ctx = type("FakeCtx", (), {"obligation_ledger": ledger, "current_subtask_id": None})()
+
+    _record_process_boundary_obligation(fake_ctx, state, violated=True, evidence={})
+    assert ledger.ids_by_kind(ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY) == []
+
+
+def test_record_process_boundary_obligation_noop_without_ledger():
+    state = GenerationState()
+    state.attempt_number = 1
+    fake_ctx = type("FakeCtx", (), {"obligation_ledger": None, "current_subtask_id": "s3"})()
+
+    # Must not raise even though there's no ledger to write to.
+    _record_process_boundary_obligation(fake_ctx, state, violated=True, evidence={})
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_classifies_surefire_fork_crash_and_records_obligation(tmp_path):
+    """Integration regression test for PRV-06 (2026-08-28): a real
+    run_attempt() call whose test gate fails with a Surefire fork-crash
+    signature must raise QualityGateFailure typed test_process_terminated
+    (not the generic "test"), and must record a VIOLATED
+    PROCESS_BOUNDARY_COMPATIBILITY obligation for the current subtask - the
+    real live incident this closes: 11 attempts all classified as generic
+    TEST FAILURE, with nothing distinguishing "the test process itself was
+    killed" from an ordinary assertion failure."""
+    app_path = "src/main/java/com/example/App.java"
+    test_path = "src/test/java/com/example/AppTest.java"
+    (tmp_path / "src/main/java/com/example").mkdir(parents=True)
+    (tmp_path / "src/test/java/com/example").mkdir(parents=True)
+    (tmp_path / app_path).write_text("class App {}\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": test_path, "content": "class AppTest {}\n"},
+    ])
+    ledger = ObligationLedger()
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        goal="Create a test class to verify the application's behavior.",
+        architect_files=[test_path], expected_files_upfront=[test_path],
+        architect_basename_to_path={"AppTest.java": test_path},
+        allowed_write_relpaths=[test_path], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        obligation_ledger=ledger, current_subtask_id="s3",
+    )
+
+    surefire_output = (
+        "[ERROR] org.apache.maven.surefire.booter.SurefireBooterForkException: "
+        "The forked VM terminated without properly saying goodbye. VM crash or System.exit called?"
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": False, "output": surefire_output},
+    ), patch(
+        "kriya.workflow.attempt.find_runnable_test_files", return_value=[test_path],
+    ), patch(
+        "kriya.workflow.attempt.extract_target_test", return_value=None,
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "test_process_terminated"
+    assert "SurefireBooterForkException" in exc_info.value.failure.message
+    rec = ledger.current(_process_boundary_obligation_id("s3"))
+    assert rec is not None
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.owner_subtask_id == "s3"
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_ordinary_test_failure_records_no_process_boundary_obligation(tmp_path):
+    """(1) An ordinary assertion failure must stay a plain "test" failure -
+    no test_process_terminated upgrade, and no PROCESS_BOUNDARY_COMPATIBILITY
+    obligation recorded at all (the call site only records one when
+    failure.type == "test_process_terminated"; an ordinary failure never
+    reaches that branch)."""
+    app_path = "src/main/java/com/example/App.java"
+    test_path = "src/test/java/com/example/AppTest.java"
+    (tmp_path / "src/main/java/com/example").mkdir(parents=True)
+    (tmp_path / "src/test/java/com/example").mkdir(parents=True)
+    (tmp_path / app_path).write_text("class App {}\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": test_path, "content": "class AppTest {}\n"},
+    ])
+    ledger = ObligationLedger()
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        goal="Create a test class to verify the application's behavior.",
+        architect_files=[test_path], expected_files_upfront=[test_path],
+        architect_basename_to_path={"AppTest.java": test_path},
+        allowed_write_relpaths=[test_path], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        obligation_ledger=ledger, current_subtask_id="s3",
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": False, "output": "org.opentest4j.AssertionFailedError: expected: <HELLO> but was: <hello>"},
+    ), patch(
+        "kriya.workflow.attempt.find_runnable_test_files", return_value=[test_path],
+    ), patch(
+        "kriya.workflow.attempt.extract_target_test", return_value=None,
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "test"
+    assert ledger.current(_process_boundary_obligation_id("s3")) is None
+    assert ledger.ids_by_kind(ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY) == []
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_escalates_message_when_process_boundary_failure_recurs(tmp_path):
+    """PRV-06 (2026-08-28): recording the obligation alone only makes the
+    conflict OBSERVABLE - this proves it also makes the SECOND consecutive
+    occurrence for the same subtask actually say so in the message shown to
+    the Developer on the next repair attempt, the mechanism that actually
+    targets the live System.exit <-> return oscillation (11 attempts, no
+    attempt ever told the model it was repeating a already-tried change)."""
+    app_path = "src/main/java/com/example/App.java"
+    test_path = "src/test/java/com/example/AppTest.java"
+    (tmp_path / "src/main/java/com/example").mkdir(parents=True)
+    (tmp_path / "src/test/java/com/example").mkdir(parents=True)
+    (tmp_path / app_path).write_text("class App {}\n")
+
+    ledger = ObligationLedger()
+    surefire_output = (
+        "[ERROR] org.apache.maven.surefire.booter.SurefireBooterForkException: "
+        "The forked VM terminated without properly saying goodbye. VM crash or System.exit called?"
+    )
+
+    def _attempt_ctx(attempt_number):
+        developer = AsyncMock()
+        developer.run_generation = AsyncMock(return_value=[
+            {"filepath": test_path, "content": "class AppTest {}\n"},
+        ])
+        state = GenerationState()
+        state.attempt_number = attempt_number
+        state.all_files_written = set()
+        ctx = _minimal_attempt_ctx(
+            tmp_path, developer=developer,
+            goal="Create a test class to verify the application's behavior.",
+            architect_files=[test_path], expected_files_upfront=[test_path],
+            architect_basename_to_path={"AppTest.java": test_path},
+            allowed_write_relpaths=[test_path], write_scope_mode=WriteScopeMode.ALLOWLIST,
+            obligation_ledger=ledger, current_subtask_id="s3",
+        )
+        return state, ctx
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": False, "output": surefire_output},
+    ), patch(
+        "kriya.workflow.attempt.find_runnable_test_files", return_value=[test_path],
+    ), patch(
+        "kriya.workflow.attempt.extract_target_test", return_value=None,
+    ):
+        state1, ctx1 = _attempt_ctx(0)
+        with pytest.raises(QualityGateFailure) as first:
+            await run_attempt(state1, ctx1)
+        state2, ctx2 = _attempt_ctx(1)
+        with pytest.raises(QualityGateFailure) as second:
+            await run_attempt(state2, ctx2)
+
+    assert "RECURRING FAILURE" not in first.value.failure.message
+    assert "RECURRING FAILURE" in second.value.failure.message
+    assert "already recorded VIOLATED on an earlier attempt" in second.value.failure.message
 
 
 _TOOL_TEST_VERIFIER = {

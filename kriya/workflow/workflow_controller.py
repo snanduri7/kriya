@@ -355,10 +355,13 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
         for requirement in consumer.requires
         if requirement in subtask.provides
     ]
+    invariant_statements = {gi.id: gi.statement for gi in plan.global_invariants}
     payload = {
         "local_description": subtask.description,
         "planned_files": [pf.path for pf in subtask.planned_files],
-        "relevant_global_invariants": list(subtask.relevant_global_invariants),
+        "relevant_global_invariants": [
+            invariant_statements.get(gi_id, gi_id) for gi_id in subtask.relevant_global_invariant_ids
+        ],
         "upstream_contracts": upstream,
         "downstream_requirements": downstream,
         "verification_targets": [vm.description for vm in subtask.verification],
@@ -388,16 +391,22 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "You are Kriya's authoritative structured Planner. Return exactly one valid JSON object and "
     "nothing else: no Markdown, code fences, prose, or rationale. Decompose the request into the "
     "smallest safe set of bounded implementation subtasks. Use this top-level shape: "
-    '{"global_invariants": ["..."], "subtasks": [{"id": "s1", "description": "...", '
-    '"execution_method": "model", "execution_role": "implementation", "depends_on": [], '
-    '"planned_files": [{"path": "...", "action": "create|modify|delete"}], "provides": ["..."], '
-    '"requires": [], "relevant_global_invariants": ["..."], "verification": '
+    '{"global_invariants": [{"id": "gi1", "statement": "..."}], "subtasks": [{"id": "s1", '
+    '"description": "...", "execution_method": "model", "execution_role": "implementation", '
+    '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete"}], '
+    '"provides": ["..."], "requires": [], "relevant_global_invariant_ids": ["gi1"], "verification": '
     '[{"type": "tool", "description": "...", "tool_name": "compile", '
     '"verifier_kind": "compile", '
     '"requires_runtime_execution": false}], '
     '"acceptance_criteria_ids": ["ac1"]}], "acceptance_criteria": '
     '[{"id": "ac1", "description": "...", "method": "judgment"}], '
     '"extension_points": [], "refactor_baseline": null}. '
+    "Each global invariant has a short stable id and a human-readable statement; a subtask "
+    "references it via relevant_global_invariant_ids using that exact id, never by restating or "
+    "paraphrasing the statement text - a subtask relevant to only PART of a compound invariant "
+    "still references the whole invariant's id, it does not invent a new id or a partial "
+    "statement. Never reference an id that isn't declared in global_invariants, and never invent "
+    "one on a subtask that wasn't first declared in global_invariants. "
     "Every model subtask has an execution_role: implementation or verification. An implementation "
     "subtask must own every file it may change in planned_files. A verification subtask (e.g. "
     "\"run the regression suite and confirm existing behavior is preserved\") MUST set "
@@ -412,7 +421,20 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "when the plan explicitly requires executing the application. Every "
     "acceptance criterion may be assigned only to a stage capable of demonstrating it. Every "
     "requires value must exactly equal one provides value from exactly one "
-    "declared dependency. Preserve goal-derived invariants without inventing unspecified choices."
+    "declared dependency. Preserve goal-derived invariants without inventing unspecified choices. "
+    "A stage whose tests need build/test tooling (a Maven/Gradle/npm/pip manifest, a test "
+    "framework dependency) that another stage's planned_files owns must declare that manifest "
+    "stage's provides value in its own requires and depends_on - execution order is not "
+    "guaranteed by planned_files or list position alone, only by depends_on. "
+    "If a stage's entrypoint may terminate the running process (an explicit exit/return-code "
+    "path, not just falling off the end of a function) and another stage's tests are expected to "
+    "exercise that entrypoint directly, plan them so the process-terminating behavior stays "
+    "separable from the logic the tests actually invoke - e.g. the terminating call sits in a "
+    "thin wrapper the tests never call directly, while the tests target the underlying logic "
+    "that returns a result instead of terminating. This applies to any process-termination "
+    "mechanism (not just one language's), and does not require a specific method name or file "
+    "structure - only that a directly-tested code path and a process-terminating code path stay "
+    "separate enough that invoking the tested path in-process cannot kill the test process itself."
 )
 
 
@@ -546,6 +568,19 @@ def build_structured_plan_repair_prompt(
             "exists, its action must be \"modify\" (or \"delete\"). Do not change which subtask "
             "owns the file, only its action.\n"
         )
+    if "UNKNOWN_GLOBAL_INVARIANT" in reason_codes:
+        targeted_correction += (
+            "- For each subtask the errors name as referencing an unknown global invariant id: "
+            "replace that entry with one of the declared ids listed in the same error (shown as "
+            "\"declared ids are [...]\"), the one whose statement is actually relevant to this "
+            "subtask. Do not invent a new id, do not restate the invariant's statement text as the "
+            "id, and do not add a new entry to global_invariants unless the goal states a real "
+            "constraint no existing invariant covers. A subtask relevant to only part of a compound "
+            "invariant still references that invariant's existing id whole - it does not split it "
+            "into a new id or a partial statement. Existing global invariant ids from the previous "
+            "draft must be preserved unchanged (same id, same statement) unless the invariant "
+            "itself is being genuinely removed or replaced.\n"
+        )
     must_fix_section = ""
     if must_preserve:
         must_fix_section = (
@@ -568,9 +603,11 @@ def build_structured_plan_repair_prompt(
         "- Correct only invalid plan structure; do not broaden scope or invent modules/entrypoints.\n"
         "- Declare depends_on for every stage that consumes files, configuration, contracts, or "
         "build setup produced by another stage.\n"
-        "- Preserve or add goal-derived global_invariants, relevant_global_invariants, and stable "
+        "- Preserve or add goal-derived global_invariants (each with a stable id and a statement) "
+        "and per-subtask relevant_global_invariant_ids referencing those ids, plus stable "
         "provides/requires metadata; every requires string must exactly equal one provides string "
-        "from exactly one declared dependency.\n"
+        "from exactly one declared dependency, and every relevant_global_invariant_ids entry must "
+        "exactly equal one global_invariants id - never restate the statement text as the id.\n"
         "- Every verification item must be an object with type, description, verifier_kind, and "
         "requires_runtime_execution; use type=tool/tool_name=compile/verifier_kind=compile for compilation, "
         "type=tool/tool_name=test/verifier_kind=test for tests, and type=judgment without tool_name for "
@@ -635,7 +672,9 @@ def build_authoritative_planner_request(
         "relevant existing path from this evidence. Do not invent a parallel replacement when a "
         "relevant existing owner is present. Use action=create only for a genuinely requested "
         "artifact with no relevant existing path.\n"
-        "- Include goal-derived global_invariants and per-subtask relevant_global_invariants, "
+        "- Include goal-derived global_invariants, each an object with a short stable id and a "
+        "human-readable statement, plus per-subtask relevant_global_invariant_ids referencing "
+        "only those ids (never restating or paraphrasing the statement text on the subtask), "
         "provides, requires, and complete depends_on edges.\n"
         "- Each requires string must exactly match one provides string from exactly one upstream "
         "subtask, and that provider must appear in depends_on.\n"
@@ -654,6 +693,15 @@ def build_authoritative_planner_request(
         "satisfies a test verifier and must not synthesize an application-runtime requirement.\n"
         "- Do not copy these protocol rules into global_invariants; derive those only from the "
         "original product request above. Do not invent unspecified implementation choices.\n"
+        "- A stage whose tests need build/test tooling (a manifest, a test framework dependency) "
+        "owned by another stage's planned_files must declare that stage's provides value in its "
+        "own requires and depends_on - do not rely on planned_files or list position to imply "
+        "execution order.\n"
+        "- If a stage's entrypoint may terminate the process and another stage's tests are "
+        "expected to exercise it directly, keep the process-terminating call separate from the "
+        "directly-tested logic (a thin wrapper performs termination, tests target the underlying "
+        "logic that returns a result instead) - applies to any process-termination mechanism, no "
+        "specific method name or file structure required.\n"
         + route_guidance
     )
 
@@ -881,8 +929,8 @@ def revise_plan_for_grounded_scope_owner(
             item for item in dict.fromkeys(failed.requires + owner_requires)
             if item not in failed.provides
         ]
-        failed.relevant_global_invariants = list(dict.fromkeys(
-            failed.relevant_global_invariants + owner.relevant_global_invariants
+        failed.relevant_global_invariant_ids = list(dict.fromkeys(
+            failed.relevant_global_invariant_ids + owner.relevant_global_invariant_ids
         ))
         revised.subtasks = [st for st in revised.subtasks if st.id != owner.id]
         for consumer in revised.subtasks:
@@ -2338,9 +2386,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
             logger.info(
-                "Current subtask: %s/%s id=%s files=%s depends_on=%s relevant_invariants=%s",
+                "Current subtask: %s/%s id=%s files=%s depends_on=%s relevant_invariant_ids=%s",
                 position, total, subtask.id, [pf.path for pf in subtask.planned_files],
-                subtask.depends_on, subtask.relevant_global_invariants,
+                subtask.depends_on, subtask.relevant_global_invariant_ids,
             )
             # MA7-C1 (2026-08-25 external review): the validated Subtask is
             # now authoritative - predetermined_plan/predetermined_design/

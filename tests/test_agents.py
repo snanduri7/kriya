@@ -3265,3 +3265,20 @@ def test_planner_agent_prompt_forbids_unrequested_multi_module_structure():
     assert "MINIMALISM" in prompt
     assert "single Maven/Gradle module" in prompt
     assert "multi-module" in prompt.lower()
+
+
+def test_planner_agent_prompt_carries_process_boundary_testability_guidance():
+    """PRV-06 (2026-08-28): a greenfield entrypoint that reasonably calls a
+    process-termination primitive on invalid input, tested by a separately-
+    generated test that reasonably invokes that entrypoint in-process,
+    produced an unresolvable structural conflict live (a JUnit test
+    crashing Surefire's forked VM via System.exit()) - 11 attempts
+    oscillating between two mutually-exclusive local edits because nothing
+    in planning ever considered testability as a first-class constraint.
+    Generic across languages/frameworks - no System.exit-specific or
+    run()-shaped requirement."""
+    prompt = PlannerAgent("planner", None).system_prompt
+    assert "process-terminating call separate from" in prompt
+    assert "any process-termination mechanism" in prompt
+    assert "no specific method name or file structure required" in prompt
+    assert "System.exit" not in prompt

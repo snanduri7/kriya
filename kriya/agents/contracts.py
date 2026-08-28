@@ -443,6 +443,50 @@ def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
     return _normalize_file_list_paths(files), None
 
 
+def _heal_global_invariants_shape(parsed: Dict[str, Any]) -> None:
+    """PRV-06 (2026-08-28) shape-only backward compat: a model that reverts
+    to the pre-existing List[str] global_invariants shape (or a subtask
+    that still emits the old relevant_global_invariants key) gets
+    mechanically reshaped into GlobalInvariant's id/statement objects and
+    Subtask.relevant_global_invariant_ids, the same "downgrade-safe
+    reshaping, never a content fix" contract as this module's other
+    self-heals. Sequential ids (gi1, gi2, ...) are assigned deterministically
+    from list position - not a guess at meaning, just a stable label. A
+    subtask string with no exact matching statement is left unresolved (not
+    dropped) so it still fails the real UNKNOWN_GLOBAL_INVARIANT id lookup
+    and enters ordinary repair, exactly like any other genuinely invalid
+    reference - this only closes the shape gap, never the content gap.
+    Mutates `parsed` in place."""
+    raw_invariants = parsed.get("global_invariants")
+    statement_to_id: Dict[str, str] = {}
+    if isinstance(raw_invariants, list) and raw_invariants and all(
+        isinstance(item, str) for item in raw_invariants
+    ):
+        healed_invariants = []
+        for i, statement in enumerate(raw_invariants):
+            gid = f"gi{i + 1}"
+            statement_to_id[statement] = gid
+            healed_invariants.append({"id": gid, "statement": statement})
+        parsed["global_invariants"] = healed_invariants
+    elif isinstance(raw_invariants, list):
+        for item in raw_invariants:
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get("id"), str)
+                and isinstance(item.get("statement"), str)
+            ):
+                statement_to_id[item["statement"]] = item["id"]
+
+    for subtask in parsed.get("subtasks") or []:
+        if not isinstance(subtask, dict) or "relevant_global_invariant_ids" in subtask:
+            continue
+        old_refs = subtask.pop("relevant_global_invariants", None)
+        if isinstance(old_refs, list):
+            subtask["relevant_global_invariant_ids"] = [
+                statement_to_id.get(ref, ref) for ref in old_refs if isinstance(ref, str)
+            ]
+
+
 def _self_heal_structured_plan_dict(parsed: Any) -> Any:
     """MA7.8 fix (2026-08-24, real live-validation finding,
     protocol_encoder_java): self-heals a small, fixed set of MECHANICALLY
@@ -475,6 +519,8 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
     replacement for real schema validation)."""
     if not isinstance(parsed, dict):
         return parsed
+
+    _heal_global_invariants_shape(parsed)
 
     def _heal_tool_pair(obj: Dict[str, Any], kind_field: str, tool_value: str, other_value: str) -> None:
         if not isinstance(obj, dict):

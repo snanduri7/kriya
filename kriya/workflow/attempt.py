@@ -36,7 +36,7 @@ from kriya.workflow.dependency_invalidation import (
     invalidate_validated_revisions,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import _build_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
+from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -72,7 +72,7 @@ from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_p
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.verification_authority import deterministic_sequence_kind
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
-from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
+from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationLedger, ObligationRecord, ObligationStatus
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
@@ -488,6 +488,88 @@ class AttemptContext:
     # existing tests (predating MA8) keeps working unchanged - every real
     # call site always supplies one.
     obligation_ledger: Optional["ObligationLedger"] = None
+
+
+def _process_boundary_obligation_id(subtask_id: str) -> str:
+    return f"attempt.subtask.{subtask_id}.process_boundary_compatibility"
+
+
+_PROCESS_BOUNDARY_RECURRENCE_ESCALATION = (
+    "\n\nRECURRING FAILURE: this exact process-boundary obligation was already recorded "
+    "VIOLATED on an earlier attempt for this subtask and is still unresolved. Toggling the "
+    "same call between two states again (e.g. undoing a previous attempt's fix) will not "
+    "resolve it - propose the structural separation (or out-of-process verification) "
+    "described above instead of repeating a change already tried."
+)
+
+
+def _record_process_boundary_obligation(
+    ctx: "AttemptContext", state: "GenerationState", *, violated: bool, evidence: Dict[str, Any],
+) -> bool:
+    """PRV-06 (2026-08-28): records ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY
+    when a test_process_terminated failure fires (violated=True), and clears
+    it back to SATISFIED the next time this subtask's test gate passes
+    (violated=False) - the same VIOLATED->SATISFIED tracking shape already
+    established for PLAN_STRUCTURAL_VALIDITY, giving this failure class real
+    cross-attempt identity instead of looking like a fresh, unrelated defect
+    every retry.
+
+    Returns True when violated=True and this exact obligation was ALREADY on
+    record as VIOLATED before this call - i.e. the SAME process-boundary
+    conflict recurring on a later attempt for the SAME subtask, never a
+    different subtask or an earlier-but-since-SATISFIED occurrence (prior
+    must itself be VIOLATED, not merely "violated at some point in this
+    obligation's history" - a subtask that fixed this and later broke it a
+    different way starts a fresh, non-recurrent record; recurrence means
+    "still unresolved between two consecutive checks," not "has a violated
+    entry somewhere in its past"). Callers use this to escalate the next
+    repair message with _PROCESS_BOUNDARY_RECURRENCE_ESCALATION instead of
+    silently repeating the same generic guidance every attempt - this is
+    what actually closes the oscillation PRV-06 hit live (the Developer
+    flipped System.exit <-> return for 11 attempts because nothing
+    distinguished "first occurrence" from "still unresolved"; recording the
+    obligation alone would only have made that observable in the ledger, not
+    prevented it). Recurrence is also written into the RECORD's own
+    `evidence` (recurrence/prior_violation_attempt/current_attempt) - a
+    durable control-plane fact inspectable from the ledger itself, not just
+    baked into a transient message string; the escalation text is only how
+    that fact gets exposed to the Developer, not the fact's only home.
+
+    Deliberately scoped to a structured/enforce subtask only
+    (ctx.current_subtask_id is the natural revision-tracked owner here, same
+    reasoning as every other owner_subtask_id in this module family) - a
+    plain Legacy run has no subtask id to anchor cross-attempt identity on
+    and doesn't consume obligation tracking today either. A SATISFIED record
+    is only written when this exact obligation was already VIOLATED for this
+    subtask, so an ordinary subtask that never hit this failure never
+    accumulates a needless record. Different subtasks get different
+    obligation ids (the subtask id is baked into the id itself) and one
+    ObligationLedger is scoped to one workflow run (see its own class
+    docstring) - recurrence can never fire across an unrelated subtask or an
+    unrelated run."""
+    if ctx.obligation_ledger is None or not ctx.current_subtask_id:
+        return False
+    obligation_id = _process_boundary_obligation_id(ctx.current_subtask_id)
+    prior = ctx.obligation_ledger.current(obligation_id)
+    if not violated and prior is None:
+        return False
+    is_recurrence = violated and prior is not None and prior.status == ObligationStatus.VIOLATED
+    record_evidence = dict(evidence)
+    if violated:
+        record_evidence["recurrence"] = is_recurrence
+        record_evidence["current_attempt"] = state.attempt_number
+        if is_recurrence:
+            record_evidence["prior_violation_attempt"] = prior.revision
+    ctx.obligation_ledger.record(ObligationRecord(
+        id=obligation_id, kind=ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY,
+        status=ObligationStatus.VIOLATED if violated else ObligationStatus.SATISFIED,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description="subtask's test execution must not trigger process/fork termination "
+                    "in already-written production code invoked in-process by a test",
+        source="attempt.run_attempt", revision=state.attempt_number,
+        evidence=record_evidence, owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
+    ))
+    return is_recurrence
 
 
 def _extract_grounded_contract_verdict(
@@ -3110,13 +3192,20 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 target_test = None
                 test_res = validator.run_tests()
                 if not test_res["success"]:
-                    failure = _build_quality_gate_failure(
+                    failure = _build_test_quality_gate_failure(
                         "test", f"TEST FAILURE:\n{test_res['output']}",
                         test_res.get("output", ""), ctx.worktree_path,
                         state.all_files_written, state.attempt_number,
                     )
+                    if failure.type == "test_process_terminated":
+                        if _record_process_boundary_obligation(
+                            ctx, state, violated=True,
+                            evidence={"detected_via": "test_selection_fallback"},
+                        ):
+                            failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
+                _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
                 state.gate_outcomes.append({
                     "attempt": state.attempt_number,
                     "type": "test",
@@ -3158,6 +3247,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             operation="repair_with_patch",
                         ))
                 if test_repair_result and test_repair_result.resolved:
+                    _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
                     state.gate_outcomes.append({
                         "attempt": state.attempt_number,
                         "type": "targeted_test",
@@ -3169,7 +3259,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     })
                     test_res = {"success": True, "output": test_repair_result.final_compile_output}
                 else:
-                    failure = _build_quality_gate_failure(
+                    failure = _build_test_quality_gate_failure(
                         "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
                         test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
                     )
@@ -3179,9 +3269,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             "transcript": test_repair_result.transcript,
                             "final_validation_output": test_repair_result.final_compile_output,
                         }
+                    if failure.type == "test_process_terminated":
+                        if _record_process_boundary_obligation(
+                            ctx, state, violated=True,
+                            evidence={"detected_via": "targeted_test"},
+                        ):
+                            failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
             if target_test and not (test_repair_result and test_repair_result.resolved):
+                _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
                 state.gate_outcomes.append({
                     "attempt": state.attempt_number,
                     "type": "targeted_test",
@@ -3195,12 +3292,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                 test_res = validator.run_tests()
                 if not test_res["success"]:
-                    failure = _build_quality_gate_failure(
+                    failure = _build_test_quality_gate_failure(
                         "test", f"TEST FAILURE:\n{test_res['output']}",
                         test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
                     )
+                    if failure.type == "test_process_terminated":
+                        if _record_process_boundary_obligation(
+                            ctx, state, violated=True,
+                            evidence={"detected_via": "full_suite"},
+                        ):
+                            failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
+                _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
                 state.gate_outcomes.append({
                     "attempt": state.attempt_number,
                     "type": "test",

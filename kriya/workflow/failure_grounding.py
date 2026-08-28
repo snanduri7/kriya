@@ -603,6 +603,79 @@ def _build_quality_gate_failure(
     )
 
 
+# Known build-tool signatures for "the test PROCESS itself was killed",
+# distinct from an ordinary assertion/compile failure - PRV-06 (2026-08-28,
+# real live-validation finding): a JUnit test invoked a System.exit()-calling
+# main() in-process, which kills the Surefire fork outright rather than
+# reporting a normal test result. Deliberately a signature LIST (not a single
+# string) so a future stack's equivalent (pytest's own worker-crash text,
+# Node's forced-exit output, ...) can be added without restructuring the
+# caller - only the Java/Surefire entries are populated now, matching the
+# one stack this incident's live evidence actually covers; do not add
+# unverified signatures for other stacks speculatively.
+_PROCESS_TERMINATION_SIGNATURES: Tuple[str, ...] = (
+    "SurefireBooterForkException",
+    "forked VM terminated",
+    "VM crash or System.exit called?",
+)
+
+_PROCESS_TERMINATION_GUIDANCE = (
+    "This is a process-boundary/testability conflict, not an ordinary assertion "
+    "failure: the test runner's own process was killed while running a test, most "
+    "likely because already-written production code calls a process-termination "
+    "primitive (e.g. System.exit/sys.exit/process.exit) on a code path a test "
+    "invokes IN-PROCESS. A single-file edit that just toggles the terminating call "
+    "on and off cannot resolve this - 'observably terminate the process for this "
+    "input' and 'be safely callable from an in-process test' cannot both hold for "
+    "the same in-process call. Resolve it structurally instead: separate the "
+    "directly-testable behavior from the process-terminating call (e.g. have the "
+    "termination-triggering logic return a result/status, and let a thin wrapper "
+    "the tests do not call in-process perform the actual termination), or verify "
+    "the terminating behavior out-of-process instead of invoking it directly from "
+    "a test. Do not just flip the same call back and forth between attempts."
+)
+
+
+def detect_process_termination_signature(output: str) -> Optional[str]:
+    """Returns the first known process/fork-termination signature found in
+    `output`, or None. Pure/deterministic - no LLM call, matching this
+    module's own "ground before it reaches the model" role."""
+    text = output or ""
+    for signature in _PROCESS_TERMINATION_SIGNATURES:
+        if signature in text:
+            return signature
+    return None
+
+
+def _build_test_quality_gate_failure(
+    type_: str,
+    banner: str,
+    raw_output: str,
+    worktree_path: str,
+    known_files: Iterable[str],
+    attempt: int,
+) -> Failure:
+    """Same contract as _build_quality_gate_failure, for the "test"/
+    "targeted_test" call sites specifically - upgrades `type_`/`banner` to
+    the process-termination shape when `raw_output` carries a known
+    signature (see _PROCESS_TERMINATION_SIGNATURES above), so the retry
+    loop's own failure-family signature (keyed off `type_`) treats this as
+    genuinely distinct from an ordinary test failure, and the Developer
+    sees the structural guidance instead of re-deriving it (inconsistently)
+    from scratch every attempt. `raw_output` itself is left untouched -
+    still just the tool's real output, used for file-location extraction -
+    only `banner` (the human/model-facing message) gets the guidance
+    prepended."""
+    signature = detect_process_termination_signature(raw_output)
+    if signature:
+        type_ = "test_process_terminated"
+        banner = (
+            f"TEST_PROCESS_TERMINATED (evidence: {signature!r}):\n"
+            f"{_PROCESS_TERMINATION_GUIDANCE}\n\n{raw_output}"
+        )
+    return _build_quality_gate_failure(type_, banner, raw_output, worktree_path, known_files, attempt)
+
+
 def _strip_build_tool_info_noise(text: str) -> str:
     """Strips lines that start with Maven's own `[INFO]`-level log prefix before the
     plain-substring implication scan below runs. Maven prints an unconditional

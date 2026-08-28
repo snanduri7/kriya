@@ -18,6 +18,7 @@ from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
     FileAction,
+    GlobalInvariant,
     PlannedFile,
     Subtask,
     VerificationMethod,
@@ -31,6 +32,7 @@ from kriya.workflow.planning_diagnostics import (
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import (
+    AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
     _StructuredPlanUnavailable,
     WorkflowController,
     _authoritative_planner_extension_candidates,
@@ -112,28 +114,28 @@ async def test_grounded_controller_revises_and_revalidates_service_only_scope(tm
 
     plan = EngineeringPlan(
         plan_id="scope-recovery", kind=ChangeKind.TASK,
-        global_invariants=["Preserve the existing endpoint architecture."],
+        global_invariants=[GlobalInvariant(id="gi1", statement="Preserve the existing endpoint architecture.")],
         subtasks=[
             Subtask(
                 id="s2", description="update service behavior",
                 execution_method=ExecutionMethod.MODEL,
                 planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
                 provides=["customer behavior"],
-                relevant_global_invariants=["Preserve the existing endpoint architecture."],
+                relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="s3", description="compose endpoint response",
                 execution_method=ExecutionMethod.MODEL, depends_on=["s2"],
                 planned_files=[PlannedFile(path=controller, action=FileAction.MODIFY)],
                 requires=["customer behavior"], provides=["endpoint response"],
-                relevant_global_invariants=["Preserve the existing endpoint architecture."],
+                relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="s4", description="extend response coverage",
                 execution_method=ExecutionMethod.MODEL, depends_on=["s3"],
                 planned_files=[PlannedFile(path=test_file, action=FileAction.MODIFY)],
                 requires=["endpoint response"],
-                relevant_global_invariants=["Preserve the existing endpoint architecture."],
+                relevant_global_invariant_ids=["gi1"],
             ),
         ],
     )
@@ -219,18 +221,19 @@ def test_subtask_goal_preserves_overall_constraints_and_mapped_acceptance_withou
 def test_subtask_semantic_context_projects_invariants_upstream_and_downstream_contracts():
     invariant = "runtime configuration remains external"
     plan = EngineeringPlan(
-        plan_id="run1", kind=ChangeKind.TASK, global_invariants=[invariant],
+        plan_id="run1", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement=invariant)],
         subtasks=[
             Subtask(
                 id="config", description="write config", execution_method=ExecutionMethod.MODEL,
                 planned_files=[PlannedFile(path="config.xml", action=FileAction.CREATE)],
-                provides=["config.ready"], relevant_global_invariants=[invariant],
+                provides=["config.ready"], relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="app", description="consume config", execution_method=ExecutionMethod.MODEL,
                 depends_on=["config"],
                 planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
-                requires=["config.ready"], relevant_global_invariants=[invariant],
+                requires=["config.ready"], relevant_global_invariant_ids=["gi1"],
                 verification=[VerificationMethod(
                     type=VerificationMethodType.JUDGMENT, description="application consumes config",
                     requires_runtime_execution=True,
@@ -311,6 +314,28 @@ def test_plan_repair_prompt_resolves_duplicate_file_ownership_without_weakening_
     assert "sole purpose is to analyze, inspect, research, or explain" in prompt
     assert "src/CustomerDisplayNameFormatter.java" in prompt
     assert "For modify/delete, use an exact relevant existing path" in prompt
+
+
+def test_plan_repair_prompt_directs_unknown_global_invariant_to_declared_ids(tmp_path):
+    """Regression test for PRV-06 (2026-08-28): UNKNOWN_GLOBAL_INVARIANT
+    used to have NO targeted correction block at all (every other reason
+    code in this function does) - the model was shown the error but never
+    told the fix mechanism, so it non-convergently repeated the same
+    mismatch across two full bounded repair rounds live. This asserts the
+    new targeted block actually reaches the model."""
+    prompt = build_structured_plan_repair_prompt(
+        "build the requested application",
+        "previous response",
+        ["subtask 's3' references unknown global invariant id(s): ['gi_ghost']; "
+         "declared ids are ['gi1', 'gi2']"],
+        ["UNKNOWN_GLOBAL_INVARIANT"],
+        1,
+    )
+    assert "replace that entry with one of the declared ids" in prompt
+    assert "Do not invent a new id" in prompt
+    assert "do not restate the invariant's statement text as the id" in prompt
+    assert "Existing global invariant ids from the previous draft must be preserved" in prompt
+    assert "never restate the statement text as the id" in prompt
 
 
 def test_normalized_ownership_diagnostic_exposes_duplicate_claims_without_inventing_symbols(tmp_path):
@@ -410,6 +435,31 @@ def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_c
     assert "runnable entrypoint stage" in request
     assert "Each planned_files path must be owned by exactly one implementation MODEL subtask" in request
     assert "solely to analyze, inspect, research, or explain code" in request
+
+
+def test_authoritative_planner_request_carries_testability_and_tooling_dag_guidance():
+    """PRV-06 (2026-08-28): two generic, cross-language planning-time
+    nudges added after a real greenfield failure - (1) a stage needing
+    build/test tooling from another stage's manifest must declare that as
+    a real requires/depends_on edge, not rely on incidental subtask-id
+    ordering (topological_subtask_order's own tie-break is "sorted id...
+    not a meaningful priority" - confirmed this run's s2/s3 ordering only
+    held by alphabetical luck); (2) a process-terminating entrypoint and
+    the tests exercising it in-process must stay structurally separable."""
+    request = build_authoritative_planner_request("Build one runnable application.")
+    assert "must declare that stage's provides value in its own requires and depends_on" in request
+    assert "do not rely on planned_files or list position to imply execution order" in request
+    assert "keep the process-terminating call separate from the" in request
+    assert "System.exit" not in request  # generic across languages, not Java-specific
+    assert "run()" not in request  # no required method name/shape
+
+
+def test_authoritative_planner_system_prompt_carries_testability_and_tooling_dag_guidance():
+    assert "the terminating call sits in a thin wrapper" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "any process-termination mechanism" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "does not require a specific method name" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "own requires and depends_on" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "execution order is not" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
 
 
 def test_task_planner_request_supplies_existing_paths_for_brownfield_owner_selection():
@@ -881,6 +931,67 @@ async def test_enforce_repairs_late_unscoped_model_subtask_before_execution(tmp_
 
 
 @pytest.mark.asyncio
+async def test_enforce_repairs_unknown_global_invariant_reference_by_id(tmp_path):
+    """Regression test for PRV-06 (2026-08-28): the exact live failure shape
+    - a subtask references a global invariant id that isn't declared yet.
+    Unlike the pre-fix text-matching contract, this converges in exactly one
+    repair round once the model swaps in a declared id, because the
+    validator and the repair-prompt guidance both operate on ids, not
+    free-text reproduction."""
+    compound = GlobalInvariant(
+        id="gi_retrieve_print",
+        statement="The application must retrieve the value from that service and print it.",
+    )
+    bad_plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK, global_invariants=[compound],
+        subtasks=[Subtask(
+            id="s2", description="service", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="Service.java", action=FileAction.CREATE)],
+            relevant_global_invariant_ids=["gi_ghost"],
+        )],
+    )
+    good_plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK, global_invariants=[compound],
+        subtasks=[Subtask(
+            id="s2", description="service", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="Service.java", action=FileAction.CREATE)],
+            relevant_global_invariant_ids=["gi_retrieve_print"],
+        )],
+    )
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["initial plan", "corrected plan"])
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": ["Service.java"],
+    })
+    validations = [
+        PlanValidationResult(
+            valid=False,
+            errors=["subtask 's2' references unknown global invariant id(s): ['gi_ghost']; "
+                    "declared ids are ['gi_retrieve_print']"],
+            reason_codes=["UNKNOWN_GLOBAL_INVARIANT"],
+        ),
+        PlanValidationResult(valid=True),
+    ]
+    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(MagicMock(), None)), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        side_effect=[bad_plan, good_plan],
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=validations),
+    ):
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2
+    repair_prompt = we.planner.run.await_args_list[1].args[0]
+    assert "gi_ghost" in repair_prompt
+    assert "declared ids are" in repair_prompt
+    assert "replace that entry with one of the declared ids" in repair_prompt
+
+
+@pytest.mark.asyncio
 async def test_enforce_structured_plan_unavailable_never_degrades_to_legacy(tmp_path):
     we = _workflow_engine()
     controller = WorkflowController(we)
@@ -973,20 +1084,20 @@ async def test_enforce_surfaces_grounded_out_of_scope_repair_as_plan_revision(tm
 async def test_enforce_reopens_unique_upstream_owner_and_reruns_consumer(tmp_path):
     plan = EngineeringPlan(
         plan_id="run1", kind=ChangeKind.TASK,
-        global_invariants=["framework dependencies must be resolved"],
+        global_invariants=[GlobalInvariant(id="gi1", statement="framework dependencies must be resolved")],
         subtasks=[
             Subtask(
                 id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
                 planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
                 provides=["build.dependencies.ready"],
-                relevant_global_invariants=["framework dependencies must be resolved"],
+                relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="s3", description="create application", execution_method=ExecutionMethod.MODEL,
                 depends_on=["s1"],
                 planned_files=[PlannedFile(path="src/App.java", action=FileAction.CREATE)],
                 requires=["build.dependencies.ready"],
-                relevant_global_invariants=["framework dependencies must be resolved"],
+                relevant_global_invariant_ids=["gi1"],
             ),
         ],
     )
@@ -1220,27 +1331,27 @@ async def test_enforce_revises_service_scope_to_grounded_controller_and_continue
         full.write_text("baseline\n")
     plan = EngineeringPlan(
         plan_id="run1", kind=ChangeKind.TASK,
-        global_invariants=["existing response ownership is preserved"],
+        global_invariants=[GlobalInvariant(id="gi1", statement="existing response ownership is preserved")],
         subtasks=[
             Subtask(
                 id="s2", description="update service", execution_method=ExecutionMethod.MODEL,
                 planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
                 provides=["customer behavior"],
-                relevant_global_invariants=["existing response ownership is preserved"],
+                relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="s3", description="compose response", execution_method=ExecutionMethod.MODEL,
                 depends_on=["s2"],
                 planned_files=[PlannedFile(path=controller, action=FileAction.MODIFY)],
                 requires=["customer behavior"], provides=["response composed"],
-                relevant_global_invariants=["existing response ownership is preserved"],
+                relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="s4", description="verify response", execution_method=ExecutionMethod.MODEL,
                 depends_on=["s3"],
                 planned_files=[PlannedFile(path=test_file, action=FileAction.MODIFY)],
                 requires=["response composed"],
-                relevant_global_invariants=["existing response ownership is preserved"],
+                relevant_global_invariant_ids=["gi1"],
             ),
         ],
     )
@@ -1305,19 +1416,20 @@ async def test_enforce_reopens_owner_with_grounded_diagnosis_and_commits_plan_at
     (tmp_path / source_path).write_text("incomplete\n")
     (tmp_path / test_path).write_text("test\n")
     plan = EngineeringPlan(
-        plan_id="run1", kind=ChangeKind.TASK, global_invariants=["output is normalized"],
+        plan_id="run1", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="output is normalized")],
         subtasks=[
             Subtask(
                 id="implementation", description="fix formatter",
                 execution_method=ExecutionMethod.MODEL,
                 planned_files=[PlannedFile(path=source_path, action=FileAction.MODIFY)],
-                provides=["formatter.fixed"], relevant_global_invariants=["output is normalized"],
+                provides=["formatter.fixed"], relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="tests", description="update formatter tests",
                 execution_method=ExecutionMethod.MODEL, depends_on=["implementation"],
                 planned_files=[PlannedFile(path=test_path, action=FileAction.MODIFY)],
-                requires=["formatter.fixed"], relevant_global_invariants=["output is normalized"],
+                requires=["formatter.fixed"], relevant_global_invariant_ids=["gi1"],
             ),
         ],
     )

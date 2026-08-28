@@ -108,3 +108,14 @@ def test_test_process_failure_is_typed_as_test_evidence_until_source_is_grounded
     assert classify_failure_attribution(
         "targeted_test", "one assertion failed",
     ) is FailureAttributionKind.TEST_DEFECT
+
+
+def test_process_termination_failure_gets_same_repair_owner_routing_as_ordinary_test_failure():
+    """PRV-06 (2026-08-28): test_process_terminated must route the same as
+    test/targeted_test - the existing scope-widening/PLAN_SCOPE_DEFECT path
+    already reaches a causal producer file correctly (confirmed live); only
+    the label and the guidance shown to the model should differ, not who
+    owns repair."""
+    assert classify_failure_attribution(
+        "test_process_terminated", "TEST_PROCESS_TERMINATED (evidence: ...)",
+    ) is FailureAttributionKind.TEST_DEFECT
