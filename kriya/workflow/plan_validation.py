@@ -35,6 +35,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
 from kriya.workflow.plan_schema import (
     BUILTIN_QUALITY_GATE_VERIFIERS,
     EngineeringPlan,
@@ -153,6 +160,8 @@ async def validate_plan(
     resuming_own_established_progress: bool = False,
     require_model_planned_files: bool = False,
     require_semantic_contracts: bool = False,
+    obligation_ledger: Optional[ObligationLedger] = None,
+    revision: object = None,
 ) -> PlanValidationResult:
     """available_tool_names=None SKIPS the tool-registry check entirely -
     only safe for contexts guaranteed not to contain TOOL-tagged subtasks
@@ -178,7 +187,21 @@ async def validate_plan(
     subtask-spanning resume, 2026-08-24) - not pre-existing, foreign work a
     plan needs to justify extending. The caller is responsible for that
     judgment (a persisted ControlState showing at least one completed
-    subtask); this function only trusts the flag it's given."""
+    subtask); this function only trusts the flag it's given.
+
+    obligation_ledger/revision (PRV-05 run #8, MA8 - kriya/workflow/
+    obligations.py): purely an optional side effect, added without
+    changing any check's own pass/fail logic - when supplied, four
+    specific PLAN_STRUCTURAL_VALIDITY constraints (the ones demonstrated
+    live in run #8: refactor_baseline non-blank, planned-file action vs
+    disk existence, planned-file ownership, and MODEL-subtask scope) are
+    recorded as DETERMINISTIC ObligationRecords with stable, field-derived
+    ids (never derived from the error text itself), SATISFIED or VIOLATED,
+    tagged with `revision` (the caller's own repair-attempt counter). This
+    lets the caller's repair loop detect a regression - a constraint that
+    was SATISFIED on a prior call and comes back VIOLATED on this one -
+    and tell the next repair prompt to preserve it, not just fix whatever
+    is currently broken."""
     errors: List[str] = []
     reason_codes: List[str] = []
 
@@ -245,6 +268,21 @@ async def validate_plan(
     if ambiguous_files:
         errors.append(f"planned file ownership must be unique: {ambiguous_files}")
         reason_codes.append("AMBIGUOUS_PLANNED_FILE_OWNERSHIP")
+    if obligation_ledger is not None:
+        for path, owners in file_owners.items():
+            obligation_ledger.record(ObligationRecord(
+                id=f"plan.file.{path}.ownership", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+                status=(
+                    ObligationStatus.VIOLATED if path in ambiguous_files else ObligationStatus.SATISFIED
+                ),
+                authority=ObligationAuthority.DETERMINISTIC,
+                description="planned file path must be owned by exactly one subtask, or a "
+                            "dependency-ordered sequential chain of subtasks",
+                source="plan_validation.validate_plan", revision=revision,
+                evidence={"path": path, "owners": list(owners)},
+                owner_subtask_id=owners[0] if len(owners) == 1 else None,
+                terminal_required=True,
+            ))
     ambiguous_capabilities = {
         capability: providers
         for capability, providers in capability_providers.items()
@@ -288,24 +326,57 @@ async def validate_plan(
         # files by design, a populated `verification` list) had no legal
         # encoding before execution_role existed - see ExecutionRole's own
         # docstring for the full incident.
-        if (
-            require_model_planned_files
-            and st.execution_method == ExecutionMethod.MODEL
+        model_subtask_unscoped = (
+            st.execution_method == ExecutionMethod.MODEL
             and st.execution_role != ExecutionRole.VERIFICATION
             and not st.planned_files
-        ):
+        )
+        if require_model_planned_files and model_subtask_unscoped:
             errors.append(
                 f"subtask {st.id!r} uses execution_method=model but declares no planned_files; "
                 "authoritative execution requires a non-empty modification scope"
             )
             reason_codes.append("MODEL_SUBTASK_MISSING_PLANNED_FILES")
+        # Only recorded when require_model_planned_files is actually the
+        # active policy - otherwise this constraint isn't being enforced at
+        # all this call, and a SATISFIED record would be a fabricated signal
+        # (regression detection would then fire falsely once a caller DOES
+        # start enforcing it).
+        if obligation_ledger is not None and require_model_planned_files and (
+            st.execution_method == ExecutionMethod.MODEL
+            and st.execution_role != ExecutionRole.VERIFICATION
+        ):
+            obligation_ledger.record(ObligationRecord(
+                id=f"plan.subtask.{st.id}.model_subtask_scope", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+                status=ObligationStatus.VIOLATED if model_subtask_unscoped else ObligationStatus.SATISFIED,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description="a MODEL implementation subtask must declare a non-empty planned_files scope",
+                source="plan_validation.validate_plan", revision=revision,
+                evidence={"subtask_id": st.id, "planned_files": [pf.path for pf in st.planned_files]},
+                owner_subtask_id=st.id,
+                terminal_required=True,
+            ))
         for pf in st.planned_files:
             full_path = os.path.join(workspace_path, pf.path)
-            if not os.path.exists(full_path) and pf.action != FileAction.CREATE:
+            action_mismatch = not os.path.exists(full_path) and pf.action != FileAction.CREATE
+            if action_mismatch:
                 errors.append(
                     f"subtask {st.id!r} planned file {pf.path!r} (action={pf.action.value}) "
                     "does not exist on disk and is not marked action=create"
                 )
+                reason_codes.append("PLANNED_FILE_ACTION_MISMATCH")
+            if obligation_ledger is not None:
+                obligation_ledger.record(ObligationRecord(
+                    id=f"plan.file.{pf.path}.action_consistency", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+                    status=ObligationStatus.VIOLATED if action_mismatch else ObligationStatus.SATISFIED,
+                    authority=ObligationAuthority.DETERMINISTIC,
+                    description="a planned file's action must be create when it does not yet exist "
+                                "on disk, modify/delete when it does",
+                    source="plan_validation.validate_plan", revision=revision,
+                    evidence={"subtask_id": st.id, "path": pf.path, "action": pf.action.value},
+                    owner_subtask_id=st.id,
+                    terminal_required=True,
+                ))
 
     acceptance_ids = {ac.id for ac in plan.acceptance_criteria}
     covered_ids = set()
@@ -343,11 +414,25 @@ async def validate_plan(
         )
         reason_codes.append("EXTENSION_POINT_REQUIRED")
 
-    if plan.kind == ChangeKind.REFACTOR and not (plan.refactor_baseline or "").strip():
-        errors.append(
-            "plan kind=refactor requires a non-blank refactor_baseline to order "
-            "equivalence verification against"
-        )
+    if plan.kind == ChangeKind.REFACTOR:
+        refactor_baseline_missing = not (plan.refactor_baseline or "").strip()
+        if refactor_baseline_missing:
+            errors.append(
+                "plan kind=refactor requires a non-blank refactor_baseline to order "
+                "equivalence verification against"
+            )
+            reason_codes.append("REFACTOR_BASELINE_MISSING")
+        if obligation_ledger is not None:
+            obligation_ledger.record(ObligationRecord(
+                id="plan.refactor_baseline.non_blank", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+                status=ObligationStatus.VIOLATED if refactor_baseline_missing else ObligationStatus.SATISFIED,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description="a refactor-kind plan must set a non-blank refactor_baseline "
+                            "(the subtask id whose output orders equivalence verification)",
+                source="plan_validation.validate_plan", revision=revision,
+                evidence={"refactor_baseline": plan.refactor_baseline},
+                terminal_required=True,
+            ))
 
     if available_tool_names is not None:
         available = set(available_tool_names)

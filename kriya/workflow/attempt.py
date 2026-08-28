@@ -18,7 +18,7 @@ import re
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
@@ -71,7 +71,8 @@ from kriya.workflow.acceptance import (
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.verification_authority import deterministic_sequence_kind
-from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, find_migration_incomplete
+from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
+from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
@@ -465,6 +466,28 @@ class AttemptContext:
     # no caller has resolved anything yet (matches every existing test's/
     # checkpoint's default, same as required_verification's own default).
     migration_resolution: Optional["MigrationResolution"] = None
+    # PRV-05 run 7 (2026-08-28) - the validated EngineeringPlan and the id of
+    # the subtask THIS call is executing, threaded through unchanged from
+    # WorkflowController's bounded-subtask execution (kriya/workflow/
+    # workflow_controller.py's _invoke_bounded_subtask) so migration
+    # validation (find_migration_incomplete's validation_scope=
+    # CURRENT_SUBTASK) and retry attribution can both ask "who owns this
+    # file, and are we there yet" via EngineeringPlan.classify_file_
+    # ownership() - the same helper, one answer. Both None for every
+    # non-MA6-structured caller (a plain Legacy run, or any pre-existing
+    # test) - migration validation then degrades to its original
+    # always-TERMINAL behavior, never silently permissive.
+    structured_plan: Optional["EngineeringPlan"] = None
+    current_subtask_id: Optional[str] = None
+    # MA8 (PRV-05 run #8, 2026-08-28) - kriya/workflow/obligations.py. One
+    # per-run ObligationLedger, threaded through unchanged from workflow.py's
+    # run_generation_workflow() (which always resolves a real instance -
+    # either the caller's shared one, or a fresh one for a plain Legacy
+    # call - see that method's own "resolved_obligation_ledger" comment).
+    # Optional/None here only so ad hoc AttemptContext construction in
+    # existing tests (predating MA8) keeps working unchanged - every real
+    # call site always supplies one.
+    obligation_ledger: Optional["ObligationLedger"] = None
 
 
 def _extract_grounded_contract_verdict(
@@ -962,6 +985,88 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
         "CANDIDATE GATES", "PASSED", state.attempt_number,
         scope=ctx.execution_scope,
     )
+
+
+def _spec_compliance_authoritative_context(ledger: Optional[ObligationLedger]) -> Optional[str]:
+    """MA8 (spec §31) - a short "AUTHORITATIVELY ESTABLISHED" prose block
+    naming which MIGRATION_COMPLETION requirements are already
+    DETERMINISTIC-authority SATISFIED, injected into SpecComplianceAgent's
+    own prompt BEFORE the call - see SpecComplianceAgent.check()'s own
+    docstring for why this is advisory only. The mandatory backstop
+    remains _spec_requirements_contradicting_authority below, applied
+    AFTER the model responds regardless of whether this context was
+    honored.
+
+    Same precondition as that function (only when EVERY current migration
+    obligation is SATISFIED - a still-VIOLATED requirement is exactly what
+    SpecCompliance should remain free to also flag), so the two never
+    disagree about when authoritative context applies."""
+    if not ledger:
+        return None
+    migration_records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+    if not migration_records or any(
+        rec.status != ObligationStatus.SATISFIED for rec in migration_records
+    ):
+        return None
+    lines = "\n".join(f"- {rec.description}" for rec in migration_records)
+    return (
+        "AUTHORITATIVELY ESTABLISHED (deterministic evidence - do not report these as "
+        f"missing/incomplete):\n{lines}\n\n"
+        "Evaluate only requirements not already covered by the above."
+    )
+
+
+def _spec_requirements_contradicting_authority(
+    missing_requirements: List[str], ledger: Optional[ObligationLedger],
+) -> Tuple[List[str], List[str]]:
+    """MA8 (PRV-05 run #8, 2026-08-28) - splits SpecComplianceAgent's own
+    free-text missing_requirements into (kept, contradicted).
+
+    An entry is "contradicted" when it mentions the migration's own
+    source/target identity terms (e.g. "gson", "jackson-databind") AND the
+    ledger's current MIGRATION_COMPLETION obligations are ALL SATISFIED -
+    i.e. the DETERMINISTIC migration gate already confirmed this exact
+    fact, so a JUDGMENT-authority claim to the contrary is a contradiction,
+    not a second, independent finding. Deliberately does NOT try to give
+    each free-text requirement its own stable ObligationRecord id (missing_
+    requirements are reworded attempt to attempt by construction - exactly
+    the "never derive an id from an LLM's own error string" case this
+    module's own docstring warns about) - arbitration here is a one-shot
+    text correlation against the migration ledger's OWN stable ids, not a
+    new obligation-tracked kind.
+
+    Never touches a requirement while ANY current migration obligation is
+    still VIOLATED - that is judgment and determinism agreeing, not a
+    contradiction to arbitrate away."""
+    if not ledger:
+        return list(missing_requirements), []
+    migration_records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+    if not migration_records or any(rec.status == ObligationStatus.VIOLATED for rec in migration_records):
+        return list(missing_requirements), []
+    # Tokenized (split on "-"/"_"), not the raw identity string as a single
+    # substring: an artifactId like "jackson-databind" must still correlate
+    # with prose that names the human-friendly library "Jackson" - found
+    # live while verifying this fix, not assumed: a full-string match missed
+    # the exact hallucinated text ("the code still uses Jackson library
+    # components") this arbitration exists to catch. Short tokens (<3 chars)
+    # are dropped to avoid trivial false positives.
+    identity_terms = {
+        token
+        for rec in migration_records
+        for value in (rec.evidence.get("source_identity"), rec.evidence.get("target_identity"))
+        if value
+        for token in re.split(r"[-_]", str(value).lower())
+        if len(token) >= 3
+    }
+    if not identity_terms:
+        return list(missing_requirements), []
+    kept: List[str] = []
+    contradicted: List[str] = []
+    for requirement in missing_requirements:
+        lowered = requirement.lower()
+        matched = any(re.search(rf"\b{re.escape(term)}\b", lowered) for term in identity_terms)
+        (contradicted if matched else kept).append(requirement)
+    return kept, contradicted
 
 
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
@@ -1806,18 +1911,33 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # extract_self_diagnosed_files() and retry_strategy.py's signature-gated
     # consumption of this field.
     # Only overwritten when THIS attempt actually produced a fresh self-
-    # diagnosis - left untouched otherwise, not reset to None. A stale value
-    # here is safe by construction: retry_strategy.py's consumption below
-    # only ever reuses it when its stored signature exactly matches the
-    # CURRENT failure's signature, so an unrelated earlier diagnosis can
-    # never wrongly redirect a different failure. Resetting to None on every
-    # attempt with no fresh diagnosis would instead lose a still-valid
-    # diagnosis the moment one intervening attempt didn't happen to repeat
-    # its own FIX ANALYSIS - e.g. attempt N correctly redirects to a
-    # different file via self-diagnosis, attempt N+1 (now targeting that
-    # file) returns no analysis, and the SAME original failure signature
-    # recurs at attempt N+2: the diagnosis must still be there to redirect
-    # correctly again.
+    # diagnosis - left untouched otherwise, not reset to None.
+    #
+    # PRV-05 run 7 (2026-08-28): the THIRD tuple element (state.attempt_number,
+    # i.e. THIS attempt) narrows this memory's original design, which relied
+    # on signature equality ALONE to survive intervening attempts
+    # indefinitely ("attempt N redirects, attempt N+1 returns no analysis,
+    # the same signature recurs at attempt N+2 - the diagnosis must still be
+    # there"). Live evidence proved that design unsafe: retry_strategy.py
+    # deliberately COLLAPSES an edit-protocol failure's signature onto
+    # whatever authoritative failure it's repairing (anchored_edit/
+    # structural_corruption/etc - see _REPAIR_FEEDBACK_FAILURE_TYPES), so a
+    # diagnosis captured mid-repair inherits that same collapsed signature -
+    # and a GENUINELY NEW, later occurrence of the ORIGINAL authoritative
+    # failure (not a continuation of the repair the diagnosis was about) can
+    # recompute to the identical signature purely because the message text
+    # matches. PRV-05 s1: a diagnosis captured responding to attempt 4's
+    # structural_corruption ("the fix is really in JsonService.java, not
+    # pom.xml") kept winning attribution for attempts 5, 6, 7, AND 8's
+    # entirely fresh migration_incomplete failures, none of which could ever
+    # be satisfied by re-editing JsonService.java again. Requiring the
+    # diagnosis's own attempt number to equal the CURRENTLY-processed
+    # failure's attempt number restricts reuse to "this attempt's own
+    # outcome" - i.e. the diagnosis explains THIS failure, not some later,
+    # merely-same-signature one. Signatures remain the right tool for BUDGET
+    # grouping (retry_strategy.py's failure_family_changed); they are not,
+    # by themselves, sufficient for diagnosis freshness.
+    #
     # Unioned with ctx.established_files (see that field's own docstring) so a
     # correct diagnosis naming an EARLIER milestone's file - one THIS attempt
     # never wrote itself - is still a valid redirect candidate, not silently
@@ -1826,7 +1946,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files, sorted(set(state.all_files_written) | set(ctx.established_files)),
     )
     if self_diagnosed:
-        state.last_self_diagnosis = (state.budgets.last_failure_signature, self_diagnosed)
+        state.last_self_diagnosis = (
+            state.budgets.last_failure_signature, self_diagnosed, state.attempt_number,
+        )
 
     # "NO CHANGE NEEDED" is useful negative attribution evidence, not a
     # successful repair. In a targeted attempt, rerunning compile/tests/runtime
@@ -3823,7 +3945,24 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         set(ctx.architect_files) & (set(migration_obligation.grounded_consumers) | {"pom.xml"})
     )
     if subtask_owns_migration_scope:
-        migration_gap = find_migration_incomplete(migration_obligation, ctx.worktree_path)
+        # validation_scope=CURRENT_SUBTASK (PRV-05 run 7, 2026-08-28): only
+        # requirements DUE at this subtask's position in the plan can fail
+        # this gate - a requirement whose only implicated file(s) belong to
+        # a not-yet-reached, dependency-ordered subtask (e.g. this exact
+        # PRV-05 plan's s4, which owns removing the old dependency from
+        # pom.xml) is PENDING here, not FAILED, even though s1 legitimately
+        # touches the grounded consumer. Degrades to the original always-
+        # TERMINAL behavior when ctx.structured_plan/current_subtask_id are
+        # None (a non-MA6-structured caller) - see MigrationValidationScope's
+        # own docstring.
+        migration_gap = find_migration_incomplete(
+            migration_obligation, ctx.worktree_path,
+            current_subtask_id=ctx.current_subtask_id,
+            engineering_plan=ctx.structured_plan,
+            validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+            obligation_ledger=ctx.obligation_ledger,
+            revision=state.attempt_number, source="migration.attempt_gate",
+        )
         if migration_gap:
             message = (
                 "MIGRATION INCOMPLETE: the goal explicitly requires replacing "
@@ -3831,28 +3970,40 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 f"{', '.join(migration_gap['reason_codes'])}. Grounded consumer(s) that must use "
                 f"{migration_gap['target_identity']}: {', '.join(migration_gap['grounded_consumers']) or 'none'}."
             )
+            # Union, not "first non-empty wins": found live, PRV-05
+            # (2026-08-28 rerun) - a fully-migrated consumer with the
+            # dependency still declared leaves BOTH unmigrated_consumers
+            # and source_usage_files empty, so the failure had no
+            # likely_files at all and couldn't point the retry/
+            # attribution pipeline at the one file that actually needs
+            # fixing (typically pom.xml, owned by a different, already-
+            # completed subtask - see migration.py's own manifest_files
+            # docstring). Already DUE-filtered by find_migration_incomplete
+            # above, so this union never includes a future-owned file.
+            evidence_files = list(dict.fromkeys(
+                migration_gap["unmigrated_consumers"]
+                + migration_gap["source_usage_files"]
+                + migration_gap["manifest_files"]
+            ))
             failure = _build_quality_gate_failure(
                 "migration_incomplete", message, message,
                 ctx.worktree_path, state.all_files_written, state.attempt_number,
-                # Union, not "first non-empty wins": found live, PRV-05
-                # (2026-08-28 rerun) - a fully-migrated consumer with the
-                # dependency still declared leaves BOTH unmigrated_consumers
-                # and source_usage_files empty, so the failure had no
-                # likely_files at all and couldn't point the retry/
-                # attribution pipeline at the one file that actually needs
-                # fixing (typically pom.xml, owned by a different, already-
-                # completed subtask - see migration.py's own manifest_files
-                # docstring).
-                extra_likely_files=list(dict.fromkeys(
-                    migration_gap["unmigrated_consumers"]
-                    + migration_gap["source_usage_files"]
-                    + migration_gap["manifest_files"]
-                )),
+                extra_likely_files=evidence_files,
             )
+            # PRV-05 run 7: this evidence is deterministic (parsed from
+            # pom.xml/scanned imports), not a text-scan guess - it must
+            # outrank the model's own self-diagnosis in attribute_failure()
+            # (kriya/workflow/attribution.py), and its "high" confidence
+            # lets the existing plan-scope-conflict check (retry_strategy.py)
+            # correctly hard-stop rather than call the Developer at all if
+            # ever an authoritative target genuinely falls outside this
+            # subtask's authorized write scope.
+            failure.authoritative_files = evidence_files
             failure.diagnostics = {
                 **(failure.diagnostics or {}),
                 "reason_code": "MIGRATION_INCOMPLETE",
                 "reason_codes": migration_gap["reason_codes"],
+                "pending_reason_codes": migration_gap.get("pending_reason_codes", []),
             }
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
@@ -3886,8 +4037,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     spec_file_contents[spec_path] = fh.read()
             except Exception as e:
                 logger.debug(f"Spec compliance check: couldn't read {spec_path}, skipping it: {e}")
+        authoritative_context = _spec_compliance_authoritative_context(ctx.obligation_ledger)
         spec_result = await ctx.spec_compliance.check(
             goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
+            authoritative_context=authoritative_context,
         )
         if spec_result.get("status") == "indeterminate":
             # SpecComplianceAgent.check() returns this when the model's own
@@ -3903,6 +4056,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # authority) in the opposite direction.
             spec_result = await ctx.spec_compliance.check(
                 goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
+                authoritative_context=authoritative_context,
             )
         if spec_result.get("status") == "indeterminate":
             message = (
@@ -3927,8 +4081,35 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
+        arbitrated_contradictions: List[str] = []
         if not spec_result["compliant"]:
-            missing_desc = "; ".join(spec_result["missing_requirements"]) or spec_result["reasoning"]
+            # MA8 (PRV-05 run #8, 2026-08-28) - kriya/workflow/obligations.py.
+            # SpecComplianceAgent is pure LLM judgment (authority=JUDGMENT) -
+            # a missing_requirement whose text correlates to a migration
+            # identity the DETERMINISTIC migration gate already reports fully
+            # SATISFIED must never drive a retry; DETERMINISTIC always
+            # outranks JUDGMENT for the same real-world fact. Found live: "the
+            # code still uses Jackson... does not show evidence of replacing
+            # the old dependency" fired AFTER the migration was actually
+            # complete, and drove 3 further wasted, destabilizing attempts.
+            # Only ever suppresses requirements when EVERY current migration
+            # obligation is SATISFIED (never touches one while the
+            # deterministic check itself still reports a violation - that's
+            # not a contradiction, judgment and determinism simply agree).
+            kept_requirements, arbitrated_contradictions = _spec_requirements_contradicting_authority(
+                spec_result["missing_requirements"], ctx.obligation_ledger,
+            )
+            if arbitrated_contradictions:
+                logger.warning(
+                    "Quality Gates: Goal spec compliance reported requirement(s) that contradict "
+                    "an authoritative deterministic SATISFIED obligation - SPEC_COMPLIANCE_"
+                    "CONTRADICTS_AUTHORITY, suppressed (not used to trigger retry): %s",
+                    arbitrated_contradictions,
+                )
+        else:
+            kept_requirements = []
+        if not spec_result["compliant"] and kept_requirements:
+            missing_desc = "; ".join(kept_requirements)
             message = (
                 "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the "
                 f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
@@ -3948,11 +4129,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     + grounded_architectural_owners
                 )),
             )
-            if grounded_architectural_owners:
-                failure.diagnostics = {
-                    **(failure.diagnostics or {}),
-                    "grounded_architectural_owners": grounded_architectural_owners,
-                }
+            failure.diagnostics = {
+                **(failure.diagnostics or {}),
+                **({"grounded_architectural_owners": grounded_architectural_owners}
+                   if grounded_architectural_owners else {}),
+                **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                    "arbitrated_contradictions": arbitrated_contradictions}
+                   if arbitrated_contradictions else {}),
+            }
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         state.gate_outcomes.append({
@@ -3960,6 +4144,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             "type": "goal_spec_compliance",
             "success": True,
             "output": spec_result["reasoning"],
+            **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                "arbitrated_contradictions": arbitrated_contradictions}
+               if arbitrated_contradictions else {}),
         })
         logger.info(f"Quality Gates: Goal spec compliance PASSED: {spec_result['reasoning']}")
 

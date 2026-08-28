@@ -17,6 +17,7 @@ from kriya.workflow.plan_schema import (
     VerificationMethodType,
     VerifierKind,
 )
+from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
 from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.triage import ChangeKind
 
@@ -507,3 +508,169 @@ async def test_risk_recomputation_calls_triage_service_with_real_touched_files(t
         route=route, workspace_path=str(tmp_path), planned_files=["a.py"],
     )
     assert result.escalated_route is escalated
+
+
+# --- MA8 (PRV-05 run #8, 2026-08-28): obligation_ledger wiring, reproducing
+# the exact hardened-planning-phase incident - a refactor plan whose repair
+# loop fixed one constraint per attempt but regressed the other. ---
+
+def _run8_plan(refactor_baseline, s4_action):
+    s1 = _model_subtask(
+        id="s1", depends_on=[],
+        planned_files=[PlannedFile(path="src/main/java/com/example/JsonService.java", action=FileAction.MODIFY)],
+    )
+    s4 = _model_subtask(
+        id="s4", depends_on=["s1"],
+        planned_files=[PlannedFile(path="src/test/java/com/example/JsonServiceTest.java", action=s4_action)],
+    )
+    return _plan([s1, s4], kind=ChangeKind.REFACTOR, refactor_baseline=refactor_baseline)
+
+
+def _run8_workspace(tmp_path):
+    service = tmp_path / "src/main/java/com/example/JsonService.java"
+    service.parent.mkdir(parents=True)
+    service.write_text("class JsonService {}\n")
+    # JsonServiceTest.java deliberately does NOT exist on disk.
+
+
+@pytest.mark.asyncio
+async def test_run8_both_constraints_initially_violated(tmp_path):
+    _run8_workspace(tmp_path)
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _run8_plan(None, FileAction.MODIFY), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert not result.valid
+    assert "REFACTOR_BASELINE_MISSING" in result.reason_codes
+    assert "PLANNED_FILE_ACTION_MISMATCH" in result.reason_codes
+    assert ledger.current("plan.refactor_baseline.non_blank").status == ObligationStatus.VIOLATED
+    assert ledger.current(
+        "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency"
+    ).status == ObligationStatus.VIOLATED
+
+
+@pytest.mark.asyncio
+async def test_run8_repair_fixes_one_constraint_and_records_it_satisfied(tmp_path):
+    _run8_workspace(tmp_path)
+    ledger = ObligationLedger()
+    await validate_plan(
+        _run8_plan(None, FileAction.MODIFY), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    result = await validate_plan(
+        _run8_plan("", FileAction.CREATE), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+    assert not result.valid
+    assert "REFACTOR_BASELINE_MISSING" in result.reason_codes
+    assert "PLANNED_FILE_ACTION_MISMATCH" not in result.reason_codes
+    assert ledger.current(
+        "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency"
+    ).status == ObligationStatus.SATISFIED
+
+
+@pytest.mark.asyncio
+async def test_run8_regression_detected_and_next_repair_receives_both_conditions(tmp_path):
+    """The exact run #8 failure: repair 2 fixes refactor_baseline but
+    regresses the already-fixed planned-file action. The ledger must
+    detect the regression, and the caller-visible signal (MUST_PRESERVE
+    computed from the ledger, oscillation detection) must be available for
+    the next repair to receive both conditions."""
+    _run8_workspace(tmp_path)
+    ledger = ObligationLedger()
+    await validate_plan(
+        _run8_plan(None, FileAction.MODIFY), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    await validate_plan(
+        _run8_plan("", FileAction.CREATE), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+    result = await validate_plan(
+        _run8_plan("s4", FileAction.MODIFY), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=2,
+    )
+    assert not result.valid
+    assert "PLANNED_FILE_ACTION_MISMATCH" in result.reason_codes
+    assert "REFACTOR_BASELINE_MISSING" not in result.reason_codes
+
+    regressed_ids = [r.obligation_id for r in ledger.regressions]
+    assert "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency" in regressed_ids
+
+    oscillating = ledger.oscillating_ids(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
+    assert "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency" in oscillating
+
+    # A next repair honoring BOTH conditions simultaneously must fully pass.
+    final = await validate_plan(
+        _run8_plan("s4", FileAction.CREATE), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=3,
+    )
+    assert final.valid, final.errors
+
+
+# --- Batch 1 (spec §12/§20): owner_subtask_id/terminal_required on the
+# recorded obligations, and MUST_PRESERVE relevance filtering fed by the
+# real validate_plan() pipeline (not a hand-built ledger). ---
+
+@pytest.mark.asyncio
+async def test_plan_structural_obligations_carry_owner_and_terminal_required(tmp_path):
+    _run8_workspace(tmp_path)
+    ledger = ObligationLedger()
+    await validate_plan(
+        _run8_plan(None, FileAction.MODIFY), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    action_rec = ledger.current(
+        "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency"
+    )
+    assert action_rec.owner_subtask_id == "s4"
+    assert action_rec.terminal_required is True
+
+    baseline_rec = ledger.current("plan.refactor_baseline.non_blank")
+    assert baseline_rec.owner_subtask_id is None  # plan-level, not owned by a single subtask
+    assert baseline_rec.terminal_required is True
+
+    ownership_rec = ledger.current("plan.file.src/main/java/com/example/JsonService.java.ownership")
+    assert ownership_rec.owner_subtask_id == "s1"
+    assert ownership_rec.terminal_required is True
+
+
+@pytest.mark.asyncio
+async def test_must_preserve_includes_just_fixed_obligation_ahead_of_next_repair(tmp_path):
+    """The run-8-shaped scenario, but checking the ACTUAL MUST_PRESERVE
+    input WorkflowController would compute (relevant_for_preservation),
+    not just the raw ledger state - confirms the just-fixed action-
+    consistency obligation would be told to a repair-2 prompt even though
+    only refactor_baseline is currently violated."""
+    _run8_workspace(tmp_path)
+    ledger = ObligationLedger()
+    await validate_plan(
+        _run8_plan(None, FileAction.MODIFY), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    await validate_plan(
+        _run8_plan("", FileAction.CREATE), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+    violated_ids = [
+        r.id for r in ledger.current_by_kind(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
+        if r.status == ObligationStatus.VIOLATED
+    ]
+    assert violated_ids == ["plan.refactor_baseline.non_blank"]
+    preserve_ids = [
+        r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY, violated_ids)
+    ]
+    assert "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency" in preserve_ids
+
+
+@pytest.mark.asyncio
+async def test_unresolved_terminal_obligations_empty_once_plan_fully_valid(tmp_path):
+    _run8_workspace(tmp_path)
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _run8_plan("s4", FileAction.CREATE), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert result.valid, result.errors
+    assert ledger.unresolved_terminal_obligations() == []

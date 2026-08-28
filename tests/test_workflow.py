@@ -25,7 +25,15 @@ from kriya.workflow.attempt import (
     _operation_map,
     _record_self_correction_scope_conflict,
     _run_verification_basis_hash,
+    _spec_requirements_contradicting_authority,
     run_attempt,
+)
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
 )
 from kriya.workflow.operations import CodeOperation
 from kriya.workflow.attribution import AttributionResult
@@ -5180,6 +5188,7 @@ async def test_full_regression_locator_regrounds_stale_target_to_unique_reposito
     state.last_self_diagnosis = (
         build_failure_signature("regression_test", failure_text),
         [stale_target],
+        state.attempt_number,
     )
     ctx = _minimal_attempt_ctx(
         tmp_path,
@@ -5465,6 +5474,48 @@ async def test_bounded_spec_compliance_includes_verified_upstream_files(tmp_path
     call = spec_compliance.check.await_args.kwargs
     assert call["files_written"] == ["Customer.java", "CustomerService.java"]
     assert "displayName" in call["file_contents"]["Customer.java"]
+
+
+@pytest.mark.asyncio
+async def test_spec_compliance_receives_authoritative_context_when_migration_already_satisfied(tmp_path):
+    """MA8 (spec §31, Batch 1 follow-up): when the ledger already reports
+    every current MIGRATION_COMPLETION obligation SATISFIED, SpecCompliance
+    must be called with an authoritative_context naming them up front, not
+    just arbitrated after the fact."""
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py", "content": "print('ok')\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": True, "reasoning": "ok", "missing_requirements": [], "likely_files": [],
+    })
+    ledger = ObligationLedger()
+    ledger.record(ObligationRecord(
+        id="migration.source_dependency_absent", kind=ObligationKind.MIGRATION_COMPLETION,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        description="SOURCE_DEPENDENCY_REMAINS", source="test", revision=1,
+    ))
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg), obligation_ledger=ledger,
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    call = spec_compliance.check.await_args.kwargs
+    assert call["authoritative_context"] is not None
+    assert "SOURCE_DEPENDENCY_REMAINS" in call["authoritative_context"]
+    assert "AUTHORITATIVELY ESTABLISHED" in call["authoritative_context"]
 
 
 @pytest.mark.asyncio
@@ -7049,7 +7100,7 @@ async def test_no_op_edit_redirects_to_different_file_named_by_own_analysis(tmp_
     assert exc_info.value.failure.type == "no_op_edit"
     assert exc_info.value.failure.likely_files == ["Application.java"]
     assert state.last_self_diagnosis == (
-        ("run_verification_hung", ("timeout",)), ["Application.java"]
+        ("run_verification_hung", ("timeout",)), ["Application.java"], 1,
     )
 
 
@@ -7657,6 +7708,165 @@ async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_auth
     assert state.plan_scope_conflict["attribution_tier"] == "judge"
     assert state.plan_scope_conflict["grounded_owner_files"] == []
     assert state.plan_scope_conflict["reason"]
+
+
+@pytest.mark.asyncio
+async def test_authoritative_migration_evidence_outside_scope_stops_without_developer_call(tmp_path):
+    """PRV-05 run 7 (2026-08-28): deterministic migration evidence
+    (Failure.authoritative_files) must be treated as HIGH-confidence,
+    grounded evidence - same class of "stop, don't call the Developer on an
+    unauthorized file" outcome as misdirected_edit above - once it's clear
+    the target genuinely falls outside this subtask's authorized write
+    scope (not merely future-owned, which stage-aware migration validation
+    now defers before a Failure is even raised - see test_migration.py)."""
+    state = GenerationState()
+    state.attempt_number = 2
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"src/main/java/com/example/JsonService.java"}
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    ctx.allowed_write_relpaths = ["src/main/java/com/example/JsonService.java"]
+    exc = QualityGateFailure(Failure(
+        type="migration_incomplete",
+        message="MIGRATION INCOMPLETE: ... SOURCE_DEPENDENCY_REMAINS ...",
+        raw_output="MIGRATION INCOMPLETE: ... SOURCE_DEPENDENCY_REMAINS ...",
+        likely_files=["pom.xml"],
+        authoritative_files=["pom.xml"],
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_DEFECT"
+    assert state.plan_scope_conflict["required_files"] == ["pom.xml"]
+    assert state.plan_scope_conflict["allowed_files"] == ["src/main/java/com/example/JsonService.java"]
+    assert state.plan_scope_conflict["attribution_tier"] == "authoritative_deterministic"
+
+
+@pytest.mark.asyncio
+async def test_stale_self_diagnosis_not_replayed_across_later_attempts(tmp_path):
+    """PRV-05 run 7 (2026-08-28): a self-diagnosis captured responding to
+    an EARLIER attempt's own outcome must not be replayed against a LATER,
+    unrelated attempt's fresh failure just because the two happen to share
+    a failure signature - the real incident this reproduces: repair-
+    protocol failures (anchored_edit/structural_corruption) collapse their
+    signature onto whatever authoritative failure they're repairing, so a
+    diagnosis captured mid-repair can share its stored signature with a
+    genuinely later, fresh occurrence of that same authoritative failure -
+    one the diagnosis was never actually about."""
+    from kriya.workflow.failure_grounding import build_failure_signature
+
+    raw_output = "COMPILATION FAILURE: cannot find symbol: class Gson"
+    signature = build_failure_signature("compile", raw_output)
+    state = GenerationState()
+    state.attempt_number = 5
+    state.last_attempt_mode = "fallback_targeted"
+    state.all_files_written = {"pom.xml", "src/main/java/com/example/JsonService.java"}
+    # Captured responding to attempt 4's own outcome - stale by attempt 5.
+    state.last_self_diagnosis = (
+        signature, ["src/main/java/com/example/JsonService.java"], 4,
+    )
+    ctx = _minimal_attempt_ctx(tmp_path)
+    exc = QualityGateFailure(Failure(
+        type="compile", message=raw_output, raw_output=raw_output,
+        likely_files=["pom.xml"],
+    ))
+
+    await handle_attempt_failure(state, ctx, exc)
+
+    assert state.last_implicated_files == ["pom.xml"]
+
+
+@pytest.mark.asyncio
+async def test_self_diagnosis_still_wins_for_the_attempt_that_produced_it(tmp_path):
+    """The narrower, evidence-driven counterpart to the test above: a self-
+    diagnosis IS still trusted when it explains THIS SAME attempt's own
+    outcome (both signature and attempt number match) - the freshness gate
+    narrows replay across LATER attempts, it does not disable the
+    mechanism entirely."""
+    from kriya.workflow.failure_grounding import build_failure_signature
+
+    raw_output = "COMPILATION FAILURE: cannot find symbol: class Gson"
+    signature = build_failure_signature("compile", raw_output)
+    state = GenerationState()
+    state.attempt_number = 4
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"pom.xml", "src/main/java/com/example/JsonService.java"}
+    state.last_self_diagnosis = (
+        signature, ["src/main/java/com/example/JsonService.java"], 4,
+    )
+    ctx = _minimal_attempt_ctx(tmp_path)
+    exc = QualityGateFailure(Failure(
+        type="compile", message=raw_output, raw_output=raw_output,
+        likely_files=["pom.xml"],
+    ))
+
+    await handle_attempt_failure(state, ctx, exc)
+
+    assert state.last_implicated_files == ["src/main/java/com/example/JsonService.java"]
+
+
+# --- MA8 (PRV-05 run #8, 2026-08-28): SpecCompliance requirement-level
+# arbitration against authoritative deterministic obligations
+# (_spec_requirements_contradicting_authority, kriya/workflow/attempt.py) ---
+
+def _migration_obligation_record(status, obligation_id="migration.source_dependency_absent"):
+    return ObligationRecord(
+        id=obligation_id, kind=ObligationKind.MIGRATION_COMPLETION,
+        status=status, authority=ObligationAuthority.DETERMINISTIC,
+        description="d", source="test",
+        evidence={"source_identity": "gson", "target_identity": "jackson-databind"},
+    )
+
+
+def test_spec_compliance_contradicting_authoritative_satisfied_migration_is_suppressed():
+    """Required test: deterministic migration SATISFIED + SpecCompliance
+    contradictory FAIL - the workflow must not fail for that criterion.
+    Reproduces the real run #8 hallucinated text verbatim."""
+    ledger = ObligationLedger()
+    ledger.record(_migration_obligation_record(ObligationStatus.SATISFIED))
+    kept, contradicted = _spec_requirements_contradicting_authority(
+        ["the code still uses Jackson library components and does not show "
+         "evidence of replacing the old dependency"],
+        ledger,
+    )
+    assert kept == []
+    assert len(contradicted) == 1
+
+
+def test_spec_compliance_partial_overlap_suppresses_only_contradicted_criterion():
+    """Required test: partial overlap - suppress only the contradicted
+    deterministic criterion, keep an unrelated semantic failure
+    actionable."""
+    ledger = ObligationLedger()
+    ledger.record(_migration_obligation_record(ObligationStatus.SATISFIED))
+    kept, contradicted = _spec_requirements_contradicting_authority(
+        [
+            "the code still uses Jackson library components",
+            "the response must include a version field not currently present",
+        ],
+        ledger,
+    )
+    assert kept == ["the response must include a version field not currently present"]
+    assert contradicted == ["the code still uses Jackson library components"]
+
+
+def test_spec_compliance_not_suppressed_when_deterministic_check_agrees_it_failed():
+    """No contradiction to arbitrate when the deterministic migration
+    check itself still reports the requirement VIOLATED - judgment and
+    determinism simply agree something is wrong."""
+    ledger = ObligationLedger()
+    ledger.record(_migration_obligation_record(ObligationStatus.VIOLATED))
+    kept, contradicted = _spec_requirements_contradicting_authority(
+        ["the code still uses Jackson library components"], ledger,
+    )
+    assert contradicted == []
+    assert kept == ["the code still uses Jackson library components"]
+
+
+def test_spec_compliance_arbitration_is_a_no_op_without_a_ledger():
+    kept, contradicted = _spec_requirements_contradicting_authority(["anything"], None)
+    assert kept == ["anything"]
+    assert contradicted == []
 
 
 @pytest.mark.asyncio

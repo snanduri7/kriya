@@ -10,9 +10,13 @@ import os
 from kriya.workflow.migration import (
     MigrationObligation,
     MigrationResolutionStatus,
+    MigrationValidationScope,
     find_migration_incomplete,
     resolve_migration_resolution,
 )
+from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
+from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
+from kriya.workflow.triage import ChangeKind
 
 _POM_BOTH = (
     "<project><dependencies>\n"
@@ -259,3 +263,280 @@ def test_find_migration_incomplete_names_the_manifest_when_consumer_is_fully_mig
     assert gap["unmigrated_consumers"] == []
     assert gap["source_usage_files"] == []
     assert gap["manifest_files"] == ["pom.xml"]
+
+
+# --- validation_scope=CURRENT_SUBTASK (PRV-05 run 7, 2026-08-28) ---
+# Reproduces the exact validated PRV-05 hardened run-7 plan: s1 owns
+# JsonService.java only, s4 (a later, dependency-ordered subtask) owns
+# removing the old dependency from pom.xml.
+
+def _prv05_plan():
+    s1 = Subtask(
+        id="s1", description="identify usages, update imports", execution_method=ExecutionMethod.MODEL,
+        depends_on=[],
+        planned_files=[PlannedFile(path=_TARGET_FILES[0], action=FileAction.MODIFY)],
+    )
+    s2 = Subtask(
+        id="s2", description="update production code", execution_method=ExecutionMethod.MODEL,
+        depends_on=["s1"],
+        planned_files=[PlannedFile(path=_TARGET_FILES[0], action=FileAction.MODIFY)],
+    )
+    s3 = Subtask(
+        id="s3", description="update test code", execution_method=ExecutionMethod.MODEL,
+        depends_on=["s1"],
+        planned_files=[PlannedFile(
+            path="src/test/java/com/example/JsonServiceTest.java", action=FileAction.CREATE,
+        )],
+    )
+    s4 = Subtask(
+        id="s4", description="remove old dependency", execution_method=ExecutionMethod.MODEL,
+        depends_on=["s2", "s3"],
+        planned_files=[PlannedFile(path="pom.xml", action=FileAction.MODIFY)],
+    )
+    return EngineeringPlan(plan_id="prv05", kind=ChangeKind.REFACTOR, subtasks=[s1, s2, s3, s4])
+
+
+def test_find_migration_incomplete_current_subtask_scope_pending_when_manifest_owned_by_future_subtask(tmp_path):
+    """Required test 1: s1 owns JsonService.java only; s4 (later,
+    dependency-ordered) owns pom.xml. JsonService.java is already fully
+    migrated - the ONLY remaining violation is SOURCE_DEPENDENCY_REMAINS,
+    whose evidence (pom.xml) is owned by a not-yet-reached subtask - s1 must
+    PASS (gap is None), not fail for an obligation it was never responsible
+    for. This is the exact PRV-05 run 7 incident."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    plan = _prv05_plan()
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        current_subtask_id="s1", engineering_plan=plan,
+        validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+    )
+    assert gap is None
+
+
+def test_find_migration_incomplete_current_subtask_scope_pending_at_s2_and_s3_too(tmp_path):
+    """Required tests 1 (continued): s2 and s3 are also upstream of s4 in
+    the dependency order - same PENDING treatment."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    plan = _prv05_plan()
+    for subtask_id in ("s2", "s3"):
+        gap = find_migration_incomplete(
+            _obligation(), str(tmp_path),
+            current_subtask_id=subtask_id, engineering_plan=plan,
+            validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+        )
+        assert gap is None, f"expected {subtask_id} to PASS (pending, not failed)"
+
+
+def test_find_migration_incomplete_current_subtask_scope_fails_when_owning_stage_is_reached(tmp_path):
+    """Required test 2: s4 IS the dependency-removal stage - the same
+    still-declared-Gson condition must FAIL here, with pom.xml as the
+    authoritative target (manifest_files), not silently pass through to
+    terminal."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    plan = _prv05_plan()
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        current_subtask_id="s4", engineering_plan=plan,
+        validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+    )
+    assert gap is not None
+    assert gap["reason_codes"] == ["SOURCE_DEPENDENCY_REMAINS"]
+    assert gap["manifest_files"] == ["pom.xml"]
+    assert gap["pending_reason_codes"] == []
+
+
+def test_find_migration_incomplete_terminal_scope_always_fails_regardless_of_ownership(tmp_path):
+    """Required test 3: TERMINAL scope (the global final-state gate) must
+    still fail on the exact same tree even when asked "as if" it were s1 -
+    validation_scope, not current_subtask_id, is what selects TERMINAL
+    behavior; every requirement is due unconditionally."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    plan = _prv05_plan()
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        current_subtask_id="s1", engineering_plan=plan,
+        validation_scope=MigrationValidationScope.TERMINAL,
+    )
+    assert gap is not None
+    assert gap["reason_codes"] == ["SOURCE_DEPENDENCY_REMAINS"]
+
+
+def test_find_migration_incomplete_current_subtask_scope_without_plan_defaults_to_due(tmp_path):
+    """Backward compatibility: a caller with no engineering_plan/
+    current_subtask_id (a non-MA6-structured caller) must see the exact
+    original always-due behavior, never silently permissive, even when it
+    explicitly asks for CURRENT_SUBTASK scope."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+    )
+    assert gap is not None
+    assert gap["reason_codes"] == ["SOURCE_DEPENDENCY_REMAINS"]
+
+
+def test_find_migration_incomplete_current_subtask_still_enforces_its_own_due_obligation(tmp_path):
+    """The explicit non-goal from the PRV-05 run 7 fix design: stage-
+    awareness must NOT become "skip SOURCE_DEPENDENCY_REMAINS until final
+    gate" - s1's OWN obligation (has JsonService.java actually stopped
+    using Gson?) must still FAIL at s1 even while the unrelated, future-
+    owned SOURCE_DEPENDENCY_REMAINS is correctly PENDING."""
+    _write(tmp_path, _POM_BOTH, _GSON_SERVICE)  # JsonService.java NOT migrated yet
+    plan = _prv05_plan()
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        current_subtask_id="s1", engineering_plan=plan,
+        validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+    )
+    assert gap is not None
+    assert "SOURCE_USAGE_REMAINS" in gap["reason_codes"]
+    assert "TARGET_NOT_USED_BY_GROUNDED_OWNER" in gap["reason_codes"]
+    assert "SOURCE_DEPENDENCY_REMAINS" not in gap["reason_codes"]
+    assert "SOURCE_DEPENDENCY_REMAINS" in gap["pending_reason_codes"]
+
+
+# --- MA8 (PRV-05 run #8, 2026-08-28): obligation_ledger wiring -
+# find_migration_incomplete() reports all FOUR individual migration
+# obligations, not just an aggregate PASS/FAIL. ---
+
+def test_find_migration_incomplete_records_all_four_obligations_when_satisfied(tmp_path):
+    _write(tmp_path, _POM_JACKSON_ONLY, _JACKSON_SERVICE)
+    ledger = ObligationLedger()
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path), obligation_ledger=ledger, revision="terminal",
+    )
+    assert gap is None
+    records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+    assert len(records) == 4
+    assert all(r.status == ObligationStatus.SATISFIED for r in records)
+    assert {r.id for r in records} == {
+        "migration.target_dependency_present",
+        "migration.source_dependency_absent",
+        "migration.source_usage_absent",
+        "migration.grounded_consumer_uses_target",
+    }
+    assert all(r.evidence.get("source_identity") == "gson" for r in records)
+    assert all(r.evidence.get("target_identity") == "jackson-databind" for r in records)
+
+
+def test_find_migration_incomplete_records_pending_at_future_owner_stage(tmp_path):
+    """Required test: future pom.xml owner -> source dependency absence
+    remains PENDING in the ledger, not VIOLATED."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    plan = _prv05_plan()
+    ledger = ObligationLedger()
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        current_subtask_id="s1", engineering_plan=plan,
+        validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+        obligation_ledger=ledger, revision=1,
+    )
+    assert gap is None
+    rec = ledger.current("migration.source_dependency_absent")
+    assert rec.status == ObligationStatus.PENDING
+
+
+def test_find_migration_incomplete_records_violated_when_owning_stage_reached(tmp_path):
+    """Required test: manifest-owner stage reached -> it becomes
+    enforceable (VIOLATED, not PENDING)."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    plan = _prv05_plan()
+    ledger = ObligationLedger()
+    find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        current_subtask_id="s4", engineering_plan=plan,
+        validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+        obligation_ledger=ledger, revision=4,
+    )
+    rec = ledger.current("migration.source_dependency_absent")
+    assert rec.status == ObligationStatus.VIOLATED
+
+
+def test_find_migration_incomplete_terminal_requires_no_pending_obligation(tmp_path):
+    """Required test: terminal state -> no required obligation may remain
+    pending/violated. Same tree as above, checked at TERMINAL scope -
+    must FAIL, matching the terminal gate's own behavior."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    ledger = ObligationLedger()
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        validation_scope=MigrationValidationScope.TERMINAL,
+        obligation_ledger=ledger, revision="terminal",
+    )
+    assert gap is not None
+    rec = ledger.current("migration.source_dependency_absent")
+    assert rec.status == ObligationStatus.VIOLATED
+    assert ledger.violated_ids(ObligationKind.MIGRATION_COMPLETION) == ["migration.source_dependency_absent"]
+
+
+def test_find_migration_incomplete_detects_true_regression(tmp_path):
+    """Required test: a previously-SATISFIED migration requirement later
+    becomes deterministically VIOLATED - the ledger must detect the
+    regression (a real, non-timing-related defect, unlike the PENDING/
+    FUTURE_ORDERED case above)."""
+    ledger = ObligationLedger()
+    _write(tmp_path, _POM_JACKSON_ONLY, _JACKSON_SERVICE)
+    gap1 = find_migration_incomplete(
+        _obligation(), str(tmp_path), obligation_ledger=ledger, revision=1,
+    )
+    assert gap1 is None
+    assert ledger.current("migration.source_dependency_absent").status == ObligationStatus.SATISFIED
+
+    # Simulate a later attempt where Gson got reintroduced into pom.xml.
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    gap2 = find_migration_incomplete(
+        _obligation(), str(tmp_path), obligation_ledger=ledger, revision=2,
+    )
+    assert gap2 is not None
+    assert "SOURCE_DEPENDENCY_REMAINS" in gap2["reason_codes"]
+    regressed_ids = [r.obligation_id for r in ledger.regressions]
+    assert "migration.source_dependency_absent" in regressed_ids
+
+
+# --- Batch 1 (spec §12/§27): owner_subtask_id/terminal_required/
+# repair_scope on migration obligation records. ---
+
+def test_migration_obligations_carry_terminal_required():
+    ledger = ObligationLedger()
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        from pathlib import Path
+        _write(Path(d), _POM_JACKSON_ONLY, _JACKSON_SERVICE)
+        gap = find_migration_incomplete(_obligation(), d, obligation_ledger=ledger, revision=1)
+        assert gap is None
+        recs = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+        assert recs and all(r.terminal_required for r in recs)
+
+
+def test_migration_obligation_owner_and_repair_scope_resolve_to_owning_stage(tmp_path):
+    """s1 owns JsonService.java (already migrated); s4 (dependency-ordered
+    later) owns pom.xml. The one still-unsatisfied requirement's owner
+    must resolve to s4, and its repair_scope must be exactly pom.xml - not
+    an arbitrary/empty scope, and not JsonService.java (s1's own file)."""
+    _write(tmp_path, _POM_BOTH, _JACKSON_SERVICE)
+    plan = _prv05_plan()
+    ledger = ObligationLedger()
+    gap = find_migration_incomplete(
+        _obligation(), str(tmp_path),
+        current_subtask_id="s1", engineering_plan=plan,
+        validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+        obligation_ledger=ledger, revision=1,
+    )
+    assert gap is None  # PENDING, owned by future s4 - s1 passes
+    rec = ledger.current("migration.source_dependency_absent")
+    assert rec.status == ObligationStatus.PENDING
+    assert rec.owner_subtask_id == "s4"
+    assert rec.repair_scope == ("pom.xml",)
+
+
+def test_migration_obligation_owner_none_when_no_engineering_plan_supplied():
+    """Legacy/non-MA6 callers pass no engineering_plan - owner_subtask_id
+    must degrade to None, not raise or guess."""
+    ledger = ObligationLedger()
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        from pathlib import Path
+        _write(Path(d), _POM_BOTH, _GSON_SERVICE)
+        find_migration_incomplete(_obligation(), d, obligation_ledger=ledger, revision=1)
+        rec = ledger.current("migration.source_dependency_absent")
+        assert rec.owner_subtask_id is None

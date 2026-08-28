@@ -2487,13 +2487,27 @@ class SpecComplianceAgent(BaseAgent):
         goal: str,
         files_written: List[str],
         file_contents: Dict[str, str],
+        authoritative_context: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """authoritative_context (MA8 spec §31, 2026-08-28): an optional
+        prose block naming requirements a stronger-authority deterministic
+        producer has ALREADY established, injected ahead of the goal/files
+        so the model doesn't re-litigate an already-settled fact in the
+        first place. This is advisory only - it may reduce how often a
+        contradictory verdict comes back at all, but the caller (attempt.py
+        ::_spec_requirements_contradicting_authority) still arbitrates the
+        response deterministically afterward regardless of whether this
+        context was honored; do not treat a lower rate of contradictions as
+        proof this alone is sufficient (per the spec's own "do not trust
+        the prompt alone" instruction)."""
         files_block = "\n\n".join(
             f"=== {path} ===\n{file_contents[path]}"
             for path in files_written
             if path in file_contents
         )
+        context_block = f"{authoritative_context}\n\n" if authoritative_context else ""
         prompt = (
+            f"{context_block}"
             f"=== Goal ===\n{goal}\n\n"
             f"=== Files Generated ===\n{files_block}\n\n"
             "Does this code satisfy every concrete, literally-named requirement in the "

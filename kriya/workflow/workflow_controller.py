@@ -122,7 +122,14 @@ from kriya.workflow.context_projection import project_implementation_source, ren
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.migration import (
-    MigrationResolution, MigrationResolutionStatus, find_migration_incomplete, resolve_migration_resolution,
+    MigrationResolution, MigrationResolutionStatus, MigrationValidationScope,
+    find_migration_incomplete, resolve_migration_resolution,
+)
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationStatus,
 )
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
@@ -456,8 +463,22 @@ def build_structured_plan_repair_prompt(
     route_kind: Optional[ChangeKind] = None,
     extension_candidates: Optional[List[str]] = None,
     repository_candidates: Optional[List[str]] = None,
+    must_preserve: Optional[List[str]] = None,
 ) -> str:
-    """Build a bounded local-only correction request for the complete plan."""
+    """Build a bounded local-only correction request for the complete plan.
+
+    must_preserve (PRV-05 run #8, MA8 - kriya/workflow/obligations.py):
+    human-readable descriptions of PLAN_STRUCTURAL_VALIDITY obligations the
+    PREVIOUS draft already satisfied (computed by the caller from the
+    ObligationLedger, not re-derived here) - found live, run #8: the
+    Planner fixed refactor_baseline on repair attempt 2 but silently
+    regressed an already-fixed planned-file action, because the repair
+    prompt only ever showed the CURRENT attempt's error list, with nothing
+    telling the model that both constraints had to hold simultaneously.
+    This is a best-effort PROMPT instruction, not an enforcement mechanism
+    - the ledger's own regression detection (surfaced by the caller as
+    PLAN_REPAIR_OSCILLATION/PLAN_REPAIR_NON_CONVERGENCE) is what actually
+    catches it if the model ignores this anyway."""
     targeted_correction = ""
     if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes:
         targeted_correction += (
@@ -509,12 +530,36 @@ def build_structured_plan_repair_prompt(
             "extension point. Set extension_points using only these existing relative paths: "
             f"{json.dumps(candidates)}. Do not invent a path.\n"
         )
+    if "REFACTOR_BASELINE_MISSING" in reason_codes:
+        targeted_correction += (
+            "- Set refactor_baseline to the exact id (a string like \"s3\") of the subtask whose "
+            "completed output the equivalence verification should be ordered against - typically "
+            "the LAST implementation subtask in dependency order, not an empty string, null, or a "
+            "prose description.\n"
+        )
+    if "PLANNED_FILE_ACTION_MISMATCH" in reason_codes:
+        targeted_correction += (
+            "- For each planned file the errors name as an action mismatch: if the file does not "
+            "yet exist in the repository evidence, its action must be \"create\"; if it already "
+            "exists, its action must be \"modify\" (or \"delete\"). Do not change which subtask "
+            "owns the file, only its action.\n"
+        )
+    must_fix_section = ""
+    if must_preserve:
+        must_fix_section = (
+            "\nMUST PRESERVE (already correct in the previous draft above - do not undo any of "
+            "these while fixing the items below; a corrected plan that changes one of these back "
+            "is itself a regression):\n"
+            + "\n".join(f"- {item}" for item in must_preserve)
+            + "\n\nMUST FIX (still wrong in the previous draft):\n"
+        )
     return (
         "Repair the previous structured engineering plan. This is PLAN_REPAIR, not implementation.\n"
         "Return only one complete JSON object and nothing else. Do not use Markdown or code fences.\n\n"
         f"Original request:\n{goal}\n\n"
         f"Deterministic reason codes: {json.dumps(reason_codes)}\n"
-        "Deterministic validation errors:\n"
+        + must_fix_section
+        + "Deterministic validation errors:\n"
         + "\n".join(f"- {error}" for error in errors)
         + "\n\nCorrection rules:\n"
         "- Return a complete corrected plan, preserving every valid subtask and dependency.\n"
@@ -1822,6 +1867,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         )
         _log_phase_banner("PLAN VALIDATION")
         repair_attempts = 0
+        # MA8 (PRV-05 run #8, 2026-08-28) - kriya/workflow/obligations.py.
+        # One ledger for the whole run, created here (before
+        # PLAN_STRUCTURAL_VALIDITY obligations start being produced) and
+        # threaded unchanged into every subtask's run_generation_workflow()
+        # call below (MIGRATION_COMPLETION/GOAL_SPEC_REQUIREMENT obligations)
+        # and the terminal migration gate - "satisfied" means the same thing
+        # everywhere in one run. See this module's own docstring for the two
+        # concrete run #8 defects this closes.
+        obligation_ledger = ObligationLedger()
         while True:
             errors: List[str] = []
             reason_codes: List[str] = []
@@ -1863,6 +1917,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         resuming_own_established_progress=has_own_established_progress,
                         require_model_planned_files=True,
                         require_semantic_contracts=True,
+                        obligation_ledger=obligation_ledger, revision=repair_attempts,
                     )
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
@@ -1910,11 +1965,26 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
             repair_prompt = None
             if repair_attempts < 2:
+                # MA8: everything PLAN_STRUCTURAL_VALIDITY currently reports
+                # SATISFIED (as of the validate_plan() call just above) must
+                # survive the next draft - see build_structured_plan_repair_
+                # prompt's own docstring for the run #8 incident this closes.
+                currently_violated_ids = [
+                    rec.id for rec in obligation_ledger.current_by_kind(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
+                    if rec.status == ObligationStatus.VIOLATED
+                ]
+                must_preserve = [
+                    f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
+                    for rec in obligation_ledger.relevant_for_preservation(
+                        ObligationKind.PLAN_STRUCTURAL_VALIDITY, currently_violated_ids,
+                    )
+                ]
                 repair_prompt = build_structured_plan_repair_prompt(
                     goal, plan_text, errors, reason_codes, repair_attempts + 1,
                     route_kind=route.kind,
                     extension_candidates=planning_repository_candidates,
                     repository_candidates=planning_repository_candidates,
+                    must_preserve=must_preserve,
                 )
             try:
                 persist_planning_attempt_diagnostic(
@@ -1948,6 +2018,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             )
             if repair_attempts >= 2:
                 reason_codes.append("STRUCTURED_PLAN_REPAIR_EXHAUSTED")
+                # MA8 (PRV-05 run #8): distinguish "kept oscillating between
+                # constraints" from "just never converged" - both are
+                # reported, never used to raise the repair-attempt bound
+                # itself (that stays fixed at 2, per this fix's own scope).
+                oscillating = obligation_ledger.oscillating_ids(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
+                if oscillating:
+                    reason_codes.append("PLAN_REPAIR_OSCILLATION")
+                    logger.error(
+                        "WorkflowController enforce run %r: plan repair OSCILLATED on "
+                        "obligation(s) %s - full revision history: %s",
+                        run_id, oscillating,
+                        {oid: [(r.revision, r.status.value) for r in obligation_ledger.history(oid)]
+                         for oid in oscillating},
+                    )
+                else:
+                    reason_codes.append("PLAN_REPAIR_NON_CONVERGENCE")
                 raise _UnsafeStructuredPlan(
                     "structured plan remained unsafe after two bounded repair attempts",
                     reason_codes=list(dict.fromkeys(reason_codes)),
@@ -2152,6 +2238,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 predetermined_design=target_goal,
                 predetermined_architect_files=target_files,
                 allowed_write_relpaths=target_files,
+                # PRV-05 run 7 (2026-08-28): the validated EngineeringPlan and
+                # this subtask's own id, so migration validation and retry
+                # attribution can both answer "who owns this file, and are we
+                # there yet" via EngineeringPlan.classify_file_ownership() -
+                # see AttemptContext.structured_plan's own docstring.
+                structured_plan=plan,
+                current_subtask_id=target.id,
+                # MA8 (PRV-05 run #8): same ledger the plan-repair loop
+                # above used, so MIGRATION_COMPLETION obligations recorded
+                # during this subtask's own attempt accumulate into the
+                # SAME per-run ledger, not a fresh one per subtask.
+                obligation_ledger=obligation_ledger,
                 # DENY_ALL for a verification-role subtask - enforced at the
                 # real write gate (AuthorizedFileWriter), not merely implied
                 # by target_files being empty. Every other subtask keeps
@@ -2243,6 +2341,31 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             call_result = await _invoke_bounded_subtask(subtask, position)
             scope_conflict = call_result.get("plan_scope_conflict") or {}
             grounded_scope_files = _plan_scope_conflict_files(scope_conflict)
+            # MA8 (spec §30, "owner is a completed predecessor"): a
+            # DETERMINISTIC-authority obligation (currently only the
+            # migration gate's authoritative_files, attribution tier
+            # "authoritative_deterministic" - see attribution.py) naming a
+            # file that a REAL, already-declared UPSTREAM subtask in THIS
+            # validated plan owns is a "reopen a completed predecessor"
+            # case, not an architecture-discovery case. Falling into the
+            # merge loop just below (revise_plan_for_grounded_scope_owner)
+            # would silently STRIP that predecessor of a legitimately
+            # planned responsibility and fold it into the current subtask
+            # instead of just re-running the predecessor - exactly the
+            # "silently edit across stage boundaries" the spec forbids.
+            # Skip straight to the existing reopen-owner path below (which
+            # already walks depends_on transitively - PAST_ORDERED by
+            # construction) whenever a real upstream owner is found; when
+            # none is found (unowned/unrelated file) fall through to the
+            # unchanged merge behavior below, matching the spec's separate
+            # "no owner -> plan/scope defect" rule.
+            if (
+                scope_conflict.get("classification") == "PLAN_SCOPE_DEFECT"
+                and scope_conflict.get("attribution_tier") == "authoritative_deterministic"
+                and grounded_scope_files
+                and resolve_scope_conflict_owners(plan, grounded_scope_files, subtask)
+            ):
+                grounded_scope_files = []
             # PRV-03: a chain of grounded owners (each repair surfacing the
             # NEXT file outside scope) needs repeated revise-and-revalidate
             # passes, not just one - see _MAX_PLAN_SCOPE_REVISION_ATTEMPTS.
@@ -2748,7 +2871,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             try:
                 if migration_resolution.status == MigrationResolutionStatus.RESOLVED:
                     obligation = migration_resolution.obligation
-                    gap = find_migration_incomplete(obligation, workspace_path) if obligation else None
+                    gap = find_migration_incomplete(
+                        obligation, workspace_path,
+                        validation_scope=MigrationValidationScope.TERMINAL,
+                        obligation_ledger=obligation_ledger,
+                        revision="terminal", source="migration.terminal_gate",
+                    ) if obligation else None
                     if gap:
                         global_migration_gap = (
                             "MIGRATION INCOMPLETE (global final-state check): the goal "
@@ -2773,6 +2901,31 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 all_completed = False
 
+        # MA8 (spec §42/43) - a generic backstop layered ALONGSIDE the
+        # migration-specific gate above, not a replacement for it (§43's
+        # own explicit interim model: existing gates AND terminal MA8
+        # obligations, not one instead of the other). Today every
+        # terminal_required obligation kind (PLAN_STRUCTURAL_VALIDITY,
+        # MIGRATION_COMPLETION) already has its own dedicated gate earlier
+        # in this run (plan-repair loop, the migration check just above),
+        # so this rarely fires on its own - its value is generalizing:
+        # any FUTURE obligation producer that marks terminal_required=True
+        # is automatically covered here without a new gate being wired by
+        # hand, and it catches the case where a specific gate's own
+        # all_completed flip was somehow bypassed.
+        global_terminal_obligation_gap: Optional[str] = None
+        if all_completed:
+            unresolved_terminal = obligation_ledger.unresolved_terminal_obligations()
+            if unresolved_terminal:
+                global_terminal_obligation_gap = (
+                    "TERMINAL OBLIGATIONS UNSATISFIED (MA8 global aggregation check): "
+                    + "; ".join(
+                        f"{rec.id} ({rec.status.value}, authority={rec.authority.value})"
+                        for rec in unresolved_terminal
+                    )
+                )
+                all_completed = False
+
         needs_review = any(r.status == SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
         final_plan_lifecycle = "completed" if all_completed else "needs_review" if needs_review else "failed"
         save_approved_plan(
@@ -2793,6 +2946,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["global_migration_gap"] = global_migration_gap
             logger.error(
                 f"WorkflowController enforce run {run_id!r}: {global_migration_gap}"
+            )
+        if global_terminal_obligation_gap:
+            aggregated["global_terminal_obligation_gap"] = global_terminal_obligation_gap
+            logger.error(
+                f"WorkflowController enforce run {run_id!r}: {global_terminal_obligation_gap}"
             )
         if knowledge_gap_break is not None:
             # Overrides status/run_id above (not quality_gates_passed/subtask_

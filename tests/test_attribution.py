@@ -112,6 +112,62 @@ async def test_attribution_falls_back_to_substring_scan_when_likely_files_empty(
     llm.complete.assert_not_called()
 
 
+# --- failure.authoritative_files (PRV-05 run 7, 2026-08-28) ---
+
+@pytest.mark.asyncio
+async def test_attribution_authoritative_files_outranks_self_diagnosis():
+    """A failure type with deterministic STRUCTURAL evidence
+    (authoritative_files - e.g. migration.py's find_migration_incomplete()
+    parsing pom.xml itself) must win over even a signature-confirmed self-
+    diagnosis: the model's own claim about its prior output is real
+    evidence, but it is not allowed to override a fact about the
+    repository. Found live: a self-diagnosis claiming "the fix is really in
+    JsonService.java, not pom.xml" kept beating the manifest's own correct
+    pom.xml evidence across attempts 5-8, none of which could ever satisfy
+    SOURCE_DEPENDENCY_REMAINS since the file that actually needed changing
+    was never retried again."""
+    failure = Failure(
+        type="migration_incomplete",
+        message="MIGRATION INCOMPLETE: ... SOURCE_DEPENDENCY_REMAINS ...",
+        raw_output="MIGRATION INCOMPLETE: ... SOURCE_DEPENDENCY_REMAINS ...",
+        likely_files=["pom.xml", "JsonService.java"],
+        authoritative_files=["pom.xml"],
+    )
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, ["pom.xml", "JsonService.java"], 0, [], llm, lambda fp: None,
+        self_diagnosed_files=["JsonService.java"],
+    )
+    assert result.tier == "authoritative_deterministic"
+    assert result.files == ["pom.xml"]
+    assert result.confidence == "high"
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_attribution_self_diagnosis_still_wins_when_no_authoritative_evidence():
+    """Confirms the authoritative_files precedence above is scoped to
+    failure types that actually set it - the pre-existing self-diagnosis-
+    over-locator/judge precedence is unchanged for every other failure
+    type, including the real PRV-05 attempt-4 shape this reproduces
+    (structural_corruption in pom.xml, the model's own analysis correctly
+    - for THIS attempt's own outcome - pointing elsewhere)."""
+    failure = Failure(
+        type="structural_corruption",
+        message="STRUCTURAL CORRUPTION in pom.xml: malformed XML",
+        raw_output="malformed XML: syntax error: line 1, column 0",
+        likely_files=["pom.xml"],
+    )
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, ["pom.xml", "JsonService.java"], 0, [], llm, lambda fp: None,
+        self_diagnosed_files=["JsonService.java"],
+    )
+    assert result.tier == "self_diagnosis"
+    assert result.files == ["JsonService.java"]
+    llm.complete.assert_not_called()
+
+
 # --- Golden regression fixture: the real, live-captured ignite_qpid_protocol failure ---
 
 # Exact known_files list and captured raw_output from the real batch run that

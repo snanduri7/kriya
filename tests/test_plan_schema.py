@@ -11,6 +11,7 @@ from kriya.workflow.plan_schema import (
     ExecutionMethod,
     ExecutionRole,
     FileAction,
+    FileOwnershipRelation,
     PlannedFile,
     PlannerStructuredOutput,
     Subtask,
@@ -312,3 +313,79 @@ def test_build_engineering_plan_supplies_plan_id_and_kind_from_caller_not_output
     assert plan.extension_points == ["kriya.tools.registry"]
     assert plan.refactor_baseline == "abc123"
     assert len(plan.subtasks) == 1
+
+
+# --- EngineeringPlan.classify_file_ownership / FileOwnershipRelation
+# (PRV-05 run 7, 2026-08-28) ---
+
+def _prv05_plan():
+    """Reproduces the exact validated PRV-05 hardened run-7 plan: s1/s2
+    sequentially co-own JsonService.java (a validated sequential ownership
+    chain, plan_validation.py's _forms_sequential_ownership_chain), s3 owns
+    the test file, s4 (later, dependency-ordered) owns pom.xml, s5 is
+    terminal."""
+    s1 = _model_subtask(
+        id="s1", depends_on=[],
+        planned_files=[PlannedFile(path="src/main/java/com/example/JsonService.java", action=FileAction.MODIFY)],
+    )
+    s2 = _model_subtask(
+        id="s2", depends_on=["s1"],
+        planned_files=[PlannedFile(path="src/main/java/com/example/JsonService.java", action=FileAction.MODIFY)],
+    )
+    s3 = _model_subtask(
+        id="s3", depends_on=["s1"],
+        planned_files=[PlannedFile(path="src/test/java/com/example/JsonServiceTest.java", action=FileAction.CREATE)],
+    )
+    s4 = _model_subtask(
+        id="s4", depends_on=["s2", "s3"],
+        planned_files=[PlannedFile(path="pom.xml", action=FileAction.MODIFY)],
+    )
+    s5 = _model_subtask(id="s5", depends_on=["s4"], planned_files=[])
+    return EngineeringPlan(plan_id="prv05", kind=ChangeKind.REFACTOR, subtasks=[s1, s2, s3, s4, s5])
+
+
+def test_classify_file_ownership_current_for_sequential_co_owner():
+    """JsonService.java is legitimately co-owned by BOTH s1 and s2 in a
+    validated sequential chain - CURRENT must fire for either, not just a
+    sole owner. This is why the helper re-derives owners directly rather
+    than reusing file_owner(), whose single-owner-only lookup would return
+    None (treating this as "ambiguous") for a path exactly like this one."""
+    plan = _prv05_plan()
+    path = "src/main/java/com/example/JsonService.java"
+    assert plan.classify_file_ownership("s1", path) == FileOwnershipRelation.CURRENT
+    assert plan.classify_file_ownership("s2", path) == FileOwnershipRelation.CURRENT
+
+
+def test_classify_file_ownership_future_ordered_for_not_yet_reached_owner():
+    plan = _prv05_plan()
+    assert plan.classify_file_ownership("s1", "pom.xml") == FileOwnershipRelation.FUTURE_ORDERED
+    assert plan.classify_file_ownership("s2", "pom.xml") == FileOwnershipRelation.FUTURE_ORDERED
+    assert plan.classify_file_ownership("s3", "pom.xml") == FileOwnershipRelation.FUTURE_ORDERED
+
+
+def test_classify_file_ownership_current_at_the_owning_stage():
+    plan = _prv05_plan()
+    assert plan.classify_file_ownership("s4", "pom.xml") == FileOwnershipRelation.CURRENT
+
+
+def test_classify_file_ownership_past_ordered_for_completed_predecessor():
+    plan = _prv05_plan()
+    path = "src/main/java/com/example/JsonService.java"
+    assert plan.classify_file_ownership("s4", path) == FileOwnershipRelation.PAST_ORDERED
+    assert plan.classify_file_ownership("s3", path) == FileOwnershipRelation.PAST_ORDERED
+
+
+def test_classify_file_ownership_unowned_when_no_subtask_declares_the_path():
+    plan = _prv05_plan()
+    assert plan.classify_file_ownership("s1", "README.md") == FileOwnershipRelation.UNOWNED
+
+
+def test_classify_file_ownership_unrelated_for_parallel_unordered_owners():
+    """Two subtasks with no dependency relationship between them, each
+    owning a different file - neither is FUTURE_ORDERED nor PAST_ORDERED
+    relative to the other, so this is a genuine plan-scope conflict, not a
+    timing question (see this module's own FileOwnershipRelation docstring)."""
+    a = _model_subtask(id="a", depends_on=[], planned_files=[PlannedFile(path="a.py", action=FileAction.MODIFY)])
+    b = _model_subtask(id="b", depends_on=[], planned_files=[PlannedFile(path="b.py", action=FileAction.MODIFY)])
+    plan = EngineeringPlan(plan_id="p1", kind=ChangeKind.TASK, subtasks=[a, b])
+    assert plan.classify_file_ownership("a", "b.py") == FileOwnershipRelation.UNRELATED

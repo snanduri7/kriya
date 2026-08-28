@@ -43,6 +43,7 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.migration import MigrationResolution, resolve_migration_resolution
+from kriya.workflow.obligations import ObligationLedger
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.policy.telemetry import build_decision_record
 
@@ -101,6 +102,10 @@ from kriya.workflow.file_resolution import (
     find_missing_expected_files,
     include_response_construction_owners,
     normalize_written_filepath,
+)
+from kriya.workflow.architectural_choice import (
+    architecture_choice_invalidated_message,
+    classify_ownership_violations,
 )
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.skill_extraction import (
@@ -172,7 +177,7 @@ from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.review_context import build_review_batches, build_reviewer_verified_evidence
 from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
-from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS
+from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, EngineeringPlan
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
@@ -618,6 +623,9 @@ class WorkflowEngine:
         execution_scope: str = "",
         grounding_goal: str = "",
         migration_resolution: Optional["MigrationResolution"] = None,
+        structured_plan: Optional["EngineeringPlan"] = None,
+        current_subtask_id: Optional[str] = None,
+        obligation_ledger: Optional["ObligationLedger"] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -2059,6 +2067,13 @@ class WorkflowEngine:
             migration_resolution if migration_resolution is not None
             else resolve_migration_resolution(goal, workspace_path)
         )
+        # MA8 (PRV-05 run #8, 2026-08-28) - kriya/workflow/obligations.py.
+        # A caller that already created one per-run ledger (WorkflowController,
+        # across several bounded-subtask calls) passes it through so every
+        # subtask's obligations accumulate into the SAME instance; a plain
+        # Legacy call gets its own fresh one, mirroring migration_resolution's
+        # own "resolved once, reused, or created fresh for this call" pattern.
+        resolved_obligation_ledger = obligation_ledger if obligation_ledger is not None else ObligationLedger()
 
         # Loop-invariant - nothing in this object is reassigned across retry
         # attempts, so it's built once here rather than reconstructed per
@@ -2129,6 +2144,9 @@ class WorkflowEngine:
             execution_scope=execution_scope,
             grounding_goal=grounding_goal,
             migration_resolution=resolved_migration_resolution,
+            structured_plan=structured_plan,
+            current_subtask_id=current_subtask_id,
+            obligation_ledger=resolved_obligation_ledger,
         )
 
         from kriya.workflow.retry_policy import decide_for_state
@@ -2640,14 +2658,30 @@ class WorkflowEngine:
                         f"test={item['redirected_test']}"
                         for item in ownership_violations
                     )
+                    message = (
+                        "BROWNFIELD OWNERSHIP REJECTED: existing behavioral ownership "
+                        "cannot be transferred to a newly created parallel implementation "
+                        "by redirecting established tests. Modify the existing owner and "
+                        "retain its API; update tests only to extend expectations or coverage."
+                    )
+                    # MA8 (spec §35-38, kriya/workflow/architectural_choice.py):
+                    # a single occurrence is ordinary quality-gate failure -
+                    # likely_files already redirects the next attempt at the
+                    # grounded owner below. Only once the SAME candidate file
+                    # recurs despite that redirect, AND the goal never
+                    # explicitly asked for a new artifact by that name, is the
+                    # underlying architectural choice (not just this attempt)
+                    # confirmed wrong.
+                    new_architectural_changes, architecture_diagnostics = classify_ownership_violations(
+                        ownership_violations, goal, state.attempt_number, state.architectural_changes,
+                    )
+                    state.architectural_changes.extend(new_architectural_changes)
+                    diagnostics = dict(architecture_diagnostics or {})
+                    if architecture_diagnostics:
+                        message = architecture_choice_invalidated_message(architecture_diagnostics)
                     failure = Failure(
                         type="brownfield_ownership_redirect",
-                        message=(
-                            "BROWNFIELD OWNERSHIP REJECTED: existing behavioral ownership "
-                            "cannot be transferred to a newly created parallel implementation "
-                            "by redirecting established tests. Modify the existing owner and "
-                            "retain its API; update tests only to extend expectations or coverage."
-                        ),
+                        message=message,
                         raw_output=evidence,
                         source="ownership_gate",
                         authority="deterministic",
@@ -2660,6 +2694,8 @@ class WorkflowEngine:
                         }),
                         attempt=state.attempt_number,
                     )
+                    if diagnostics:
+                        failure.diagnostics = {**(failure.diagnostics or {}), **diagnostics}
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 api_violations = find_brownfield_public_api_changes(

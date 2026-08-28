@@ -78,7 +78,14 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+
+from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationRecord, ObligationStatus
+from kriya.workflow.plan_schema import FileOwnershipRelation
+
+if TYPE_CHECKING:
+    from kriya.workflow.obligations import ObligationLedger
+    from kriya.workflow.plan_schema import EngineeringPlan
 
 _IGNORED_DIRS = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
 _NON_PRODUCTION_SCOPES = {"test", "provided", "system"}
@@ -113,6 +120,39 @@ class MigrationResolution:
     status: MigrationResolutionStatus
     obligation: Optional[MigrationObligation] = None
     reason: str = ""
+
+
+class MigrationValidationScope(str, Enum):
+    """Which of find_migration_incomplete()'s four requirements are DUE at
+    this call - PRV-05 run 7 (2026-08-28): the original (pre-this-fix)
+    version asked a TERMINAL question ("is the whole migration done") at
+    every non-terminal subtask boundary that merely touched a grounded
+    consumer, which fails a perfectly correct intermediate state (s1 fully
+    migrates its own consumer; s4, a later dependency-ordered subtask, still
+    owns removing the dependency) as if it were a real defect. See this
+    module's own top-of-file docstring's PRV-05 run-6 section for the
+    sibling identity-resolution defect this is NOT - that one was about WHO
+    the source/target are; this one is about WHEN each requirement becomes
+    enforceable.
+
+    CURRENT_SUBTASK: only requirements whose implicated file(s) are owned by
+    THIS subtask or an already-completed (PAST_ORDERED) one are due; a
+    requirement whose only implicated files are owned by a not-yet-reached
+    (FUTURE_ORDERED) subtask is PENDING, not FAILED. Requires
+    current_subtask_id + engineering_plan; without both (a legacy,
+    non-MA6-structured caller), scope degrades to full TERMINAL-equivalent
+    behavior - never silently permissive.
+
+    TERMINAL: every requirement is due, unconditionally - the original,
+    unscoped behavior, correct once the whole plan has actually executed.
+    "an obligation becomes enforceable when its owning stage is reached, and
+    globally enforceable at terminal validation" - not "skip the check until
+    the end", which would let a plan whose OWNING stage (e.g. s4) botches
+    the removal slide all the way to the terminal gate undetected of its own
+    stage-local failure."""
+
+    CURRENT_SUBTASK = "current_subtask"
+    TERMINAL = "terminal"
 
 
 # Narrow, high-precision-only (matching this codebase's established
@@ -302,15 +342,113 @@ def resolve_migration_resolution(goal: str, workspace_path: str) -> MigrationRes
     return MigrationResolution(MigrationResolutionStatus.RESOLVED, obligation=obligation)
 
 
+def _requirement_is_due(
+    implicated_paths: List[str],
+    *,
+    validation_scope: MigrationValidationScope,
+    engineering_plan: Optional["EngineeringPlan"],
+    current_subtask_id: Optional[str],
+) -> bool:
+    """Is a currently-unmet requirement enforceable RIGHT NOW, or is it
+    legitimately owned by a not-yet-reached subtask (PENDING)? TERMINAL
+    scope, a missing plan/subtask_id (legacy caller - see
+    MigrationValidationScope's own docstring), or an empty implicated-path
+    list (nothing to locate ownership for - don't silently defer) all fall
+    back to "due", matching this function's pre-stage-aware behavior
+    exactly. Otherwise due unless EVERY implicated path is owned by a
+    strictly FUTURE_ORDERED subtask - an UNOWNED path (nothing in the plan
+    will ever touch it) is deliberately treated as due, not deferred; a
+    mix of one CURRENT/PAST_ORDERED/UNOWNED path and one FUTURE_ORDERED one
+    is due too, since at least one instance of the violation is genuinely
+    actionable at this point in the plan."""
+    if validation_scope == MigrationValidationScope.TERMINAL:
+        return True
+    if engineering_plan is None or current_subtask_id is None:
+        return True
+    if not implicated_paths:
+        return True
+    relations = [
+        engineering_plan.classify_file_ownership(current_subtask_id, path)
+        for path in implicated_paths
+    ]
+    return any(relation != FileOwnershipRelation.FUTURE_ORDERED for relation in relations)
+
+
+def _owner_subtask_id_for_paths(
+    engineering_plan: Optional["EngineeringPlan"], paths: List[str],
+) -> Optional[str]:
+    """The single subtask that owns EVERY path in `paths`, or None when
+    there's no plan to consult, no paths, or the paths don't all resolve
+    to the same single unambiguous owner (EngineeringPlan.file_owner()
+    already returns None for a multi-owner/sequential-chain file - see its
+    own docstring; this stays conservative rather than guessing which
+    co-owner is "the" owner for obligation-record purposes)."""
+    if engineering_plan is None or not paths:
+        return None
+    owners = {
+        owner.id if (owner := engineering_plan.file_owner(path)) else None
+        for path in paths
+    }
+    if len(owners) == 1:
+        return next(iter(owners))
+    return None
+
+
+_MIGRATION_OBLIGATION_IDS = {
+    "TARGET_DEPENDENCY_MISSING": "migration.target_dependency_present",
+    "SOURCE_DEPENDENCY_REMAINS": "migration.source_dependency_absent",
+    "SOURCE_USAGE_REMAINS": "migration.source_usage_absent",
+    "TARGET_NOT_USED_BY_GROUNDED_OWNER": "migration.grounded_consumer_uses_target",
+}
+
+
 def find_migration_incomplete(
-    obligation: MigrationObligation, worktree_path: str,
+    obligation: MigrationObligation,
+    worktree_path: str,
+    *,
+    current_subtask_id: Optional[str] = None,
+    engineering_plan: Optional["EngineeringPlan"] = None,
+    validation_scope: MigrationValidationScope = MigrationValidationScope.TERMINAL,
+    obligation_ledger: Optional["ObligationLedger"] = None,
+    revision: Any = None,
+    source: str = "migration.find_migration_incomplete",
 ) -> Optional[Dict[str, Any]]:
-    """Terminal completion check against the final candidate state
-    (worktree_path - the real, fully-applied post-write tree, matching this
-    module's terminal-time convention, e.g. static_checks.py's
+    """Completion check against the CURRENT candidate state (worktree_path -
+    the real, fully-applied tree as of this call, matching this module's
+    established convention, e.g. static_checks.py's
     run_static_checks(worktree_path, ...) and find_established_stack_drift).
-    Returns None (obligation satisfied) or a dict of unmet TERMINAL_
-    REQUIREMENTS reason codes plus the evidence behind them."""
+    Returns None (every DUE requirement satisfied) or a dict of unmet
+    reason codes plus the evidence behind them.
+
+    validation_scope (PRV-05 run 7, 2026-08-28) - see
+    MigrationValidationScope's own docstring for the full incident this
+    closes: default TERMINAL preserves this function's exact original
+    behavior (every requirement always due) for every existing caller that
+    doesn't pass the new keyword-only args - the workflow_controller.py
+    terminal global gate, and any pre-this-fix test. Passing
+    validation_scope=CURRENT_SUBTASK plus current_subtask_id/
+    engineering_plan additionally computes which requirements are DUE at
+    THIS subtask boundary (see _requirement_is_due above) versus PENDING
+    (a real, currently-unmet condition whose owning subtask hasn't run
+    yet) - PENDING requirements never appear in the returned dict's
+    reason_codes/evidence and never cause a non-None return on their own;
+    they're surfaced separately, in pending_reason_codes, for diagnostics
+    only. Uses the validated plan as the authority on ownership - never
+    infers it from filenames.
+
+    obligation_ledger (PRV-05 run #8, MA8 - kriya/workflow/obligations.py):
+    purely an optional side effect, added without changing any of the
+    detection logic above - when supplied, records all FOUR individual
+    migration requirements (target present / source absent / source usage
+    absent / grounded consumer uses target) as DETERMINISTIC
+    ObligationRecords, SATISFIED/VIOLATED/PENDING exactly matching this
+    call's own due-ness computation, every time this function runs
+    (including the fully-satisfied None-return path, where all four are
+    recorded SATISFIED). evidence carries source_identity/target_identity
+    so a later, unrelated subsystem (SpecCompliance arbitration,
+    attempt.py) can correlate a free-text judgment claim back to a
+    specific migration obligation without importing MigrationObligation
+    itself."""
     pom_path = os.path.join(worktree_path, "pom.xml")
     pom_content = ""
     if os.path.isfile(pom_path):
@@ -347,10 +485,6 @@ def find_migration_incomplete(
     )
     grounded_consumer_uses_target = not unmigrated_consumers
 
-    if target_present and source_absent and source_usage_absent and grounded_consumer_uses_target:
-        return None
-
-    reason_codes = []
     # manifest_files: evidence for the two reason codes that are purely
     # about the DECLARATION (pom.xml), not any .java file's content - found
     # live, PRV-05 (2026-08-28): when JsonService is fully migrated (no
@@ -364,23 +498,90 @@ def find_migration_incomplete(
     if not target_present or not source_absent:
         if os.path.isfile(os.path.join(worktree_path, "pom.xml")):
             manifest_files.append("pom.xml")
-    if not target_present:
-        reason_codes.append("TARGET_DEPENDENCY_MISSING")
-    if not source_absent:
-        reason_codes.append("SOURCE_DEPENDENCY_REMAINS")
-    if not source_usage_absent:
-        reason_codes.append("SOURCE_USAGE_REMAINS")
-    if not grounded_consumer_uses_target:
-        reason_codes.append("TARGET_NOT_USED_BY_GROUNDED_OWNER")
+
+    # (reason_code, implicated_paths) - the ONLY paths _requirement_is_due()
+    # consults for that specific requirement, so a violation whose paths are
+    # entirely owned by a not-yet-reached subtask is deferred without ever
+    # touching an unrelated requirement's due-ness (e.g. s1's own
+    # SOURCE_USAGE_REMAINS over JsonService.java stays due even though
+    # SOURCE_DEPENDENCY_REMAINS over pom.xml, owned by s4, is pending).
+    candidate_findings = [
+        ("TARGET_DEPENDENCY_MISSING", not target_present, manifest_files),
+        ("SOURCE_DEPENDENCY_REMAINS", not source_absent, manifest_files),
+        ("SOURCE_USAGE_REMAINS", not source_usage_absent, source_usage_files),
+        ("TARGET_NOT_USED_BY_GROUNDED_OWNER", not grounded_consumer_uses_target, unmigrated_consumers),
+    ]
+
+    due_reason_codes: List[str] = []
+    pending_reason_codes: List[str] = []
+    due_manifest_files: List[str] = []
+    due_source_usage_files: List[str] = []
+    due_unmigrated_consumers: List[str] = []
+    for code, violated, implicated_paths in candidate_findings:
+        if not violated:
+            if obligation_ledger is not None:
+                obligation_ledger.record(ObligationRecord(
+                    id=_MIGRATION_OBLIGATION_IDS[code], kind=ObligationKind.MIGRATION_COMPLETION,
+                    status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+                    description=code, source=source, revision=revision,
+                    evidence={
+                        "source_identity": obligation.source_identity,
+                        "target_identity": obligation.target_identity,
+                    },
+                    owner_subtask_id=_owner_subtask_id_for_paths(engineering_plan, implicated_paths),
+                    terminal_required=True,
+                    repair_scope=tuple(implicated_paths),
+                ))
+            continue
+        is_due = _requirement_is_due(
+            implicated_paths,
+            validation_scope=validation_scope,
+            engineering_plan=engineering_plan,
+            current_subtask_id=current_subtask_id,
+        )
+        if obligation_ledger is not None:
+            obligation_ledger.record(ObligationRecord(
+                id=_MIGRATION_OBLIGATION_IDS[code], kind=ObligationKind.MIGRATION_COMPLETION,
+                status=ObligationStatus.VIOLATED if is_due else ObligationStatus.PENDING,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=code, source=source, revision=revision,
+                evidence={
+                    "source_identity": obligation.source_identity,
+                    "target_identity": obligation.target_identity,
+                    "implicated_paths": list(implicated_paths),
+                },
+                owner_subtask_id=_owner_subtask_id_for_paths(engineering_plan, implicated_paths),
+                terminal_required=True,
+                repair_scope=tuple(implicated_paths),
+            ))
+        if is_due:
+            due_reason_codes.append(code)
+            if code in ("TARGET_DEPENDENCY_MISSING", "SOURCE_DEPENDENCY_REMAINS"):
+                due_manifest_files = manifest_files
+            elif code == "SOURCE_USAGE_REMAINS":
+                due_source_usage_files = source_usage_files
+            elif code == "TARGET_NOT_USED_BY_GROUNDED_OWNER":
+                due_unmigrated_consumers = unmigrated_consumers
+        else:
+            pending_reason_codes.append(code)
+
+    if not due_reason_codes:
+        # Every currently-unmet requirement is legitimately owned by a
+        # not-yet-reached subtask (or there were none) - satisfied FOR THIS
+        # STAGE, not a silent "skip until terminal": TERMINAL-scope callers
+        # (the global gate) still see every requirement as due and will
+        # correctly fail this same tree if it's the final state.
+        return None
 
     return {
-        "reason_codes": reason_codes,
+        "reason_codes": due_reason_codes,
+        "pending_reason_codes": pending_reason_codes,
         "source_identity": obligation.source_identity,
         "target_identity": obligation.target_identity,
         "grounded_consumers": obligation.grounded_consumers,
-        "source_usage_files": source_usage_files,
-        "unmigrated_consumers": unmigrated_consumers,
-        "manifest_files": manifest_files,
+        "source_usage_files": due_source_usage_files,
+        "unmigrated_consumers": due_unmigrated_consumers,
+        "manifest_files": due_manifest_files,
     }
 
 

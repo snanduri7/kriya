@@ -11,6 +11,7 @@ from enum import Enum
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from kriya.workflow.architectural_choice import CandidateArchitecturalChange
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.edit_safety import content_revision
@@ -323,14 +324,20 @@ class GenerationState:
     # kriya/workflow/failure.py) and for a future caller that wants the
     # ranking/reasoning, not just the winning file list.
     last_attribution: Optional[Any] = None
-    # (failure_signature, files) from the MOST RECENT attempt's own FIX
-    # ANALYSIS text, when it named a DIFFERENT known file than the one it
-    # was attached to (extract_self_diagnosed_files(), kriya/workflow/
-    # attribution.py) - paired with the failure signature that attempt was
-    # RESPONDING to, so retry_strategy.py can only trust it on a CONFIRMED
-    # repeat of that exact failure, never on a genuinely new/unrelated one.
-    # None whenever the most recent attempt produced no analysis text, or
-    # its analysis didn't diverge from what it was asked to fix.
+    # (failure_signature, files, attempt_number) from the MOST RECENT
+    # attempt's own FIX ANALYSIS text, when it named a DIFFERENT known file
+    # than the one it was attached to (extract_self_diagnosed_files(),
+    # kriya/workflow/attribution.py) - paired with the failure signature
+    # that attempt was RESPONDING to AND the attempt number that produced
+    # it, so retry_strategy.py only trusts it as the explanation for THAT
+    # SAME attempt's own outcome (both signature and attempt number must
+    # match - see retry_strategy.py's consumption site and attempt.py's
+    # capture site for the PRV-05 run 7, 2026-08-28 incident this attempt-
+    # number gate closes: signature equality alone let a stale, several-
+    # attempts-old diagnosis get replayed against unrelated later failures
+    # that merely collapsed to the same signature). None whenever the most
+    # recent attempt produced no analysis text, or its analysis didn't
+    # diverge from what it was asked to fix.
     last_self_diagnosis: Optional[Any] = None
     # {filepath: source-line snippet} for the MOST RECENT failure's error
     # location(s) - empty whenever the last failure's error text named no
@@ -411,6 +418,13 @@ class GenerationState:
     # brownfield API gate. Unlike last_failure/error_context, this survives
     # later compiler/test failures until every removed signature is restored.
     api_contract_recovery: Optional[APIContractRecovery] = None
+    # MA8 (spec §35-38): every occurrence, this run, of an EXISTING
+    # brownfield/duplicate-ownership detector (find_brownfield_test_
+    # redirections/find_brownfield_public_api_changes) flagging the same
+    # candidate-introduced file - see kriya/workflow/architectural_choice.py.
+    # A single occurrence is ordinary quality-gate failure/retry; recurrence
+    # is what confirms the underlying architectural choice itself is wrong.
+    architectural_changes: List[CandidateArchitecturalChange] = field(default_factory=list)
 
     def record_event(self, event: RunEvent) -> None:
         self.run_events.append(event)

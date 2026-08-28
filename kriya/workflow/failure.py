@@ -229,6 +229,21 @@ class Failure:
     milestone_id: Optional[str] = None
     planned_files: List[str] = field(default_factory=list)
     verification_target: Optional[str] = None
+    # PRV-05 run 7 (2026-08-28): a small, explicit set of failure types carry
+    # DETERMINISTIC evidence of which file(s) an unmet condition concerns -
+    # not a text-scan guess, a real structural fact (e.g. migration.py's
+    # find_migration_incomplete() parsing pom.xml itself to learn the old
+    # dependency is still declared). That evidence must outrank the model's
+    # own self-diagnosis in attribute_failure() (kriya/workflow/
+    # attribution.py) - found live, PRV-05 run 7: a stale self-diagnosis
+    # ("the fix is really in JsonService.java, not pom.xml") kept winning
+    # over the manifest's own authoritative pom.xml evidence across attempts
+    # 5-8, none of which could ever satisfy SOURCE_DEPENDENCY_REMAINS since
+    # the file that actually needed changing was never retried again. Empty
+    # for every failure type that has no such structural evidence (the
+    # overwhelming majority) - those keep today's locator/self-diagnosis/
+    # judge precedence exactly as before.
+    authoritative_files: List[str] = field(default_factory=list)
 
     def to_gate_outcome(self) -> dict:
         """The shape kriya/workflow/workflow.py's gate_outcomes list expects -
@@ -262,6 +277,7 @@ class Failure:
             "milestone_id": self.milestone_id,
             "planned_files": list(self.planned_files),
             "verification_target": self.verification_target,
+            "authoritative_files": list(self.authoritative_files),
         }
 
 

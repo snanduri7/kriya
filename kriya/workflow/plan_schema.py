@@ -93,6 +93,24 @@ class ExecutionRole(str, Enum):
     VERIFICATION = "verification"
 
 
+class FileOwnershipRelation(str, Enum):
+    """Where a file sits relative to a given subtask in the validated plan's
+    dependency DAG - PRV-05 (2026-08-28)'s answer to "who owns this file,
+    and are we there yet", shared by EngineeringPlan.classify_file_ownership()
+    below. UNOWNED (no subtask in the plan declares the path at all) is
+    deliberately distinct from UNRELATED (owned, but by a subtask with no
+    dependency-ordering relationship to the one asking) - an UNOWNED file
+    can never legitimately become PENDING (nothing in the plan will ever
+    "reach" it), while an UNRELATED one is a real plan-scope conflict, not a
+    timing question."""
+
+    CURRENT = "current"
+    FUTURE_ORDERED = "future_ordered"
+    PAST_ORDERED = "past_ordered"
+    UNRELATED = "unrelated"
+    UNOWNED = "unowned"
+
+
 class VerificationMethodType(str, Enum):
     """TOOL verification is deterministic (compile/test/lint/a registered
     validator). JUDGMENT is anything that can't be deterministically
@@ -372,6 +390,59 @@ class EngineeringPlan(BaseModel):
     def file_owner(self, path: str) -> Optional[Subtask]:
         owners = [st for st in self.subtasks if any(pf.path == path for pf in st.planned_files)]
         return owners[0] if len(owners) == 1 else None
+
+    def _transitive_dependency_ids(self, subtask_id: str) -> "set[str]":
+        """Every OTHER subtask id `subtask_id` depends on, directly or
+        transitively (own id never included). Assumes the graph is already
+        known-acyclic (plan_validation.validate_plan() rejects cycles before
+        a plan is execution-authorized - see this module's own docstring) -
+        a cycle would recurse forever without the visited-guard below."""
+        by_id = {st.id: st for st in self.subtasks}
+        visited: "set[str]" = set()
+
+        def resolve(sid: str) -> "set[str]":
+            if sid in visited:
+                return set()
+            visited.add(sid)
+            result: "set[str]" = set()
+            for dep in by_id[sid].depends_on if sid in by_id else []:
+                if dep not in by_id:
+                    continue
+                result.add(dep)
+                result |= resolve(dep)
+            return result
+
+        return resolve(subtask_id)
+
+    def classify_file_ownership(
+        self, current_subtask_id: str, path: str,
+    ) -> "FileOwnershipRelation":
+        """Where `path` sits relative to `current_subtask_id` in the
+        validated plan's dependency DAG - PRV-05 (2026-08-28)'s ownership
+        helper, shared by stage-aware migration validation
+        (kriya/workflow/migration.py) and retry attribution alike, so both
+        answer "who owns this file, and are we there yet" the same way.
+
+        Deliberately re-derives the owner set directly from planned_files
+        rather than calling file_owner() above - a file legitimately owned
+        by TWO OR MORE subtasks in a validated, dependency-ordered sequential
+        chain (plan_validation.py's _forms_sequential_ownership_chain, e.g.
+        this exact PRV-05 plan's JsonService.java: both s1 and s2 declare
+        it) is not "ambiguous" here the way file_owner()'s single-owner-only
+        lookup treats it - CURRENT must fire whenever current_subtask_id is
+        ANY one of the (validated-sequential) co-owners, not just when it's
+        the sole owner."""
+        owners = [st.id for st in self.subtasks if any(pf.path == path for pf in st.planned_files)]
+        if not owners:
+            return FileOwnershipRelation.UNOWNED
+        if current_subtask_id in owners:
+            return FileOwnershipRelation.CURRENT
+        current_deps = self._transitive_dependency_ids(current_subtask_id)
+        if any(owner in current_deps for owner in owners):
+            return FileOwnershipRelation.PAST_ORDERED
+        if all(current_subtask_id in self._transitive_dependency_ids(owner) for owner in owners):
+            return FileOwnershipRelation.FUTURE_ORDERED
+        return FileOwnershipRelation.UNRELATED
 
     def content_hash(self) -> str:
         """Stable sha256 over the plan's full validated content - MA6.7's

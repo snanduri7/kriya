@@ -591,7 +591,29 @@ async def attribute_failure(
     actively wrong to prefer over a fresh locator. Ranked ABOVE locator/judge
     deliberately: a locator that already led to one failed fix attempt on
     this exact repeat is weaker evidence than the model's own stated
-    disagreement with that target."""
+    disagreement with that target - EXCEPT failure.authoritative_files
+    (below), which outranks even self-diagnosis."""
+    # PRV-05 run 7 (2026-08-28): checked FIRST, above self-diagnosis - a
+    # failure type that sets authoritative_files (currently only
+    # migration.py's find_migration_incomplete(), via attempt.py's
+    # migration_incomplete raise site) carries deterministic STRUCTURAL
+    # evidence (e.g. pom.xml's own parsed dependency list), not a guess.
+    # The model's own self-diagnosis is real evidence too, but it is a
+    # claim about the model's OWN prior output, not a fact about the
+    # repository - it must never be allowed to overrule a fact. Found live:
+    # a self-diagnosis claiming "the fix is really in JsonService.java, not
+    # pom.xml" kept beating the manifest's own correct pom.xml evidence for
+    # 4 consecutive attempts, none of which could ever satisfy
+    # SOURCE_DEPENDENCY_REMAINS since the file that actually needed
+    # changing was never retried again.
+    if failure.authoritative_files:
+        return AttributionResult(
+            tier="authoritative_deterministic", files=list(failure.authoritative_files), confidence="high",
+            reasoning=(
+                "Deterministic structural evidence (not a text/self-diagnosis guess) identifies "
+                "the file(s) an unmet condition concerns."
+            ),
+        )
     if self_diagnosed_files:
         return AttributionResult(
             tier="self_diagnosis", files=self_diagnosed_files, confidence="high",

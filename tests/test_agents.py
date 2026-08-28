@@ -2846,6 +2846,31 @@ async def test_spec_compliance_check_unparseable_response_fails_open():
     assert result["status"] == "unknown"
 
 @pytest.mark.asyncio
+async def test_spec_compliance_check_prepends_authoritative_context_to_prompt():
+    """MA8 (spec §31): when the caller supplies authoritative_context, it
+    must actually reach the model's prompt, ahead of the goal/files - not
+    just be accepted and silently dropped."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "compliant": True, "reasoning": "ok", "missing_requirements": [], "likely_files": [],
+    }))
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    await checker.check(
+        goal="Replace Gson with Jackson",
+        files_written=["JsonService.java"],
+        file_contents={"JsonService.java": "class JsonService {}\n"},
+        authoritative_context="AUTHORITATIVELY ESTABLISHED (deterministic evidence):\n- SOURCE_DEPENDENCY_REMAINS",
+    )
+
+    prompt_sent = llm.complete.call_args_list[0][0][1]
+    context_pos = prompt_sent.index("AUTHORITATIVELY ESTABLISHED")
+    goal_pos = prompt_sent.index("=== Goal ===")
+    assert context_pos < goal_pos
+
+
+@pytest.mark.asyncio
 async def test_skill_gap_agent_extracts_rules_and_examples():
     cfg = AppConfig()
     llm = LLMClient(cfg)

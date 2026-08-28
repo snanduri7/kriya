@@ -1011,6 +1011,89 @@ async def test_enforce_reopens_unique_upstream_owner_and_reruns_consumer(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_enforce_reopens_completed_predecessor_for_authoritative_deterministic_scope_conflict_instead_of_merging(tmp_path):
+    """MA8 (spec §30, 'owner is a completed predecessor'): a DETERMINISTIC-
+    authority scope conflict (attribution_tier="authoritative_deterministic"
+    - currently only ever produced by the migration gate's
+    failure.authoritative_files, see attribution.py) naming a file a real
+    UPSTREAM subtask already owns must REOPEN that predecessor, not merge/
+    steal its ownership into the failing subtask - even though
+    classification == PLAN_SCOPE_DEFECT would otherwise route into the
+    merge path (compare test_enforce_revises_service_scope_to_grounded_
+    controller_and_continues just below, whose attribution_tier=
+    "architectural_owner" case is deliberately left routing through the
+    unchanged merge path)."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="remove old dependency", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pom.xml", action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="s2", description="migrate production usage", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="src/JsonService.java", action=FileAction.MODIFY)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (tmp_path / "pom.xml").write_text("<project><dependencies><gson/></dependencies></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if len(calls) == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "classification": "PLAN_SCOPE_DEFECT",
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "migration_incomplete",
+                    "required_files": ["pom.xml"],
+                    "grounded_owner_files": [],
+                    "attribution_tier": "authoritative_deterministic",
+                    "allowed_files": ["src/JsonService.java"],
+                },
+            }
+        if len(calls) == 3:
+            (tmp_path / "pom.xml").write_text("<project><dependencies/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        (tmp_path / "src").mkdir(exist_ok=True)
+        (tmp_path / "src" / "JsonService.java").write_text("class JsonService {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["src/JsonService.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 4
+    # s2 (the failing consumer) never got pom.xml merged into its own scope -
+    # s1 was REOPENED and re-ran pom.xml itself.
+    assert calls[1]["allowed_write_relpaths"] == ["src/JsonService.java"]
+    assert calls[2]["allowed_write_relpaths"] == ["pom.xml"]
+    assert calls[3]["allowed_write_relpaths"] == ["src/JsonService.java"]
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_subtasks = approved["plan"]["subtasks"]
+    # Ownership must remain exactly as originally planned - pom.xml still
+    # belongs to s1, NOT stripped from it and merged into s2.
+    assert any(
+        item["id"] == "s1" and "pom.xml" in [pf["path"] for pf in item["planned_files"]]
+        for item in approved_subtasks
+    )
+    assert not any(
+        item["id"] == "s2" and "pom.xml" in [pf["path"] for pf in item["planned_files"]]
+        for item in approved_subtasks
+    )
+
+
+@pytest.mark.asyncio
 async def test_enforce_revises_service_scope_to_grounded_controller_and_continues(tmp_path):
     service = "src/CustomerService.java"
     controller = "src/CustomerController.java"
@@ -2081,6 +2164,14 @@ async def test_enforce_rejects_model_subtask_without_planned_files(tmp_path):
     assert result.legacy_result["reason_codes"] == [
         "MODEL_SUBTASK_MISSING_PLANNED_FILES",
         "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+        # MA8: the planner is mocked to return the identical broken plan on
+        # every repair attempt, so the same obligation stays VIOLATED across
+        # all 3 attempts (never oscillates through SATISFIED) - the
+        # exhaustion branch correctly reports non-convergence, not
+        # oscillation. Pre-existing test gap (this assertion predates MA8
+        # v1's oscillation/non-convergence diagnostics), fixed while
+        # verifying Batch 1 - not caused by Batch 1 itself.
+        "PLAN_REPAIR_NON_CONVERGENCE",
     ]
     assert result.legacy_result["plan_repair_attempts"] == 2
     assert result.legacy_result["invalid_subtask_ids"] == ["s1"]

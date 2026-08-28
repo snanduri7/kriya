@@ -247,6 +247,8 @@ workflow_controller:
 
 **Operator visibility**: `kriya doctor` reports the current workspace's control-plane state regardless of whether any of the above is enabled - workspace identity, whether `ControlState` matches the real on-disk workspace (drift detection), and contract/artifact record counts.
 
+**Task correctness across revisions (MA8)** - no new config, active automatically whenever `mode: enforce` runs. On top of the bounded per-subtask write authority above, `enforce` mode now tracks whether structural plan constraints and (for a dependency-migration goal) the migration's own completion facts stay true across plan repairs and retries - a repair that fixes one constraint while silently regressing another already-fixed one is now detected and fed back into the next repair attempt, a stale or contradictory Goal Spec Compliance verdict can no longer override an already-confirmed deterministic migration fact, and a recurring invented parallel implementation of an existing file's responsibility is now flagged rather than repeatedly re-patched. See `docs/design.md` §9 for the full mechanism.
+
 ---
 
 ## 3. Core Commands

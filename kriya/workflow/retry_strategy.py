@@ -470,14 +470,27 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         # ladder the current attempt is already on.
         # Only trust a self-diagnosis (kriya/workflow/attribution.py's
         # extract_self_diagnosed_files(), captured in attempt.py right after
-        # the attempt that produced it) when THIS failure is a CONFIRMED
-        # repeat of the exact failure that diagnosis was responding to -
-        # current_failure_signature was just computed fresh above, before
-        # state.budgets.last_failure_signature gets overwritten to it at
-        # line 142. A stale diagnosis from an unrelated, different failure
-        # must never override a fresh locator.
+        # the attempt that produced it) when THIS failure is the CONFIRMED
+        # outcome of the very attempt that diagnosis was captured during -
+        # both the signature AND the attempt number must match. Signature
+        # alone is NOT sufficient (PRV-05 run 7, 2026-08-28 - see attempt.py's
+        # state.last_self_diagnosis capture site for the full incident):
+        # _REPAIR_FEEDBACK_FAILURE_TYPES collapses an edit-protocol failure's
+        # signature onto whatever authoritative failure it's repairing, so a
+        # diagnosis captured mid-repair can share its stored signature with a
+        # LATER, genuinely fresh occurrence of that same authoritative
+        # failure - one the diagnosis was never actually about. Gating on
+        # attempt number too restricts reuse to "explains THIS attempt's own
+        # outcome", closing that replay without narrowing anything else - a
+        # diagnosis that legitimately predicts the NEXT attempt's own result
+        # is still captured fresh, every attempt, whenever that attempt's own
+        # response carries new FIX ANALYSIS text.
         self_diagnosed_files = None
-        if state.last_self_diagnosis and state.last_self_diagnosis[0] == current_failure_signature:
+        if (
+            state.last_self_diagnosis
+            and state.last_self_diagnosis[0] == current_failure_signature
+            and state.last_self_diagnosis[2] == state.attempt_number
+        ):
             self_diagnosed_files = state.last_self_diagnosis[1]
 
         # Unioned with ctx.established_files (kriya/workflow/attempt.py's
