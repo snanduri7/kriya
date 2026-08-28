@@ -390,7 +390,20 @@ _REPRO_SHAPE_RE = re.compile(
     r"\b(?:traceback|stack\s*trace|exception|throws?\b|"
     r"crashes?\s+when|fails?\s+when|breaks?\s+when|"
     r"expected\s+.{1,60}?\bgot\b|returns?\s+(?:a\s+)?\d{3}\b|"
-    r"\bbug\b|\bdefect\b|\bregression\b|\bbroken\b)",
+    r"\bbug\b|\bdefect\b|\bbroken\b|"
+    # "regression" alone means "a regression [bug]" - real repro-shape
+    # evidence. But "regression tests"/"regression suite" is standard QA
+    # boilerplate, near-universal in ANY brownfield goal ("existing
+    # regression tests must continue to pass") and carries no repro-shape
+    # signal at all. Found live, PRV-05 (2026-08-28): that exact phrase in
+    # an explicit migration goal made repro_shape fire alongside
+    # migration_language, and repro_shape's fixed decision-order priority
+    # (checked first in EngineeringTriageService.classify) silently
+    # overrode the correct REFACTOR classification with TASK - routing an
+    # explicit "replace X with Y" migration through the wrong downstream
+    # profile for its entire run.
+    r"\bregression\b(?!\s+(?:tests?|suite))"
+    r")",
     re.IGNORECASE,
 )
 # A file:line reference (a real stack-trace frame, or a reproduction quoting

@@ -15,6 +15,8 @@ from kriya.workflow.triage import (
     ExecutionWeight,
     ImpactVector,
     RiskClass,
+    _detect_migration_language,
+    _detect_repro_shape,
     determine_execution_weight,
     determine_risk_class,
     escalate_risk,
@@ -330,3 +332,43 @@ async def test_recompute_from_files_no_kernel_degrades_honestly_no_crash():
     )
     assert recomputed.impact.downstream_references == 0
     assert recomputed.impact.symbols_impacted == 0
+
+
+# --- _detect_repro_shape / _detect_migration_language: the "regression" word
+# collision (PRV-05, 2026-08-28) ---
+#
+# _REPRO_SHAPE_RE and _MIGRATION_LANGUAGE_RE are checked in a fixed decision
+# order in EngineeringTriageService.classify() (repro_shape first, short-
+# circuiting REFACTOR) - "regression" alone used to match both "a regression
+# [bug]" (real repro-shape evidence) AND "regression tests"/"regression
+# suite" (standard QA boilerplate present in nearly every brownfield goal,
+# carrying no repro-shape signal at all). Found live: an explicit "Replace
+# the existing JSON serialization library..." migration goal that also said
+# "Existing regression tests must continue to pass" got its correct REFACTOR
+# classification silently overridden to TASK by this false positive - Legacy
+# mode then ran the entire dependency migration under the wrong downstream
+# profile.
+
+def test_repro_shape_does_not_fire_on_regression_tests_boilerplate():
+    assert _detect_repro_shape("Existing regression tests must continue to pass.") is False
+    assert _detect_repro_shape("Run the full regression suite before merging.") is False
+
+
+def test_repro_shape_still_fires_on_a_real_regression_bug():
+    assert _detect_repro_shape("This change introduced a regression in the login flow.") is True
+    assert _detect_repro_shape("Fix the regression that broke checkout.") is True
+
+
+def test_migration_goal_with_regression_tests_boilerplate_is_not_masked_by_repro_shape():
+    """The exact real PRV-05 goal text: migration_language must fire, and
+    repro_shape must NOT fire (which would otherwise win the fixed decision
+    order and force TASK instead of REFACTOR)."""
+    goal = (
+        "Replace the existing JSON serialization library with the JSON library "
+        "already approved for this repository.\n\n"
+        "Requirements:\n"
+        "- Preserve the application's externally observable JSON contract exactly.\n"
+        "- Existing regression tests must continue to pass."
+    )
+    assert _detect_migration_language(goal) is True
+    assert _detect_repro_shape(goal) is False
