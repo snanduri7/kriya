@@ -1327,6 +1327,160 @@ async def test_enforce_owner_recovery_no_progress_blocks_completion_and_never_re
 
 
 @pytest.mark.asyncio
+async def test_enforce_owner_recovery_wrong_fix_blocks_completion_and_never_resumes_consumer(tmp_path):
+    """Recovery Execution Contract Invariant 3 (2026-08-29): a changed
+    candidate can still be wrong - RECOVERY_NO_PROGRESS (see the sibling
+    test just above) only catches a BYTE-IDENTICAL regeneration. This is
+    the general case: s1's owner-recovery attempt genuinely CHANGES
+    build.config (so no-progress does not fire) but still does not
+    reference the authoritative entrypoint (RequiredMain) the originating
+    scope_conflict names via `required_reference_token` - a deterministic,
+    pre-consumer acceptance check (no LLM call, no downstream subtask
+    re-invocation) must reject this BEFORE the consumer is ever resumed.
+    "owner_local_accepted (local gates PASS) AND candidate changed" must
+    NOT be treated as recovery success - only "AND the originating
+    requirement is actually satisfied" may be. Compare
+    test_enforce_owner_recovery_correct_fix_via_reference_token_completes_
+    and_resumes_consumer just below (the same mechanism's ACCEPT path)."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build config", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)],
+                provides=["entrypoint.configured"],
+            ),
+            Subtask(
+                id="s2", description="create application entrypoint", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app_entrypoint.txt", action=FileAction.CREATE)],
+                requires=["entrypoint.configured"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (tmp_path / "build.config").write_text("entrypoint=OldMain")
+            return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+        if len(calls) == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "misdirected_edit",
+                    "required_files": ["build.config"],
+                    "allowed_files": ["app_entrypoint.txt"],
+                    "required_reference_token": "RequiredMain",
+                },
+            }
+        # Generation 0's owner-recovery candidate: genuinely CHANGED from
+        # the baseline (so RECOVERY_NO_PROGRESS does not fire) but still
+        # wrong - references a DIFFERENT incorrect entrypoint, never the
+        # authoritative "RequiredMain" the scope_conflict names.
+        (tmp_path / "build.config").write_text("entrypoint=DifferentButStillWrongMain")
+        return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    # Only s1's initial pass, s2's failing attempt, and s1's one rejected
+    # recovery attempt happened - the consumer was never re-invoked to
+    # discover what a cheap, deterministic check already knew.
+    assert len(calls) == 3
+    assert result.legacy_result["status"] != "success"
+    assert len(result.legacy_result["plan_recovery_events"]) == 1
+    recovery_event = result.legacy_result["plan_recovery_events"][0]
+    assert recovery_event["owner_recovery_passed"] is False
+    assert recovery_event["generation"] == 0
+    owner_result = next(item for item in result.subtask_results if item.subtask_id == "s1")
+    assert owner_result.status == SubtaskStatus.NEEDS_REVIEW
+    assert "PLAN_RECOVERY_OWNER_FAILED" in owner_result.reason_codes
+    consumer_result = next(item for item in result.subtask_results if item.subtask_id == "s2")
+    assert consumer_result.status != SubtaskStatus.COMPLETED
+    # The still-wrong candidate is what's on disk - Kriya never pretended
+    # otherwise, but it also never let the consumer act on it as if fixed.
+    assert (tmp_path / "build.config").read_text() == "entrypoint=DifferentButStillWrongMain"
+
+
+@pytest.mark.asyncio
+async def test_enforce_owner_recovery_correct_fix_via_reference_token_completes_and_resumes_consumer(tmp_path):
+    """Recovery Execution Contract Invariant 3 (2026-08-29), ACCEPT path:
+    the same deterministic required_reference_token mechanism that
+    rejected a still-wrong candidate in the sibling test just above must
+    also correctly ACCEPT a genuine fix - owner local gates PASS AND the
+    authoritative entrypoint is now actually referenced -> recovery
+    accepted -> consumer resumes -> consumer succeeds. Together with the
+    no-progress test and the wrong-fix test just above, these three prove
+    the full contract: same wrong -> reject as no progress, different
+    wrong -> reject as unmet recovery, correct -> accept."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build config", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)],
+                provides=["entrypoint.configured"],
+            ),
+            Subtask(
+                id="s2", description="create application entrypoint", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app_entrypoint.txt", action=FileAction.CREATE)],
+                requires=["entrypoint.configured"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (tmp_path / "build.config").write_text("entrypoint=OldMain")
+            return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+        if len(calls) == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "misdirected_edit",
+                    "required_files": ["build.config"],
+                    "allowed_files": ["app_entrypoint.txt"],
+                    "required_reference_token": "RequiredMain",
+                },
+            }
+        if len(calls) == 3:
+            # Generation 0's owner-recovery candidate: the genuine fix -
+            # references the authoritative entrypoint the scope_conflict
+            # named.
+            (tmp_path / "build.config").write_text("entrypoint=RequiredMain")
+            return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+        (tmp_path / "app_entrypoint.txt").write_text("RequiredMain")
+        return {"status": "success", "quality_gates_passed": True, "files": ["app_entrypoint.txt"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 4
+    assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
+    recovery_event = result.legacy_result["plan_recovery_events"][0]
+    assert recovery_event["owner_recovery_passed"] is True
+    assert (tmp_path / "build.config").read_text() == "entrypoint=RequiredMain"
+
+
+@pytest.mark.asyncio
 async def test_enforce_reopens_completed_predecessor_for_authoritative_deterministic_scope_conflict_instead_of_merging(tmp_path):
     """MA8 (spec §30, 'owner is a completed predecessor'): a DETERMINISTIC-
     authority scope conflict (attribution_tier="authoritative_deterministic"

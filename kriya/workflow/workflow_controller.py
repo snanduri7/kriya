@@ -1185,6 +1185,70 @@ def _build_owner_recovery_context(
     )
 
 
+def _evaluate_recovery_acceptance_precheck(
+    *,
+    scope_conflict: Dict[str, Any],
+    plan_workspace_path: str,
+    required_owner_files: List[str],
+) -> Optional[bool]:
+    """Recovery Execution Contract Invariant 3 (2026-08-29): "owner local
+    gates PASS" and "the recovery requirement that reopened this owner is
+    actually satisfied" are different questions - a regenerated candidate
+    can change (so RECOVERY_NO_PROGRESS never fires) while still being
+    WRONG (e.g. a build config corrected from one bad entrypoint value to
+    a DIFFERENT bad one). This is the smallest authoritative acceptance
+    evidence available BEFORE ever resuming the downstream consumer -
+    deliberately narrow, matching Correctness Continuity Part C's own "no
+    universal semantic evaluator" boundary, reused here rather than
+    invented fresh. Returns True/False when a deterministic evidence
+    source actually applies to this scope_conflict; None when none does,
+    in which case the caller falls back to the PRE-EXISTING, already-
+    correct design documented at the CONSUMER_RETRY_STARTED call site:
+    the consumer's own retry Quality Gates ARE the authoritative
+    acceptance signal for everything not covered by a cheap check here -
+    this function only ever narrows WHEN a wasted consumer call can be
+    skipped, never widens what counts as success.
+
+    Exactly one evidence source, deliberately: `required_reference_token`
+    (an optional string a caller may place directly on scope_conflict,
+    e.g. an authoritative entrypoint/config value a downstream consumer
+    already established) - a deterministic whole-word text match against
+    the owner's own required files, the SAME crude, generic, language-
+    agnostic primitive Correctness Continuity Part C already uses for
+    cross-subtask integration evidence (`_integration_reference_token`/
+    its own regex). Absent by default on every scope_conflict shape this
+    codebase currently produces - populating it is future wiring, not
+    built this round (disclosed, not silently assumed).
+
+    A `PolymorphicValidator.run_compile_check()`-based compile-family
+    fallback was drafted and DELIBERATELY REMOVED during this same
+    round's own regression sweep: it produced false RECOVERY_ACCEPTANCE_
+    UNSATISFIED rejections against every pre-existing test's synthetic
+    pom.xml fixture (no real Maven toolchain/buildable project behind
+    them), and - more fundamentally - directly contradicts this
+    codebase's own already-tested finding at the CONSUMER_RETRY_STARTED
+    call site: a compile check on the owner's OWN file has no way to
+    evaluate a DOWNSTREAM cross-owner requirement (confirmed live:
+    pom.xml's own compile check happily accepted a still-incomplete
+    manifest). A real per-ecosystem "did this specific requirement's own
+    evidence clear" check remains a legitimate future extension, but is
+    not this one - see docs/design.md's own disclosure for this round."""
+    required_token = scope_conflict.get("required_reference_token")
+    if not required_token:
+        return None
+    pattern = re.compile(rf"\b{re.escape(required_token)}\b")
+    for path in required_owner_files:
+        full_path = os.path.join(plan_workspace_path, path)
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        if pattern.search(content):
+            return True
+    return False
+
+
 def _integration_reference_token(path: str) -> str:
     """The stem of a file's basename (no directory, no extension) - e.g.
     "InMemoryService" from "src/main/java/com/example/InMemoryService.java",
@@ -3444,7 +3508,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         and recovery_candidate_fingerprints.get(fingerprint_key) == candidate_fingerprint
                     )
                     recovery_candidate_fingerprints[fingerprint_key] = candidate_fingerprint
-                    owner_passed = (
+                    owner_local_accepted = (
                         bool(owner_result.get("quality_gates_passed"))
                         and not owner_undeclared
                         and set(required_owner_files).issubset(owner_written)
@@ -3459,46 +3523,101 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "legitimate recovery progress.",
                             candidate_requirement_id, owner_id, generation, sorted(required_owner_files),
                         )
-                    logger.info(
-                        "OWNER_RECOVERY_COMPLETED requirement_id=%s owner=%s generation=%d passed=%s",
-                        candidate_requirement_id, owner_id, generation, owner_passed,
-                    )
-                    plan_recovery_events.append({
-                        "failed_subtask": subtask.id,
-                        "reopened_owner": owner_id,
-                        "required_repair_files": sorted(required_owner_files),
-                        "classification": scope_conflict.get(
-                            "classification", "PLAN_SCOPE_INSUFFICIENT",
-                        ),
-                        "reason": scope_conflict.get("reason"),
-                        "invalidated_subtasks": invalidated,
-                        "ownership_revalidated": True,
-                        "revalidation_basis": "unique approved upstream file owner",
-                        "owner_recovery_passed": owner_passed,
-                        "requirement_id": candidate_requirement_id,
-                        "generation": generation,
-                    })
-                    approved_stage_states[owner_id] = "completed" if owner_passed else "needs_review"
-                    control_state = control_state.with_updates(
-                        subtask_states={
-                            **control_state.subtask_states,
-                            owner_id: "completed" if owner_passed else "needs_review",
-                        },
-                        subtask_written_files={
-                            **control_state.subtask_written_files,
-                            owner_id: sorted(owner_result.get("files") or []),
-                        },
-                    )
-                    save_approved_plan(
-                        workspace_path, plan.plan_id,
-                        build_approved_plan_document(
-                            plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
-                            stage_states=approved_stage_states,
-                            lifecycle_state="in_progress" if owner_passed else "needs_review",
-                        ),
-                    )
-                    save_control_state(workspace_path, control_state)
-                    if owner_passed:
+                    # Recovery Execution Contract Invariant 3 (2026-08-29):
+                    # owner_local_accepted (local gates + no-progress) is
+                    # NECESSARY but not SUFFICIENT - a changed candidate can
+                    # still be wrong. RECOVERY_NO_PROGRESS above is the
+                    # cheap, unchanged-content special case; this is the
+                    # general one: a deterministic pre-consumer acceptance
+                    # check, when one applies to this scope_conflict's own
+                    # failure_type, can reject a genuinely-changed-but-still-
+                    # wrong candidate WITHOUT ever resuming the (expensive,
+                    # LLM-driven) downstream consumer just to find out.
+                    recovery_acceptance_unsatisfied = False
+                    if owner_local_accepted:
+                        acceptance_precheck = _evaluate_recovery_acceptance_precheck(
+                            scope_conflict=scope_conflict,
+                            plan_workspace_path=plan_workspace_path,
+                            required_owner_files=sorted(required_owner_files),
+                        )
+                        if acceptance_precheck is False:
+                            recovery_acceptance_unsatisfied = True
+                            logger.warning(
+                                "RECOVERY_ACCEPTANCE_UNSATISFIED requirement_id=%s owner=%s "
+                                "generation=%d - a deterministic pre-consumer acceptance check "
+                                "found the originating recovery requirement still unmet for %s, "
+                                "even though the owner's own local gates passed and the "
+                                "candidate genuinely changed from its prior state.",
+                                candidate_requirement_id, owner_id, generation,
+                                sorted(required_owner_files),
+                            )
+                    if not owner_local_accepted or recovery_acceptance_unsatisfied:
+                        # Recovery did not close the loop - the consumer is
+                        # NEVER resumed off the back of this candidate, and
+                        # OWNER_RECOVERY_COMPLETED is declared False
+                        # immediately (no separate, later "was it REALLY
+                        # accepted" step needed - nothing downstream ran).
+                        logger.info(
+                            "OWNER_RECOVERY_COMPLETED requirement_id=%s owner=%s generation=%d passed=False",
+                            candidate_requirement_id, owner_id, generation,
+                        )
+                        plan_recovery_events.append({
+                            "failed_subtask": subtask.id,
+                            "reopened_owner": owner_id,
+                            "required_repair_files": sorted(required_owner_files),
+                            "classification": scope_conflict.get(
+                                "classification", "PLAN_SCOPE_INSUFFICIENT",
+                            ),
+                            "reason": scope_conflict.get("reason"),
+                            "invalidated_subtasks": invalidated,
+                            "ownership_revalidated": True,
+                            "revalidation_basis": "unique approved upstream file owner",
+                            "owner_recovery_passed": False,
+                            "requirement_id": candidate_requirement_id,
+                            "generation": generation,
+                        })
+                        approved_stage_states[owner_id] = "needs_review"
+                        control_state = control_state.with_updates(
+                            subtask_states={
+                                **control_state.subtask_states,
+                                owner_id: "needs_review",
+                            },
+                            subtask_written_files={
+                                **control_state.subtask_written_files,
+                                owner_id: sorted(owner_result.get("files") or []),
+                            },
+                        )
+                        save_approved_plan(
+                            workspace_path, plan.plan_id,
+                            build_approved_plan_document(
+                                plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                                stage_states=approved_stage_states,
+                                lifecycle_state="needs_review",
+                            ),
+                        )
+                        save_control_state(workspace_path, control_state)
+                        for result_index, prior_result in enumerate(subtask_results):
+                            if prior_result.subtask_id == owner_id:
+                                subtask_results[result_index] = SubtaskResult(
+                                    subtask_id=owner_id,
+                                    status=SubtaskStatus.NEEDS_REVIEW,
+                                    execution_method=ExecutionMethod.MODEL.value,
+                                    error="upstream owner failed bounded plan recovery verification",
+                                    reason_codes=("PLAN_RECOVERY_OWNER_FAILED",),
+                                )
+                                break
+                        recovery_generation_by_key[generation_key] = generation + 1
+                        break
+                    else:
+                        # owner_local_accepted True and no pre-consumer
+                        # acceptance check rejected it - proceed to resume
+                        # the consumer. Invariant 3: OWNER_RECOVERY_COMPLETED
+                        # and its plan-state persistence are now declared
+                        # ONLY after folding in the consumer's own retry
+                        # result below, never on the owner's local gates
+                        # alone - "owner local PASS" and "recovery PASS" are
+                        # different questions (see this function's own
+                        # module-level acceptance-precheck docstring).
                         for path in owner_result.get("files") or []:
                             try:
                                 with open(
@@ -3550,20 +3669,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             ),
                             execution_role="consumer_retry",
                         )
-                        # MA8.1 (PRV-06, 2026-08-29): the obligation's own
-                        # acceptance condition IS this consumer_retry call's
-                        # Quality Gates - not a separate, speculative check
-                        # of the owner's file content (which the owner's own
-                        # narrow gate has no way to evaluate against a
-                        # DOWNSTREAM requirement anyway - confirmed live:
-                        # pom.xml's own compile check happily accepted a
-                        # still-incomplete manifest). SATISFIED only on the
-                        # real, authoritative signal; left VIOLATED (sticky,
-                        # unchanged) otherwise, so a further reopening of
-                        # the SAME owner for the SAME requirement reuses the
-                        # SAME MUST_FIX text rather than losing it again.
+                        # MA8.1 (PRV-06, 2026-08-29) / Recovery Execution
+                        # Contract Invariant 3 (2026-08-29): the obligation's
+                        # own acceptance condition IS this consumer_retry
+                        # call's Quality Gates - not a separate, speculative
+                        # check of the owner's file content (which the
+                        # owner's own narrow gate has no way to evaluate
+                        # against a DOWNSTREAM requirement anyway - confirmed
+                        # live: pom.xml's own compile check happily accepted
+                        # a still-incomplete manifest). recovery_accepted is
+                        # now the SAME signal OWNER_RECOVERY_COMPLETED itself
+                        # reports below - "owner local PASS" is no longer
+                        # conflated with "recovery PASS" anywhere in this
+                        # cycle.
+                        recovery_accepted = bool(call_result.get("quality_gates_passed"))
                         if cross_owner_obligation is not None:
-                            if bool(call_result.get("quality_gates_passed")):
+                            if recovery_accepted:
                                 obligation_ledger.record(ObligationRecord(
                                     id=cross_owner_obligation.id,
                                     kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
@@ -3577,6 +3698,45 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                     terminal_required=False,
                                     repair_scope=cross_owner_obligation.repair_scope,
                                 ))
+                        logger.info(
+                            "OWNER_RECOVERY_COMPLETED requirement_id=%s owner=%s generation=%d passed=%s",
+                            candidate_requirement_id, owner_id, generation, recovery_accepted,
+                        )
+                        plan_recovery_events.append({
+                            "failed_subtask": subtask.id,
+                            "reopened_owner": owner_id,
+                            "required_repair_files": sorted(required_owner_files),
+                            "classification": scope_conflict.get(
+                                "classification", "PLAN_SCOPE_INSUFFICIENT",
+                            ),
+                            "reason": scope_conflict.get("reason"),
+                            "invalidated_subtasks": invalidated,
+                            "ownership_revalidated": True,
+                            "revalidation_basis": "unique approved upstream file owner",
+                            "owner_recovery_passed": recovery_accepted,
+                            "requirement_id": candidate_requirement_id,
+                            "generation": generation,
+                        })
+                        approved_stage_states[owner_id] = "completed" if recovery_accepted else "needs_review"
+                        control_state = control_state.with_updates(
+                            subtask_states={
+                                **control_state.subtask_states,
+                                owner_id: "completed" if recovery_accepted else "needs_review",
+                            },
+                            subtask_written_files={
+                                **control_state.subtask_written_files,
+                                owner_id: sorted(owner_result.get("files") or []),
+                            },
+                        )
+                        save_approved_plan(
+                            workspace_path, plan.plan_id,
+                            build_approved_plan_document(
+                                plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                                stage_states=approved_stage_states,
+                                lifecycle_state="in_progress" if recovery_accepted else "needs_review",
+                            ),
+                        )
+                        save_control_state(workspace_path, control_state)
                         # This exact (origin, owner, files) tuple has now
                         # completed one full owner-recovery-and-downstream-
                         # retry cycle - the NEXT scope conflict for this
@@ -3584,25 +3744,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         # for its own fresh requirement rather than being
                         # silently treated as a continuation of this one.
                         recovery_generation_by_key[generation_key] = generation + 1
-                        if bool(call_result.get("quality_gates_passed")):
+                        if recovery_accepted:
                             break
                         scope_conflict = call_result.get("plan_scope_conflict") or {}
                         if not scope_conflict:
                             break
                         continue
-                    else:
-                        for result_index, prior_result in enumerate(subtask_results):
-                            if prior_result.subtask_id == owner_id:
-                                subtask_results[result_index] = SubtaskResult(
-                                    subtask_id=owner_id,
-                                    status=SubtaskStatus.NEEDS_REVIEW,
-                                    execution_method=ExecutionMethod.MODEL.value,
-                                    error="upstream owner failed bounded plan recovery verification",
-                                    reason_codes=("PLAN_RECOVERY_OWNER_FAILED",),
-                                )
-                                break
-                        recovery_generation_by_key[generation_key] = generation + 1
-                        break
             subtask_call_results.append(call_result)
 
             quality_gates_passed = bool(call_result.get("quality_gates_passed"))
