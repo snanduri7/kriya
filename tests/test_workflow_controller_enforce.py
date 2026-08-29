@@ -8,11 +8,13 @@ rather than reimplementing edit-application/verification/approval."""
 import json
 import os
 import shutil
+from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from kriya.control.persistence import load_approved_plan, load_control_state
+from kriya.control.state import ControlState
 from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
@@ -41,6 +43,7 @@ from kriya.workflow.obligations import (
 from kriya.workflow.workflow_controller import (
     AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
     _StructuredPlanUnavailable,
+    ArtifactOwnerResolutionBasis,
     WorkflowController,
     _authoritative_planner_extension_candidates,
     _build_owner_recovery_context,
@@ -52,6 +55,8 @@ from kriya.workflow.workflow_controller import (
     build_subtask_goal_text,
     build_subtask_semantic_context,
     build_structured_plan_repair_prompt,
+    resolve_effective_artifact_owner,
+    resolve_effective_scope_conflict_owners,
     resolve_scope_conflict_owners,
     revise_plan_for_grounded_scope_owner,
 )
@@ -3227,3 +3232,389 @@ async def test_enforce_generic_non_maven_shape_permits_a_second_distinct_recover
     assert events[0]["requirement_id"] != events[1]["requirement_id"]
     assert events[0]["generation"] == 0
     assert events[1]["generation"] == 1
+
+
+# --- MA8.1 completion v3 (2026-08-29): "Effective Artifact Ownership and
+# Recovery Routing" - Kriya must be able to recover an artifact even when
+# the subtask that produced its currently-visible revision is absent from
+# the failing subtask's own declared depends_on. Live PRV-06 evidence: s1
+# created App.java, s2 later successfully MODIFIED it, s3 (needing a
+# further App.java fix) declared depends_on=['s1'] only - resolve_scope_
+# conflict_owners (depends_on-only) could never find s2, so recovery fell
+# through to the DAG-mutating merge path, which hit its own real
+# ownership-uniqueness bug and the run terminated unresolved. See
+# resolve_effective_artifact_owner's own docstring for the full authority
+# order (execution provenance first, dependency ancestry as fallback).
+
+
+def _owner_provenance_control_state(subtask_written_files: Dict[str, List[str]]) -> ControlState:
+    return ControlState(schema_version=1, run_id="owner-provenance-test").with_updates(
+        subtask_states={sid: "completed" for sid in subtask_written_files},
+        subtask_written_files=dict(subtask_written_files),
+    )
+
+
+def test_resolve_effective_artifact_owner_latest_successful_modifier_wins():
+    """Test A: s1 creates A, s2 later successfully modifies A - the most
+    recent completed, real modifier (s2) wins, basis=
+    LATEST_SUCCESSFUL_MODIFIER."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="modify A", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="needs A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="B.java", action=FileAction.CREATE)]),
+        ],
+    )
+    order = ["s1", "s2", "s3"]
+    control_state = _owner_provenance_control_state({"s1": ["A.java"], "s2": ["A.java"]})
+
+    resolution = resolve_effective_artifact_owner(
+        plan, "A.java", plan.subtask_by_id("s3"), order=order, control_state=control_state,
+    )
+
+    assert resolution.owner_subtask_id == "s2"
+    assert resolution.resolution_basis == ArtifactOwnerResolutionBasis.LATEST_SUCCESSFUL_MODIFIER
+
+
+def test_resolve_effective_artifact_owner_missing_declared_dependency_does_not_hide_real_owner():
+    """Test B: the exact live PRV-06 shape - s3's OWN depends_on names s1
+    but not s2, even though s2 is the artifact's real, already-completed
+    modifier. Must still resolve to s2. The OLD dependency-only resolver
+    (resolve_scope_conflict_owners) genuinely cannot - asserted directly to
+    prove this is a real fix, not incidental."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="modify A", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="needs A", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],  # deliberately NOT s2
+                    planned_files=[PlannedFile(path="B.java", action=FileAction.CREATE)]),
+        ],
+    )
+    order = ["s1", "s2", "s3"]
+    control_state = _owner_provenance_control_state({"s1": ["A.java"], "s2": ["A.java"]})
+
+    assert resolve_scope_conflict_owners(plan, ["A.java"], plan.subtask_by_id("s3")) == {}
+
+    resolution = resolve_effective_artifact_owner(
+        plan, "A.java", plan.subtask_by_id("s3"), order=order, control_state=control_state,
+    )
+
+    assert resolution.owner_subtask_id == "s2"
+    assert resolution.resolution_basis == ArtifactOwnerResolutionBasis.LATEST_SUCCESSFUL_MODIFIER
+
+
+def test_resolve_effective_artifact_owner_rejects_arbitrary_topological_predecessor():
+    """Test C: s1 wrote B.txt, s2 wrote A.txt - both ran before s3, but
+    only s2 ever actually wrote A.txt. s1 must never be selected merely
+    because it executed earlier (PRV-06 §4/§23 invariant 2)."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create B", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="B.txt", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="create A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="A.txt", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="needs A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="C.txt", action=FileAction.CREATE)]),
+        ],
+    )
+    order = ["s1", "s2", "s3"]
+    control_state = _owner_provenance_control_state({"s1": ["B.txt"], "s2": ["A.txt"]})
+
+    resolution = resolve_effective_artifact_owner(
+        plan, "A.txt", plan.subtask_by_id("s3"), order=order, control_state=control_state,
+    )
+
+    assert resolution.owner_subtask_id == "s2"
+    assert resolution.owner_subtask_id != "s1"
+
+
+def test_resolve_effective_artifact_owner_multiple_historical_modifiers_latest_wins():
+    """Test D: s1 writes A, s2 modifies A, s3 modifies A, s4 requires A -
+    the LATEST (s3), not the first or a middle one, wins."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="modify A", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="modify A again", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s2"],
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.MODIFY)]),
+            Subtask(id="s4", description="needs A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="B.java", action=FileAction.CREATE)]),
+        ],
+    )
+    order = ["s1", "s2", "s3", "s4"]
+    control_state = _owner_provenance_control_state({
+        "s1": ["A.java"], "s2": ["A.java"], "s3": ["A.java"],
+    })
+
+    resolution = resolve_effective_artifact_owner(
+        plan, "A.java", plan.subtask_by_id("s4"), order=order, control_state=control_state,
+    )
+
+    assert resolution.owner_subtask_id == "s3"
+    assert resolution.evidence["prior_modifiers"] == ["s1", "s2", "s3"]
+
+
+def test_resolve_effective_artifact_owner_failed_modifier_does_not_become_owner():
+    """Test E: s1 writes A successfully; s2 attempts A but FAILS quality
+    gates (still recorded a written-files entry, matching real
+    ControlState behavior for a failed subtask); s3 requires A. A failed
+    candidate must not acquire ownership - owner stays s1."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="modify A", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="needs A", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="B.java", action=FileAction.CREATE)]),
+        ],
+    )
+    order = ["s1", "s2", "s3"]
+    control_state = ControlState(schema_version=1, run_id="t").with_updates(
+        subtask_states={"s1": "completed", "s2": "failed"},
+        subtask_written_files={"s1": ["A.java"], "s2": ["A.java"]},
+    )
+
+    resolution = resolve_effective_artifact_owner(
+        plan, "A.java", plan.subtask_by_id("s3"), order=order, control_state=control_state,
+    )
+
+    assert resolution.owner_subtask_id == "s1"
+
+
+def test_resolve_effective_artifact_owner_is_artifact_type_agnostic():
+    """Test F: identical behavior for a non-source, non-Java artifact - no
+    language/build-system special case anywhere in the resolver."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pyproject.toml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="modify manifest", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="pyproject.toml", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="needs a further correction", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="test_service.py", action=FileAction.CREATE)]),
+        ],
+    )
+    order = ["s1", "s2", "s3"]
+    control_state = _owner_provenance_control_state({
+        "s1": ["pyproject.toml"], "s2": ["pyproject.toml"],
+    })
+
+    resolution = resolve_effective_artifact_owner(
+        plan, "pyproject.toml", plan.subtask_by_id("s3"), order=order, control_state=control_state,
+    )
+
+    assert resolution.owner_subtask_id == "s2"
+
+
+@pytest.mark.asyncio
+async def test_enforce_duplicate_type_shape_resolves_effective_owner_via_execution_provenance(tmp_path):
+    """§14 (deterministic reproduction of the live PRV-06 Hardened shape)
+    and Test I (the fallback actually runs owner recovery, proven by real
+    _invoke_bounded_subtask calls - not just log text): s1 creates
+    App.java, s2 later successfully modifies it, s3 (owning InMemoryService
+    .java, depends_on=['s1'] only - s2 is deliberately NOT declared)
+    encounters deterministic duplicate-type evidence requiring App.java to
+    change. Must resolve owner=s2 via execution provenance, thread the
+    exact grounded requirement to s2, cause NO plan DAG mutation, and
+    resume s3 afterward."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create App", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="create InMemoryService", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],  # deliberately NOT s2 - the exact live gap
+                    planned_files=[PlannedFile(path="InMemoryService.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "App.java").write_text("class App {}\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}\nclass InMemoryService {}\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "duplicate_type",
+                    "reason": "InMemoryService is already declared in App.java",
+                    "raw_evidence": "'InMemoryService' is already declared in App.java",
+                    "required_files": ["App.java"],
+                    "allowed_files": ["InMemoryService.java"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "App.java").write_text("class App {}\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        (tmp_path / "InMemoryService.java").write_text("class InMemoryService {}\n")
+        return {"status": "success", "quality_gates_passed": True, "files": ["InMemoryService.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 5
+    # calls[3] is s2's real owner-recovery call - proof the fallback
+    # actually ran, not just logged.
+    assert calls[3]["allowed_write_relpaths"] == ["App.java"]
+    owner_recovery_context = calls[3]["supplementary_context"]
+    assert "MUST FIX" in owner_recovery_context
+    assert "InMemoryService is already declared in App.java" in owner_recovery_context
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 1
+    assert events[0]["reopened_owner"] == "s2"
+    # No plan DAG mutation occurred - the approved plan's own subtask set
+    # and edges are exactly unchanged from the original.
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_subtasks = {item["id"]: item for item in approved["plan"]["subtasks"]}
+    assert set(approved_subtasks) == {"s1", "s2", "s3"}
+    assert approved_subtasks["s3"]["depends_on"] == ["s1"]
+    # And the OLD dependency-only resolver genuinely could not have found
+    # this owner - confirming this is a real fix, not incidental.
+    assert resolve_scope_conflict_owners(plan, ["App.java"], plan.subtask_by_id("s3")) == {}
+
+
+def test_revise_plan_for_grounded_scope_owner_normalizes_multiple_active_owners(tmp_path):
+    """Test G: App.java is declared by BOTH s1 (create) and s2 (modify) - a
+    legitimate sequential ownership chain. Grounded revision moving it into
+    s3 must leave EXACTLY ONE active owner, never the artifact declared on
+    every original owner AND the failed stage at once (the live PRV-06
+    "planned file ownership must be unique" validation failure)."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create App", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="needs App changed again", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="Other.java", action=FileAction.CREATE)]),
+        ],
+    )
+    (tmp_path / "App.java").write_text("class App {}")
+
+    revised = revise_plan_for_grounded_scope_owner(plan, "s3", ["App.java"], str(tmp_path))
+
+    owners_of_app = [
+        st.id for st in revised.subtasks if any(pf.path == "App.java" for pf in st.planned_files)
+    ]
+    assert owners_of_app == ["s3"]
+    # Must still validate cleanly - unique ownership, well-formed plan.
+    EngineeringPlan.model_validate(revised.model_dump(mode="json"))
+
+
+def test_revise_plan_for_grounded_scope_owner_does_not_touch_execution_history(tmp_path):
+    """Test H: plan responsibility (what the REVISED plan says an
+    artifact's active owner is) and execution history (ControlState's own
+    record of who actually wrote it) are separate concerns -
+    revise_plan_for_grounded_scope_owner operates purely on the plan and
+    must never require touching, and cannot affect, a separately-held
+    ControlState's own historical record."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create App", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="needs App changed again", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="Other.java", action=FileAction.CREATE)]),
+        ],
+    )
+    (tmp_path / "App.java").write_text("class App {}")
+    control_state = _owner_provenance_control_state({"s1": ["App.java"], "s2": ["App.java"]})
+
+    revise_plan_for_grounded_scope_owner(plan, "s3", ["App.java"], str(tmp_path))
+
+    assert control_state.subtask_written_files == {"s1": ["App.java"], "s2": ["App.java"]}
+    assert control_state.subtask_states == {"s1": "completed", "s2": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_enforce_owner_recovery_fails_closed_when_no_owner_is_resolvable(tmp_path):
+    """Test J: when no subtask - by execution provenance OR dependency
+    ancestry - can be defensibly resolved as a required repair file's
+    owner, the owner-recovery loop must fail closed rather than guess
+    (PRV-06 §5 step 4 / §23 invariant 8) - proven by confirming NO owner-
+    recovery call happens at all, not merely by log text."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create App", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="needs something unresolvable", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="Other.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        return {
+            "status": "failed", "quality_gates_passed": False, "files": [],
+            "plan_scope_conflict": {
+                "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                "failure_type": "compile",
+                "required_files": ["Ghost.java"],  # nobody in the plan ever declares this
+                "allowed_files": ["Other.java"],
+            },
+        }
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    # Exactly the two real calls happened - s1's own, and s2's single
+    # failing attempt. No owner-recovery call, no arbitrary owner guess.
+    assert len(calls) == 2
+    assert result.legacy_result.get("plan_recovery_events", []) == []

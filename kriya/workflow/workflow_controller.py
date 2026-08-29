@@ -76,6 +76,8 @@ import logging
 import os
 import re
 import shutil
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import parse_planner_structured_output
@@ -766,6 +768,190 @@ def resolve_scope_conflict_owners(
     return owners
 
 
+class ArtifactOwnerResolutionBasis(str, Enum):
+    """MA8.1 completion v3 (2026-08-29, 'Effective Artifact Ownership and
+    Recovery Routing'): WHY resolve_effective_artifact_owner picked a given
+    subtask as an artifact's recovery owner - pure observability/testing
+    metadata, never itself a control-flow input (every caller only ever
+    branches on owner_subtask_id being present or absent).
+
+    LATEST_SUCCESSFUL_MODIFIER: the artifact's real, applied execution
+    provenance (ControlState.subtask_states/subtask_written_files) names a
+    subtask that actually wrote it and completed successfully - the
+    primary, authoritative signal (see resolve_effective_artifact_owner).
+
+    DEPENDENCY_ANCESTRY: no execution provenance was available (or usable
+    yet), so the plan's own declared file_owner() was used, gated - exactly
+    as resolve_scope_conflict_owners always required - on that owner being
+    a transitive depends_on ancestor of the failing subtask. This is the
+    ORIGINAL (pre-2026-08-29-v3) resolution mechanism, kept as the fallback
+    for when provenance genuinely doesn't exist yet.
+
+    UNIQUE_PLAN_OWNER: reserved for a unique plan-declared owner accepted
+    WITHOUT dependency-ancestry confirmation. Deliberately never produced by
+    resolve_effective_artifact_owner today - test_enforce_surfaces_
+    unrelated_owner_scope_conflict_as_plan_revision_required_instead_of_
+    merging depends on a same-shaped case (a unique owner, declared but
+    neither upstream nor yet-executed) staying UNRESOLVED, not silently
+    auto-picked. Kept as a distinct typed value so a future, more permissive
+    policy could be represented without another vocabulary change - not a
+    live code path.
+
+    UNRESOLVED: no owner could be defensibly selected. Callers must fail
+    closed, never guess (PRV-06 §26 invariant 3/8)."""
+
+    LATEST_SUCCESSFUL_MODIFIER = "latest_successful_modifier"
+    UNIQUE_PLAN_OWNER = "unique_plan_owner"
+    DEPENDENCY_ANCESTRY = "dependency_ancestry"
+    UNRESOLVED = "unresolved"
+
+
+@dataclass(frozen=True)
+class OwnerResolution:
+    """One artifact's recovery-owner resolution result - small, typed,
+    reused as-is for both control flow (owner_subtask_id is None or not)
+    and observability (resolution_basis/evidence, logged verbatim by
+    resolve_effective_scope_conflict_owners as ARTIFACT_OWNER_RESOLVED/
+    ARTIFACT_OWNER_UNRESOLVED)."""
+
+    artifact: str
+    owner_subtask_id: Optional[str]
+    resolution_basis: ArtifactOwnerResolutionBasis
+    evidence: Dict[str, Any] = field(default_factory=dict)
+
+
+def _successful_modifiers_in_execution_order(
+    path: str, order: List[str], control_state: ControlState,
+) -> List[str]:
+    """Every subtask id (in real execution order) whose OWN ControlState
+    record shows it completed successfully AND actually wrote `path` - the
+    real, applied file list (subtask_written_files), never the plan's mere
+    upfront planned_files declaration. A subtask that hasn't run yet has no
+    entry here at all (ControlState is populated incrementally, in
+    execution order, as _run_structured_enforce's own per-subtask loop
+    proceeds) - so this can never surface a not-yet-executed subtask, no
+    special-casing required to keep it safe for that case."""
+    return [
+        subtask_id for subtask_id in order
+        if control_state.subtask_states.get(subtask_id) == SubtaskStatus.COMPLETED.value
+        and path in control_state.subtask_written_files.get(subtask_id, [])
+    ]
+
+
+def resolve_effective_artifact_owner(
+    plan: EngineeringPlan,
+    path: str,
+    failed_subtask: Subtask,
+    order: Optional[List[str]] = None,
+    control_state: Optional[ControlState] = None,
+) -> OwnerResolution:
+    """MA8.1 completion v3 (PRV-06, 2026-08-29): the artifact's EFFECTIVE
+    recovery owner - the most recent successfully-completed subtask that
+    actually produced/modified the revision currently visible to the
+    workflow - not necessarily the planner-assigned owner, the nearest
+    depends_on ancestor, or the first subtask that mentioned the file.
+
+    Live PRV-06 evidence this closes: s1 created App.java, s2 later
+    successfully MODIFIED it (both declare it in planned_files - a
+    legitimate sequential ownership chain, see plan_schema.py's
+    classify_file_ownership docstring) - but s3 (needing a further App.java
+    fix) only declared depends_on=['s1'], omitting s2. The OLD single
+    mechanism (resolve_scope_conflict_owners, walking depends_on only)
+    could never find s2: plan.file_owner('App.java') itself already returns
+    None for a MULTI-declared path, and even if it didn't, s2 sits outside
+    s3's own declared ancestry. Recovery then fell through to
+    revise_plan_for_grounded_scope_owner's DAG-mutation path, which hit its
+    own real bug (see that function's own docstring) and the run terminated
+    unresolved - despite Kriya already knowing, from its own execution
+    state, that s2 was the artifact's real current owner.
+
+    Two-step authority order, execution provenance ALWAYS tried first:
+
+    1. Execution provenance (_successful_modifiers_in_execution_order) -
+       the most recent completed, real modifier. Requires `order` and
+       `control_state`; skipped entirely (falls through to step 2) when
+       either is omitted, preserving the exact old behavior for any caller
+       that doesn't have them (e.g. direct unit tests).
+    2. Dependency-ancestry fallback (resolve_scope_conflict_owners,
+       UNCHANGED) - the plan's own declared file_owner(), gated on being a
+       transitive depends_on ancestor of the failing subtask. This is
+       deliberately the exact ORIGINAL mechanism, not a new one: widening
+       it to "any unique plan-declared owner" would resolve
+       test_enforce_surfaces_unrelated_owner_scope_conflict_as_plan_
+       revision_required_instead_of_merging's own case (a unique but
+       genuinely unrelated/not-yet-run owner) into an incorrect silent
+       auto-pick - exactly the "arbitrary topological predecessor" failure
+       mode this design explicitly forbids (PRV-06 §4/§20 invariant 2).
+
+    Never returns a subtask that hasn't successfully completed (a FAILED
+    candidate's own written files are ordinary in-progress residue, not
+    ownership - PRV-06 §26 invariant 3) and never returns failed_subtask
+    itself."""
+    if order is not None and control_state is not None:
+        modifiers = [
+            subtask_id for subtask_id in _successful_modifiers_in_execution_order(path, order, control_state)
+            if subtask_id != failed_subtask.id
+        ]
+        if modifiers:
+            return OwnerResolution(
+                artifact=path, owner_subtask_id=modifiers[-1],
+                resolution_basis=ArtifactOwnerResolutionBasis.LATEST_SUCCESSFUL_MODIFIER,
+                evidence={"prior_modifiers": modifiers},
+            )
+    ancestry_owners = resolve_scope_conflict_owners(plan, [path], failed_subtask)
+    for owner_id, owned_paths in ancestry_owners.items():
+        if path in owned_paths:
+            return OwnerResolution(
+                artifact=path, owner_subtask_id=owner_id,
+                resolution_basis=ArtifactOwnerResolutionBasis.DEPENDENCY_ANCESTRY,
+                evidence={},
+            )
+    return OwnerResolution(
+        artifact=path, owner_subtask_id=None,
+        resolution_basis=ArtifactOwnerResolutionBasis.UNRESOLVED,
+        evidence={},
+    )
+
+
+def resolve_effective_scope_conflict_owners(
+    plan: EngineeringPlan,
+    required_files: List[str],
+    failed_subtask: Subtask,
+    order: Optional[List[str]] = None,
+    control_state: Optional[ControlState] = None,
+) -> Dict[str, List[str]]:
+    """Multi-artifact wrapper around resolve_effective_artifact_owner,
+    returning the exact same Dict[owner_id, [paths]] shape resolve_scope_
+    conflict_owners always has - both real call sites in
+    _run_structured_enforce (the PLAN_SCOPE_DEFECT merge-skip condition and
+    the owner-recovery loop's own owner_map) swap directly to this, no
+    other change needed downstream: once an owner is resolved, control
+    still hands off entirely to the existing, unmodified MA8.1 requirement-
+    scoped recovery mechanism (this function performs no recovery itself).
+
+    Every per-artifact resolution is logged (ARTIFACT_OWNER_RESOLVED /
+    ARTIFACT_OWNER_UNRESOLVED) so a later forensic read never has to
+    reconstruct "why was X picked as owner of Y" by hand (PRV-06 §22)."""
+    owners: Dict[str, List[str]] = {}
+    for path in required_files:
+        resolution = resolve_effective_artifact_owner(
+            plan, path, failed_subtask, order=order, control_state=control_state,
+        )
+        if resolution.owner_subtask_id is None:
+            logger.info(
+                "ARTIFACT_OWNER_UNRESOLVED artifact=%s candidate_owners=%s reason=%s",
+                path, [], resolution.resolution_basis.value,
+            )
+            continue
+        logger.info(
+            "ARTIFACT_OWNER_RESOLVED artifact=%s owner_subtask_id=%s resolution_basis=%s prior_modifiers=%s",
+            path, resolution.owner_subtask_id, resolution.resolution_basis.value,
+            resolution.evidence.get("prior_modifiers", []),
+        )
+        owners.setdefault(resolution.owner_subtask_id, []).append(path)
+    return owners
+
+
 def _cross_owner_obligation_id(
     originating_subtask_id: str, owner_subtask_id: str, required_files: List[str],
     failure_family: str, generation: int,
@@ -1109,15 +1295,40 @@ def revise_plan_for_grounded_scope_owner(
     for path in grounded:
         if not os.path.isfile(os.path.join(workspace_path, path)):
             raise ValueError(f"grounded scope owner does not exist: {path}")
-        owner = revised.file_owner(path)
+        # MA8.1 completion v3 (PRV-06, 2026-08-29): a path may legitimately
+        # be declared by MULTIPLE subtasks at once (a validated sequential
+        # ownership chain - e.g. one subtask creates, a later one modifies;
+        # plan_schema.py's classify_file_ownership own docstring). The
+        # single-owner-only file_owner() lookup this used to call returns
+        # None for exactly that shape, which fell through to the
+        # "genuinely new file" branch below WITHOUT stripping the path
+        # from ANY of its real declared owners - producing an invalid plan
+        # where the same path ended up declared on every original owner
+        # AND the failed stage simultaneously (live PRV-06 evidence:
+        # App.java on s1, s2, AND s3 at once - "planned file ownership
+        # must be unique", the exact validation failure that then forced
+        # a fallback to owner-recovery with no valid path forward either).
+        # Re-derived directly here instead, over every declaring subtask.
+        owners = [
+            st for st in revised.subtasks
+            if st.id != failed.id and any(pf.path == path for pf in st.planned_files)
+        ]
         moved: Optional[PlannedFile] = None
-        if owner is not None and owner.id != failed.id:
-            moved = next(pf for pf in owner.planned_files if pf.path == path)
+        if owners:
+            # The LAST declared owner's own PlannedFile metadata (action/
+            # reason) seeds `moved` - a simple, sufficient heuristic since
+            # actual content correctness is enforced by the merged
+            # subtask's own compile/test Quality Gates afterward, not by
+            # this planning-time metadata (the same acceptance already
+            # applies to owner_requires below).
+            source_owner = owners[-1]
+            moved = next(pf for pf in source_owner.planned_files if pf.path == path)
             moved = moved.model_copy(update={
                 "reason": "deterministically grounded architectural owner",
             })
-            owner.planned_files = [pf for pf in owner.planned_files if pf.path != path]
-        elif owner is None:
+            for owner in owners:
+                owner.planned_files = [pf for pf in owner.planned_files if pf.path != path]
+        else:
             moved = PlannedFile(
                 path=path, action=FileAction.MODIFY,
                 reason="deterministically grounded architectural owner",
@@ -1125,89 +1336,90 @@ def revise_plan_for_grounded_scope_owner(
         if moved is not None and not any(pf.path == path for pf in failed.planned_files):
             failed.planned_files.append(moved)
 
-        if owner is None or owner.id == failed.id or owner.planned_files:
-            continue
+        for owner in owners:
+            if owner.planned_files:
+                continue
 
-        # The old stage has no independently executable scope after moving
-        # its sole owner. Merge its contract and remove it, preserving the
-        # DAG. owner.depends_on is only safe to inherit when owner was
-        # UPSTREAM of failed; when it was downstream (this is a
-        # forward-grounded discovery, not a backward one), those
-        # dependencies are already reachable FROM failed and inheriting
-        # them would create a cycle - drop those instead of raising, since
-        # failed's own original position already sequences it correctly
-        # relative to them.
-        failed_downstream = _transitive_dependents(revised, failed.id)
-        dropped_owner_deps = {
-            dep for dep in owner.depends_on if dep in failed_downstream
-        }
-        failed.depends_on = list(dict.fromkeys(
-            dep for dep in failed.depends_on + owner.depends_on
-            if dep not in (failed.id, owner.id) and dep not in failed_downstream
-        ))
-        failed.acceptance_criteria_ids = list(dict.fromkeys(
-            failed.acceptance_criteria_ids + owner.acceptance_criteria_ids
-        ))
-        existing_verification = {
-            json.dumps(vm.model_dump(mode="json"), sort_keys=True)
-            for vm in failed.verification
-        }
-        failed.verification.extend(
-            vm for vm in owner.verification
-            if json.dumps(vm.model_dump(mode="json"), sort_keys=True)
-            not in existing_verification
-        )
-        failed.provides = list(dict.fromkeys(failed.provides + owner.provides))
-        # A requires whose sole provider was one of dropped_owner_deps can no
-        # longer be validly declared - keeping it would fail validate_plan's
-        # SEMANTIC_DEPENDENCY_EDGE_MISSING check (requires X but doesn't
-        # depend on X's provider) for exactly the edge we just had to drop
-        # above to avoid a cycle. The capability itself may genuinely not be
-        # ready yet; that risk is accepted the same way any other grounded-
-        # owner recovery accepts it - actual correctness is still enforced
-        # by the merged subtask's own compile/test Quality Gates, not by
-        # this planning-time metadata alone.
-        capability_providers: Dict[str, List[str]] = {}
-        for st in revised.subtasks:
-            for capability in st.provides:
-                capability_providers.setdefault(capability, []).append(st.id)
-        owner_requires = [
-            item for item in owner.requires
-            if not (
-                len(capability_providers.get(item, [])) == 1
-                and capability_providers[item][0] in dropped_owner_deps
-            )
-        ]
-        failed.requires = [
-            item for item in dict.fromkeys(failed.requires + owner_requires)
-            if item not in failed.provides
-        ]
-        failed.relevant_global_invariant_ids = list(dict.fromkeys(
-            failed.relevant_global_invariant_ids + owner.relevant_global_invariant_ids
-        ))
-        revised.subtasks = [st for st in revised.subtasks if st.id != owner.id]
-        # 2026-08-29 (PRV-06, MA8.1): computed BEFORE the redirect loop,
-        # against the plan as it stood before this merge (owner already
-        # removed above, but no depends_on rewritten yet) - see
-        # _transitive_upstream_ids' own docstring for the live cyclic-DAG
-        # incident this guards against.
-        failed_upstream = _transitive_upstream_ids(revised, failed.id)
-        for consumer in revised.subtasks:
-            if owner.id not in consumer.depends_on:
-                continue
-            if consumer.id in failed_upstream or consumer.id == failed.id:
-                # consumer already runs before (or is) failed - the merge
-                # doesn't need it to depend on anything for ordering, and
-                # redirecting it to depend on failed would invert direction
-                # and close a cycle (failed already transitively depends on
-                # it). Drop the now-dangling reference to the deleted owner
-                # instead of redirecting it.
-                consumer.depends_on = [dep for dep in consumer.depends_on if dep != owner.id]
-                continue
-            consumer.depends_on = list(dict.fromkeys(
-                failed.id if dep == owner.id else dep for dep in consumer.depends_on
-                if (failed.id if dep == owner.id else dep) != consumer.id
+            # The old stage has no independently executable scope after
+            # moving its sole remaining declaration. Merge its contract and
+            # remove it, preserving the DAG. owner.depends_on is only safe
+            # to inherit when owner was UPSTREAM of failed; when it was
+            # downstream (this is a forward-grounded discovery, not a
+            # backward one), those dependencies are already reachable FROM
+            # failed and inheriting them would create a cycle - drop those
+            # instead of raising, since failed's own original position
+            # already sequences it correctly relative to them.
+            failed_downstream = _transitive_dependents(revised, failed.id)
+            dropped_owner_deps = {
+                dep for dep in owner.depends_on if dep in failed_downstream
+            }
+            failed.depends_on = list(dict.fromkeys(
+                dep for dep in failed.depends_on + owner.depends_on
+                if dep not in (failed.id, owner.id) and dep not in failed_downstream
             ))
+            failed.acceptance_criteria_ids = list(dict.fromkeys(
+                failed.acceptance_criteria_ids + owner.acceptance_criteria_ids
+            ))
+            existing_verification = {
+                json.dumps(vm.model_dump(mode="json"), sort_keys=True)
+                for vm in failed.verification
+            }
+            failed.verification.extend(
+                vm for vm in owner.verification
+                if json.dumps(vm.model_dump(mode="json"), sort_keys=True)
+                not in existing_verification
+            )
+            failed.provides = list(dict.fromkeys(failed.provides + owner.provides))
+            # A requires whose sole provider was one of dropped_owner_deps can no
+            # longer be validly declared - keeping it would fail validate_plan's
+            # SEMANTIC_DEPENDENCY_EDGE_MISSING check (requires X but doesn't
+            # depend on X's provider) for exactly the edge we just had to drop
+            # above to avoid a cycle. The capability itself may genuinely not be
+            # ready yet; that risk is accepted the same way any other grounded-
+            # owner recovery accepts it - actual correctness is still enforced
+            # by the merged subtask's own compile/test Quality Gates, not by
+            # this planning-time metadata alone.
+            capability_providers: Dict[str, List[str]] = {}
+            for st in revised.subtasks:
+                for capability in st.provides:
+                    capability_providers.setdefault(capability, []).append(st.id)
+            owner_requires = [
+                item for item in owner.requires
+                if not (
+                    len(capability_providers.get(item, [])) == 1
+                    and capability_providers[item][0] in dropped_owner_deps
+                )
+            ]
+            failed.requires = [
+                item for item in dict.fromkeys(failed.requires + owner_requires)
+                if item not in failed.provides
+            ]
+            failed.relevant_global_invariant_ids = list(dict.fromkeys(
+                failed.relevant_global_invariant_ids + owner.relevant_global_invariant_ids
+            ))
+            revised.subtasks = [st for st in revised.subtasks if st.id != owner.id]
+            # 2026-08-29 (PRV-06, MA8.1): computed BEFORE the redirect loop,
+            # against the plan as it stood before this merge (owner already
+            # removed above, but no depends_on rewritten yet) - see
+            # _transitive_upstream_ids' own docstring for the live cyclic-DAG
+            # incident this guards against.
+            failed_upstream = _transitive_upstream_ids(revised, failed.id)
+            for consumer in revised.subtasks:
+                if owner.id not in consumer.depends_on:
+                    continue
+                if consumer.id in failed_upstream or consumer.id == failed.id:
+                    # consumer already runs before (or is) failed - the merge
+                    # doesn't need it to depend on anything for ordering, and
+                    # redirecting it to depend on failed would invert direction
+                    # and close a cycle (failed already transitively depends on
+                    # it). Drop the now-dangling reference to the deleted owner
+                    # instead of redirecting it.
+                    consumer.depends_on = [dep for dep in consumer.depends_on if dep != owner.id]
+                    continue
+                consumer.depends_on = list(dict.fromkeys(
+                    failed.id if dep == owner.id else dep for dep in consumer.depends_on
+                    if (failed.id if dep == owner.id else dep) != consumer.id
+                ))
 
     failed.description = (
         f"{failed.description} Authoritative scope revision: modify grounded owner(s) "
@@ -2763,11 +2975,24 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # the PRV-06 incident (whose owner was genuinely upstream) and
             # would have silently changed already-tested behavior with no
             # live incident behind it.
+            # MA8.1 completion v3 (2026-08-29, "Effective Artifact Ownership
+            # and Recovery Routing"): resolve_effective_scope_conflict_
+            # owners replaces the bare depends_on-only resolve_scope_
+            # conflict_owners here - the live PRV-06 incident this closes
+            # is a downstream subtask needing an artifact whose real,
+            # already-completed modifier sits OUTSIDE its own declared
+            # depends_on (see resolve_effective_artifact_owner's own
+            # docstring). This is the actual root fix: with it, this skip-
+            # condition correctly recognizes a real effective owner and
+            # never lets the failure fall through into the DAG-mutating
+            # merge path below at all for that case.
             if (
                 scope_conflict.get("classification") == "PLAN_SCOPE_DEFECT"
                 and grounded_scope_files
                 and (
-                    resolve_scope_conflict_owners(plan, grounded_scope_files, subtask)
+                    resolve_effective_scope_conflict_owners(
+                        plan, grounded_scope_files, subtask, order=order, control_state=control_state,
+                    )
                     or (
                         scope_conflict.get("attribution_tier") == "authoritative_deterministic"
                         and any(
@@ -2872,6 +3097,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "the scope conflict unresolved.",
                         run_id, subtask.id, grounded_scope_files, revision_failure_reason,
                     )
+                    logger.info(
+                        "PLAN_SCOPE_REVISION_REJECTED subtask=%s grounded_files=%s reason=%s",
+                        subtask.id, grounded_scope_files, revision_failure_reason,
+                    )
+                    logger.info(
+                        "OWNER_RECOVERY_FALLBACK_STARTED subtask=%s required_files=%s",
+                        subtask.id, sorted(set(scope_conflict.get("required_files", []))),
+                    )
                     scope_conflict = {
                         **scope_conflict,
                         "reason": revision_failure_reason,
@@ -2890,6 +3123,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "terminates with the scope conflict unresolved.",
                         run_id, subtask.id, _MAX_PLAN_SCOPE_REVISION_ATTEMPTS, grounded_scope_files,
                     )
+                    logger.info(
+                        "OWNER_RECOVERY_FALLBACK_STARTED subtask=%s required_files=%s",
+                        subtask.id, sorted(set(scope_conflict.get("required_files", []))),
+                    )
             # MA8.1 completion (2026-08-29 v2): looped, not one-shot - a
             # downstream retry after a successful owner recovery may
             # surface a genuinely NEW grounded requirement on the SAME
@@ -2900,14 +3137,34 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # requirement's own attempt count (via the ledger's history()),
             # not from a blanket "this owner already ran once" guard.
             for _owner_recovery_cycle in range(_MAX_PLAN_SCOPE_REVISION_ATTEMPTS):
-                owner_map = resolve_scope_conflict_owners(
+                # MA8.1 completion v3: same effective-owner upgrade as the
+                # merge-skip condition above - execution provenance tried
+                # first, dependency-ancestry fallback unchanged.
+                owner_map = resolve_effective_scope_conflict_owners(
                     plan, list(scope_conflict.get("required_files", [])), subtask,
+                    order=order, control_state=control_state,
                 ) if scope_conflict else {}
                 required_scope_files = set(scope_conflict.get("required_files", []))
                 resolved_scope_files = {
                     path for owner_paths in owner_map.values() for path in owner_paths
                 }
                 if not (len(owner_map) == 1 and resolved_scope_files == required_scope_files):
+                    # MA8.1 completion v3 (§13/§22, "fix false fallback
+                    # behavior"): the plan-revision loop above logs that it
+                    # is "falling back to upstream-owner recovery" whenever
+                    # its own validation fails - this is the code that IS
+                    # that fallback. Previously, when it couldn't resolve a
+                    # unique owner either, it broke here with NO log line at
+                    # all, so a real run's own logs claimed a fallback that
+                    # never observably happened. Emitted only when there was
+                    # a genuine conflict to resolve (an empty scope_conflict
+                    # on the very first pass is not a failure).
+                    if scope_conflict:
+                        logger.warning(
+                            "SCOPE_RECOVERY_OWNER_UNRESOLVED subtask=%s required_files=%s "
+                            "resolved_owners=%s - failing closed, no owner will be guessed.",
+                            subtask.id, sorted(required_scope_files), owner_map,
+                        )
                     break
                 owner_id, required_owner_files = next(iter(owner_map.items()))
                 owner = plan.subtask_by_id(owner_id)
@@ -2979,6 +3236,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         required_owner_files=required_owner_files,
                         cross_owner_obligation=cross_owner_obligation,
                         scope_conflict=scope_conflict,
+                    )
+                    logger.info(
+                        "CROSS_OWNER_RECOVERY_SCHEDULED requirement_id=%s artifact=%s owner_subtask_id=%s",
+                        candidate_requirement_id, sorted(required_owner_files), owner_id,
                     )
                     logger.info(
                         "OWNER_RECOVERY_STARTED requirement_id=%s owner=%s generation=%d",
