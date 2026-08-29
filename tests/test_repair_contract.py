@@ -13,6 +13,8 @@ from kriya.workflow.obligations import (
 from kriya.workflow.repair_contract import (
     RepairContractStatus,
     RepairKind,
+    _build_contract_from_shape,
+    _ContractShape,
     build_repair_contract,
     derive_process_boundary_participants,
 )
@@ -138,3 +140,60 @@ def test_build_repair_contract_happy_path():
     assert contract.immediate_correction_targets == contract.participating_artifacts
     assert "src/main/java/App.java" in contract.repair_intent
     assert "src/test/java/AppTest.java" in contract.repair_intent
+
+
+# --- _build_contract_from_shape: the generic constructor is N-artifact, not
+# two-artifact - the process-boundary detector above is the only thing
+# currently limited to a producer/consumer pair; the constructor itself
+# knows nothing about that framing (2026-08-29 design review: "implement an
+# N-artifact RepairContract executor, while keeping the initial detector
+# intentionally limited to the currently proven process-boundary case"). ---
+
+def test_build_contract_from_shape_supports_more_than_two_participants():
+    """A hypothetical future obligation kind's shape function could report
+    5 participants with no producer/consumer framing at all - the generic
+    constructor must build a correct contract from it with zero changes."""
+    obligation = _obligation()
+    shape = _ContractShape(
+        participating_artifacts=("A.java", "B.java", "C.java", "D.java", "E.java"),
+        generation_order=("A.java", "B.java", "C.java", "D.java", "E.java"),
+        participant_roles={
+            "A.java": "role_a", "B.java": "role_b", "C.java": "role_c",
+            "D.java": "role_d", "E.java": "role_e",
+        },
+        repair_intent="Resolve a hypothetical 5-file coordinated defect.",
+        must_fix=("all five files must agree on the shared contract",),
+        must_preserve=("existing unrelated behavior",),
+    )
+
+    contract = _build_contract_from_shape(obligation, shape, created_attempt=1)
+
+    assert contract is not None
+    assert len(contract.participating_artifacts) == 5
+    assert contract.generation_order == shape.generation_order
+    assert contract.participant_roles == shape.participant_roles
+    assert contract.immediate_correction_targets == shape.participating_artifacts
+
+
+def test_build_contract_from_shape_rejects_single_participant():
+    obligation = _obligation()
+    shape = _ContractShape(
+        participating_artifacts=("A.java",), generation_order=("A.java",),
+        participant_roles={"A.java": "role_a"}, repair_intent="x",
+        must_fix=("x",), must_preserve=("x",),
+    )
+    assert _build_contract_from_shape(obligation, shape, created_attempt=1) is None
+
+
+def test_build_contract_from_shape_rejects_generation_order_mismatch():
+    """generation_order must be exactly the same SET as participating_artifacts
+    - a shape function bug that drops or invents a participant in one but not
+    the other must not silently produce a contract."""
+    obligation = _obligation()
+    shape = _ContractShape(
+        participating_artifacts=("A.java", "B.java", "C.java"),
+        generation_order=("A.java", "B.java"),  # missing C.java
+        participant_roles={"A.java": "x", "B.java": "y", "C.java": "z"},
+        repair_intent="x", must_fix=("x",), must_preserve=("x",),
+    )
+    assert _build_contract_from_shape(obligation, shape, created_attempt=1) is None

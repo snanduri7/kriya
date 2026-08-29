@@ -1683,6 +1683,67 @@ def test_materialize_candidate_content_no_change_needed_returns_none(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_coordinated_repair_generation_supports_more_than_two_participants(tmp_path):
+    """The executor is a genuine N-artifact mechanism, not a two-artifact
+    producer/consumer one (2026-08-29 design review) - only the process-
+    boundary DETECTOR is currently limited to 2 participants. Proves it with
+    a 3-file RepairContract: every participant is generated, and candidate-
+    view propagation (Rule 2A) holds transitively - the third participant
+    sees BOTH earlier participants' real candidate content, not just the
+    immediately-preceding one."""
+    paths = ["A.java", "B.java", "C.java"]
+    for p in paths:
+        (tmp_path / p).write_text(f"ORIGINAL_{p}")
+
+    contract = RepairContract(
+        id="repair.s1.x", source_obligation_id="attempt.subtask.s1.process_boundary_compatibility",
+        kind=RepairKind.COORDINATED, repair_intent="x",
+        must_fix=("x",), must_preserve=("x",),
+        participating_artifacts=tuple(paths),
+        participant_roles={p: "role" for p in paths},
+        generation_order=tuple(paths), created_attempt=1,
+        immediate_correction_targets=tuple(paths),
+    )
+    state = GenerationState()
+    state.attempt_number = 1
+    state.all_files_written = set(paths)
+    state.error_context = "some coordinated failure"
+    ctx = _minimal_attempt_ctx(tmp_path, architect_files=paths)
+
+    captured_contexts: Dict[str, str] = {}
+
+    async def fake_run_developer_generation(state_arg, ctx_arg, **kwargs):
+        filepath = kwargs["known_target_files"][0]
+        captured_contexts[filepath] = kwargs["existing_code_context"]
+        return [{"filepath": filepath, "content": f"CANDIDATE_{filepath}", "edits": []}]
+
+    with patch(
+        "kriya.workflow.attempt._run_developer_generation",
+        side_effect=fake_run_developer_generation,
+    ):
+        results = await _run_coordinated_repair_generation(
+            state, ctx, contract, base_code_context="", stream_callback=None,
+            attempt_operation=CodeOperation.REPAIR_WITH_PATCH,
+        )
+
+    assert [r["filepath"] for r in results] == paths
+    assert [r["content"] for r in results] == [f"CANDIDATE_{p}" for p in paths]
+    # C.java's own call must see BOTH A.java's and B.java's fresh candidates,
+    # not their original baseline content - propagation holds across the
+    # whole chain, not just the immediately-preceding participant.
+    assert "CANDIDATE_A.java" in captured_contexts["C.java"]
+    assert "CANDIDATE_B.java" in captured_contexts["C.java"]
+    assert "ORIGINAL_A.java" not in captured_contexts["C.java"]
+    assert "ORIGINAL_B.java" not in captured_contexts["C.java"]
+    # And B.java's own call must see A.java's candidate, but C.java is still
+    # its ORIGINAL baseline (C.java hasn't been generated yet at that point
+    # in the sequence) - never a candidate that doesn't exist yet.
+    assert "CANDIDATE_A.java" in captured_contexts["B.java"]
+    assert "ORIGINAL_C.java" in captured_contexts["B.java"]
+    assert "CANDIDATE_C.java" not in captured_contexts["B.java"]
+
+
+@pytest.mark.asyncio
 async def test_run_attempt_uses_coordinated_generation_when_contract_active(tmp_path):
     """The direct counter to the PRV-06 Bucket A oscillation: with an ACTIVE
     RepairContract, a single targeted-retry attempt must generate/stage BOTH
