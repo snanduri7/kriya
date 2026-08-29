@@ -22,7 +22,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.core.kernel import Kernel
+from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
+from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
     apply_anchored_edits,
@@ -1812,6 +1814,60 @@ def _spec_requirements_contradicting_authority(
     return kept, contradicted
 
 
+def _goal_spec_requirement_obligation_id(subtask_id: str) -> str:
+    return f"attempt.subtask.{subtask_id}.goal_spec_requirement"
+
+
+def _goal_spec_evidence_fingerprint(goal: str, file_contents: Dict[str, str]) -> str:
+    """Correctness Continuity Part A (PRV-06, 2026-08-29) - a stable digest
+    of exactly what a goal_spec_compliance verdict was based on: the
+    requirement text plus every checked file's own content, byte for byte.
+    Reuses edit_safety.content_revision (the same primitive the anchored-
+    edit pipeline already trusts for content identity) rather than
+    inventing a second hashing scheme. Two calls producing the same
+    fingerprint mean the judge was shown literally the same requirement
+    and the same code - the precondition evidence monotonicity requires
+    before a settled verdict may be reused or a contradiction suppressed.
+    A single byte of real change (either side) produces a different
+    fingerprint and is always treated as genuinely new evidence, never
+    "close enough" - see _settled_goal_spec_requirement's own docstring."""
+    blob = goal + "\x00" + "\x00".join(
+        f"{path}\x01{file_contents[path]}" for path in sorted(file_contents)
+    )
+    return content_revision(blob)
+
+
+def _settled_goal_spec_requirement(
+    ledger: Optional[ObligationLedger], obligation_id: Optional[str], fingerprint: str,
+) -> Optional[ObligationRecord]:
+    """Correctness Continuity Part A (PRV-06, 2026-08-29) - MA8 evidence
+    monotonicity applied to ObligationKind.GOAL_SPEC_REQUIREMENT (defined
+    since MA8, never populated until now - see docs/design.md's own
+    "defined for future use" note). Returns the ledger's current record for
+    this obligation only when it is SATISFIED and its own recorded evidence
+    fingerprint exactly matches `fingerprint` - i.e. the SAME requirement
+    text and the SAME checked-file content already satisfied it once.
+
+    Returns None whenever there is no prior record, the prior record isn't
+    SATISFIED, or the fingerprint differs by even one byte - a changed
+    fingerprint is always treated as genuinely new evidence, entitled to a
+    full, independent re-judgment (Part A6: unchanged evidence cannot be
+    destabilized by weaker judgment; new evidence must always be free to
+    invalidate). This function only ever answers "is there settled,
+    unchanged evidence to protect" - it never itself skips or overrides an
+    LLM call; see run_attempt's own call site for how the answer is used to
+    suppress a contradictory JUDGMENT-authority verdict without ever
+    letting it become failure evidence or consume a Developer retry."""
+    if ledger is None or not obligation_id:
+        return None
+    current = ledger.current(obligation_id)
+    if current is None or current.status != ObligationStatus.SATISFIED:
+        return None
+    if current.evidence.get("fingerprint") != fingerprint:
+        return None
+    return current
+
+
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """Runs one Developer + Quality Gates attempt. Mutates state in place
     (files_written, gate_outcomes, model_hops, run_verification_*, etc.).
@@ -2862,6 +2918,61 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
 
         if not filepath:
             continue
+
+        if (
+            ctx.write_scope_mode == WriteScopeMode.ALLOWLIST
+            and ctx.allowed_write_relpaths
+            and filepath not in ctx.allowed_write_relpaths
+        ):
+            # Correctness Continuity Part B4 (PRV-06, 2026-08-29): rejected
+            # HERE, before apply_anchored_edits or any write is attempted -
+            # distinct from, and in addition to, AuthorizedFileWriter's own
+            # final write-scope enforcement at commit time later in this
+            # pipeline (both layers remain; see WriteScopeMode's own
+            # docstring for that one). This layer exists so an unauthorized
+            # target never even gets a wasted anchored-edit attempt against
+            # it. Live incident this closes: an owner-recovery attempt for
+            # s2 (authorized scope = App.java only) also generated a SEARCH/
+            # REPLACE for InMemoryService.java (owned by a different
+            # subtask, s3) - apply_anchored_edits() was invoked on it anyway
+            # and failed the whole retry attempt on content that was never
+            # legally writable by this attempt in the first place.
+            #
+            # Raises the SAME PolicyDeniedError/reason_code AuthorizedFile
+            # Writer.authorize() would eventually produce for this exact
+            # target, rather than silently dropping the file_obj and letting
+            # the REST of the batch proceed - MA9's own atomic-rejection
+            # invariant ("an unauthorized coordinated participant denies the
+            # WHOLE batch") must hold here too. Found and fixed during this
+            # same change's own regression sweep: an earlier draft silently
+            # `continue`d past the unauthorized file, which let an
+            # OTHERWISE-authorized sibling in the same batch (e.g. App.java)
+            # commit anyway - exactly the bypass MA9's own tests
+            # (test_run_attempt_coordinated_repair_denies_unauthorized_
+            # participant_atomically) exist to catch. Nothing in this
+            # attempt's `staged_writes` has reached disk yet at this point
+            # (that only happens in the later, single atomic commit step),
+            # so raising here still leaves every file at its pre-attempt
+            # baseline, matching the final write-scope gate's own contract
+            # exactly.
+            state.rejected_generation_targets.append(filepath)
+            full_path = os.path.join(ctx.worktree_path, filepath)
+            logger.warning(
+                "RECOVERY_GENERATION_TARGET_REJECTED filepath=%s reason=outside_authorized_scope "
+                "allowed=%s", filepath, sorted(ctx.allowed_write_relpaths),
+            )
+            raise PolicyDeniedError(
+                request=ActionRequest(action_type=ActionType.WRITE_FILE, target=full_path),
+                result=PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE",
+                    explanation=(
+                        f"'{full_path}' is outside the validated subtask's allowed modification "
+                        f"scope: {sorted(ctx.allowed_write_relpaths)!r}."
+                    ),
+                    matched_rule="filesystem.authorized_writer.validated_subtask_scope",
+                ),
+            )
 
         # Single choke point every content path (batch JSON, iterative
         # per-file, a full-set retry) converges through before a byte
@@ -4872,6 +4983,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             except Exception as e:
                 logger.debug(f"Spec compliance check: couldn't read {spec_path}, skipping it: {e}")
         authoritative_context = _spec_compliance_authoritative_context(ctx.obligation_ledger)
+        # Correctness Continuity Part A (PRV-06, 2026-08-29): computed BEFORE
+        # the call so the fingerprint reflects exactly what's about to be
+        # judged, and captured here (not recomputed later) so the settled
+        # check and the eventual ledger write always agree on one value.
+        goal_spec_obligation_id = (
+            _goal_spec_requirement_obligation_id(ctx.current_subtask_id)
+            if ctx.current_subtask_id else None
+        )
+        goal_spec_evidence_fingerprint = _goal_spec_evidence_fingerprint(ctx.goal, spec_file_contents)
+        settled_goal_spec = _settled_goal_spec_requirement(
+            ctx.obligation_ledger, goal_spec_obligation_id, goal_spec_evidence_fingerprint,
+        )
         spec_result = await ctx.spec_compliance.check(
             goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
             authoritative_context=authoritative_context,
@@ -4950,6 +5073,33 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
+        if not spec_result["compliant"] and settled_goal_spec is not None:
+            # Correctness Continuity Part A (PRV-06, 2026-08-29): the SAME
+            # evidence (requirement text + every checked file's content,
+            # byte for byte) already satisfied this exact obligation on an
+            # earlier attempt for this subtask - e.g. s2's own planned pass,
+            # re-judged again during a later owner-recovery attempt with no
+            # relevant content change. A later contradictory JUDGMENT-
+            # authority verdict against UNCHANGED evidence must never
+            # overturn a settled fact (MA8: DETERMINISTIC > GROUNDED >
+            # JUDGMENT; here, even within JUDGMENT itself, unchanged
+            # evidence cannot be destabilized by a mere re-ask of the same
+            # question). Live incident this closes: byte-identical App.java
+            # content passed goal_spec_compliance during s2's own pass, then
+            # failed the same check type during s2's owner-recovery,
+            # inventing a "protocolVersion field" requirement that appeared
+            # nowhere in the goal, plan, or either file.
+            logger.warning(
+                "Quality Gates: Goal spec compliance returned a contradictory verdict against "
+                f"UNCHANGED evidence already SATISFIED at attempt {settled_goal_spec.revision} for "
+                f"{settled_goal_spec.id!r} - SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY, suppressed "
+                f"(not used to trigger retry): {spec_result.get('reasoning')}"
+            )
+            spec_result = {
+                "compliant": True, "reasoning": spec_result.get("reasoning", ""),
+                "missing_requirements": [], "likely_files": [],
+                "reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+            }
         arbitrated_contradictions: List[str] = []
         if not spec_result["compliant"]:
             # MA8 (PRV-05 run #8, 2026-08-28) - kriya/workflow/obligations.py.
@@ -5006,8 +5156,30 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "arbitrated_contradictions": arbitrated_contradictions}
                    if arbitrated_contradictions else {}),
             }
+            if goal_spec_obligation_id and ctx.obligation_ledger is not None:
+                # Correctness Continuity Part A6: this IS new/changed evidence
+                # (settled_goal_spec was None, or content genuinely differed) -
+                # a real violation is always free to (re)invalidate.
+                ctx.obligation_ledger.record(ObligationRecord(
+                    id=goal_spec_obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
+                    status=ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT,
+                    description="goal_spec_compliance verdict for this subtask's checked files",
+                    source="attempt.run_attempt", revision=state.attempt_number,
+                    evidence={"fingerprint": goal_spec_evidence_fingerprint,
+                              "missing_requirements": kept_requirements},
+                    owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
+                ))
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
+        if goal_spec_obligation_id and ctx.obligation_ledger is not None:
+            ctx.obligation_ledger.record(ObligationRecord(
+                id=goal_spec_obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
+                status=ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT,
+                description="goal_spec_compliance verdict for this subtask's checked files",
+                source="attempt.run_attempt", revision=state.attempt_number,
+                evidence={"fingerprint": goal_spec_evidence_fingerprint},
+                owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
+            ))
         state.gate_outcomes.append({
             "attempt": state.attempt_number,
             "type": "goal_spec_compliance",
@@ -5016,6 +5188,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
                 "arbitrated_contradictions": arbitrated_contradictions}
                if arbitrated_contradictions else {}),
+            **({"reason_code": spec_result["reason_code"]} if spec_result.get("reason_code") else {}),
         })
         logger.info(f"Quality Gates: Goal spec compliance PASSED: {spec_result['reasoning']}")
 

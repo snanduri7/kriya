@@ -24,6 +24,8 @@ from kriya.workflow.attempt import (
     _diagnosis_mismatch_bypass_reason,
     _directly_executable_runtime_verifiers,
     _directly_executable_verifiers,
+    _goal_spec_evidence_fingerprint,
+    _goal_spec_requirement_obligation_id,
     _materialize_candidate_content,
     _operation_map,
     _process_boundary_obligation_id,
@@ -6759,6 +6761,234 @@ async def test_run_attempt_passes_when_spec_compliant(tmp_path):
     assert any(g.get("type") == "goal_spec_compliance" and g.get("success") for g in state.gate_outcomes)
 
 
+def test_settled_goal_spec_requirement_pure_function():
+    """Correctness Continuity Part A unit test - the fingerprint/settled
+    lookup in isolation, no run_attempt() machinery needed."""
+    from kriya.workflow.attempt import _settled_goal_spec_requirement
+
+    ledger = ObligationLedger()
+    obligation_id = _goal_spec_requirement_obligation_id("s2")
+    fp = _goal_spec_evidence_fingerprint("goal text", {"App.java": "content v1"})
+
+    # No prior record at all.
+    assert _settled_goal_spec_requirement(ledger, obligation_id, fp) is None
+
+    ledger.record(ObligationRecord(
+        id=obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT,
+        description="d", source="s", revision=1, evidence={"fingerprint": fp},
+    ))
+    # Same fingerprint -> settled.
+    settled = _settled_goal_spec_requirement(ledger, obligation_id, fp)
+    assert settled is not None and settled.status == ObligationStatus.SATISFIED
+
+    # A single byte of real content change -> a different fingerprint -> not settled.
+    different_fp = _goal_spec_evidence_fingerprint("goal text", {"App.java": "content v2"})
+    assert _settled_goal_spec_requirement(ledger, obligation_id, different_fp) is None
+
+    # A VIOLATED prior record is never "settled," regardless of fingerprint match.
+    ledger.record(ObligationRecord(
+        id=obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
+        status=ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT,
+        description="d", source="s", revision=2, evidence={"fingerprint": fp},
+    ))
+    assert _settled_goal_spec_requirement(ledger, obligation_id, fp) is None
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_goal_spec_reuses_settled_verdict_against_unchanged_evidence(tmp_path):
+    """Correctness Continuity Part A (PRV-06, 2026-08-29) - evidence
+    monotonicity. The SAME requirement + SAME checked-file content already
+    satisfied goal_spec_compliance for this subtask on an earlier attempt
+    (recorded directly into the ledger, mirroring what a real prior
+    run_attempt() call would have written) - a later contradictory
+    JUDGMENT-authority verdict against that UNCHANGED evidence must never
+    overturn it, consume a retry, or even reach a raise. Live incident this
+    reproduces: byte-identical App.java content passed goal_spec_compliance
+    during s2's own pass, then failed the same check type during s2's
+    owner-recovery, inventing a 'protocolVersion field' requirement that
+    appeared nowhere in the goal, plan, or either file."""
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    app_content = (
+        "public class App {\n"
+        "    private static final Map<String, String> inMemoryService = new HashMap<>();\n"
+        "}\n"
+    )
+    goal = "Implement App.java that stores a value in-memory"
+
+    ledger = ObligationLedger()
+    obligation_id = _goal_spec_requirement_obligation_id("s2")
+    fingerprint = _goal_spec_evidence_fingerprint(goal, {"App.java": app_content})
+    ledger.record(ObligationRecord(
+        id=obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT,
+        description="goal_spec_compliance verdict for this subtask's checked files",
+        source="attempt.run_attempt", revision=1,
+        evidence={"fingerprint": fingerprint}, owner_subtask_id="s2",
+    ))
+
+    state = GenerationState()
+    state.all_files_written = {"App.java"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "App.java", "content": app_content}])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": False,
+        "reasoning": "the goal names concrete requirements the generated code doesn't satisfy: "
+                     "a protocolVersion field",
+        "missing_requirements": ["a protocolVersion field"],
+        "likely_files": ["App.java"],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path, goal=goal, developer=developer,
+        architect_files=["App.java"], expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+        spec_compliance=spec_compliance, kernel=Kernel(config=cfg),
+        current_subtask_id="s2", obligation_ledger=ledger,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise - contradiction suppressed
+
+    outcomes = [o for o in state.gate_outcomes if o.get("type") == "goal_spec_compliance"]
+    assert outcomes and outcomes[-1]["success"] is True
+    assert outcomes[-1].get("reason_code") == "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY"
+    assert ledger.current(obligation_id).status == ObligationStatus.SATISFIED
+    assert developer.run_generation.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_goal_spec_reevaluates_when_evidence_changes(tmp_path):
+    """Correctness Continuity Part A6 - a real content/requirement change
+    produces a DIFFERENT evidence fingerprint, so a genuinely new violation
+    is always free to (re)invalidate - evidence monotonicity protects
+    UNCHANGED evidence only, never becomes 'once passed, always passed.'"""
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    ledger = ObligationLedger()
+    obligation_id = _goal_spec_requirement_obligation_id("s2")
+    stale_fingerprint = _goal_spec_evidence_fingerprint(
+        "Implement App.java that stores a value in-memory", {"App.java": "an old, different revision"},
+    )
+    ledger.record(ObligationRecord(
+        id=obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT,
+        description="goal_spec_compliance verdict for this subtask's checked files",
+        source="attempt.run_attempt", revision=1,
+        evidence={"fingerprint": stale_fingerprint}, owner_subtask_id="s2",
+    ))
+
+    state = GenerationState()
+    state.all_files_written = {"App.java"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "App.java", "content": "public class App {\n    // materially different content\n}\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": False,
+        "reasoning": "a protocolVersion field is required but absent.",
+        "missing_requirements": ["a protocolVersion field"],
+        "likely_files": ["App.java"],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path, goal="Implement App.java that stores a value in-memory",
+        developer=developer,
+        architect_files=["App.java"], expected_files_upfront=["App.java"],
+        architect_basename_to_path={"App.java": "App.java"},
+        spec_compliance=spec_compliance, kernel=Kernel(config=cfg),
+        current_subtask_id="s2", obligation_ledger=ledger,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "goal_spec_compliance"
+    assert ledger.current(obligation_id).status == ObligationStatus.VIOLATED
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_rejects_anchored_edit_for_unauthorized_target_before_apply(tmp_path):
+    """Correctness Continuity Part B4 (PRV-06, 2026-08-29) - rejected BEFORE
+    apply_anchored_edits is even called, distinct from (and in addition to)
+    the final AuthorizedFileWriter write-scope gate later in the pipeline -
+    both layers remain, this proves the earlier one. Live incident this
+    reproduces: an owner-recovery Developer call authorized only for
+    App.java also returned a SEARCH/REPLACE for InMemoryService.java (owned
+    by a different subtask) - previously this reached apply_anchored_edits
+    and burned the whole attempt on a MISDIRECTED_EDIT; now it is denied
+    (PolicyDeniedError, same reason_code AuthorizedFileWriter's own final
+    gate would use) before ever being attempted. Denial is ATOMIC, same as
+    MA9's own coordinated-repair invariant (test_run_attempt_coordinated_
+    repair_denies_unauthorized_participant_atomically): App.java's own
+    otherwise-valid edit must NOT land either - an early, cheaper rejection
+    must never grant a bypass the later, authoritative gate would refuse."""
+    from kriya.policy.errors import PolicyDeniedError
+
+    app_baseline = "public class App {\n    int x = 1;\n}\n"
+    service_baseline = "public class InMemoryService {\n    static void store() {}\n}\n"
+    (tmp_path / "App.java").write_text(app_baseline, encoding="utf-8")
+    (tmp_path / "InMemoryService.java").write_text(service_baseline, encoding="utf-8")
+
+    state = GenerationState()
+    state.all_files_written = {"App.java", "InMemoryService.java"}
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "App.java", "content": None,
+         "edits": [{"search": "int x = 1;", "replace": "int x = 2;"}]},
+        # Content that does NOT match InMemoryService.java's real text at
+        # all - would raise a MISDIRECTED_EDIT ValueError from
+        # apply_anchored_edits if this ever reached it (the exact live
+        # shape: an App.java-shaped edit misdirected at a sibling file).
+        {"filepath": "InMemoryService.java", "content": None,
+         "edits": [{"search": "int x = 1;", "replace": "int x = 2;"}]},
+    ])
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["App.java", "InMemoryService.java"],
+        expected_files_upfront=["App.java", "InMemoryService.java"],
+        allowed_write_relpaths=["App.java"],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(PolicyDeniedError) as exc_info:
+            await run_attempt(state, ctx)  # must NOT raise MISDIRECTED_EDIT instead
+
+    assert exc_info.value.result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+    assert (tmp_path / "App.java").read_text() == app_baseline
+    assert (tmp_path / "InMemoryService.java").read_text() == service_baseline
+    assert state.rejected_generation_targets == ["InMemoryService.java"]
+
+
 @pytest.mark.asyncio
 async def test_bounded_spec_compliance_includes_verified_upstream_files(tmp_path):
     from kriya.config import AppConfig
@@ -9067,6 +9297,57 @@ async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_auth
     assert state.plan_scope_conflict["attribution_tier"] == "judge"
     assert state.plan_scope_conflict["grounded_owner_files"] == []
     assert state.plan_scope_conflict["reason"]
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_narrows_implicated_files_to_authorized_scope_even_at_medium_confidence(tmp_path):
+    """Correctness Continuity Part B (PRV-06, 2026-08-29) - recovery
+    generation must never be OFFERED a target outside its own authorized
+    write scope, independent of attribution confidence. Unlike the
+    misdirected_edit case above (which is high-confidence by construction
+    and already stopped the loop via plan_scope_conflict before this
+    session), a MEDIUM-confidence attribution never trips that escalation -
+    but must still never let an unauthorized file ride along into
+    state.last_implicated_files, which is what the next 'Targeted retry'
+    prompt actually offers the Developer as an editable target. Live
+    incident this reproduces: an owner-recovery attempt authorized only for
+    App.java received a medium-confidence goal_spec_compliance failure
+    implicating BOTH App.java and InMemoryService.java (owned by a
+    different subtask) - InMemoryService.java rode along unfiltered into
+    the next attempt's targeting and burned a whole retry on a
+    MISDIRECTED_EDIT against a file this attempt was never allowed to
+    touch."""
+    from kriya.workflow.attribution import AttributionResult
+
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    state.all_files_written = {"App.java"}
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    ctx.allowed_write_relpaths = ["App.java"]
+    ctx.write_scope_mode = WriteScopeMode.ALLOWLIST
+    exc = QualityGateFailure(Failure(
+        type="goal_spec_compliance",
+        message="the goal names concrete requirements the generated code doesn't satisfy",
+        likely_files=["App.java", "InMemoryService.java"],
+    ))
+
+    medium_confidence_attribution = AttributionResult(
+        tier="judge", files=["App.java", "InMemoryService.java"], confidence="medium",
+        reasoning="both files plausibly relate to the missing requirement",
+    )
+    with patch(
+        "kriya.workflow.retry_strategy.attribute_failure",
+        AsyncMock(return_value=medium_confidence_attribution),
+    ):
+        should_break = await handle_attempt_failure(state, ctx, exc)
+
+    # Medium confidence never trips the escalation - the loop keeps going...
+    assert should_break is False
+    assert state.plan_scope_conflict is None
+    # ...but the unauthorized file must never become a generation target.
+    assert state.last_implicated_files == ["App.java"]
+    assert "InMemoryService.java" in state.rejected_generation_targets
 
 
 @pytest.mark.asyncio

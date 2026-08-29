@@ -308,6 +308,15 @@ class GenerationState:
     # the last one) is still eligible. None whenever the last failure named no
     # known file, or scoping is disabled (goes to the full-set path).
     last_implicated_files: Optional[List[str]] = None
+    # Correctness Continuity Part B (PRV-06, 2026-08-29): filepaths dropped
+    # from a generation/edit attempt because they fell outside
+    # ctx.allowed_write_relpaths under WriteScopeMode.ALLOWLIST - recorded
+    # by retry_strategy.py (pre-prompt narrowing of last_implicated_files)
+    # and attempt.py (pre-apply_anchored_edits rejection in the per-file
+    # write loop). Pure observability/diagnostics, accumulates across the
+    # whole run - never read or branched on by the retry loop itself, same
+    # posture as planner_reuse_used_attempt1 above.
+    rejected_generation_targets: List[str] = field(default_factory=list)
     # The file(s) the completeness check (extract_expected_files vs. what got
     # written) found missing after the MOST RECENT attempt. Mutually exclusive
     # with last_implicated_files - an IncompleteGenerationError sets this and

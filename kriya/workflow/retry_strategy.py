@@ -24,6 +24,7 @@ import os
 from typing import Optional
 
 from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.attribution import AttributionResult, _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.failure import (
@@ -758,7 +759,41 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             state.last_missing_files = [missing_manifest]
             state.last_implicated_files = None
         else:
-            state.last_implicated_files = implicated if implicated else None
+            narrowed_implicated = implicated
+            if (
+                implicated
+                and getattr(ctx, "write_scope_mode", None) == WriteScopeMode.ALLOWLIST
+                and ctx.allowed_write_relpaths
+            ):
+                # Correctness Continuity Part B (PRV-06, 2026-08-29): an
+                # implicated file outside this attempt's authorized write
+                # scope must never become a generation TARGET, independent
+                # of attribution confidence - unlike the scope_conflict_is_
+                # grounded block above (which only ESCALATES to a plan-scope
+                # conflict on high-confidence/misdirected_edit evidence),
+                # this filter applies unconditionally, because offering an
+                # unauthorized file as something the Developer should "focus
+                # on" is never correct regardless of how confident the
+                # attribution was. Live incident this closes: a medium-
+                # confidence GOAL_SPEC_COMPLIANCE_FAILURE implicated both
+                # App.java (authorized) and InMemoryService.java (owned by a
+                # different subtask, NOT authorized for this owner-recovery
+                # attempt) - too low-confidence to trip the existing
+                # plan_scope_conflict escalation above, so InMemoryService.java
+                # silently rode along into the next "Targeted retry" prompt
+                # and burned a whole attempt on a MISDIRECTED_EDIT against a
+                # file this attempt was never allowed to touch.
+                allowed_scope = set(ctx.allowed_write_relpaths)
+                narrowed_implicated = [f for f in implicated if f in allowed_scope]
+                rejected = sorted(set(implicated) - allowed_scope)
+                if rejected:
+                    logger.warning(
+                        "RECOVERY_GENERATION_TARGET_REJECTED filepaths=%s reason=outside_authorized_scope "
+                        "allowed=%s - dropped from the next generation attempt's targets",
+                        rejected, sorted(allowed_scope),
+                    )
+                    state.rejected_generation_targets.extend(rejected)
+            state.last_implicated_files = narrowed_implicated if narrowed_implicated else None
             state.last_missing_files = None
 
     # MA9 (2026-08-29): the ONE place attribution's own output ordinarily

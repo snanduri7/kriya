@@ -287,6 +287,85 @@ class GlobalInvariant(BaseModel):
         return v
 
 
+class IntegrationRelationshipKind(str, Enum):
+    """Correctness Continuity Part C (PRV-06, 2026-08-29) - a deliberately
+    small, closed vocabulary for the relationship an IntegrationRelationship
+    asserts between a producer subtask's artifact(s) and a consumer
+    subtask's artifact(s). Kept separate from kriya/workflow/repair_
+    contract.py's own ArtifactRelationKind (a different purpose - MA9's
+    repair-time GENERATION ORDERING/grouping vocabulary, derived from
+    FileRole - not this module's plan-time CORRECTNESS vocabulary, which is
+    asserted by the Planner or a test, not inferred from file roles).
+
+    USES: the consumer's code is expected to call/reference the producer's
+        artifact directly (PRV-06's own live gap: App.java should USE
+        InMemoryService.java, not reimplement it).
+    PROVIDES_TO / CONFIGURES / IMPLEMENTS / VERIFIES / DEPENDS_ON: the same
+        small set the spec review named - kept even though only USES has
+        live PRV evidence behind it yet, since a closed enum with unused
+        members is cheap and honest (matches ArtifactRelationKind's own
+        precedent of declaring IMPLEMENTS with no producer yet)."""
+
+    USES = "uses"
+    PROVIDES_TO = "provides_to"
+    CONFIGURES = "configures"
+    IMPLEMENTS = "implements"
+    VERIFIES = "verifies"
+    DEPENDS_ON = "depends_on"
+
+
+class IntegrationRelationship(BaseModel):
+    """Correctness Continuity Part C (PRV-06, 2026-08-29) - makes an
+    intended relationship between two (or more) subtasks' outputs an
+    explicit, structured plan fact instead of leaving it implicit in free-
+    text subtask descriptions. Optional and additive: EngineeringPlan.
+    integration_relationships defaults to an empty list, so every existing
+    plan/test that never populates it is completely unaffected - this is
+    read only by the obligation-derivation step it feeds (workflow_
+    controller.py), never required for plan validity.
+
+    Live incident this exists to make representable: PRV-06's plan had `s2:
+    App.java` and `s3: InMemoryService.java` as independent sibling
+    subtasks (both depend only on s1). Each passed its OWN local goal-spec-
+    compliance check; neither declared that App.java was actually supposed
+    to use InMemoryService.java, so the plan had no way to say the two
+    outputs were meant to compose into one behavior - Kriya validated local
+    completion twice and missed the relationship entirely."""
+
+    id: str
+    kind: IntegrationRelationshipKind
+    producer_subtask_ids: List[str] = Field(default_factory=list)
+    consumer_subtask_ids: List[str] = Field(default_factory=list)
+    participating_artifacts: List[str] = Field(default_factory=list)
+    relationship_statement: str
+    acceptance_condition: str = ""
+
+    @field_validator("id")
+    @classmethod
+    def _non_blank_id(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("integration relationship id must not be blank")
+        return v
+
+    @field_validator("relationship_statement")
+    @classmethod
+    def _non_blank_statement(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("integration relationship statement must not be blank")
+        return v
+
+    @field_validator("producer_subtask_ids", "consumer_subtask_ids")
+    @classmethod
+    def _non_empty_ids(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError(
+                "integration relationship must name at least one producer/consumer subtask id"
+            )
+        return v
+
+
 class Subtask(BaseModel):
     """One execution unit within an EngineeringPlan - MA6 invariant 2: the
     Developer/tool receives exactly one of these at a time, never the
@@ -399,6 +478,11 @@ class EngineeringPlan(BaseModel):
     extension_points: List[str] = Field(default_factory=list)
     refactor_baseline: Optional[str] = None
     global_invariants: List[GlobalInvariant] = Field(default_factory=list)
+    # Correctness Continuity Part C (PRV-06, 2026-08-29) - see
+    # IntegrationRelationship's own docstring. Optional/additive; defaults
+    # to empty so every plan that predates this field (or simply has no
+    # cross-subtask relationship to assert) validates exactly as before.
+    integration_relationships: List[IntegrationRelationship] = Field(default_factory=list)
 
     @field_validator("plan_id")
     @classmethod
@@ -522,6 +606,11 @@ class PlannerStructuredOutput(BaseModel):
     extension_points: List[str] = Field(default_factory=list)
     refactor_baseline: Optional[str] = None
     global_invariants: List[GlobalInvariant] = Field(default_factory=list)
+    # Correctness Continuity Part C (PRV-06, 2026-08-29) - see
+    # IntegrationRelationship's own docstring. Optional; a Planner response
+    # that omits it (every one that predates this field) degrades to "no
+    # asserted cross-subtask relationship," identical to today's behavior.
+    integration_relationships: List[IntegrationRelationship] = Field(default_factory=list)
 
 
 def build_engineering_plan_from_planner_output(
@@ -541,4 +630,5 @@ def build_engineering_plan_from_planner_output(
         plan_id=plan_id, kind=kind, subtasks=output.subtasks,
         acceptance_criteria=output.acceptance_criteria, extension_points=output.extension_points,
         refactor_baseline=output.refactor_baseline, global_invariants=output.global_invariants,
+        integration_relationships=output.integration_relationships,
     )

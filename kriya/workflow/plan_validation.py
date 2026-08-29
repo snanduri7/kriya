@@ -406,6 +406,54 @@ async def validate_plan(
                 )
                 reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
 
+    # Correctness Continuity Part C (PRV-06, 2026-08-29) - see
+    # IntegrationRelationship's own docstring (plan_schema.py). Checked by
+    # id, never inferred from free text, same discipline as the global-
+    # invariant reference check just above.
+    subtask_ids = {st.id for st in plan.subtasks}
+    for rel in plan.integration_relationships:
+        unknown_producer_ids = sorted(set(rel.producer_subtask_ids) - subtask_ids)
+        unknown_consumer_ids = sorted(set(rel.consumer_subtask_ids) - subtask_ids)
+        if unknown_producer_ids or unknown_consumer_ids:
+            errors.append(
+                f"integration relationship {rel.id!r} references unknown subtask id(s): "
+                f"producers={unknown_producer_ids} consumers={unknown_consumer_ids}"
+            )
+            reason_codes.append("INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK")
+            continue
+        obligation_id = f"plan.integration.{rel.id}"
+        if obligation_ledger is not None and obligation_ledger.current(obligation_id) is None:
+            # Seeded exactly once per relationship id - a later re-call of
+            # this function (e.g. a subsequent plan-repair iteration on the
+            # SAME plan) must never clobber a status a later, real
+            # deterministic reference check (workflow_controller.py, after
+            # the consumer subtask actually completes) already recorded.
+            # Part C7: PENDING + terminal_required is sufficient by itself -
+            # obligations.py's own unresolved_terminal_obligations() (MA8
+            # spec §42/43 generic backstop, already wired at this run's
+            # terminal aggregation) fails the whole run on anything
+            # terminal_required that never leaves PENDING, with zero new
+            # gate to wire by hand.
+            obligation_ledger.record(ObligationRecord(
+                id=obligation_id,
+                kind=ObligationKind.CROSS_SUBTASK_INTEGRATION,
+                status=ObligationStatus.PENDING,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=rel.relationship_statement,
+                source="plan_validation.validate_plan", revision=revision,
+                evidence={
+                    "kind": rel.kind.value,
+                    "producer_subtask_ids": list(rel.producer_subtask_ids),
+                    "consumer_subtask_ids": list(rel.consumer_subtask_ids),
+                    "participating_artifacts": list(rel.participating_artifacts),
+                    "acceptance_condition": rel.acceptance_condition,
+                },
+                owner_subtask_id=(
+                    rel.consumer_subtask_ids[0] if len(rel.consumer_subtask_ids) == 1 else None
+                ),
+                terminal_required=True,
+            ))
+
     for st in plan.subtasks:
         # execution_role=verification is EXEMPT here, not weakened: Subtask's
         # own model_validator (plan_schema.py) already requires a

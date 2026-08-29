@@ -1169,6 +1169,112 @@ def _build_owner_recovery_context(
     )
 
 
+def _integration_reference_token(path: str) -> str:
+    """The stem of a file's basename (no directory, no extension) - e.g.
+    "InMemoryService" from "src/main/java/com/example/InMemoryService.java",
+    "service" from "app/repository.py". A deliberately crude, generic,
+    language-agnostic proxy for "the identifier another file would use to
+    reference this one" - no AST, no import-graph, no per-language parsing
+    (Part C2's own explicit boundary: use existing plan/obligation
+    machinery, never build a semantic dependency graph)."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return stem
+
+
+def _evaluate_integration_obligations(
+    plan: EngineeringPlan,
+    obligation_ledger: Optional[ObligationLedger],
+    completed_subtask_id: str,
+    established_file_context: Dict[str, str],
+    revision: Any,
+) -> None:
+    """Correctness Continuity Part C (PRV-06, 2026-08-29) - the deterministic
+    evidence source that can transition a plan.integration.* obligation
+    (seeded PENDING by plan_validation.validate_plan(), see its own
+    docstring there) to SATISFIED or VIOLATED. Called once, right after a
+    subtask finishes and its files land in established_file_context - see
+    this module's own per-subtask loop for the call site.
+
+    Deliberately narrow evidence: a whole-word textual reference from the
+    token(s) of every relevant PRODUCER artifact's basename appearing
+    somewhere in the CONSUMER subtask's own just-established file content -
+    generic, cheap, and language-agnostic (Part C8: deterministic reference
+    evidence preferred over any new LLM judge; Part C2: no semantic graph,
+    no AST, no per-ecosystem adapter). This is intentionally a coarse
+    proxy for "the consumer actually uses the producer," not a compiler -
+    it can't confirm the reference is semantically correct, only that it
+    exists at all. That is exactly the class of evidence PRV-06 showed
+    Kriya had NONE of before this: App.java never once mentioned
+    "InMemoryService" anywhere in its own content, which this check would
+    have caught with zero false negatives on the real live incident.
+
+    Only evaluates a relationship once it is still PENDING (never re-
+    evaluates an already-SATISFIED/VIOLATED one - Part A's own evidence-
+    monotonicity spirit applied here too: this module deliberately does not
+    build upstream-change invalidation/stale-propagation, per Part C's own
+    explicit "not built until MA9 ever does partial regeneration" boundary
+    - see repair_contract.py's own three-level dependency model note)."""
+    if obligation_ledger is None or not plan.integration_relationships:
+        return
+    for rel in plan.integration_relationships:
+        if completed_subtask_id not in rel.consumer_subtask_ids:
+            continue
+        obligation_id = f"plan.integration.{rel.id}"
+        current = obligation_ledger.current(obligation_id)
+        if current is None or current.status != ObligationStatus.PENDING:
+            continue
+        producer_paths = [
+            pf.path
+            for pid in rel.producer_subtask_ids
+            for pf in (plan.subtask_by_id(pid).planned_files if plan.subtask_by_id(pid) else [])
+            if not rel.participating_artifacts or pf.path in rel.participating_artifacts
+        ]
+        consumer_paths = [
+            pf.path
+            for cid in rel.consumer_subtask_ids
+            for pf in (plan.subtask_by_id(cid).planned_files if plan.subtask_by_id(cid) else [])
+            if not rel.participating_artifacts or pf.path in rel.participating_artifacts
+        ]
+        consumer_content = "\n".join(
+            established_file_context[p] for p in consumer_paths if p in established_file_context
+        )
+        missing_producers = []
+        for producer_path in producer_paths:
+            if producer_path not in established_file_context:
+                # The producer hasn't been established yet at all - cannot
+                # possibly have been integrated (Part C6's scheduling
+                # invariant: a consumer finalizing before its producer's
+                # contract exists is itself the defect this records).
+                missing_producers.append(producer_path)
+                continue
+            token = _integration_reference_token(producer_path)
+            if not re.search(rf"\b{re.escape(token)}\b", consumer_content):
+                missing_producers.append(producer_path)
+        satisfied = not missing_producers
+        record = ObligationRecord(
+            id=obligation_id,
+            kind=ObligationKind.CROSS_SUBTASK_INTEGRATION,
+            status=ObligationStatus.SATISFIED if satisfied else ObligationStatus.VIOLATED,
+            authority=ObligationAuthority.DETERMINISTIC,
+            description=current.description,
+            source="workflow_controller.integration_check",
+            revision=revision,
+            evidence={
+                **current.evidence,
+                "missing_producer_references": missing_producers,
+            },
+            owner_subtask_id=current.owner_subtask_id,
+            terminal_required=True,
+            repair_scope=current.repair_scope,
+        )
+        obligation_ledger.record(record)
+        logger.info(
+            "INTEGRATION_OBLIGATION_%s id=%s consumer=%s missing=%s",
+            "SATISFIED" if satisfied else "VIOLATED",
+            obligation_id, completed_subtask_id, missing_producers,
+        )
+
+
 def _transitive_dependents(plan: EngineeringPlan, subtask_id: str) -> set[str]:
     """Every subtask that depends on `subtask_id`, directly or through a
     chain of other subtasks - i.e. everything that is DOWNSTREAM of it in
@@ -3314,6 +3420,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                 reason="recovered_upstream_subtask",
                             )
                             established_file_context[path] = projection.content
+                        # Correctness Continuity Part C: the reopened owner
+                        # may itself be a relationship's consumer (not just
+                        # its producer) - no-op when it isn't.
+                        _evaluate_integration_obligations(
+                            plan, obligation_ledger, owner_id, established_file_context, owner_position,
+                        )
                         approved_stage_states[subtask.id] = "in_progress"
                         control_state = control_state.with_updates(
                             subtask_states={
@@ -3530,6 +3642,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     reason="established_by_earlier_subtask",
                 )
                 established_file_context[path] = projection.content
+
+            # Correctness Continuity Part C (PRV-06, 2026-08-29): this
+            # subtask just finished and its files are now in
+            # established_file_context - the earliest point any
+            # relationship it's a CONSUMER for can be deterministically
+            # (re-)evaluated. No-op when the plan declares no integration
+            # relationships at all (every plan predating this feature).
+            _evaluate_integration_obligations(
+                plan, obligation_ledger, subtask_id, established_file_context, position,
+            )
 
         # Authoritative scope recovery may merge/remove a stage. Completion
         # must be measured against the revalidated CURRENT plan, not the

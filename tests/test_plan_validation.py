@@ -12,6 +12,8 @@ from kriya.workflow.plan_schema import (
     ExecutionRole,
     FileAction,
     GlobalInvariant,
+    IntegrationRelationship,
+    IntegrationRelationshipKind,
     PlannedFile,
     Subtask,
     VerificationMethod,
@@ -806,6 +808,87 @@ async def test_unresolved_terminal_obligations_empty_once_plan_fully_valid(tmp_p
     )
     assert result.valid, result.errors
     assert ledger.unresolved_terminal_obligations() == []
+
+
+# --- Correctness Continuity Part C (PRV-06, 2026-08-29): plan.
+# integration_relationships / ObligationKind.CROSS_SUBTASK_INTEGRATION.
+# See IntegrationRelationship's own docstring (plan_schema.py) for the live
+# incident - two sibling subtasks each independently satisfied their own
+# local goal_spec_compliance while never composing into one behavior. ---
+
+@pytest.mark.asyncio
+async def test_integration_relationship_unknown_subtask_id_is_an_error(tmp_path):
+    plan = _plan([_model_subtask(id="s2", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)])]).model_copy(update={
+        "integration_relationships": [IntegrationRelationship(
+            id="r1", kind=IntegrationRelationshipKind.USES,
+            producer_subtask_ids=["s_ghost"], consumer_subtask_ids=["s2"],
+            relationship_statement="App must use a producer that doesn't exist",
+        )],
+    })
+
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+
+    assert result.valid is False
+    assert result.reason_codes == ["INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK"]
+    assert any("s_ghost" in e for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_valid_integration_relationship_seeds_pending_terminal_obligation(tmp_path):
+    s2 = _model_subtask(id="s2", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)])
+    s3 = _model_subtask(id="s3", planned_files=[PlannedFile(path="InMemoryService.java", action=FileAction.CREATE)])
+    plan = _plan([s2, s3]).model_copy(update={
+        "integration_relationships": [IntegrationRelationship(
+            id="r1", kind=IntegrationRelationshipKind.USES,
+            producer_subtask_ids=["s3"], consumer_subtask_ids=["s2"],
+            relationship_statement="App.java must use InMemoryService.java",
+        )],
+    })
+    ledger = ObligationLedger()
+
+    result = await validate_plan(plan, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0)
+
+    assert result.valid, result.errors
+    rec = ledger.current("plan.integration.r1")
+    assert rec is not None
+    assert rec.status == ObligationStatus.PENDING
+    assert rec.terminal_required is True
+    assert rec.kind == ObligationKind.CROSS_SUBTASK_INTEGRATION
+    # A PENDING, terminal_required obligation is unresolved by construction -
+    # the plan is not yet globally correct just because it's structurally valid.
+    assert "plan.integration.r1" in [r.id for r in ledger.unresolved_terminal_obligations()]
+
+
+@pytest.mark.asyncio
+async def test_revalidating_the_same_plan_does_not_clobber_a_settled_integration_status(tmp_path):
+    """A plan-repair loop (or any caller) may call validate_plan() again on
+    the SAME plan after subtask execution has already resolved an
+    integration obligation - the seeding step must never re-record PENDING
+    over an already-SATISFIED/VIOLATED status (Part A's own evidence-
+    monotonicity spirit applied to seeding, not just re-judgment)."""
+    from kriya.workflow.obligations import ObligationAuthority, ObligationRecord
+
+    s2 = _model_subtask(id="s2", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)])
+    s3 = _model_subtask(id="s3", planned_files=[PlannedFile(path="InMemoryService.java", action=FileAction.CREATE)])
+    plan = _plan([s2, s3]).model_copy(update={
+        "integration_relationships": [IntegrationRelationship(
+            id="r1", kind=IntegrationRelationshipKind.USES,
+            producer_subtask_ids=["s3"], consumer_subtask_ids=["s2"],
+            relationship_statement="App.java must use InMemoryService.java",
+        )],
+    })
+    ledger = ObligationLedger()
+    await validate_plan(plan, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0)
+    ledger.record(ObligationRecord(
+        id="plan.integration.r1", kind=ObligationKind.CROSS_SUBTASK_INTEGRATION,
+        status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+        description="d", source="workflow_controller.integration_check", revision=1,
+        evidence={"missing_producer_references": ["InMemoryService.java"]}, terminal_required=True,
+    ))
+
+    await validate_plan(plan, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=1)
+
+    assert ledger.current("plan.integration.r1").status == ObligationStatus.VIOLATED
 
 
 # --- canonicalize_planned_file_actions (PRV-05 run #10, 2026-08-28): the

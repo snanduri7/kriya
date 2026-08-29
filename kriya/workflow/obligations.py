@@ -94,13 +94,30 @@ class ObligationKind(str, Enum):
     only when the ORIGINATING downstream subtask's own retry actually
     passes - the same "requirement, not target, is the stable object"
     principle PROCESS_BOUNDARY_COMPATIBILITY already established for a
-    same-subtask repair, applied here across a subtask boundary instead."""
+    same-subtask repair, applied here across a subtask boundary instead.
+
+    CROSS_SUBTASK_INTEGRATION (Correctness Continuity Part C, PRV-06,
+    2026-08-29): a live incident where two SIBLING subtasks (s2: App.java,
+    s3: InMemoryService.java, both depending only on s1, neither on the
+    other) each independently implemented their own self-contained in-
+    memory storage and each passed its own local goal_spec_compliance check
+    - App.java never actually used InMemoryService.java. Kriya validated
+    local completion twice and never noticed the two outputs were meant to
+    compose into one behavior, because nothing in the plan represented that
+    relationship at all. This kind exists so a Planner-asserted (or test-
+    asserted) IntegrationRelationship (kriya/workflow/plan_schema.py)
+    becomes a PENDING, terminal_required obligation the moment the plan
+    validates, satisfied only by later deterministic evidence that the
+    consumer's own content actually references the producer's artifact -
+    never by the consumer subtask's own local Quality Gates passing, which
+    is exactly the signal that already proved insufficient live."""
 
     PLAN_STRUCTURAL_VALIDITY = "plan_structural_validity"
     MIGRATION_COMPLETION = "migration_completion"
     GOAL_SPEC_REQUIREMENT = "goal_spec_requirement"
     PROCESS_BOUNDARY_COMPATIBILITY = "process_boundary_compatibility"
     CROSS_OWNER_ARTIFACT_REQUIREMENT = "cross_owner_artifact_requirement"
+    CROSS_SUBTASK_INTEGRATION = "cross_subtask_integration"
 
 
 class ObligationStatus(str, Enum):

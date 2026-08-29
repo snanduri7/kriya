@@ -48,7 +48,9 @@ from kriya.workflow.workflow_controller import (
     _authoritative_planner_extension_candidates,
     _build_owner_recovery_context,
     _cross_owner_obligation_id,
+    _evaluate_integration_obligations,
     _get_or_create_cross_owner_obligation,
+    _integration_reference_token,
     _transitive_upstream_ids,
     build_authoritative_planner_request,
     build_subtask_constraint_context,
@@ -3618,3 +3620,146 @@ async def test_enforce_owner_recovery_fails_closed_when_no_owner_is_resolvable(t
     # failing attempt. No owner-recovery call, no arbitrary owner guess.
     assert len(calls) == 2
     assert result.legacy_result.get("plan_recovery_events", []) == []
+
+
+# --- Correctness Continuity Part C (PRV-06, 2026-08-29) -
+# _evaluate_integration_obligations(): the deterministic evidence source
+# that transitions a plan.integration.* obligation (seeded PENDING by
+# plan_validation.validate_plan()) to SATISFIED or VIOLATED. Direct unit
+# tests against the helper - matches this codebase's own precedent for
+# every other retry/obligation helper (resolve_effective_artifact_owner
+# etc. above), no need for the full WorkflowController pipeline to prove
+# this deterministic reference check's own behavior. ---
+
+def _integration_plan(participating_artifacts=()):
+    s2 = Subtask(
+        id="s2", description="App", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
+    )
+    s3 = Subtask(
+        id="s3", description="Service", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="InMemoryService.java", action=FileAction.CREATE)],
+    )
+    rel_kwargs = dict(
+        id="r1", kind="uses", producer_subtask_ids=["s3"], consumer_subtask_ids=["s2"],
+        relationship_statement="App.java must use InMemoryService.java",
+    )
+    if participating_artifacts:
+        rel_kwargs["participating_artifacts"] = list(participating_artifacts)
+    from kriya.workflow.plan_schema import IntegrationRelationship
+    return EngineeringPlan(
+        plan_id="p1", kind=ChangeKind.TASK, subtasks=[s2, s3],
+        integration_relationships=[IntegrationRelationship(**rel_kwargs)],
+    )
+
+
+def _seeded_ledger(plan):
+    import asyncio
+    ledger = ObligationLedger()
+    asyncio.run(validate_plan(plan, workspace_path="/tmp", obligation_ledger=ledger, revision=0))
+    return ledger
+
+
+def test_integration_reference_token_is_the_basename_stem():
+    assert _integration_reference_token("src/main/java/com/example/InMemoryService.java") == "InMemoryService"
+    assert _integration_reference_token("app/repository.py") == "repository"
+
+
+def test_evaluate_integration_obligations_violated_when_consumer_never_references_producer():
+    """PRV-06's own real live shape: s2 (App.java) and s3
+    (InMemoryService.java) each pass their own local check, but App.java
+    never mentions InMemoryService anywhere - both locally complete, not
+    globally integrated."""
+    plan = _integration_plan()
+    ledger = _seeded_ledger(plan)
+    established = {
+        "InMemoryService.java": "public class InMemoryService { static void store(){} }",
+        "App.java": "public class App { java.util.Map m = new java.util.HashMap(); }",
+    }
+
+    _evaluate_integration_obligations(plan, ledger, "s2", established, revision=1)
+
+    rec = ledger.current("plan.integration.r1")
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.evidence["missing_producer_references"] == ["InMemoryService.java"]
+    assert "plan.integration.r1" in [r.id for r in ledger.unresolved_terminal_obligations()]
+
+
+def test_evaluate_integration_obligations_satisfied_when_consumer_references_producer():
+    plan = _integration_plan()
+    ledger = _seeded_ledger(plan)
+    established = {
+        "InMemoryService.java": "public class InMemoryService { static void store(){} }",
+        "App.java": "public class App { InMemoryService svc; }",
+    }
+
+    _evaluate_integration_obligations(plan, ledger, "s2", established, revision=1)
+
+    rec = ledger.current("plan.integration.r1")
+    assert rec.status == ObligationStatus.SATISFIED
+    assert rec.evidence["missing_producer_references"] == []
+    assert ledger.unresolved_terminal_obligations() == []
+
+
+def test_evaluate_integration_obligations_generic_non_java_reference():
+    """Genericity (Part E4): the same reference-token mechanism, unchanged,
+    for a Python producer/consumer pair - no Java/Maven assumption anywhere
+    in the checked logic."""
+    s_main = Subtask(
+        id="s_main", description="main", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="main.py", action=FileAction.CREATE)],
+    )
+    s_repo = Subtask(
+        id="s_repo", description="repository", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="repository.py", action=FileAction.CREATE)],
+    )
+    from kriya.workflow.plan_schema import IntegrationRelationship
+    plan = EngineeringPlan(
+        plan_id="p1", kind=ChangeKind.TASK, subtasks=[s_main, s_repo],
+        integration_relationships=[IntegrationRelationship(
+            id="r1", kind="uses", producer_subtask_ids=["s_repo"], consumer_subtask_ids=["s_main"],
+            relationship_statement="main.py must use repository.py",
+        )],
+    )
+    ledger = _seeded_ledger(plan)
+
+    violated = {"repository.py": "class Repository:\n    pass\n", "main.py": "print('hello')\n"}
+    _evaluate_integration_obligations(plan, ledger, "s_main", violated, revision=1)
+    assert ledger.current("plan.integration.r1").status == ObligationStatus.VIOLATED
+
+    ledger2 = _seeded_ledger(plan)
+    satisfied = {
+        "repository.py": "class Repository:\n    pass\n",
+        "main.py": "from repository import Repository\nrepo = Repository()\n",
+    }
+    _evaluate_integration_obligations(plan, ledger2, "s_main", satisfied, revision=1)
+    assert ledger2.current("plan.integration.r1").status == ObligationStatus.SATISFIED
+
+
+def test_evaluate_integration_obligations_never_reevaluates_an_already_settled_relationship():
+    """Part A's own evidence-monotonicity spirit applied to Part C: once a
+    relationship leaves PENDING, a later call (e.g. the owner recovering
+    and re-completing) must not flip it back and forth."""
+    plan = _integration_plan()
+    ledger = _seeded_ledger(plan)
+    established_satisfied = {
+        "InMemoryService.java": "public class InMemoryService {}",
+        "App.java": "public class App { InMemoryService svc; }",
+    }
+    _evaluate_integration_obligations(plan, ledger, "s2", established_satisfied, revision=1)
+    assert ledger.current("plan.integration.r1").status == ObligationStatus.SATISFIED
+
+    # A later re-completion of s2 with content that would now look VIOLATED
+    # must NOT flip an already-SATISFIED relationship.
+    established_would_now_fail = {"InMemoryService.java": "public class InMemoryService {}", "App.java": "public class App {}"}
+    _evaluate_integration_obligations(plan, ledger, "s2", established_would_now_fail, revision=2)
+    assert ledger.current("plan.integration.r1").status == ObligationStatus.SATISFIED
+
+
+def test_evaluate_integration_obligations_noop_for_unrelated_subtask_completion():
+    plan = _integration_plan()
+    ledger = _seeded_ledger(plan)
+    _evaluate_integration_obligations(plan, ledger, "s3", {"InMemoryService.java": "x"}, revision=1)
+    # s3 is the PRODUCER, not a consumer of r1 - evaluating its own
+    # completion must not touch the relationship at all.
+    assert ledger.current("plan.integration.r1").status == ObligationStatus.PENDING
