@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from kriya.workflow.generation_manifest import FileRole
 from kriya.workflow.obligations import ObligationKind, ObligationRecord
 
 
@@ -77,6 +78,32 @@ class RepairContractStatus(str, Enum):
     ABANDONED = "abandoned"
 
 
+class ArtifactRelationKind(str, Enum):
+    """A small, deliberately bounded normalized vocabulary (2026-08-29 v3
+    design review) for describing WHY one RepairGroup precedes another -
+    NOT a graph subsystem, NOT a new discovery mechanism. This exists so
+    evidence Kriya already has can be expressed consistently (a plan's own
+    `depends_on` -> DEPENDS_ON; a BUILD-role file's relationship to
+    everything it configures the build for -> DECLARES_DEPENDENCY_FOR; a
+    TEST-role group's relationship to what it exercises -> VERIFIES), not
+    to go discover NEW relationships no evidence source currently produces.
+    Six kinds, deliberately not eight or twenty - IMPLEMENTS exists for a
+    future evidence source that can actually name an interface/
+    implementation pair; nothing produces that evidence today, so nothing
+    maps to it yet, and that's fine - the vocabulary is allowed to have
+    slots nothing fills. Maven/Gradle/Python/Node discovery ADAPTERS that
+    would populate finer-grained relationships are explicitly NOT built -
+    see repair_contract.py's own module docstring, "Explicitly deferred,"
+    for the evidence bar that would justify building one."""
+
+    DEPENDS_ON = "depends_on"
+    DECLARES_DEPENDENCY_FOR = "declares_dependency_for"
+    CONFIGURES = "configures"
+    PROVIDES_CONTRACT_TO = "provides_contract_to"
+    IMPLEMENTS = "implements"
+    VERIFIES = "verifies"
+
+
 @dataclass(frozen=True)
 class RepairGroup:
     """A dependency-ordered subset of one RepairContract's participating
@@ -88,6 +115,28 @@ class RepairGroup:
     generation, reused here rather than inventing a second graph engine),
     never from any obligation-kind-specific field name.
 
+    Genericity invariant (2026-08-29 v3 design review, to be preserved by
+    any future change to this module or its callers): MA9 must be
+    artifact-type agnostic. RepairContract, RepairGroup, candidate-state
+    propagation, Developer orchestration, authorization, verification, and
+    atomic acceptance must never depend on programming language or build
+    system - ecosystem-specific knowledge is permitted only inside a
+    bounded evidence/discovery adapter (today: the FileRole classification
+    itself, and the PROCESS_BOUNDARY_COMPATIBILITY evidence adapter),
+    never inside the generic repair executor.
+
+    A second, equally important invariant: FileRole provides DEFAULT
+    artifact classification and CONSERVATIVE execution precedence - it
+    must never be treated as a complete semantic dependency graph. A
+    CONFIG file may need to precede source in one application and follow
+    it in another; a MODEL may depend on generated code; a BUILD file may
+    not actually affect a particular SOURCE file at all. Role-priority
+    ordering is a safe scheduling default when no stronger evidence
+    exists, not a claim about real per-file dependencies - see this
+    module's own "Level 1/2/3 dependency" note in docs/design.md for where
+    finer-grained (real, per-file) dependency evidence would plug in if a
+    live incident ever demonstrates the need.
+
     id: stable within one contract, e.g. "group.build"/"group.source".
     artifacts: this group's own members, in generation order.
     participant_roles: this group's subset of the contract's full
@@ -98,13 +147,19 @@ class RepairGroup:
     one - in v1 always every group with a strictly higher generic-role
     priority (BUILD before MODEL before SOURCE before CONFIG before
     ENTRYPOINT before TEST), mirroring generation_manifest.py's own
-    build_generation_manifest() dependency accumulation exactly."""
+    build_generation_manifest() dependency accumulation exactly.
+    relationship_kind: the ArtifactRelationKind this group's role
+    represents to whatever depends on it (see _ROLE_RELATIONSHIP_KIND) -
+    purely descriptive/observability today, never consulted for ordering
+    or authorization decisions, which stay driven by _ROLE_PRIORITY and
+    the existing write-scope boundary respectively."""
 
     id: str
     artifacts: Tuple[str, ...]
     participant_roles: Dict[str, str]
     depends_on_group_ids: Tuple[str, ...]
     generation_order: Tuple[str, ...]
+    relationship_kind: ArtifactRelationKind = ArtifactRelationKind.DEPENDS_ON
 
 
 @dataclass
@@ -371,6 +426,24 @@ _CONTRACT_SHAPE_BUILDERS = {
 }
 
 
+# Normalizes evidence _derive_repair_groups() already has (the FileRole
+# itself) into the ArtifactRelationKind vocabulary - 2026-08-29 v3 design
+# review: "normalize evidence we already have without creating new
+# discovery infrastructure." BUILD declares the dependency coordinates
+# everything else builds against; MODEL provides the data contract/shape
+# other roles consume; CONFIG configures the behavior of the
+# source/entrypoint that reads it; TEST verifies everything generated
+# before it. SOURCE/ENTRYPOINT/DOCUMENTATION/ASSET have no role-level
+# relationship more specific than the generic default - deliberately left
+# at DEPENDS_ON rather than guessing.
+_ROLE_RELATIONSHIP_KIND: Dict[FileRole, "ArtifactRelationKind"] = {
+    FileRole.BUILD: ArtifactRelationKind.DECLARES_DEPENDENCY_FOR,
+    FileRole.MODEL: ArtifactRelationKind.PROVIDES_CONTRACT_TO,
+    FileRole.CONFIG: ArtifactRelationKind.CONFIGURES,
+    FileRole.TEST: ArtifactRelationKind.VERIFIES,
+}
+
+
 def _derive_repair_groups(
     participating_artifacts: Tuple[str, ...], participant_roles: Dict[str, str],
 ) -> Tuple[RepairGroup, ...]:
@@ -402,7 +475,16 @@ def _derive_repair_groups(
     generated together with mutual candidate visibility - the correct
     default per this module's own docstring ("files whose candidate states
     must remain coherent... should be grouped or ordered together") when
-    no cross-role ordering signal exists between them."""
+    no cross-role ordering signal exists between them.
+
+    Each group also gets an ArtifactRelationKind (see _ROLE_RELATIONSHIP_
+    KIND below) - purely descriptive normalization of evidence this
+    function ALREADY has (the role itself), not a new relationship
+    discovery step. A future finer-grained evidence source (a real
+    Maven/Gradle/Python/Node dependency-descriptor adapter, or a plan's own
+    per-file `depends_on`) is explicitly NOT built here - see this
+    function's own module docstring for the live-incident bar that would
+    justify one; this stays a conservative, always-available default."""
     from kriya.workflow.generation_manifest import _ROLE_PRIORITY, classify_file_role
 
     file_roles = {path: classify_file_role(path) for path in participating_artifacts}
@@ -422,6 +504,7 @@ def _derive_repair_groups(
             participant_roles={p: participant_roles.get(p, role.value) for p in members},
             depends_on_group_ids=prior_group_ids,
             generation_order=members,
+            relationship_kind=_ROLE_RELATIONSHIP_KIND.get(role, ArtifactRelationKind.DEPENDS_ON),
         ))
         prior_group_ids = prior_group_ids + (group_id,)
     return tuple(groups)

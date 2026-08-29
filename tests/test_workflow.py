@@ -17432,3 +17432,75 @@ async def test_run_coordinated_repair_generation_fresh_candidate_view_each_call(
     # The second attempt's downstream prompt must NOT carry the first
     # attempt's stale candidate forward.
     assert "FIRST_ATTEMPT_APP_CANDIDATE" not in captured[1]
+
+
+# --- MA9 v3 (2026-08-29): heterogeneous-artifact genericity proof - "MA9
+# repair participation and dependency ordering MUST operate on heterogeneous
+# repository artifacts, not source files alone." No .java/Maven-specific
+# code path is exercised by either test below; classify_file_role/
+# _ROLE_PRIORITY are the same stack-neutral machinery for every stack. ---
+
+def test_derive_repair_groups_python_heterogeneous_artifacts_no_java_or_maven(tmp_path):
+    """A synthetic, entirely non-Java/non-Maven repair: a Python build
+    manifest, a model, two source files, a YAML config, an entrypoint, and
+    a test - spanning 6 of the 8 FileRole categories. Proves the grouping
+    machinery itself carries no Java/Maven assumption anywhere in its own
+    code path (it never even sees a .java file or a pom.xml in this test)."""
+    from kriya.workflow.repair_contract import ArtifactRelationKind, _derive_repair_groups
+
+    participants = (
+        "pyproject.toml", "models/order.py", "repository.py", "service.py",
+        "config.yml", "main.py", "tests/test_service.py",
+    )
+    groups = _derive_repair_groups(participants, {})
+
+    assert [g.id for g in groups] == [
+        "group.build", "group.model", "group.source", "group.config",
+        "group.entrypoint", "group.test",
+    ]
+    assert groups[0].artifacts == ("pyproject.toml",)
+    assert groups[1].artifacts == ("models/order.py",)
+    assert set(groups[2].artifacts) == {"repository.py", "service.py"}
+    assert groups[3].artifacts == ("config.yml",)
+    assert groups[4].artifacts == ("main.py",)
+    assert groups[5].artifacts == ("tests/test_service.py",)
+    # Relationship vocabulary applied identically, regardless of stack.
+    assert groups[0].relationship_kind == ArtifactRelationKind.DECLARES_DEPENDENCY_FOR
+    assert groups[1].relationship_kind == ArtifactRelationKind.PROVIDES_CONTRACT_TO
+    assert groups[3].relationship_kind == ArtifactRelationKind.CONFIGURES
+    assert groups[5].relationship_kind == ArtifactRelationKind.VERIFIES
+    # Dependency propagation identical in shape to the Java case.
+    assert groups[-1].depends_on_group_ids == tuple(g.id for g in groups[:-1])
+    flattened = tuple(p for g in groups for p in g.generation_order)
+    assert set(flattened) == set(participants)
+
+
+def test_derive_repair_groups_jvm_heterogeneous_artifacts_build_and_config(tmp_path):
+    """The user's own worked example: a build manifest (pom.xml), a YAML
+    application config, a domain/model class, several plain source
+    classes, and a test - all coexisting as participants of ONE
+    RepairContract. Proves heterogeneous artifact TYPES (not just multiple
+    .java files) combine correctly within a single JVM-flavored repair."""
+    from kriya.workflow.repair_contract import ArtifactRelationKind, _derive_repair_groups
+
+    participants = (
+        "pom.xml", "application.yml", "OrderRequest.java", "OrderRepository.java",
+        "OrderService.java", "OrderController.java", "OrderServiceTest.java",
+    )
+    groups = _derive_repair_groups(participants, {})
+
+    assert [g.id for g in groups] == [
+        "group.build", "group.model", "group.source", "group.config", "group.test",
+    ]
+    assert groups[0].artifacts == ("pom.xml",)
+    assert groups[0].relationship_kind == ArtifactRelationKind.DECLARES_DEPENDENCY_FOR
+    assert groups[1].artifacts == ("OrderRequest.java",)
+    assert groups[1].relationship_kind == ArtifactRelationKind.PROVIDES_CONTRACT_TO
+    assert set(groups[2].artifacts) == {"OrderController.java", "OrderRepository.java", "OrderService.java"}
+    assert groups[3].artifacts == ("application.yml",)
+    assert groups[3].relationship_kind == ArtifactRelationKind.CONFIGURES
+    assert groups[4].artifacts == ("OrderServiceTest.java",)
+    assert groups[4].relationship_kind == ArtifactRelationKind.VERIFIES
+    assert groups[4].depends_on_group_ids == (
+        "group.build", "group.model", "group.source", "group.config",
+    )
