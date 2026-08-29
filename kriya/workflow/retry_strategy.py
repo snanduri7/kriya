@@ -274,6 +274,20 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # this fix: an early, broader version of this change (reclassifying
     # EVERY bare exception) did exactly that regression, caught by this
     # module's own existing test_workflow.py regression sweep.
+    #
+    # Future hardening note (2026-08-29 design review, not a blocker for
+    # this pass): this whitelist is a pragmatic fix for TODAY's evidenced
+    # failure classes, not permanent architectural truth - classification
+    # is properly about an exception's ORIGIN (did Kriya's own control-
+    # plane code break) and SEMANTICS, not merely its Python type. A
+    # TypeError could someday be a deliberate signal from a validator or
+    # plugin boundary, the same way ValueError already is here for
+    # DeveloperAgent's own malformed-response signaling. If a future
+    # addition needs one of these four types as an intentional, non-buggy
+    # signal, prefer a typed internal exception (a dedicated base class
+    # control-plane code raises deliberately) or an explicit control-plane
+    # boundary over continuing to grow this whitelist - see docs/design.md
+    # §11.3's own "Future hardening note" for the fuller rationale.
     attached_failure = getattr(e, "failure", None)
     scope_denial_failure = attached_failure is None and _failure_from_validated_scope_denial(e, ctx)
     is_internal_framework_bug = (
