@@ -76,12 +76,31 @@ class ObligationKind(str, Enum):
     across 11 attempts because no cross-revision signal existed distinguishing
     "still the same structural conflict" from "a fresh, different failure" -
     this kind exists to make that distinction trackable the same way
-    PLAN_STRUCTURAL_VALIDITY already tracks planned-file-action regressions."""
+    PLAN_STRUCTURAL_VALIDITY already tracks planned-file-action regressions.
+
+    CROSS_OWNER_ARTIFACT_REQUIREMENT (PRV-06, 2026-08-29): a live incident
+    where a downstream subtask (s4, writing JUnit 5 tests) deterministically
+    proved an already-completed upstream owner (s1, pom.xml) is missing a
+    required dependency (javac: "package org.junit.jupiter.api does not
+    exist"). Kriya correctly detected the failure, correctly attributed it
+    to pom.xml, correctly denied the out-of-scope write, and correctly
+    reopened s1 - but the SPECIFIC grounded reason for reopening it did not
+    survive the handoff: s1 was re-invoked with a generic "preserve
+    brownfield owner identity" framing, regenerated a still-incomplete
+    pom.xml, and the same downstream failure recurred. This kind exists so
+    the exact requirement (must_fix/must_preserve/evidence/acceptance
+    condition) that justified reopening an owner survives as a durable,
+    ledger-tracked fact - sticky across a failed owner attempt, satisfied
+    only when the ORIGINATING downstream subtask's own retry actually
+    passes - the same "requirement, not target, is the stable object"
+    principle PROCESS_BOUNDARY_COMPATIBILITY already established for a
+    same-subtask repair, applied here across a subtask boundary instead."""
 
     PLAN_STRUCTURAL_VALIDITY = "plan_structural_validity"
     MIGRATION_COMPLETION = "migration_completion"
     GOAL_SPEC_REQUIREMENT = "goal_spec_requirement"
     PROCESS_BOUNDARY_COMPATIBILITY = "process_boundary_compatibility"
+    CROSS_OWNER_ARTIFACT_REQUIREMENT = "cross_owner_artifact_requirement"
 
 
 class ObligationStatus(str, Enum):

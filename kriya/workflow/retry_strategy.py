@@ -651,6 +651,17 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                     "grounded_owner_files": (
                         outside_scope if attribution.tier == "architectural_owner" else []
                     ),
+                    # MA8.1 (PRV-06, 2026-08-29): the raw grounded evidence
+                    # (a compiler/test error, not an attribution summary) -
+                    # preserved separately from "reason" because a later,
+                    # failed grounded-owner plan-revision attempt overwrites
+                    # "reason" with its OWN failure message
+                    # (workflow_controller.py's `{**scope_conflict, "reason":
+                    # revision_failure_reason}`), which would otherwise
+                    # silently erase the actual cause an owner-recovery
+                    # obligation needs to quote. Bounded length - this
+                    # becomes Developer-facing prompt text, not a log dump.
+                    "raw_evidence": (failure.raw_output or "")[:2000],
                 }
         # For a QualityGateFailure type that appends its own gate_outcome at
         # the RAISE SITE (compile/test/regression_test/run_verification/

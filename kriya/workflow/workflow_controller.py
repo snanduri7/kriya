@@ -766,6 +766,134 @@ def resolve_scope_conflict_owners(
     return owners
 
 
+def _cross_owner_obligation_id(
+    originating_subtask_id: str, owner_subtask_id: str, required_files: List[str],
+) -> str:
+    return f"recovery.{originating_subtask_id}.{owner_subtask_id}.{'.'.join(sorted(required_files))}"
+
+
+def _get_or_create_cross_owner_obligation(
+    ledger: Optional[ObligationLedger],
+    *,
+    originating_subtask_id: str,
+    owner_subtask_id: str,
+    required_files: List[str],
+    scope_conflict: Dict[str, Any],
+    revision: Any,
+) -> Optional[ObligationRecord]:
+    """MA8.1 (PRV-06, 2026-08-29): the single place a downstream failure's
+    grounded requirement for an upstream owner becomes a durable, ledger-
+    tracked fact instead of a one-shot prompt string that can be lost or
+    overwritten - see ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT's own
+    docstring for the live incident (a downstream test subtask proved an
+    upstream build-manifest owner was missing a dependency; the owner was
+    reopened with a generic "preserve brownfield identity" framing instead
+    of that specific requirement, regenerated an equally incomplete
+    manifest, and the same failure recurred).
+
+    Sticky by construction: if this EXACT obligation (same originating
+    subtask, same owner, same required files) is already on record as
+    VIOLATED, returns it UNCHANGED rather than re-deriving from the
+    CURRENT scope_conflict - a later attempt's own grounded evidence can
+    be weaker or differently shaped than the first, strongest occurrence
+    (confirmed live: the second failure that recurred was a static-rule
+    violation, not the original compiler error) - the obligation's own
+    MUST_FIX/evidence must not silently regress just because a later
+    symptom looks different. Reuses ObligationRecord as-is (no new
+    dataclass, per the 2026-08-29 design review) - owner_subtask_id and
+    repair_scope are already exactly the fields this needs; must_fix/
+    must_preserve/acceptance_conditions/raw_evidence live in the free-form
+    `evidence` dict.
+
+    Returns None only when there is no ledger to record into (a caller
+    outside structured/enforce execution, which never reaches this
+    recovery path today anyway - matches every other MA8/MA9 obligation
+    hook's own "no ledger -> no-op" convention)."""
+    if ledger is None:
+        return None
+    obligation_id = _cross_owner_obligation_id(originating_subtask_id, owner_subtask_id, required_files)
+    existing = ledger.current(obligation_id)
+    if existing is not None and existing.status == ObligationStatus.VIOLATED:
+        return existing
+    grounded_reason = scope_conflict.get("reason") or "a grounded requirement discovered by the reopened downstream subtask"
+    evidence = {
+        "must_fix": [grounded_reason],
+        "must_preserve": [
+            "existing project/module identity",
+            "existing configuration and declarations unrelated to this requirement",
+        ],
+        "raw_evidence": scope_conflict.get("raw_evidence") or "",
+        "required_artifacts": list(required_files),
+        "acceptance_conditions": [
+            f"subtask {originating_subtask_id} passes its own Quality Gates without the same "
+            "grounded requirement recurring",
+        ],
+        "originating_subtask_id": originating_subtask_id,
+    }
+    record = ObligationRecord(
+        id=obligation_id,
+        kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
+        status=ObligationStatus.VIOLATED,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description=f"{owner_subtask_id} must satisfy a requirement grounded by {originating_subtask_id}'s own failure: {grounded_reason}",
+        source="workflow_controller.owner_recovery",
+        revision=revision,
+        evidence=evidence,
+        owner_subtask_id=owner_subtask_id,
+        terminal_required=False,
+        repair_scope=tuple(sorted(required_files)),
+    )
+    ledger.record(record)
+    return record
+
+
+def _build_owner_recovery_context(
+    *,
+    owner_id: str,
+    failed_subtask_id: str,
+    required_owner_files: List[str],
+    cross_owner_obligation: Optional[ObligationRecord],
+    scope_conflict: Dict[str, Any],
+) -> str:
+    """The Developer-facing recovery_context text for a reopened owner
+    subtask - extracted to its own function (2026-08-29, MA8.1) so the
+    exact wording/fields it produces are directly unit-testable, matching
+    this codebase's own precedent for every other retry-prompt builder
+    (e.g. kriya/workflow/retry_prompts.py). When cross_owner_obligation is
+    available, surfaces its MUST FIX/MUST PRESERVE/EVIDENCE/ACCEPTANCE
+    explicitly - the exact grounded reason this owner is being reopened,
+    not a generic "preserve brownfield identity" framing (see
+    ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT's own docstring for the
+    live incident this closes). Falls back to the original, plainer
+    framing only when no ledger was available to record an obligation into
+    (a caller outside structured/enforce execution)."""
+    if cross_owner_obligation is not None:
+        ev = cross_owner_obligation.evidence
+        return (
+            "--- ACTIVE CROSS-OWNER RECOVERY REQUIREMENT ---\n"
+            f"Reopened owner: {owner_id}\n"
+            f"Originating failure: subtask {failed_subtask_id}\n"
+            f"Required repair files: {json.dumps(required_owner_files)}\n\n"
+            f"MUST FIX: {'; '.join(ev.get('must_fix', [])) or 'unavailable'}\n"
+            f"MUST PRESERVE: {'; '.join(ev.get('must_preserve', [])) or 'unavailable'}\n"
+            f"EVIDENCE: {ev.get('raw_evidence') or 'unavailable'}\n"
+            f"ACCEPTANCE: {'; '.join(ev.get('acceptance_conditions', [])) or 'unavailable'}\n\n"
+            "This is the exact grounded reason this owner was reopened - address it "
+            "specifically, not a generic regeneration. Preserve every other existing "
+            "declaration this file already has."
+        )
+    return (
+        "--- authoritative plan recovery ---\n"
+        f"Failed consumer: {failed_subtask_id}\n"
+        f"Reopened owner: {owner_id}\n"
+        f"Required repair files: {json.dumps(required_owner_files)}\n"
+        f"Failure type: {scope_conflict.get('failure_type')}\n"
+        f"Grounded failure diagnosis: {scope_conflict.get('reason') or 'unavailable'}\n"
+        "Repair only the reopened owner's approved files. Preserve its provided "
+        "contracts and all relevant global invariants."
+    )
+
+
 def _transitive_dependents(plan: EngineeringPlan, subtask_id: str) -> set[str]:
     """Every subtask that depends on `subtask_id`, directly or through a
     chain of other subtasks - i.e. everything that is DOWNSTREAM of it in
@@ -779,6 +907,42 @@ def _transitive_dependents(plan: EngineeringPlan, subtask_id: str) -> set[str]:
                 dependents.add(st.id)
                 frontier.append(st.id)
     return dependents
+
+
+def _transitive_upstream_ids(plan: EngineeringPlan, subtask_id: str) -> set[str]:
+    """Every subtask `subtask_id` depends on, directly or through a chain -
+    i.e. everything UPSTREAM of it in the DAG (the mirror of
+    _transitive_dependents above, walking depends_on forward instead of
+    finding reverse-dependents).
+
+    2026-08-29 (PRV-06, MA8.1) - added after live evidence: the merge loop
+    below already protects one direction (an owner's OWN depends_on
+    pointing at something downstream of the failed stage - see
+    dropped_owner_deps) but not the other. When a THIRD subtask that
+    already depends on the deleted owner gets redirected to depend on
+    `failed` instead, that redirect is only safe if the third subtask is
+    NOT itself upstream of `failed` - otherwise `failed` already
+    (transitively) depends on it, and pointing it at `failed` too closes a
+    cycle: consumer -> failed -> ... -> consumer. Confirmed live: a
+    grounded-owner plan revision reopening a build-manifest owner (pom.xml)
+    for a downstream test subtask redirected the manifest's OTHER, earlier
+    consumers (production-code subtasks upstream of the failing test stage)
+    to depend on the failing test stage - inverting the original
+    dependency direction and producing exactly this cycle, caught only by
+    validate_plan()'s own after-the-fact structural check. See the merge
+    loop's own use of this function for the fix - skip (drop, don't
+    redirect) any such edge instead of constructing it."""
+    upstream: set[str] = set()
+    frontier = list(plan.subtask_by_id(subtask_id).depends_on) if plan.subtask_by_id(subtask_id) else []
+    while frontier:
+        current = frontier.pop()
+        if current in upstream:
+            continue
+        upstream.add(current)
+        dependency = plan.subtask_by_id(current)
+        if dependency is not None:
+            frontier.extend(dependency.depends_on)
+    return upstream
 
 
 def _plan_scope_conflict_files(scope_conflict: Optional[Dict[str, object]]) -> List[str]:
@@ -933,8 +1097,23 @@ def revise_plan_for_grounded_scope_owner(
             failed.relevant_global_invariant_ids + owner.relevant_global_invariant_ids
         ))
         revised.subtasks = [st for st in revised.subtasks if st.id != owner.id]
+        # 2026-08-29 (PRV-06, MA8.1): computed BEFORE the redirect loop,
+        # against the plan as it stood before this merge (owner already
+        # removed above, but no depends_on rewritten yet) - see
+        # _transitive_upstream_ids' own docstring for the live cyclic-DAG
+        # incident this guards against.
+        failed_upstream = _transitive_upstream_ids(revised, failed.id)
         for consumer in revised.subtasks:
             if owner.id not in consumer.depends_on:
+                continue
+            if consumer.id in failed_upstream or consumer.id == failed.id:
+                # consumer already runs before (or is) failed - the merge
+                # doesn't need it to depend on anything for ordering, and
+                # redirecting it to depend on failed would invert direction
+                # and close a cycle (failed already transitively depends on
+                # it). Drop the now-dangling reference to the deleted owner
+                # instead of redirecting it.
+                consumer.depends_on = [dep for dep in consumer.depends_on if dep != owner.id]
                 continue
             consumer.depends_on = list(dict.fromkeys(
                 failed.id if dep == owner.id else dep for dep in consumer.depends_on
@@ -2441,15 +2620,51 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             #   loop's own "no owner -> plan/scope defect -> use the
             #   existing authoritative plan revision mechanism" behavior is
             #   correct for this case and stays exactly as it was.
+            #
+            # Widened (2026-08-29, PRV-06, MA8.1), narrowly: the PAST_ORDERED
+            # disjunct below (resolve_scope_conflict_owners finds a real,
+            # unique UPSTREAM owner) now skips the merge loop regardless of
+            # attribution_tier - the original gate ("authoritative_
+            # deterministic" only) left an ordinary grounded compile-error
+            # finding (tier "architectural_owner" - a downstream subtask
+            # proving an upstream owner's file is missing something, e.g. a
+            # build manifest missing a test dependency) going through the
+            # DAG-mutating merge loop even when a clean upstream owner was
+            # resolvable. revise_plan_for_grounded_scope_owner() is for
+            # genuine architecture-discovery (permanently reassigning
+            # ownership because the PLAN mis-assigned it) - a different
+            # operation from "temporarily reopen an owner that's already
+            # correctly assigned, to satisfy one new requirement, then
+            # resume the downstream subtask," which is exactly what the
+            # non-mutating owner-recovery path below (resolve_scope_
+            # conflict_owners + CROSS_OWNER_ARTIFACT_REQUIREMENT) does - the
+            # "recovery scheduling, not plan dependency" distinction that
+            # incident's forensic analysis identified as the actual
+            # conceptual mistake behind a live-observed cyclic-DAG revision
+            # failure.
+            #
+            # The FUTURE_ORDERED/UNRELATED disjunct (owned, but NOT
+            # upstream) deliberately KEEPS its original authoritative_
+            # deterministic-only gate, unchanged - test_enforce_revises_
+            # service_scope_to_grounded_controller_and_continues exercises
+            # exactly this combination (tier="architectural_owner", a real
+            # owner that is downstream, not upstream, of the failing
+            # subtask) and depends on it continuing to route through the
+            # merge path; widening THAT disjunct too was not evidenced by
+            # the PRV-06 incident (whose owner was genuinely upstream) and
+            # would have silently changed already-tested behavior with no
+            # live incident behind it.
             if (
                 scope_conflict.get("classification") == "PLAN_SCOPE_DEFECT"
-                and scope_conflict.get("attribution_tier") == "authoritative_deterministic"
                 and grounded_scope_files
                 and (
                     resolve_scope_conflict_owners(plan, grounded_scope_files, subtask)
-                    or any(
-                        plan.classify_file_ownership(subtask.id, path) != FileOwnershipRelation.UNOWNED
-                        for path in grounded_scope_files
+                    or (
+                        scope_conflict.get("attribution_tier") == "authoritative_deterministic"
+                        and any(
+                            plan.classify_file_ownership(subtask.id, path) != FileOwnershipRelation.UNOWNED
+                            for path in grounded_scope_files
+                        )
                     )
                 )
             ):
@@ -2598,15 +2813,30 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     )
                     save_control_state(workspace_path, control_state)
                     owner_position = order.index(owner_id) + 1
-                    recovery_context = (
-                        "--- authoritative plan recovery ---\n"
-                        f"Failed consumer: {subtask.id}\n"
-                        f"Reopened owner: {owner_id}\n"
-                        f"Required repair files: {json.dumps(required_owner_files)}\n"
-                        f"Failure type: {scope_conflict.get('failure_type')}\n"
-                        f"Grounded failure diagnosis: {scope_conflict.get('reason') or 'unavailable'}\n"
-                        "Repair only the reopened owner's approved files. Preserve its provided "
-                        "contracts and all relevant global invariants."
+                    # MA8.1 (PRV-06, 2026-08-29): the grounded reason this
+                    # owner is being reopened is promoted into a durable
+                    # CROSS_OWNER_ARTIFACT_REQUIREMENT obligation and
+                    # threaded explicitly into the owner's own Developer
+                    # prompt - the exact requirement-propagation gap the
+                    # live incident exposed. Sticky across a failed owner
+                    # attempt (see _get_or_create_cross_owner_obligation's
+                    # own docstring) - a second reopening for the SAME
+                    # unresolved requirement reuses the SAME MUST_FIX text,
+                    # never degrading back to generic brownfield framing.
+                    cross_owner_obligation = _get_or_create_cross_owner_obligation(
+                        obligation_ledger,
+                        originating_subtask_id=subtask.id,
+                        owner_subtask_id=owner_id,
+                        required_files=required_owner_files,
+                        scope_conflict=scope_conflict,
+                        revision=len(plan_recovery_events),
+                    )
+                    recovery_context = _build_owner_recovery_context(
+                        owner_id=owner_id,
+                        failed_subtask_id=subtask.id,
+                        required_owner_files=required_owner_files,
+                        cross_owner_obligation=cross_owner_obligation,
+                        scope_conflict=scope_conflict,
                     )
                     owner_result = await _invoke_bounded_subtask(
                         owner, owner_position, recovery_context=recovery_context,
@@ -2697,6 +2927,33 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             ),
                             execution_role="consumer_retry",
                         )
+                        # MA8.1 (PRV-06, 2026-08-29): the obligation's own
+                        # acceptance condition IS this consumer_retry call's
+                        # Quality Gates - not a separate, speculative check
+                        # of the owner's file content (which the owner's own
+                        # narrow gate has no way to evaluate against a
+                        # DOWNSTREAM requirement anyway - confirmed live:
+                        # pom.xml's own compile check happily accepted a
+                        # still-incomplete manifest). SATISFIED only on the
+                        # real, authoritative signal; left VIOLATED (sticky,
+                        # unchanged) otherwise, so a further reopening of
+                        # the SAME owner for the SAME requirement reuses the
+                        # SAME MUST_FIX text rather than losing it again.
+                        if cross_owner_obligation is not None:
+                            if bool(call_result.get("quality_gates_passed")):
+                                obligation_ledger.record(ObligationRecord(
+                                    id=cross_owner_obligation.id,
+                                    kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
+                                    status=ObligationStatus.SATISFIED,
+                                    authority=ObligationAuthority.DETERMINISTIC,
+                                    description=cross_owner_obligation.description,
+                                    source="workflow_controller.owner_recovery",
+                                    revision=len(plan_recovery_events),
+                                    evidence=cross_owner_obligation.evidence,
+                                    owner_subtask_id=cross_owner_obligation.owner_subtask_id,
+                                    terminal_required=False,
+                                    repair_scope=cross_owner_obligation.repair_scope,
+                                ))
                     else:
                         for result_index, prior_result in enumerate(subtask_results):
                             if prior_result.subtask_id == owner_id:

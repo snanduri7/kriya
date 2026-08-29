@@ -31,11 +31,22 @@ from kriya.workflow.planning_diagnostics import (
     planning_diagnostics_path,
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
 from kriya.workflow.workflow_controller import (
     AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
     _StructuredPlanUnavailable,
     WorkflowController,
     _authoritative_planner_extension_candidates,
+    _build_owner_recovery_context,
+    _cross_owner_obligation_id,
+    _get_or_create_cross_owner_obligation,
+    _transitive_upstream_ids,
     build_authoritative_planner_request,
     build_subtask_constraint_context,
     build_subtask_goal_text,
@@ -2472,3 +2483,343 @@ async def test_enforce_rejects_model_subtask_without_planned_files(tmp_path):
     assert result.legacy_result["invalid_subtask_ids"] == ["s1"]
     assert we.planner.run.await_count == 3
     we.run_generation_workflow.assert_not_awaited()
+
+
+# --- MA8.1 (PRV-06, 2026-08-29): Cross-Owner Requirement-Preserving Recovery
+# - a live run proved the grounded reason for reopening an upstream owner
+# (e.g. "pom.xml is missing the JUnit 5 dependency s4's tests need") was not
+# surviving the handoff: the owner got reopened with a generic "preserve
+# brownfield identity" framing, regenerated an equally incomplete file, and
+# the same downstream failure recurred. A separate, real bug in the SAME
+# incident: the "preferred" grounded-owner plan-revision path produced a
+# cyclic subtask dependency graph when reopening an owner that had OTHER,
+# earlier consumers upstream of the failing stage. ---
+
+def _prv06_shaped_plan():
+    """The exact shape of the live PRV-06 Hardened failure: a build
+    manifest (s1) owned upstream of two parallel production subtasks (s2,
+    s3), which a test-writing subtask (s4) depends on. s4 proves s1 is
+    missing something it needs; s1 must be reopened WITHOUT inverting the
+    s1 -> s2/s3 -> s4 dependency direction."""
+    return EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="create App", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="src/main/java/App.java", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s3", description="create InMemoryService", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="src/main/java/InMemoryService.java", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s4", description="create tests", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s2", "s3"],
+                planned_files=[
+                    PlannedFile(path="src/test/java/AppTest.java", action=FileAction.CREATE),
+                    PlannedFile(path="src/test/java/InMemoryServiceTest.java", action=FileAction.CREATE),
+                ],
+            ),
+        ],
+    )
+
+
+def test_transitive_upstream_ids_finds_everything_a_subtask_depends_on():
+    plan = _prv06_shaped_plan()
+    assert _transitive_upstream_ids(plan, "s4") == {"s1", "s2", "s3"}
+    assert _transitive_upstream_ids(plan, "s2") == {"s1"}
+    assert _transitive_upstream_ids(plan, "s1") == set()
+
+
+def test_revise_plan_for_grounded_scope_owner_does_not_invert_dependency_direction(tmp_path):
+    """The exact live cyclic-DAG incident, reproduced directly: reopening
+    s1 (pom.xml) for the failing s4 must not redirect s1's OTHER consumers
+    (s2, s3 - both upstream of s4) to depend on s4 instead - that would
+    invert s1 -> s2/s3 -> s4 into a cycle. Confirmed via
+    _transitive_upstream_ids: no subtask may end up (transitively)
+    depending on itself."""
+    plan = _prv06_shaped_plan()
+    (tmp_path / "pom.xml").write_text("<project/>")
+
+    revised = revise_plan_for_grounded_scope_owner(plan, "s4", ["pom.xml"], str(tmp_path))
+
+    # s1 is gone (merged into s4); s2 and s3 must NOT depend on s4.
+    assert revised.subtask_by_id("s1") is None
+    s2 = revised.subtask_by_id("s2")
+    s3 = revised.subtask_by_id("s3")
+    assert "s4" not in s2.depends_on
+    assert "s4" not in s3.depends_on
+    # No subtask transitively depends on itself - the direct cycle check.
+    for subtask in revised.subtasks:
+        assert subtask.id not in _transitive_upstream_ids(revised, subtask.id)
+    # Must still validate cleanly as a real plan (acyclic, well-formed).
+    EngineeringPlan.model_validate(revised.model_dump(mode="json"))
+
+
+def test_cross_owner_obligation_id_stable_and_scoped():
+    id1 = _cross_owner_obligation_id("s4", "s1", ["pom.xml"])
+    id2 = _cross_owner_obligation_id("s4", "s1", ["pom.xml"])
+    id3 = _cross_owner_obligation_id("s4", "s2", ["pom.xml"])
+    assert id1 == id2
+    assert id1 != id3
+
+
+def _scope_conflict_fixture(reason="grounded reason", raw_evidence="javac error", required_files=("pom.xml",)):
+    required_files = list(required_files)
+    return {
+        "classification": "PLAN_SCOPE_DEFECT",
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+        "failure_type": "compile",
+        "reason": reason,
+        "required_files": required_files,
+        "allowed_files": [],
+        "attribution_tier": "architectural_owner",
+        "grounded_owner_files": required_files,
+        "raw_evidence": raw_evidence,
+    }
+
+
+def test_get_or_create_cross_owner_obligation_creates_with_real_evidence():
+    ledger = ObligationLedger()
+    scope_conflict = _scope_conflict_fixture(
+        reason="pom.xml is missing the JUnit 5 dependency",
+        raw_evidence="package org.junit.jupiter.api does not exist",
+    )
+
+    record = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s4", owner_subtask_id="s1",
+        required_files=["pom.xml"], scope_conflict=scope_conflict, revision=1,
+    )
+
+    assert record is not None
+    assert record.kind == ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT
+    assert record.status == ObligationStatus.VIOLATED
+    assert record.authority == ObligationAuthority.DETERMINISTIC
+    assert record.owner_subtask_id == "s1"
+    assert record.repair_scope == ("pom.xml",)
+    assert "pom.xml is missing the JUnit 5 dependency" in record.evidence["must_fix"][0]
+    assert record.evidence["raw_evidence"] == "package org.junit.jupiter.api does not exist"
+    assert record.evidence["originating_subtask_id"] == "s4"
+    assert ledger.current(record.id) is record
+
+
+def test_get_or_create_cross_owner_obligation_is_sticky_across_a_failed_attempt():
+    """A second call for the SAME (originating subtask, owner, required
+    files) while the obligation is still VIOLATED must return the exact
+    same record - even when the current scope_conflict's own evidence is
+    weaker/different (e.g. a later static-rule violation instead of the
+    original compiler error) - never silently regressing the MUST_FIX
+    text an owner-recovery prompt depends on."""
+    ledger = ObligationLedger()
+    strong_evidence = _scope_conflict_fixture(
+        reason="pom.xml is missing the JUnit 5 dependency",
+        raw_evidence="package org.junit.jupiter.api does not exist",
+    )
+    first = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s4", owner_subtask_id="s1",
+        required_files=["pom.xml"], scope_conflict=strong_evidence, revision=1,
+    )
+
+    weaker_evidence = _scope_conflict_fixture(
+        reason="unrelated static rule violation", raw_evidence="",
+    )
+    second = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s4", owner_subtask_id="s1",
+        required_files=["pom.xml"], scope_conflict=weaker_evidence, revision=2,
+    )
+
+    assert second is first
+    assert second.evidence["raw_evidence"] == "package org.junit.jupiter.api does not exist"
+
+
+def test_get_or_create_cross_owner_obligation_no_ledger_returns_none():
+    assert _get_or_create_cross_owner_obligation(
+        None, originating_subtask_id="s4", owner_subtask_id="s1",
+        required_files=["pom.xml"], scope_conflict=_scope_conflict_fixture(), revision=1,
+    ) is None
+
+
+def test_build_owner_recovery_context_surfaces_obligation_not_generic_framing():
+    """§28.7-equivalent for MA8.1: the reopened owner's prompt must show
+    the exact grounded MUST_FIX/MUST_PRESERVE/EVIDENCE/ACCEPTANCE, never
+    fall back to the old generic 'preserve brownfield owner identity'
+    framing, whenever an obligation is available."""
+    obligation = ObligationRecord(
+        id="recovery.s4.s1.pom.xml", kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
+        status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+        description="x", source="test", revision=1,
+        evidence={
+            "must_fix": ["provide the JUnit 5 dependency required by AppTest.java"],
+            "must_preserve": ["existing project identity"],
+            "raw_evidence": "package org.junit.jupiter.api does not exist",
+            "acceptance_conditions": ["subtask s4 passes its own Quality Gates"],
+        },
+        owner_subtask_id="s1", repair_scope=("pom.xml",),
+    )
+
+    context = _build_owner_recovery_context(
+        owner_id="s1", failed_subtask_id="s4", required_owner_files=["pom.xml"],
+        cross_owner_obligation=obligation, scope_conflict=_scope_conflict_fixture(),
+    )
+
+    assert "MUST FIX" in context
+    assert "provide the JUnit 5 dependency required by AppTest.java" in context
+    assert "MUST PRESERVE" in context
+    assert "existing project identity" in context
+    assert "EVIDENCE" in context
+    assert "package org.junit.jupiter.api does not exist" in context
+    assert "ACCEPTANCE" in context
+    assert "subtask s4 passes its own Quality Gates" in context
+
+
+def test_build_owner_recovery_context_falls_back_without_ledger():
+    context = _build_owner_recovery_context(
+        owner_id="s1", failed_subtask_id="s4", required_owner_files=["pom.xml"],
+        cross_owner_obligation=None,
+        scope_conflict=_scope_conflict_fixture(reason="some diagnosis"),
+    )
+    assert "authoritative plan recovery" in context
+    assert "some diagnosis" in context
+
+
+@pytest.mark.asyncio
+async def test_enforce_reopened_owner_receives_grounded_requirement_not_generic_framing(tmp_path):
+    """End-to-end reproduction of the live PRV-06 shape (§28.2/28.7-
+    equivalent): s4's compile failure grounds a requirement on s1
+    (pom.xml); the reopened owner's own Developer call must receive the
+    exact MUST_FIX/evidence text, not a generic framing - and the
+    obligation is SATISFIED only once s4's own retry actually passes."""
+    plan = _prv06_shaped_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n <= 3:
+            # s1, s2, s3 all succeed cleanly on the first pass.
+            for path in kwargs["allowed_write_relpaths"]:
+                full = tmp_path / path
+                full.parent.mkdir(parents=True, exist_ok=True)
+                full.write_text("baseline\n")
+            return {"status": "success", "quality_gates_passed": True, "files": kwargs["allowed_write_relpaths"]}
+        if n == 4:
+            # s4 fails - grounded evidence points at pom.xml.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": _scope_conflict_fixture(
+                    reason="pom.xml is missing the JUnit 5 dependency required by the generated tests",
+                    raw_evidence="package org.junit.jupiter.api does not exist",
+                ),
+            }
+        if n == 5:
+            # s1 owner_recovery - this time actually fixes it.
+            for path in kwargs["allowed_write_relpaths"]:
+                (tmp_path / path).write_text("<project><dependencies><junit/></dependencies></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": kwargs["allowed_write_relpaths"]}
+        # s4 consumer_retry - now passes.
+        for path in ["src/test/java/AppTest.java", "src/test/java/InMemoryServiceTest.java"]:
+            full = tmp_path / path
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text("class Test {}\n")
+        return {"status": "success", "quality_gates_passed": True, "files": [
+            "src/test/java/AppTest.java", "src/test/java/InMemoryServiceTest.java",
+        ]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 6
+    # The reopened owner (call index 4, s1's owner_recovery) must have
+    # received the exact grounded requirement, not generic framing.
+    owner_recovery_context = calls[4]["supplementary_context"]
+    assert "MUST FIX" in owner_recovery_context
+    assert "pom.xml is missing the JUnit 5 dependency" in owner_recovery_context
+    assert "EVIDENCE" in owner_recovery_context
+    assert "package org.junit.jupiter.api does not exist" in owner_recovery_context
+    assert "ACTIVE CROSS-OWNER RECOVERY REQUIREMENT" in owner_recovery_context
+    # And the ORIGINAL DAG must remain intact - no cyclic-DAG plan
+    # revision was ever needed for this shape.
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_ids = {item["id"] for item in approved["plan"]["subtasks"]}
+    assert approved_ids == {"s1", "s2", "s3", "s4"}
+
+
+@pytest.mark.asyncio
+async def test_enforce_cross_owner_recovery_generic_non_maven_shape(tmp_path):
+    """Genericity proof (mirrors MA9's own heterogeneous-artifact tests):
+    the identical mechanism, with Python-flavored paths - pyproject.toml
+    reopened because a downstream test subtask proves a dependency is
+    missing. No Java/Maven-specific code path is exercised anywhere in
+    workflow_controller.py's own logic; only the evidence/paths differ."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pyproject.toml", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="create service", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="service.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s2"],
+                planned_files=[PlannedFile(path="test_service.py", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n <= 2:
+            for path in kwargs["allowed_write_relpaths"]:
+                full = tmp_path / path
+                full.parent.mkdir(parents=True, exist_ok=True)
+                full.write_text("baseline\n")
+            return {"status": "success", "quality_gates_passed": True, "files": kwargs["allowed_write_relpaths"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": _scope_conflict_fixture(
+                    reason="pyproject.toml is missing the pytest dependency required by the generated tests",
+                    raw_evidence="ModuleNotFoundError: No module named 'pytest'",
+                    required_files=["pyproject.toml"],
+                ),
+            }
+        if n == 4:
+            for path in kwargs["allowed_write_relpaths"]:
+                (tmp_path / path).write_text("[tool.poetry.dependencies]\npytest = \"*\"\n")
+            return {"status": "success", "quality_gates_passed": True, "files": kwargs["allowed_write_relpaths"]}
+        (tmp_path / "test_service.py").write_text("def test_x(): pass\n")
+        return {"status": "success", "quality_gates_passed": True, "files": ["test_service.py"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 5
+    owner_recovery_context = calls[3]["supplementary_context"]
+    assert "MUST FIX" in owner_recovery_context
+    assert "pytest dependency" in owner_recovery_context
+    assert "ModuleNotFoundError" in owner_recovery_context
