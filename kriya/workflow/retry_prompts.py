@@ -12,6 +12,7 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.workflow.context_budget import estimate_tokens
 from kriya.workflow.retry_package import RetryPackage
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,7 @@ def _build_coordinated_retry_prompt(
     ecosystem_invariant_block: str = "",
     resource_lifecycle_block: str = "",
     verification_contract_block: str = "",
+    participant_content_budget: Optional[int] = None,
 ) -> Tuple[str, str]:
     """MA9 (2026-08-29): coordinated-repair variant of
     _build_targeted_retry_prompt for an ACTIVE RepairContract (kriya/
@@ -199,11 +201,36 @@ def _build_coordinated_retry_prompt(
     docstring, "Rule 2A": candidate state must accumulate during coordinated
     generation while the real worktree stays untouched until the whole
     batch is atomically accepted by the existing staged-write pipeline
-    further down run_attempt())."""
+    further down run_attempt()).
+
+    participant_content_budget (2026-08-29 v2 design review, §14 - "for 6-10
+    affected files, do not place all full file contents in every prompt"):
+    None (the default) preserves the original unbounded behavior exactly -
+    every participant/reference file gets its full content, correct and
+    harmless for the 2-participant case this is proven against today. When
+    set, full content is ALWAYS shown for generation_target and every other
+    member of its own active repair group (the group currently being
+    synthesized needs full mutual visibility - never hidden, matching this
+    module's own "do not hide a participant whose current candidate API is
+    required" rule); participants in OTHER groups and plain reference files
+    then compete for the remaining budget on a first-fit basis (stable
+    iteration order, not size-sorted), falling back to a filename+role-only
+    mention - never silently omitted - once it runs out. Reuses
+    estimate_tokens() (kriya/workflow/context_budget.py), the same token-
+    counting primitive _fill_missing_content's own sibling-content budget
+    already uses for an analogous problem, not a new estimator."""
     candidate_view = candidate_view or {}
     participants = set(contract.participating_artifacts)
+    active_group_artifacts = set(contract.participating_artifacts)
+    for group in getattr(contract, "repair_groups", ()) or ():
+        if generation_target in group.artifacts:
+            active_group_artifacts = set(group.artifacts)
+            break
+
     target_section = ""
     reference_section = ""
+    omitted_participants: List[str] = []
+    running_tokens = 0
     for filepath in sorted(set(all_files_written) | participants):
         current_content = candidate_view.get(filepath)
         if current_content is None:
@@ -217,6 +244,19 @@ def _build_coordinated_retry_prompt(
             " (candidate generated earlier in this same coordinated repair - not yet committed)"
             if filepath in candidate_view else ""
         )
+        always_full = (
+            participant_content_budget is None
+            or filepath == generation_target
+            or filepath in active_group_artifacts
+            or filepath not in participants
+        )
+        if not always_full:
+            block_tokens = estimate_tokens(current_content)
+            if running_tokens + block_tokens > participant_content_budget:
+                omitted_participants.append(filepath)
+                continue
+            running_tokens += block_tokens
+
         if filepath == generation_target:
             target_section += f"=== File to generate now: {filepath}{candidate_label} ===\n{current_content}\n\n"
         elif filepath in participants:
@@ -231,6 +271,14 @@ def _build_coordinated_retry_prompt(
                 f"=== Existing file (already correct, reference only - regenerate ONLY if your fix "
                 f"genuinely cannot be made without it): {filepath}{candidate_label} ===\n{current_content}\n\n"
             )
+    if omitted_participants:
+        target_section += (
+            "=== Additional coordinated repair participant(s) (content omitted - context budget "
+            "reached; still part of this SAME repair, not excluded from it): "
+            + ", ".join(
+                f"{p} [{contract.participant_roles.get(p, 'participant')}]" for p in omitted_participants
+            ) + " ===\n\n"
+        )
 
     participant_list = ", ".join(contract.generation_order)
     must_fix = "; ".join(contract.must_fix) or "resolve the coordinated repair intent below"
@@ -241,6 +289,12 @@ def _build_coordinated_retry_prompt(
         "That does not mean other participant(s) are exempt from this repair - only that this "
         "is where the current error text points."
         if immediate_targets and set(immediate_targets) != participants
+        else ""
+    )
+    active_group_id = getattr(contract, "active_group_id", None)
+    active_group_line = (
+        f"\nActive repair group: {active_group_id} ({', '.join(sorted(active_group_artifacts))})."
+        if active_group_id and len(getattr(contract, "repair_groups", ()) or ()) > 1
         else ""
     )
 
@@ -256,6 +310,7 @@ def _build_coordinated_retry_prompt(
         f"a time across separate calls that share this same contract): {participant_list}.\n"
         f"MUST FIX: {must_fix}\n"
         f"MUST PRESERVE: {must_preserve}"
+        f"{active_group_line}"
         f"{immediate_line}\n\n"
         f"You are generating exactly one file right now: {generation_target}. The other "
         "participant(s), shown above for reference, are generated separately as part of this "

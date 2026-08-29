@@ -66,6 +66,30 @@ _REPAIR_FEEDBACK_FAILURE_TYPES = {
 }
 
 
+def _abandon_active_repair_contract_if_any(state: GenerationState, *, reason: str) -> None:
+    """MA9 (2026-08-29 v2 design review): marks an ACTIVE RepairContract
+    ABANDONED at the two unambiguous "this subtask's retry loop is stopping
+    now, and it isn't because the obligation got SATISFIED" points in
+    handle_attempt_failure() below. Deliberately conservative/narrow - there
+    may be other paths where a subtask's retry loop ends with an obligation
+    still VIOLATED that this doesn't cover (e.g. an exception propagating
+    from somewhere this function never sees); an orphaned ACTIVE contract at
+    run end in one of those uncovered paths is a disclosed limitation, not a
+    correctness bug (the run itself still fails closed correctly regardless
+    of this status label - see RepairContractStatus.ABANDONED's own
+    docstring). A no-op whenever no contract is active, matching every other
+    MA9 hook in this codebase."""
+    if state.repair_contract is None or state.repair_contract.status != RepairContractStatus.ACTIVE:
+        return
+    state.repair_contract.status = RepairContractStatus.ABANDONED
+    state.record_event(RunEvent(
+        kind="repair_contract_abandoned", attempt=state.attempt_number, source="retry_strategy.handle_attempt_failure",
+        authority=EventAuthority.ADVISORY,
+        message=f"RepairContract '{state.repair_contract.id}' abandoned - retry loop stopping ({reason}).",
+        details={"repair_contract_id": state.repair_contract.id, "reason": reason},
+    ))
+
+
 def _failure_from_validated_scope_denial(
     error: Exception, ctx,
 ) -> Optional[Failure]:
@@ -789,6 +813,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         state.gate_outcomes.append(failure.to_gate_outcome())
 
     if state.plan_scope_conflict is not None or state.no_progress_terminated:
+        _abandon_active_repair_contract_if_any(state, reason="plan_scope_conflict_or_no_progress")
         if state.plan_scope_conflict is not None:
             logger.error(
                 "Quality Gates stopped early - grounded repair requires file(s) outside the "
@@ -816,6 +841,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     )
     budgets_exhausted = not retry_decision.should_continue
     if budgets_exhausted:
+        _abandon_active_repair_contract_if_any(state, reason=retry_decision.action.value)
         if retry_decision.action is RetryAction.STOP_ENVIRONMENT:
             logger.error(f"Quality Gates stopped early - {state.environment_failure}")
         else:

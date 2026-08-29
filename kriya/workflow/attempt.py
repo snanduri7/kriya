@@ -580,8 +580,14 @@ def _record_process_boundary_obligation(
     # whatever it already was (None for every run that never hits this).
     if violated:
         _sync_active_repair_contract(ctx, state, record)
-    elif state.repair_contract is not None and state.repair_contract.source_obligation_id == obligation_id:
-        state.repair_contract.status = RepairContractStatus.CLOSED
+    elif state.repair_contract is not None and obligation_id in state.repair_contract.source_obligation_ids:
+        state.repair_contract.status = RepairContractStatus.SATISFIED
+        state.record_event(RunEvent(
+            kind="repair_contract_satisfied", attempt=state.attempt_number, source="attempt.run_attempt",
+            authority=EventAuthority.ADVISORY,
+            message=f"RepairContract '{state.repair_contract.id}' satisfied - originating obligation resolved.",
+            details={"repair_contract_id": state.repair_contract.id, "obligation_id": obligation_id},
+        ))
     return is_recurrence
 
 
@@ -601,7 +607,7 @@ def _sync_active_repair_contract(
     existing = state.repair_contract
     if (
         existing is not None
-        and existing.source_obligation_id == obligation_record.id
+        and obligation_record.id in existing.source_obligation_ids
         and existing.status == RepairContractStatus.ACTIVE
     ):
         return
@@ -612,14 +618,30 @@ def _sync_active_repair_contract(
     evidence = derive_process_boundary_participants(raw_output, ctx.worktree_path, known_files)
     contract = build_repair_contract(
         obligation_record, evidence, created_attempt=state.attempt_number,
+        authorized_write_scope=tuple(sorted(getattr(ctx, "allowed_write_relpaths", None) or ())),
     )
     if contract is None:
         return
     state.repair_contract = contract
     logger.info(
         "MA9: unambiguous evidence found - opening a COORDINATED RepairContract '%s' "
-        "(participants: %s).", contract.id, ", ".join(contract.participating_artifacts),
+        "(participants: %s; groups: %s).", contract.id,
+        ", ".join(contract.participating_artifacts),
+        ", ".join(g.id for g in contract.repair_groups),
     )
+    state.record_event(RunEvent(
+        kind="repair_contract_created", attempt=state.attempt_number, source="attempt.run_attempt",
+        authority=EventAuthority.ADVISORY,
+        message=f"RepairContract '{contract.id}' opened ({contract.kind.value}).",
+        details={
+            "repair_contract_id": contract.id,
+            "repair_kind": contract.kind.value,
+            "source_obligation_ids": list(contract.source_obligation_ids),
+            "participating_artifacts": list(contract.participating_artifacts),
+            "authorized_write_scope": list(contract.authorized_write_scope),
+            "repair_group_ids": [g.id for g in contract.repair_groups],
+        },
+    ))
 
 
 def _materialize_candidate_content(
@@ -689,53 +711,102 @@ async def _run_coordinated_repair_generation(
     authoritative worktree stays exactly as it was before this attempt began
     until the existing staged_writes/AuthorizedFileWriter pipeline further
     down run_attempt() atomically accepts (or, on any gate failure, discards)
-    the WHOLE returned list - both participants land together or neither
-    does, the same all-or-nothing behavior that pipeline already gives any
-    multi-file `files` list, coordinated or not."""
+    the WHOLE returned list - every participant, across every group, lands
+    together or none does, the same all-or-nothing behavior that pipeline
+    already gives any multi-file `files` list, coordinated or not.
+
+    Group-aware (2026-08-29 v2 design review, §11/§19): walks
+    contract.repair_groups in order (never a flat generation_order directly -
+    that field is only the flattening of every group's own order, kept on
+    the contract for convenience/backward-compat), setting
+    contract.active_group_id per group purely for observability
+    (developer_repair_call/repair_group_started events below) - it plays no
+    role in candidate-view visibility, which already spans every group
+    generated so far regardless of which one is "active." No per-group
+    lightweight validation is run here (§19 explicitly calls that optional -
+    "acceptable," not required); the correctness invariant this module
+    guarantees is the harder one anyway: no PARTIAL commit ever happens,
+    since nothing here writes to the worktree at all until the full,
+    all-groups candidate passes every existing gate further down
+    run_attempt()."""
     candidate_view: Dict[str, str] = {}
     results: List[Dict[str, str]] = []
-    for filepath in contract.generation_order:
-        task_desc, active_code_context = _build_coordinated_retry_prompt(
-            ctx.goal, ctx.plan, state.error_context, contract, filepath,
-            state.all_files_written, ctx.worktree_path, base_code_context,
-            candidate_view=candidate_view,
-            ecosystem_invariant_block=ctx.ecosystem_invariant_block,
-            resource_lifecycle_block=ctx.resource_lifecycle_block,
-            verification_contract_block=ctx.verification_contract_block,
-        )
-        file_results = await _run_developer_generation(
-            state, ctx,
-            task_description=task_desc,
-            design_context=ctx.design,
-            existing_code_context=active_code_context,
-            stream_callback=stream_callback,
-            model_override=None, base_url_override=None, api_key_override=None, extra_body_override=None,
-            known_target_files=[filepath],
-            prior_error_context=state.error_context or None,
-            # Every participant, always - never narrowed to just this call's
-            # own filepath. See RepairContract's own docstring: an active
-            # coordinated contract must never let single-file attribution
-            # collapse it back to narrow targeting; implicated_files=[filepath]
-            # here would also silently disable the NO CHANGE NEEDED option
-            # for every participant the CURRENT failure doesn't specifically
-            # name (_fill_missing_content only offers it when
-            # apply_fix_analysis is True, which requires filepath to be IN
-            # implicated_files).
-            implicated_files=list(contract.participating_artifacts),
-            error_source_context=state.last_error_source_context or None,
-            retry_temperature=ctx.kernel.config.llm.retry_temperature,
-            extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
-            files_with_current_content=state.all_files_written,
-            sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
-            operation_by_file=_operation_map(ctx, [filepath], attempt_operation, state),
-            default_operation=attempt_operation,
-        )
-        for entry in file_results:
-            if entry.get("filepath") == filepath:
-                materialized = _materialize_candidate_content(ctx, filepath, entry)
-                if materialized is not None:
-                    candidate_view[filepath] = materialized
-            results.append(entry)
+    for group in contract.repair_groups:
+        contract.active_group_id = group.id
+        state.record_event(RunEvent(
+            kind="repair_group_started", attempt=state.attempt_number, source="attempt.run_attempt",
+            authority=EventAuthority.ADVISORY,
+            message=f"RepairContract '{contract.id}' entering group '{group.id}'.",
+            details={
+                "repair_contract_id": contract.id, "group_id": group.id,
+                "artifacts": list(group.artifacts), "depends_on_group_ids": list(group.depends_on_group_ids),
+            },
+        ))
+        for filepath in group.generation_order:
+            task_desc, active_code_context = _build_coordinated_retry_prompt(
+                ctx.goal, ctx.plan, state.error_context, contract, filepath,
+                state.all_files_written, ctx.worktree_path, base_code_context,
+                candidate_view=candidate_view,
+                ecosystem_invariant_block=ctx.ecosystem_invariant_block,
+                resource_lifecycle_block=ctx.resource_lifecycle_block,
+                verification_contract_block=ctx.verification_contract_block,
+                # Only the currently-active group's own members are exempt
+                # from this budget (see _build_coordinated_retry_prompt's own
+                # docstring) - harmless/inert for today's 2-participant case
+                # (both nearly always land in the same or immediately
+                # adjacent group, well under budget), load-bearing for a
+                # future 6-10 participant repair.
+                participant_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+            )
+            state.record_event(RunEvent(
+                kind="developer_repair_call", attempt=state.attempt_number, source="attempt.run_attempt",
+                authority=EventAuthority.ADVISORY,
+                message=f"Coordinated Developer call for '{filepath}' (group '{group.id}').",
+                details={
+                    "repair_contract_id": contract.id, "active_group": group.id,
+                    "immediate_target": filepath, "participant_count": len(contract.participating_artifacts),
+                    "candidate_revision": len(candidate_view),
+                },
+            ))
+            file_results = await _run_developer_generation(
+                state, ctx,
+                task_description=task_desc,
+                design_context=ctx.design,
+                existing_code_context=active_code_context,
+                stream_callback=stream_callback,
+                model_override=None, base_url_override=None, api_key_override=None, extra_body_override=None,
+                known_target_files=[filepath],
+                prior_error_context=state.error_context or None,
+                # Every participant, always - never narrowed to just this call's
+                # own filepath. See RepairContract's own docstring: an active
+                # coordinated contract must never let single-file attribution
+                # collapse it back to narrow targeting; implicated_files=[filepath]
+                # here would also silently disable the NO CHANGE NEEDED option
+                # for every participant the CURRENT failure doesn't specifically
+                # name (_fill_missing_content only offers it when
+                # apply_fix_analysis is True, which requires filepath to be IN
+                # implicated_files).
+                implicated_files=list(contract.participating_artifacts),
+                error_source_context=state.last_error_source_context or None,
+                retry_temperature=ctx.kernel.config.llm.retry_temperature,
+                extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+                files_with_current_content=state.all_files_written,
+                sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+                operation_by_file=_operation_map(ctx, [filepath], attempt_operation, state),
+                default_operation=attempt_operation,
+            )
+            for entry in file_results:
+                if entry.get("filepath") == filepath:
+                    materialized = _materialize_candidate_content(ctx, filepath, entry)
+                    if materialized is not None:
+                        candidate_view[filepath] = materialized
+                        state.record_event(RunEvent(
+                            kind="candidate_edit_staged", attempt=state.attempt_number,
+                            source="attempt.run_attempt", authority=EventAuthority.ADVISORY,
+                            message=f"Candidate staged for '{filepath}' (group '{group.id}').",
+                            details={"repair_contract_id": contract.id, "artifact": filepath},
+                        ))
+                results.append(entry)
     return results
 
 
@@ -1895,6 +1966,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state.budgets.targeted_retry_count + 1, ctx.targeted_max_retries,
                 active_repair_contract.id, ", ".join(active_repair_contract.generation_order),
             )
+            state.record_event(RunEvent(
+                kind="repair_retry", attempt=state.attempt_number, source="attempt.run_attempt",
+                authority=EventAuthority.ADVISORY,
+                message=f"RepairContract '{active_repair_contract.id}' still ACTIVE on retry.",
+                details={
+                    "repair_contract_id": active_repair_contract.id,
+                    "immediate_targets": list(active_repair_contract.immediate_correction_targets),
+                    "contract_remains_active": True,
+                },
+            ))
             state.model_hops.append(ctx.kernel.config.llm.model)
             dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
             files = await _run_coordinated_repair_generation(

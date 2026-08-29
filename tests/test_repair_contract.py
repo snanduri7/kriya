@@ -127,7 +127,7 @@ def test_build_repair_contract_happy_path():
     assert contract is not None
     assert contract.status == RepairContractStatus.ACTIVE
     assert contract.kind == RepairKind.COORDINATED
-    assert contract.source_obligation_id == obligation.id
+    assert contract.source_obligation_ids == (obligation.id,)
     assert contract.created_attempt == 3
     assert contract.participating_artifacts == tuple(sorted(
         ["src/main/java/App.java", "src/test/java/AppTest.java"],
@@ -140,6 +140,15 @@ def test_build_repair_contract_happy_path():
     assert contract.immediate_correction_targets == contract.participating_artifacts
     assert "src/main/java/App.java" in contract.repair_intent
     assert "src/test/java/AppTest.java" in contract.repair_intent
+    # N-artifact grouping (2026-08-29 v2 review): even this 2-participant
+    # case is now derived generically via stack-neutral FileRole
+    # classification, not a hand-specified 2-slot generation_order.
+    # "App.java" -> stem "app" matches generation_manifest.py's own
+    # ENTRYPOINT stem set - genuinely correct here too (it's the process
+    # entrypoint), not a misclassification this test needs to work around.
+    assert [g.id for g in contract.repair_groups] == ["group.entrypoint", "group.test"]
+    assert contract.active_group_id == "group.entrypoint"
+    assert contract.expected_postconditions
 
 
 # --- _build_contract_from_shape: the generic constructor is N-artifact, not
@@ -152,11 +161,13 @@ def test_build_repair_contract_happy_path():
 def test_build_contract_from_shape_supports_more_than_two_participants():
     """A hypothetical future obligation kind's shape function could report
     5 participants with no producer/consumer framing at all - the generic
-    constructor must build a correct contract from it with zero changes."""
+    constructor must build a correct contract from it with zero changes.
+    All 5 share the plain SOURCE role (no test/model/config markers), so
+    they land in ONE group, alphabetically ordered - the correct default
+    per _derive_repair_groups' own docstring when nothing separates them."""
     obligation = _obligation()
     shape = _ContractShape(
-        participating_artifacts=("A.java", "B.java", "C.java", "D.java", "E.java"),
-        generation_order=("A.java", "B.java", "C.java", "D.java", "E.java"),
+        participating_artifacts=("E.java", "C.java", "A.java", "D.java", "B.java"),
         participant_roles={
             "A.java": "role_a", "B.java": "role_b", "C.java": "role_c",
             "D.java": "role_d", "E.java": "role_e",
@@ -170,30 +181,51 @@ def test_build_contract_from_shape_supports_more_than_two_participants():
 
     assert contract is not None
     assert len(contract.participating_artifacts) == 5
-    assert contract.generation_order == shape.generation_order
+    assert contract.generation_order == ("A.java", "B.java", "C.java", "D.java", "E.java")
+    assert len(contract.repair_groups) == 1
+    assert contract.repair_groups[0].artifacts == contract.generation_order
     assert contract.participant_roles == shape.participant_roles
-    assert contract.immediate_correction_targets == shape.participating_artifacts
+    assert contract.immediate_correction_targets == contract.participating_artifacts
 
 
 def test_build_contract_from_shape_rejects_single_participant():
     obligation = _obligation()
     shape = _ContractShape(
-        participating_artifacts=("A.java",), generation_order=("A.java",),
+        participating_artifacts=("A.java",),
         participant_roles={"A.java": "role_a"}, repair_intent="x",
         must_fix=("x",), must_preserve=("x",),
     )
     assert _build_contract_from_shape(obligation, shape, created_attempt=1) is None
 
 
-def test_build_contract_from_shape_rejects_generation_order_mismatch():
-    """generation_order must be exactly the same SET as participating_artifacts
-    - a shape function bug that drops or invents a participant in one but not
-    the other must not silently produce a contract."""
+def test_build_contract_from_shape_groups_by_stack_neutral_file_role():
+    """Real multi-role grouping, generically derived - a build manifest
+    (matching this codebase's own _BUILD_FILENAMES list, not Java-specific)
+    alongside model/source/test files groups and orders exactly like
+    generation_manifest.py's own build_generation_manifest() would order
+    them for INITIAL generation - the same machinery, reused, not a
+    second, drifting convention."""
     obligation = _obligation()
     shape = _ContractShape(
-        participating_artifacts=("A.java", "B.java", "C.java"),
-        generation_order=("A.java", "B.java"),  # missing C.java
-        participant_roles={"A.java": "x", "B.java": "y", "C.java": "z"},
+        participating_artifacts=(
+            "pom.xml", "OrderRequest.java", "OrderService.java", "OrderServiceTest.java",
+        ),
+        participant_roles={},
         repair_intent="x", must_fix=("x",), must_preserve=("x",),
     )
-    assert _build_contract_from_shape(obligation, shape, created_attempt=1) is None
+
+    contract = _build_contract_from_shape(obligation, shape, created_attempt=1)
+
+    assert contract is not None
+    assert [g.id for g in contract.repair_groups] == [
+        "group.build", "group.model", "group.source", "group.test",
+    ]
+    assert contract.repair_groups[0].artifacts == ("pom.xml",)
+    assert contract.repair_groups[0].depends_on_group_ids == ()
+    assert contract.repair_groups[-1].artifacts == ("OrderServiceTest.java",)
+    assert contract.repair_groups[-1].depends_on_group_ids == (
+        "group.build", "group.model", "group.source",
+    )
+    assert contract.generation_order == (
+        "pom.xml", "OrderRequest.java", "OrderService.java", "OrderServiceTest.java",
+    )
