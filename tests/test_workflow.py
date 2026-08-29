@@ -9514,6 +9514,90 @@ async def test_handle_attempt_failure_narrows_implicated_files_to_authorized_sco
 
 
 @pytest.mark.asyncio
+async def test_handle_attempt_failure_routes_grounded_deny_all_runtime_failure_to_owner_recovery(tmp_path):
+    """Verification-routing fix (PRV-06, 2026-08-29) - a DENY_ALL context's
+    authorized scope is the empty set BY CONSTRUCTION (a verification-only
+    subtask owns nothing), which used to make `if ctx.allowed_write_
+    relpaths and scope_conflict_is_grounded:` false unconditionally - so a
+    genuine, high-confidence runtime-verification failure grounded to a
+    real file (App.java) never set state.plan_scope_conflict, and the SAME
+    cross-owner/effective-owner recovery machinery that already handles a
+    compile/test failure reaching an out-of-scope file never got a chance
+    to run for one discovered by runtime verification. Live incident this
+    reproduces: a files=[]/DENY_ALL application_runtime verification
+    subtask's own genuine 'app reads stdin but contract supplies argv'
+    failure, grounded to App.java with high confidence, needed exactly
+    this escalation to ever reach MA8.1 owner recovery instead of dying
+    silently inside a context that can never write anything."""
+    from kriya.workflow.attribution import AttributionResult
+
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    ctx.allowed_write_relpaths = []
+    ctx.write_scope_mode = WriteScopeMode.DENY_ALL
+    exc = QualityGateFailure(Failure(
+        type="run_verification",
+        message="RUNTIME VERIFICATION FAILURE: app failed to read command-line input",
+        likely_files=["src/main/java/com/example/App.java"],
+    ))
+    high_confidence_attribution = AttributionResult(
+        tier="locator", files=["src/main/java/com/example/App.java"], confidence="high",
+        reasoning="grounded to App.java",
+    )
+
+    with patch(
+        "kriya.workflow.retry_strategy.attribute_failure",
+        AsyncMock(return_value=high_confidence_attribution),
+    ):
+        should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.plan_scope_conflict is not None
+    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_DEFECT"
+    assert state.plan_scope_conflict["required_files"] == ["src/main/java/com/example/App.java"]
+    assert state.plan_scope_conflict["allowed_files"] == []
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_never_offers_a_deny_all_target_even_at_low_confidence(tmp_path):
+    """Symmetric with the ALLOWLIST case above: a DENY_ALL subtask can
+    never legally write ANY file, regardless of attribution confidence -
+    a low-confidence implication must still be dropped from the next
+    attempt's targets, not just a high-confidence one (which already
+    stops the loop entirely via plan_scope_conflict)."""
+    from kriya.workflow.attribution import AttributionResult
+
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    ctx.allowed_write_relpaths = []
+    ctx.write_scope_mode = WriteScopeMode.DENY_ALL
+    exc = QualityGateFailure(Failure(
+        type="run_verification",
+        message="RUNTIME VERIFICATION FAILURE: ambiguous output",
+        likely_files=["src/main/java/com/example/App.java"],
+    ))
+    low_confidence_attribution = AttributionResult(
+        tier="judge", files=["src/main/java/com/example/App.java"], confidence="low",
+        reasoning="weak guess",
+    )
+
+    with patch(
+        "kriya.workflow.retry_strategy.attribute_failure",
+        AsyncMock(return_value=low_confidence_attribution),
+    ):
+        should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is False
+    assert state.plan_scope_conflict is None
+    assert state.last_implicated_files is None
+    assert "src/main/java/com/example/App.java" in state.rejected_generation_targets
+
+
+@pytest.mark.asyncio
 async def test_authoritative_migration_evidence_outside_scope_stops_without_developer_call(tmp_path):
     """PRV-05 run 7 (2026-08-28): deterministic migration evidence
     (Failure.authoritative_files) must be treated as HIGH-confidence,

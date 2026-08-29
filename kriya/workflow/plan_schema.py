@@ -202,6 +202,33 @@ class VerificationMethod(BaseModel):
             raise ValueError(
                 f"tool_name={self.tool_name} requires verifier_kind={inferred.value}"
             )
+        if self.verifier_kind == VerifierKind.APPLICATION_RUNTIME and not self.requires_runtime_execution:
+            # Runtime Verification routing fix (PRV-06, 2026-08-29) - live
+            # incident: the Planner's initial system prompt (unlike its own
+            # repair-prompt sibling, which already pairs the two) told the
+            # model WHEN to set verifier_kind=application_runtime but never
+            # said to also set requires_runtime_execution=true, and
+            # plan_validation.py enforced no pairing either. The result: a
+            # verification-only subtask (files=[], write_scope_mode=
+            # DENY_ALL) whose sole verifier was application_runtime/
+            # requires_runtime_execution=False silently failed
+            # attempt.py::_directly_executable_runtime_verifiers()'s own
+            # deliberately-strict AND check, fell through to the ordinary
+            # Developer-generation retry loop, and burned 5 attempts having
+            # the Developer invent files it was never authorized to write
+            # (each correctly denied by DENY_ALL, but only after being
+            # generated) before genuine runtime verification ever ran.
+            # There is no legitimate reason to classify a verifier as
+            # APPLICATION_RUNTIME while claiming it does NOT require
+            # runtime execution - the two facts are definitionally paired,
+            # so this is a deterministic self-heal (matching this
+            # codebase's own "the prompt says the right thing, but back it
+            # with a deterministic check" precedent - e.g. the no-pom.xml
+            # javac-prepend backstop, RunVerifierAgent's own input_channel
+            # text-inference fallback), not a new inference heuristic. Only
+            # ever flips False -> True; a genuinely non-runtime verifier
+            # never has verifier_kind=APPLICATION_RUNTIME to begin with.
+            self.requires_runtime_execution = True
         return self
 
     @property

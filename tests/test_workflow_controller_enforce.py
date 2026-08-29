@@ -480,6 +480,19 @@ def test_authoritative_planner_system_prompt_carries_testability_and_tooling_dag
     assert "execution order is not" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
 
 
+def test_authoritative_planner_system_prompt_pairs_application_runtime_with_requires_runtime_execution():
+    """Verification-routing fix (PRV-06, 2026-08-29) - the initial planning
+    prompt used to tell the model WHEN to set verifier_kind=application_runtime
+    but never said to pair it with requires_runtime_execution=true (unlike
+    its own repair-prompt sibling, which already did) - live-confirmed as
+    the root cause of a verification-only subtask silently missing the
+    direct-execution predicate and burning its budget on doomed Developer
+    generation under DENY_ALL."""
+    assert "verifier_kind=application_runtime" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "requires_runtime_execution=true TOGETHER" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "never set one without the other" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+
+
 def test_authoritative_planner_system_prompt_carries_integration_relationship_guidance():
     """Correctness Continuity Part C completion (PRV-06, 2026-08-29) - the
     field/obligation/validation machinery was implemented but stayed

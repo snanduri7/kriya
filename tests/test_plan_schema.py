@@ -129,6 +129,50 @@ def test_application_runtime_verifier_explicitly_requires_application_execution(
     assert vm.requires_application_runtime is True
 
 
+def test_application_runtime_verifier_self_heals_requires_runtime_execution():
+    """Verification-routing fix (PRV-06, 2026-08-29) - live incident: the
+    Planner's own initial system prompt (unlike its repair-prompt sibling)
+    never paired verifier_kind=application_runtime with requires_runtime_
+    execution=true, and plan_validation.py enforced no such pairing either.
+    A verification-only subtask (files=[], write_scope_mode=DENY_ALL)
+    whose sole verifier had verifier_kind=application_runtime but
+    requires_runtime_execution=False silently failed attempt.py's own
+    _directly_executable_runtime_verifiers() AND check, fell through to
+    the ordinary Developer-generation retry loop, and burned 5 attempts
+    inventing files it could never write before real runtime verification
+    ever ran. There is no legitimate reason to classify a verifier as
+    APPLICATION_RUNTIME while claiming it does not require runtime
+    execution, so this is a deterministic self-heal, not a new inference
+    heuristic - it may only ever flip False -> True."""
+    vm = VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="run the application with sample input",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+        requires_runtime_execution=False,
+    )
+    assert vm.requires_runtime_execution is True
+    assert vm.requires_application_runtime is True
+
+
+def test_non_runtime_verifier_is_never_touched_by_the_self_heal():
+    vm = VerificationMethod(type=VerificationMethodType.JUDGMENT, description="check style")
+    assert vm.verifier_kind is VerifierKind.JUDGMENT
+    assert vm.requires_runtime_execution is False
+
+
+def test_directly_executable_runtime_verifiers_matches_a_self_healed_entry():
+    from kriya.workflow.attempt import _directly_executable_runtime_verifiers
+
+    vm = VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="run the application with sample input",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+        requires_runtime_execution=False,
+    )
+    matched = _directly_executable_runtime_verifiers([vm.model_dump(mode="json")])
+    assert len(matched) == 1
+
+
 # --- AcceptanceCriterion ---
 
 def test_acceptance_criterion_blank_id_rejected():

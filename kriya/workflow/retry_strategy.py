@@ -695,8 +695,26 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             attribution.confidence == "high"
             or fail_type == "misdirected_edit"
         )
-        if ctx.allowed_write_relpaths and scope_conflict_is_grounded:
-            allowed_scope = set(ctx.allowed_write_relpaths)
+        # Verification-routing fix (PRV-06, 2026-08-29): a DENY_ALL context
+        # (a verification-only subtask, files=[]) has an EMPTY allowed
+        # scope by construction - `ctx.allowed_write_relpaths` being falsy
+        # there means "everything is out of scope," not "no scope
+        # restriction applies," the exact ambiguity WriteScopeMode itself
+        # was introduced to resolve for the write GATE (kriya/policy/
+        # filesystem.py's own docstring) but this scope-conflict check
+        # never consulted. Live incident this closes: a genuine runtime-
+        # verification failure grounded to App.java (high-confidence
+        # attribution) from a DENY_ALL subtask never set
+        # state.plan_scope_conflict at all, because `ctx.allowed_write_
+        # relpaths` (always []) made the `if` below false - so the SAME
+        # cross-owner/effective-owner recovery machinery that already
+        # handles a compile/test failure reaching an out-of-scope file
+        # (§11 MA8.1) never got a chance to run for a runtime-verification
+        # failure discovered from a non-mutating context. An ALLOWLIST
+        # subtask's own real (non-empty) allowed scope is unaffected.
+        is_deny_all_scope = getattr(ctx, "write_scope_mode", None) == WriteScopeMode.DENY_ALL
+        if (ctx.allowed_write_relpaths or is_deny_all_scope) and scope_conflict_is_grounded:
+            allowed_scope = set() if is_deny_all_scope else set(ctx.allowed_write_relpaths)
             outside_scope = sorted(set(implicated) - allowed_scope)
             if outside_scope:
                 state.plan_scope_conflict = {
@@ -793,6 +811,25 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                         rejected, sorted(allowed_scope),
                     )
                     state.rejected_generation_targets.extend(rejected)
+            elif implicated and getattr(ctx, "write_scope_mode", None) == WriteScopeMode.DENY_ALL:
+                # Verification-routing fix (PRV-06, 2026-08-29): a DENY_ALL
+                # context's authorized scope is the empty set BY
+                # CONSTRUCTION (a verification-only subtask owns nothing) -
+                # every implicated file is unconditionally out of scope,
+                # the same reasoning as the ALLOWLIST branch above, just
+                # with an always-empty allowed_scope rather than a
+                # populated one. Without this, a low/medium-confidence
+                # runtime-verification attribution (too weak to trip the
+                # scope_conflict_is_grounded escalation above) could still
+                # offer an unwritable file as the next attempt's "Targeted
+                # retry" focus, inside a subtask that can never legally
+                # write it.
+                logger.warning(
+                    "RECOVERY_GENERATION_TARGET_REJECTED filepaths=%s reason=deny_all_scope "
+                    "- dropped from the next generation attempt's targets", sorted(implicated),
+                )
+                state.rejected_generation_targets.extend(sorted(implicated))
+                narrowed_implicated = []
             state.last_implicated_files = narrowed_implicated if narrowed_implicated else None
             state.last_missing_files = None
 
