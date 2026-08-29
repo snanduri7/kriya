@@ -2385,6 +2385,169 @@ async def test_run_attempt_application_runtime_verification_only_never_calls_dev
     assert ctx.write_scope_mode == WriteScopeMode.DENY_ALL
 
 
+def test_apply_runtime_verification_contract_shapes():
+    """Runtime Verification Contract (PRV-06, 2026-08-29) - pure-function
+    coverage of every recognized/unrecognized invocation shape, mirrors the
+    spec's own Test A/B/C/D/E/G matrix without needing a full run_attempt()
+    for each variant (the end-to-end tests below cover the wiring once)."""
+    from kriya.workflow.attempt import _apply_runtime_verification_contract, _RUNTIME_VERIFICATION_SYNTHETIC_INPUT
+
+    # Test A shape: mvn exec:java with no -Dexec.args gets one injected.
+    cmds, stdin, reason = _apply_runtime_verification_contract(
+        [["mvn", "-e", "exec:java", "-Dexec.mainClass=com.example.MainApplication"]], "argv",
+    )
+    assert cmds[-1][-1] == f"-Dexec.args={_RUNTIME_VERIFICATION_SYNTHETIC_INPUT}"
+    assert stdin is None and reason is None
+
+    # Generic interpreter+target (Test G genericity: java/python/node all identical).
+    for interpreter, target in (("java", "App"), ("python", "app.py"), ("node", "app.js")):
+        cmds, stdin, reason = _apply_runtime_verification_contract([[interpreter, target]], "argv")
+        assert cmds == [[interpreter, target, _RUNTIME_VERIFICATION_SYNTHETIC_INPUT]]
+        assert reason is None
+
+    # Already supplied - never double-inject.
+    cmds, stdin, reason = _apply_runtime_verification_contract(
+        [["mvn", "exec:java", "-Dexec.mainClass=X", "-Dexec.args=already"]], "argv",
+    )
+    assert cmds == [["mvn", "exec:java", "-Dexec.mainClass=X", "-Dexec.args=already"]]
+    cmds, stdin, reason = _apply_runtime_verification_contract([["python", "app.py", "already"]], "argv")
+    assert cmds == [["python", "app.py", "already"]]
+
+    # exec:exec (and any other mvn/gradle shape) - never guessed at, a bare
+    # trailing token there is parsed as a lifecycle phase, not an argument.
+    cmds, stdin, reason = _apply_runtime_verification_contract([["mvn", "exec:exec"]], "argv")
+    assert cmds == [["mvn", "exec:exec"]] and reason is not None
+
+    # Test D shape: stdin channel supplies + closes a real payload.
+    cmds, stdin, reason = _apply_runtime_verification_contract([["java", "App"]], "stdin")
+    assert cmds == [["java", "App"]] and stdin == _RUNTIME_VERIFICATION_SYNTHETIC_INPUT and reason is None
+
+    # Test E shape: none channel is a complete no-op.
+    cmds, stdin, reason = _apply_runtime_verification_contract([["java", "App"]], "none")
+    assert cmds == [["java", "App"]] and stdin is None and reason is None
+
+    # Test B shape: genuinely unrecognized - refuses rather than guessing.
+    cmds, stdin, reason = _apply_runtime_verification_contract([["./run.sh"]], "argv")
+    assert cmds == [["./run.sh"]] and reason is not None
+
+    # Multi-command sequence: only the LAST (the actual app invocation) is touched.
+    cmds, stdin, reason = _apply_runtime_verification_contract(
+        [["javac", "App.java"], ["java", "App"]], "argv",
+    )
+    assert cmds[0] == ["javac", "App.java"]
+    assert cmds[1] == ["java", "App", _RUNTIME_VERIFICATION_SYNTHETIC_INPUT]
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_runtime_verification_injects_synthetic_argv_when_contract_requires_it(tmp_path):
+    """Runtime Verification Contract Test A (PRV-06, 2026-08-29) - live
+    incident reproduction and fix-proof: judge() states input_channel=
+    "argv" but its own literal run_commands never supplies one (the EXACT
+    live shape: mvn exec:java with no -Dexec.args). Previously this ran
+    the app with zero input, got "No input provided", and that got
+    misdiagnosed as an application defect. Now the deterministic injector
+    supplies a synthetic value BEFORE the process is ever launched -
+    proven here by inspecting the real command run_app_sequence receives,
+    not just the end result."""
+    developer = AsyncMock()
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["mvn", "-e", "exec:java", "-Dexec.mainClass=com.example.MainApplication"]],
+        "command_source": "inferred", "input_channel": "argv",
+        "success_criteria": "prints the uppercase version of the command line argument",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "printed it", "likely_files": []})
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    captured = {}
+
+    def fake_run_app_sequence(commands, timeout=90, stdin_payload=None):
+        captured["commands"] = commands
+        captured["stdin_payload"] = stdin_payload
+        return {"success": True, "timed_out": False, "returncode": 0, "output": "KRIYA-VERIFICATION-INPUT", "steps": []}
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence", side_effect=fake_run_app_sequence,
+    ):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    assert captured["commands"][-1][-1] == "-Dexec.args=kriya-verification-input"
+    assert captured["stdin_payload"] is None
+    assert any(o["type"] == "run_verification" and o["success"] for o in state.gate_outcomes)
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_runtime_verification_supplies_and_closes_stdin_when_contract_requires_it(tmp_path):
+    """Runtime Verification Contract Test C (PRV-06, 2026-08-29)."""
+    developer = AsyncMock()
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["java", "App"]],
+        "command_source": "inferred", "input_channel": "stdin",
+        "success_criteria": "reads a line from stdin and echoes it",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "echoed it", "likely_files": []})
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    captured = {}
+
+    def fake_run_app_sequence(commands, timeout=90, stdin_payload=None):
+        captured["stdin_payload"] = stdin_payload
+        return {"success": True, "timed_out": False, "returncode": 0, "output": "KRIYA-VERIFICATION-INPUT", "steps": []}
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence", side_effect=fake_run_app_sequence,
+    ):
+        await run_attempt(state, ctx)
+
+    assert captured["stdin_payload"] == "kriya-verification-input"
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_runtime_verification_contract_incomplete_never_launches_process(tmp_path):
+    """Runtime Verification Contract Test B/D (PRV-06, 2026-08-29) - when
+    the deterministic injector can't determine how to supply a required
+    input channel, the process must NEVER be launched (this is Kriya's own
+    verifier deficiency, not an application defect) and the Developer must
+    never be re-invoked to "fix" it. Distinguishes INVOCATION FAILURE from
+    APPLICATION FAILURE per the spec's own Part 9."""
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be invoked to repair a verifier-caused gap"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["./run.sh"]],
+        "command_source": "inferred", "input_channel": "argv",
+        "success_criteria": "prints the uppercase version of the command line argument",
+    })
+    run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("grade() must never be called - the process was never launched"),
+    )
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        side_effect=AssertionError("run_app_sequence must never be called for an incomplete contract"),
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
+    assert "RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE" in exc_info.value.failure.message
+    assert not developer.run_generation.called
+
+
 @pytest.mark.asyncio
 async def test_run_attempt_application_runtime_verification_passes_with_zero_writes(tmp_path):
     """(2) Runtime verifier passes -> subtask PASS (no exception), a
@@ -7246,7 +7409,7 @@ async def test_run_attempt_deterministically_corrects_java_entrypoint_end_to_end
 
     captured_commands = {}
 
-    def fake_run_app_sequence(self, commands, timeout=90):
+    def fake_run_app_sequence(self, commands, timeout=90, stdin_payload=None):
         captured_commands["commands"] = commands
         return {"success": True, "timed_out": False, "returncode": 0, "output": "ok"}
 
@@ -8181,7 +8344,7 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts(tmp_path
     tasks_json_path = os.path.join(str(tmp_path), "tasks.json")
     pre_call_leftover_content = []
 
-    def fake_run_app_sequence(commands, timeout=90):
+    def fake_run_app_sequence(commands, timeout=90, stdin_payload=None):
         if os.path.exists(tasks_json_path):
             with open(tasks_json_path) as f:
                 pre_call_leftover_content.append(f.read())
@@ -8246,7 +8409,7 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_
     tasks_json_path = os.path.join(str(tmp_path), "tasks.json")
     pre_call_leftover_content = []
 
-    def fake_run_app_sequence(commands, timeout=90):
+    def fake_run_app_sequence(commands, timeout=90, stdin_payload=None):
         if os.path.exists(tasks_json_path):
             with open(tasks_json_path) as f:
                 pre_call_leftover_content.append(f.read())

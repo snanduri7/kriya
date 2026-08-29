@@ -368,7 +368,9 @@ class PolymorphicValidator:
         except Exception as e:
             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
-    def _run_cmd_with_timeout(self, cmd: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
+    def _run_cmd_with_timeout(
+        self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
+    ) -> Dict[str, Any]:
         self._audit_run_command(cmd, cwd)
         env = None
         preexec_fn = None
@@ -391,7 +393,7 @@ class PolymorphicValidator:
             env["JAVA_HOME"] = self.java_home_override
             env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
         return ProcessController().run(
-            cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn,
+            cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn, stdin_payload=stdin_payload,
         ).to_dict()
 
     def run_pom_validate(self) -> Dict[str, Any]:
@@ -947,7 +949,9 @@ class PolymorphicValidator:
             "output": res["stdout"] + "\n" + res["stderr"],
         }
 
-    def run_app_sequence(self, commands: List[List[str]], timeout: int = 90) -> Dict[str, Any]:
+    def run_app_sequence(
+        self, commands: List[List[str]], timeout: int = 90, stdin_payload: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Runs an ORDERED sequence of already-resolved commands, one after another, in the
         same workspace directory - so state one command creates (a written file, a database)
         persists for the next. Some goals can only be verified this way: a goal like "add an
@@ -963,7 +967,17 @@ class PolymorphicValidator:
         later step's output is still available as evidence for the grader even if an earlier
         one failed for an unrelated reason - except a timeout, which stops the sequence
         immediately (a hung process means continuing serves no purpose). Each command gets
-        its own timeout budget, not a shared one."""
+        its own timeout budget, not a shared one.
+
+        stdin_payload (Runtime Verification Contract, PRV-06, 2026-08-29): applied ONLY to
+        the LAST command - the one that actually exercises the application's behavior in
+        every real sequence this codebase produces (an "add an item, then list items"-style
+        multi-command sequence's own earlier steps are themselves separate app invocations
+        already fully specified by the judge's own literal argv, not something this
+        parameter is meant to feed). Every OTHER command in the sequence still gets stdin
+        explicitly closed (ProcessController's own new default), never left open - the
+        difference this parameter makes is only whether the LAST command receives a real
+        payload instead of immediate EOF."""
         if not commands:
             return {"success": False, "timed_out": False, "returncode": None, "output": "No run commands provided."}
 
@@ -979,7 +993,10 @@ class PolymorphicValidator:
         for i, command in enumerate(commands, 1):
             step_label = f"=== Step {i}/{len(commands)}: {' '.join(command)} ==="
             try:
-                res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
+                res = self._run_cmd_with_timeout(
+                    command, cwd=self.workspace_path, timeout=timeout,
+                    stdin_payload=stdin_payload if i == len(commands) else None,
+                )
             except Exception as e:
                 output_parts.append(f"{step_label}\nFailed to execute: {e}")
                 steps.append({

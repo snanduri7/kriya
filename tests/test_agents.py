@@ -264,6 +264,92 @@ async def test_run_verifier_judge_reasoning_defaults_to_empty_string_never_fabri
 
 
 @pytest.mark.asyncio
+async def test_run_verifier_judge_returns_the_models_own_input_channel():
+    """Runtime Verification Contract (PRV-06, 2026-08-29) - the model's own
+    structured input_channel field is trusted as-is when it's one of the
+    three valid values."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["mvn", "exec:java", "-Dexec.mainClass=App"]],
+        "command_source": "inferred", "input_channel": "argv",
+        "success_criteria": "prints the uppercase input", "reasoning": "",
+    }))
+    verifier = RunVerifierAgent("run_verifier", llm)
+
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["App.java"])
+
+    assert judgment["input_channel"] == "argv"
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_falls_back_to_deterministic_input_channel_inference():
+    """Live incident this closes: the model's own success_criteria/reasoning
+    correctly named "the command line argument," but omitted the new
+    input_channel field entirely (a real, plausible slip - json_mode
+    guarantees valid JSON, not that every requested field is populated).
+    The deterministic keyword backstop reads the SAME judge response's own
+    text instead of silently defaulting to "none"."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["mvn", "exec:java", "-Dexec.mainClass=App"]],
+        "command_source": "inferred",
+        "success_criteria": "prints the uppercase version of the command line argument",
+        "reasoning": "the goal requires reading a command line argument",
+    }))
+    verifier = RunVerifierAgent("run_verifier", llm)
+
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["App.java"])
+
+    assert judgment["input_channel"] == "argv"
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_input_channel_defaults_to_none_with_no_signal():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["python", "app.py"]],
+        "command_source": "inferred", "success_criteria": "prints hello", "reasoning": "",
+    }))
+    verifier = RunVerifierAgent("run_verifier", llm)
+
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+
+    assert judgment["input_channel"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_ignores_an_invalid_input_channel_value():
+    """An out-of-vocabulary value (a model slip, or older/foreign output)
+    is never trusted verbatim - falls through to the same deterministic
+    text-based inference as an omitted field."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["python", "app.py"]],
+        "command_source": "inferred", "input_channel": "environment_variable",
+        "success_criteria": "reads from standard input and echoes it", "reasoning": "",
+    }))
+    verifier = RunVerifierAgent("run_verifier", llm)
+
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+
+    assert judgment["input_channel"] == "stdin"
+
+
+def test_infer_input_channel_from_text_prefers_argv_phrase_over_bare_terms():
+    from kriya.agents.agent import _infer_input_channel_from_text
+
+    assert _infer_input_channel_from_text(
+        "prints the uppercase version of the command line argument", "",
+    ) == "argv"
+    assert _infer_input_channel_from_text("", "reads from standard input") == "stdin"
+    assert _infer_input_channel_from_text("prints a fixed greeting", "no input needed") == "none"
+
+
+@pytest.mark.asyncio
 async def test_run_verifier_judge_reasoning_explains_infrastructure_failures_too():
     """Each of the three infrastructure-failure fallback paths (call failed,
     unparseable JSON, non-dict response) also carries a synthetic reasoning

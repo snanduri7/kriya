@@ -436,7 +436,20 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "that returns a result instead of terminating. This applies to any process-termination "
     "mechanism (not just one language's), and does not require a specific method name or file "
     "structure - only that a directly-tested code path and a process-terminating code path stay "
-    "separate enough that invoking the tested path in-process cannot kill the test process itself."
+    "separate enough that invoking the tested path in-process cannot kill the test process itself. "
+    "When two subtasks' outputs are meant to compose into ONE behavior - one subtask's file is "
+    "meant to be called, imported, or otherwise directly used by another's, not merely scheduled "
+    "before it - add an object to a top-level integration_relationships list: {\"id\": \"ir1\", "
+    "\"kind\": \"uses\", \"producer_subtask_ids\": [\"s3\"], \"consumer_subtask_ids\": [\"s2\"], "
+    "\"relationship_statement\": \"...\"} (kind is one of uses/provides_to/configures/implements/"
+    "verifies/depends_on). This is a STRONGER claim than depends_on/provides/requires (which only "
+    "order execution and name a producer) - only add it when the goal actually requires the "
+    "consumer's own generated code to reference the producer's artifact, e.g. two subtasks would "
+    "otherwise each be free to implement the same concern independently without ever composing "
+    "(a real live incident: a storage-service subtask and a main-application subtask that reads/"
+    "writes storage each passed their own local checks while the main application never actually "
+    "used the storage service it depended on). Omit the list entirely when no subtask's output is "
+    "meant to be directly used by another's code - most plans need none."
 )
 
 

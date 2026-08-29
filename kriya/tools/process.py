@@ -50,15 +50,28 @@ class ProcessController:
         timeout: int,
         env: Optional[Dict[str, str]] = None,
         preexec_fn: Optional[Callable[[], None]] = None,
+        stdin_payload: Optional[str] = None,
     ) -> ProcessResult:
+        # Runtime Verification Contract (PRV-06, 2026-08-29): stdin is now
+        # ALWAYS an explicit pipe, never left as the default (which inherits
+        # THIS process's own stdin unchanged) - a real live incident this
+        # closes: a generated app's own blocking `System.in`/readLine() call,
+        # invoked with no stdin_payload, blocked for the FULL timeout window
+        # before this class's own timeout/kill logic finally ended it,
+        # wasting the entire budget on a hang the caller had no way to
+        # prevent. communicate(input=...) with an empty string still closes
+        # stdin immediately (EOF) exactly like DEVNULL would for a command
+        # that never reads it, so this is a strict improvement for every
+        # existing caller (compile/test/pom-validate/version-check), not
+        # just the one that supplies a real payload.
         process = subprocess.Popen(
             command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, env=env, preexec_fn=preexec_fn,
+            stdin=subprocess.PIPE, text=True, env=env, preexec_fn=preexec_fn,
             start_new_session=(os.name == "posix"),
         )
         timed_out = False
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
+            stdout, stderr = process.communicate(input=stdin_payload or "", timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             self._terminate_tree(process)

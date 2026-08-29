@@ -278,6 +278,35 @@ def _is_unparseable_json(response: str) -> bool:
     return not isinstance(parsed, dict)
 
 
+_ARGV_CHANNEL_TERMS = ("command line argument", "command-line argument", "cli argument", "argv")
+_STDIN_CHANNEL_TERMS = ("standard input", "stdin", "console input")
+
+
+def _infer_input_channel_from_text(success_criteria: str, reasoning: str) -> str:
+    """Runtime Verification Contract (PRV-06, 2026-08-29) - deterministic
+    backstop for judge()'s own new input_channel field, used only when the
+    model omits it or returns something outside the closed argv/stdin/none
+    vocabulary (json_mode guarantees syntactically valid JSON, not that
+    every field is populated as asked - the same gap _coerce_bool_field
+    below exists for should_run/passed). Multi-word phrase matching first
+    (checked before the single-word "argv"/"stdin" terms so "command line
+    argument" is never mistakenly read as ambiguous), case-insensitive,
+    over success_criteria + reasoning (both already-available judge output,
+    no new LLM call - matches this same function's own precedent for the
+    no-pom.xml javac-prepend backstop). Defaults to "none" when neither
+    term appears - the safe direction: a false "none" only skips deterministic
+    input-supply for a goal that turns out to need it (falls back to
+    exactly today's pre-fix behavior), while a false "argv"/"stdin" would
+    inject an unwanted, unrequested value into an otherwise-correct
+    invocation."""
+    text = f"{success_criteria} {reasoning}".lower()
+    if any(term in text for term in _ARGV_CHANNEL_TERMS):
+        return "argv"
+    if any(term in text for term in _STDIN_CHANNEL_TERMS):
+        return "stdin"
+    return "none"
+
+
 def _coerce_bool_field(value: Any, field_name: str, context: str) -> bool:
     """Safely interprets a JSON field the prompt asked for as a boolean, WITHOUT
     Python's own bool() coercion - bool("false") is True (any non-empty string is
@@ -430,7 +459,16 @@ class PlannerAgent(BaseAgent):
             "process-termination mechanism, no specific method name or file structure required. "
             "Keep all overall request constraints relevant "
             "to each subtask explicit in that subtask's description "
-            "and mapped acceptance criteria; later bounded execution cannot safely infer omitted requirements. If you "
+            "and mapped acceptance criteria; later bounded execution cannot safely infer omitted requirements. "
+            "When two subtasks' outputs are meant to compose into ONE behavior - one subtask's file is meant "
+            "to be called, imported, or otherwise directly used by another's, not merely scheduled before it - "
+            "add an object to a top-level integration_relationships list: {\"id\": \"ir1\", \"kind\": \"uses\", "
+            "\"producer_subtask_ids\": [\"s3\"], \"consumer_subtask_ids\": [\"s2\"], \"relationship_statement\": "
+            "\"...\"} (kind is one of uses/provides_to/configures/implements/verifies/depends_on) - a stronger "
+            "claim than depends_on/provides/requires (which only order execution and name a producer), only "
+            "needed when the consumer's own generated code must actually reference the producer's artifact. "
+            "Omit the list entirely when no subtask's output is meant to be directly used by another's code. "
+            "If you "
             "cannot confidently produce this breakdown, still include your best-effort attempt rather "
             "than omitting the block."
         )
@@ -2128,9 +2166,23 @@ class RunVerifierAgent(BaseAgent):
             '  "should_run": true or false,\n'
             '  "run_commands": [["executable", "arg1", "arg2"], ...] or null,\n'
             '  "command_source": "goal_explicit" or "inferred",\n'
+            '  "input_channel": "argv" or "stdin" or "none",\n'
             '  "success_criteria": "one or two sentences describing what observable output would prove success",\n'
             '  "reasoning": "one or two sentences explaining WHY should_run is what it is"\n'
             "}\n"
+            "input_channel says HOW the running application receives the external value the goal "
+            "describes it acting on, independent of whatever literal command you return: "
+            "\"argv\" when the goal describes reading a value from a command-line argument/parameter "
+            "(e.g. \"read a text value from the command line\", \"accept an argument\"); \"stdin\" "
+            "only when the goal explicitly describes reading from standard input/console input "
+            "specifically; \"none\" when the behavior needs no external input value at all (e.g. it "
+            "always operates on a fixed/generated value, or takes no input). Missing argv NEVER "
+            "implies stdin - infer input_channel from what the GOAL says the input mechanism is, "
+            "never from which channel happens to be easier to supply. This field is read "
+            "independently of run_commands' own literal argv - Kriya's own execution layer "
+            "guarantees the declared channel is actually supplied (a synthetic, deterministic "
+            "value) before running, so you do not need to invent a specific literal value "
+            "yourself; just state which channel the application actually reads from.\n"
             "reasoning is required in both cases, but matters most when should_run is false - state "
             "the actual, specific reason this goal has no observable runtime behavior worth running "
             "(e.g. a concrete fact about what the goal does or doesn't ask for, or about the code "
@@ -2332,18 +2384,41 @@ class RunVerifierAgent(BaseAgent):
             if java_files:
                 run_commands = [["javac"] + java_files] + run_commands
 
+        success_criteria = parsed.get("success_criteria") or ""
+        reasoning = parsed.get("reasoning") or ""
         return {
             "should_run": _coerce_bool_field(parsed.get("should_run"), "should_run", "Run Verifier judge()") and run_commands is not None,
             "run_commands": run_commands,
             "command_source": parsed.get("command_source") if parsed.get("command_source") in ("goal_explicit", "inferred") else "inferred",
-            "success_criteria": parsed.get("success_criteria") or "",
+            # Runtime Verification Contract (PRV-06, 2026-08-29) - "detection
+            # knows more than execution remembers" was the root of a live
+            # incident: this judge's own success_criteria correctly said the
+            # goal needed "the command line argument," but its own
+            # run_commands never supplied one, and nothing carried that known
+            # requirement forward into the actual invocation - the app
+            # correctly reported "no input provided," which then got
+            # misdiagnosed as an application defect for 9 wasted attempts.
+            # input_channel makes the requirement an explicit, structured
+            # fact the execution layer (attempt.py) can enforce independent
+            # of whatever literal argv this response happened to include.
+            # Primary source is the model's own new structured field;
+            # _infer_input_channel_from_text is a deterministic backstop for
+            # when the model omits/mis-populates it (never a live LLM
+            # re-ask - matches this same function's own precedent for the
+            # no-pom.xml javac-prepend backstop below).
+            "input_channel": (
+                parsed.get("input_channel")
+                if parsed.get("input_channel") in ("argv", "stdin", "none")
+                else _infer_input_channel_from_text(success_criteria, reasoning)
+            ),
+            "success_criteria": success_criteria,
             # Observability only (PRV-06, 2026-08-28) - never consulted by any
             # should_run/run_commands decision anywhere in this codebase, only
             # persisted so a REQUIRED_RUNTIME_VERIFICATION_MISSING failure
             # carries the judge's own stated reason instead of a bare boolean.
             # Model may omit it despite the system prompt asking for it -
             # never fabricated here if absent.
-            "reasoning": parsed.get("reasoning") or "",
+            "reasoning": reasoning,
         }
 
     async def grade(

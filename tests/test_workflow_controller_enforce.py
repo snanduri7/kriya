@@ -480,6 +480,52 @@ def test_authoritative_planner_system_prompt_carries_testability_and_tooling_dag
     assert "execution order is not" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
 
 
+def test_authoritative_planner_system_prompt_carries_integration_relationship_guidance():
+    """Correctness Continuity Part C completion (PRV-06, 2026-08-29) - the
+    field/obligation/validation machinery was implemented but stayed
+    dormant since the live Planner had no way to know it existed (a real
+    PRV-06 run's own Planner never populated integration_relationships,
+    confirmed by grepping that run's log). This closes it the same way
+    every other structured field this prompt already asks for is
+    introduced (global_invariants/provides/requires above)."""
+    assert "integration_relationships" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "producer_subtask_ids" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "consumer_subtask_ids" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "STRONGER claim than depends_on/provides/requires" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+
+
+def test_planner_structured_output_parses_a_real_integration_relationships_response():
+    """Schema round-trip, no live model call: confirms a Planner response
+    shaped exactly as the prompt now asks for actually parses into a real
+    EngineeringPlan.integration_relationships, not silently dropped."""
+    from kriya.agents.contracts import parse_planner_structured_output
+
+    raw = json.dumps({
+        "global_invariants": [],
+        "subtasks": [
+            {"id": "s2", "description": "App", "execution_method": "model",
+             "planned_files": [{"path": "App.java", "action": "create"}]},
+            {"id": "s3", "description": "Service", "execution_method": "model",
+             "planned_files": [{"path": "Service.java", "action": "create"}]},
+        ],
+        "integration_relationships": [{
+            "id": "ir1", "kind": "uses",
+            "producer_subtask_ids": ["s3"], "consumer_subtask_ids": ["s2"],
+            "relationship_statement": "App.java must use Service.java",
+        }],
+        "acceptance_criteria": [], "extension_points": [], "refactor_baseline": None,
+    })
+
+    output, error = parse_planner_structured_output(raw)
+
+    assert error is None, error
+    assert len(output.integration_relationships) == 1
+    rel = output.integration_relationships[0]
+    assert rel.producer_subtask_ids == ["s3"]
+    assert rel.consumer_subtask_ids == ["s2"]
+    assert rel.kind.value == "uses"
+
+
 def test_task_planner_request_supplies_existing_paths_for_brownfield_owner_selection():
     request = build_authoritative_planner_request(
         "Fix the existing display-name formatter and update its tests",

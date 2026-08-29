@@ -879,6 +879,93 @@ def _record_self_correction_scope_conflict(
     }
 
 
+_RUNTIME_VERIFICATION_SYNTHETIC_INPUT = "kriya-verification-input"
+
+
+def _apply_runtime_verification_contract(
+    commands: List[List[str]], input_channel: str,
+) -> Tuple[List[List[str]], Optional[str], Optional[str]]:
+    """Runtime Verification Contract (PRV-06, 2026-08-29). RunVerifierAgent.
+    judge() now states input_channel ("argv"/"stdin"/"none") as an explicit
+    fact about what the goal requires, independent of whatever literal
+    command it happened to return - this is the deterministic enforcement
+    layer that makes that fact actually reach the real invocation, closing
+    a live incident where the judge's own success_criteria correctly named
+    "the command line argument" but its own run_commands never supplied
+    one, and the app's own correct "no input provided" response was then
+    misdiagnosed as an application defect for 9 wasted attempts.
+
+    Returns (corrected_commands, stdin_payload, incomplete_reason).
+    incomplete_reason is None whenever the contract was successfully
+    satisfied (including "none", and "argv"/"stdin" already supplied) -
+    non-None means the caller must raise RUNTIME_VERIFICATION_CONTRACT_
+    INCOMPLETE and never launch the process (see this module's own call
+    sites). The synthetic value is a single, stable, Kriya-owned constant
+    (never asked of an LLM, matching the same discipline as every other
+    typed value this codebase generates deterministically) - it is not
+    goal-specific text, so it carries no proprietary/external data and is
+    safe to record verbatim in verification evidence.
+
+    Deliberately narrow, evidence-bounded shape detection (only the two
+    proven-live invocation forms, plus one generic fallback that covers
+    every other interpreter+target language without any per-ecosystem
+    branching): a Maven exec:java invocation (recognized by an "exec:java"
+    token or an already-present "-Dexec.mainClass=" token - exec:exec is
+    deliberately NOT matched here, since its own argument-passing mechanism
+    is pom.xml-configured, not a "-Dexec.args=" command-line property) gets
+    "-Dexec.args=<value>" appended; any other "mvn"/"gradle"/"./gradlew"
+    invocation is left unrecognized rather than guessed at - a bare
+    trailing token there is parsed as an additional lifecycle phase/goal,
+    not a program argument, and would fail the build outright. Any other
+    exactly-two-token command (["java","Main"], ["python","app.py"],
+    ["node","app.js"], ...) gets the value appended as a third, positional
+    token - language-agnostic by construction, not hardcoded for Java/Maven
+    or for this one PRV. A command already carrying more than two tokens
+    (java/python/etc. with
+    its own extra argv, or an exec:java command that already sets
+    "-Dexec.args=") is assumed to already supply its own value and is left
+    untouched. Only applied to the LAST command in the sequence - the one
+    that actually exercises the application's behavior in every real
+    sequence this codebase produces (see run_app_sequence's own docstring
+    for the multi-invocation case, e.g. "add an item, then list items",
+    where every earlier step is its own already-fully-specified
+    invocation, not something this function is meant to touch)."""
+    if not commands or input_channel not in ("argv", "stdin"):
+        return commands, None, None
+    if input_channel == "stdin":
+        return commands, _RUNTIME_VERIFICATION_SYNTHETIC_INPUT, None
+    *prefix, last = commands
+    is_maven_exec_java = "exec:java" in last or any(
+        tok.startswith("-Dexec.mainClass=") for tok in last
+    )
+    if is_maven_exec_java:
+        if any(tok.startswith("-Dexec.args=") for tok in last):
+            return commands, None, None
+        return prefix + [last + [f"-Dexec.args={_RUNTIME_VERIFICATION_SYNTHETIC_INPUT}"]], None, None
+    # A bare trailing token is a valid program argument for a plain
+    # interpreter invocation (java/python/node/...), but NOT for "mvn"/
+    # "gradle" (a bare token there is parsed as an additional lifecycle
+    # phase/goal to run, e.g. "mvn exec:exec kriya-verification-input"
+    # would fail Maven outright with an unknown-phase error) - any other
+    # mvn/gradle shape besides the exec:java one already handled above is
+    # left unrecognized rather than guessed at.
+    if last and last[0] in ("mvn", "gradle", "./gradlew", "gradlew"):
+        return commands, None, (
+            f"input_channel=argv but the final command ({last!r}) is a build-tool "
+            "invocation this deterministic injector doesn't know how to pass an "
+            "argument to safely (only mvn exec:java's -Dexec.args= is supported)."
+        )
+    if len(last) == 2:
+        return prefix + [last + [_RUNTIME_VERIFICATION_SYNTHETIC_INPUT]], None, None
+    if len(last) > 2:
+        return commands, None, None
+    return commands, None, (
+        f"input_channel=argv but the final command's shape ({last!r}) isn't one this "
+        "deterministic injector recognizes - refusing to guess where to place a "
+        "command-line argument rather than silently running an under-specified invocation."
+    )
+
+
 def _run_verification_basis_hash(ctx: "AttemptContext", state: GenerationState) -> str:
     """Fingerprint the real invocation-affecting basis for cached judgment."""
     digest = hashlib.sha256()
@@ -1587,6 +1674,24 @@ async def _execute_runtime_verification_directly(
 
     state.run_verification_confirmed = True
     resolved_run_commands = [_resolve_run_command(cmd, ctx.worktree_path) for cmd in judgment["run_commands"]]
+    input_channel = judgment.get("input_channel") or "none"
+    resolved_run_commands, stdin_payload, contract_incomplete_reason = _apply_runtime_verification_contract(
+        resolved_run_commands, input_channel,
+    )
+    logger.info(
+        "RUNTIME_VERIFICATION_CONTRACT input_channel=%s argument_count=%d stdin_present=%s",
+        input_channel, len(resolved_run_commands[-1]) if resolved_run_commands else 0,
+        bool(stdin_payload),
+    )
+    if contract_incomplete_reason:
+        message = f"RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE: {contract_incomplete_reason}"
+        logger.warning(message)
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
     jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(ctx.worktree_path, state.java_home_override)
     if jvm_flag_correction:
         state.toolchain_warning = (
@@ -1604,6 +1709,7 @@ async def _execute_runtime_verification_directly(
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
     run_res = validator.run_app_sequence(
         resolved_run_commands, timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+        stdin_payload=stdin_payload,
     )
     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
     if run_command_targets_missing_entrypoint(run_res["output"]):
@@ -4399,6 +4505,24 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             "One or more inferred run commands aren't resolvable as given here - "
                             "substituted Kriya's own interpreter/PATH-resolved equivalents."
                         )
+                    rv_input_channel = judgment.get("input_channel") or "none"
+                    resolved_run_commands, rv_stdin_payload, rv_contract_incomplete_reason = (
+                        _apply_runtime_verification_contract(resolved_run_commands, rv_input_channel)
+                    )
+                    logger.info(
+                        "RUNTIME_VERIFICATION_CONTRACT input_channel=%s argument_count=%d stdin_present=%s",
+                        rv_input_channel, len(resolved_run_commands[-1]) if resolved_run_commands else 0,
+                        bool(rv_stdin_payload),
+                    )
+                    if rv_contract_incomplete_reason:
+                        rv_message = f"RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE: {rv_contract_incomplete_reason}"
+                        logger.warning(rv_message)
+                        rv_failure = Failure(
+                            type="verification_infrastructure_failure", message=rv_message,
+                            raw_output=rv_message, attempt=state.attempt_number,
+                        )
+                        state.gate_outcomes.append(rv_failure.to_gate_outcome())
+                        raise QualityGateFailure(rv_failure)
                     jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(ctx.worktree_path, state.java_home_override)
                     if jvm_flag_correction:
                         logger.warning(f"JVM flag preflight: {jvm_flag_correction}")
@@ -4431,6 +4555,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     run_res = validator.run_app_sequence(
                         resolved_run_commands,
                         timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                        stdin_payload=rv_stdin_payload,
                     )
                     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
                     # Invalidate a stale cached judgment BEFORE grading/raising below,
