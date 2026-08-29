@@ -248,14 +248,48 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # Every failure source now raises with a real Failure object attached
     # (QualityGateFailure.failure directly, or IncompleteGenerationError.failure
     # for backward compat - see kriya/workflow/failure.py) instead of a bare
-    # message string later re-sniffed for its type by prefix-matching. A bare
-    # Exception (shouldn't normally happen - defensive only) is wrapped the same
-    # way so everything downstream always reads one shape.
+    # message string later re-sniffed for its type by prefix-matching.
+    #
+    # PRV-06 completion (2026-08-29, "MA8.1 <-> MA9 composition and
+    # AttemptContext correctness"): a bare Exception reaching this final
+    # fallback was ALWAYS documented as "shouldn't normally happen -
+    # defensive only". A NARROW, explicitly-named subset of exception types
+    # - ones that can ONLY ever indicate a bug in Kriya's OWN control-plane
+    # code, never a deliberate "the model/input was bad" signal - is
+    # reclassified as "internal_framework_error" instead of "general_error":
+    # never fed back to the Developer as diagnosis/repair evidence, and
+    # wired into the SAME environment_failure/STOP_ENVIRONMENT mechanism
+    # time_budget_exhausted/verification_infrastructure_failure already use
+    # below, so the run fails closed on the very first occurrence instead of
+    # burning further Developer retries or letting MA8.1 open a new cross-
+    # owner recovery requirement from it. Live-reproduced proof: an
+    # UnboundLocalError inside run_attempt's own coordinated-repair branch.
+    #
+    # ValueError is deliberately EXCLUDED from that set, even though it's
+    # just as "bare" here - this codebase already uses it pervasively and
+    # intentionally for "the model/input was bad" signaling (e.g.
+    # DeveloperAgent's own malformed-JSON-response ValueError in agent.py),
+    # and reclassifying that as internal would wrongly hard-stop a perfectly
+    # ordinary, retryable model failure. Confirmed live while implementing
+    # this fix: an early, broader version of this change (reclassifying
+    # EVERY bare exception) did exactly that regression, caught by this
+    # module's own existing test_workflow.py regression sweep.
+    attached_failure = getattr(e, "failure", None)
+    scope_denial_failure = attached_failure is None and _failure_from_validated_scope_denial(e, ctx)
+    is_internal_framework_bug = (
+        attached_failure is None
+        and not scope_denial_failure
+        and isinstance(e, (UnboundLocalError, TypeError, KeyError, AssertionError))
+    )
     failure: Failure = (
-        getattr(e, "failure", None)
-        or _failure_from_validated_scope_denial(e, ctx)
+        attached_failure
+        or scope_denial_failure
         or Failure(
-            type="general_error", message=raw_error_context,
+            type="internal_framework_error" if is_internal_framework_bug else "general_error",
+            message=(
+                f"INTERNAL KRIYA ERROR (not a generated-application defect): {raw_error_context}"
+                if is_internal_framework_bug else raw_error_context
+            ),
             raw_output=raw_error_context, source="orchestrator",
         )
     )
@@ -358,7 +392,17 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # of the exact same failure would never compare equal.
     state.environment_failure = (
         failure.message
-        if failure.type in {"time_budget_exhausted", "verification_infrastructure_failure"}
+        if failure.type in {
+            "time_budget_exhausted", "verification_infrastructure_failure",
+            # PRV-06 completion (2026-08-29): an internal Kriya exception
+            # is exactly as unfixable-by-retrying as these two - stop
+            # immediately (RetryAction.STOP_ENVIRONMENT) rather than
+            # burning further Developer attempts or classifying it via
+            # classify_environment_failure()'s own text-pattern heuristics,
+            # which were never designed to recognize an arbitrary internal
+            # traceback.
+            "internal_framework_error",
+        }
         else classify_environment_failure(raw_error_context)
     )
 

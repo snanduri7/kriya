@@ -68,6 +68,14 @@ class FailureCategory(str, Enum):
     today, only the generation time budget running out before a pass could
     even start."""
 
+    INTERNAL = "internal"
+    """Kriya's OWN implementation broke (an unexpected exception in the
+    orchestration/retry code itself, not the generated application) - PRV-06
+    completion (2026-08-29). Never a code-correctness signal about the
+    application under generation; see retry_strategy.py::handle_attempt_
+    failure's own docstring for why this must never be conflated with an
+    ordinary GENERATION_COMPLETENESS/EDIT_TARGETING model defect."""
+
     UNCLASSIFIED = "unclassified"
     """A bare, non-QualityGateFailure exception with no specific
     Failure.type of its own, or any future Failure.type this mapping
@@ -113,6 +121,9 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
 
     # RESOURCE - operational constraint, not a code defect
     "time_budget_exhausted": FailureCategory.RESOURCE,
+
+    # INTERNAL - Kriya's own implementation broke, not the application
+    "internal_framework_error": FailureCategory.INTERNAL,
 
     # UNCLASSIFIED - explicit fallback
     "general_error": FailureCategory.UNCLASSIFIED,

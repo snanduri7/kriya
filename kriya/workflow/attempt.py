@@ -682,7 +682,7 @@ async def _run_coordinated_repair_generation(
     state: "GenerationState", ctx: "AttemptContext", contract: Any,
     base_code_context: str, stream_callback: Optional[Callable[[str], None]],
     attempt_operation: Any,
-) -> List[Dict[str, str]]:
+) -> Tuple[List[Dict[str, str]], Dict[str, str]]:
     """MA9 (2026-08-29): the coordinated counterpart to a single
     _run_developer_generation(known_target_files=state.last_implicated_files)
     call - one sequential Developer call per contract.generation_order entry,
@@ -728,7 +728,21 @@ async def _run_coordinated_repair_generation(
     guarantees is the harder one anyway: no PARTIAL commit ever happens,
     since nothing here writes to the worktree at all until the full,
     all-groups candidate passes every existing gate further down
-    run_attempt()."""
+    run_attempt().
+
+    Returns (results, candidate_view) - PRV-06 completion (2026-08-29, "MA8.1
+    <-> MA9 composition and AttemptContext correctness"): the caller's own
+    shared post-generation pipeline (anchored-edit application further down
+    run_attempt()) needs a `shown_context` for its own grounding check
+    (edit_safety.py::apply_anchored_edits's third argument) that reflects
+    this SAME coordinated candidate state - not the authoritative baseline
+    workspace, which Rule 2A above guarantees is still stale at this point.
+    Previously this function returned only `results`, silently discarding
+    the very candidate_view its own docstring calls "probably the single
+    most load-bearing implementation rule in MA9" the moment control
+    returned to the caller - the caller then had nothing but an unassigned
+    local variable (see run_attempt's own `active_code_context`), a real,
+    live-reproduced UnboundLocalError."""
     candidate_view: Dict[str, str] = {}
     results: List[Dict[str, str]] = []
     for group in contract.repair_groups:
@@ -807,7 +821,7 @@ async def _run_coordinated_repair_generation(
                             details={"repair_contract_id": contract.id, "artifact": filepath},
                         ))
                 results.append(entry)
-    return results
+    return results, candidate_view
 
 
 def _extract_grounded_contract_verdict(
@@ -1901,6 +1915,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         and ctx.resume_state.get("stage") in {"candidate_gates_passed", "developer_success"}
         and state.attempt_number == 1
     )
+    # PRV-06 completion (2026-08-29, "MA8.1 <-> MA9 composition and
+    # AttemptContext correctness"): a defensive baseline, not the real fix
+    # (see the MA9-coordinated branch below, which now assigns a real,
+    # candidate-view-aware value) - every branch below is still expected to
+    # set a MEANINGFUL active_code_context of its own. This exists only so
+    # that a FUTURE branch that forgets to (the exact live-reproduced defect
+    # this closes) degrades to "no shown-context grounding check" -
+    # edit_safety.py::apply_anchored_edits already treats an empty
+    # shown_context as exactly that, the same sentinel _materialize_
+    # candidate_content already uses for its own, narrower equivalent case -
+    # rather than raising UnboundLocalError the moment a response comes back
+    # as anchored edits.
+    active_code_context = ""
 
     if resuming_candidate_stage:
         logger.info(
@@ -1978,8 +2005,24 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ))
             state.model_hops.append(ctx.kernel.config.llm.model)
             dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-            files = await _run_coordinated_repair_generation(
+            files, coordinated_candidate_view = await _run_coordinated_repair_generation(
                 state, ctx, active_repair_contract, base_code_context, dev_stream, attempt_operation,
+            )
+            # PRV-06 completion (2026-08-29): active_code_context was
+            # previously left UNASSIGNED on this branch - live-reproduced
+            # UnboundLocalError the moment a coordinated response came back
+            # as anchored edits and reached the shared anchored-edit
+            # application further down this function. Built from the SAME
+            # base_code_context every coordinated participant's own prompt
+            # was seeded from, PLUS each participant's real staged content
+            # (candidate_view) - never the stale authoritative baseline
+            # alone, so a later participant's edit whose search-block only
+            # exists in an earlier participant's just-generated candidate
+            # (not yet written to the worktree, per Rule 2A) is correctly
+            # recognized as grounded rather than incorrectly rejected.
+            active_code_context = base_code_context + "".join(
+                f"\n\n=== Candidate (not yet committed) for {path} ===\n{content}"
+                for path, content in sorted(coordinated_candidate_view.items())
             )
         else:
             retry_package = _retry_package_for_attempt(

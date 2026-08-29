@@ -1622,7 +1622,7 @@ async def test_run_coordinated_repair_generation_candidate_view_isolation(tmp_pa
         "kriya.workflow.attempt._run_developer_generation",
         side_effect=fake_run_developer_generation,
     ):
-        results = await _run_coordinated_repair_generation(
+        results, _candidate_view = await _run_coordinated_repair_generation(
             state, ctx, contract, base_code_context="", stream_callback=None,
             attempt_operation=CodeOperation.REPAIR_WITH_PATCH,
         )
@@ -1745,7 +1745,7 @@ async def test_run_coordinated_repair_generation_supports_more_than_two_particip
         "kriya.workflow.attempt._run_developer_generation",
         side_effect=fake_run_developer_generation,
     ):
-        results = await _run_coordinated_repair_generation(
+        results, _candidate_view = await _run_coordinated_repair_generation(
             state, ctx, contract, base_code_context="", stream_callback=None,
             attempt_operation=CodeOperation.REPAIR_WITH_PATCH,
         )
@@ -1810,7 +1810,7 @@ async def test_run_attempt_uses_coordinated_generation_when_contract_active(tmp_
         return [
             {"filepath": app_path, "content": fixed_app, "edits": []},
             {"filepath": test_path, "content": fixed_test, "edits": []},
-        ]
+        ], {app_path: fixed_app, test_path: fixed_test}
 
     with patch(
         "kriya.workflow.attempt._run_coordinated_repair_generation",
@@ -1876,6 +1876,151 @@ async def test_run_attempt_ordinary_targeted_retry_unaffected_without_contract(t
 
     mock_coordinated.assert_not_called()
     assert (tmp_path / app_path).read_text() == fixed_app_local
+
+
+# --- PRV-06 completion (2026-08-29): "MA8.1 <-> MA9 composition and
+# AttemptContext correctness" - a live PRV-06 run proved MA9's coordinated-
+# repair branch of run_attempt() left active_code_context unassigned,
+# raising UnboundLocalError the moment a coordinated Developer response
+# came back as an anchored edit rather than full file content (the
+# full-content shape, already covered by test_run_attempt_uses_coordinated_
+# generation_when_contract_active above, never touches the affected code
+# path at all - see that gap's own root cause below). execution_role
+# ("consumer_retry" after an MA8.1 owner-recovery cycle vs. an ordinary
+# targeted retry) is a WorkflowController-level concept, never threaded
+# into run_generation_workflow's own kwargs - from run_attempt's own
+# perspective there is no distinguishable code path between the two, so
+# proving this here IS the MA8.1 -> MA9 composition proof, not a narrower
+# substitute for it.
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_coordinated_anchored_edit_response_reaches_shared_pipeline_without_internal_exception(tmp_path):
+    """The direct live reproduction and fix-proof: a coordinated response
+    returned as edits=[...] (content=None) must reach the shared anchored-
+    edit application further down run_attempt() and succeed, never raise
+    UnboundLocalError. Reverting the active_code_context fix in attempt.py
+    (both the coordinated-branch assignment and the defensive top-of-
+    function baseline) reproduces the live exception with this exact test
+    unchanged - confirmed directly while implementing this fix."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    contract = _make_two_participant_contract(app_path, test_path, created_attempt=1)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {app_path, test_path}
+    state.last_implicated_files = [test_path]
+    state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict"
+    state.repair_contract = contract
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, architect_files=[app_path, test_path],
+        expected_files_upfront=[app_path, test_path],
+        allowed_write_relpaths=[app_path, test_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    fixed_test = (
+        "public class AppTest {\n"
+        "    void testMain() { App.main(new String[0]); }\n"
+        "}\n"
+    )
+
+    async def fake_run_developer_generation(state_arg, ctx_arg, **kwargs):
+        filepath = kwargs["known_target_files"][0]
+        if filepath == app_path:
+            # The exact shape dormant until this live incident: an
+            # anchored edit, not full file content.
+            return [{
+                "filepath": app_path, "content": None,
+                "edits": [{"search": "System.exit(1);", "replace": "return;"}],
+            }]
+        return [{"filepath": test_path, "content": fixed_test, "edits": []}]
+
+    with patch(
+        "kriya.workflow.attempt._run_developer_generation",
+        side_effect=fake_run_developer_generation,
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise UnboundLocalError
+
+    assert "return;" in (tmp_path / app_path).read_text()
+    assert "System.exit(1);" not in (tmp_path / app_path).read_text()
+    assert (tmp_path / test_path).read_text() == fixed_test
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_coordinated_active_code_context_reflects_candidate_view(tmp_path):
+    """§6 (candidate-view correctness): active_code_context for the MA9
+    coordinated branch must be built from the SAME candidate_view
+    _run_coordinated_repair_generation already accumulates in memory (Rule
+    2A), not an empty string or only the stale authoritative baseline -
+    proven by capturing the exact shown_context apply_anchored_edits
+    receives in the shared staging loop and confirming it carries the
+    first participant's just-generated (not-yet-committed) candidate
+    content, not just what was on disk before this attempt began."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    contract = _make_two_participant_contract(app_path, test_path, created_attempt=1)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {app_path, test_path}
+    state.last_implicated_files = [test_path]
+    state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict"
+    state.repair_contract = contract
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, architect_files=[app_path, test_path],
+        expected_files_upfront=[app_path, test_path],
+        allowed_write_relpaths=[app_path, test_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    async def fake_run_developer_generation(state_arg, ctx_arg, **kwargs):
+        filepath = kwargs["known_target_files"][0]
+        if filepath == app_path:
+            return [{
+                "filepath": app_path, "content": None,
+                "edits": [{"search": "System.exit(1);", "replace": "return;"}],
+            }]
+        return [{
+            "filepath": test_path, "content": None,
+            "edits": [{"search": "testMain", "replace": "testMainAgain"}],
+        }]
+
+    captured_contexts = []
+    from kriya.workflow.edit_safety import apply_anchored_edits as real_apply_anchored_edits
+
+    def capturing_apply(original_content, edits, shown_context):
+        captured_contexts.append(shown_context)
+        return real_apply_anchored_edits(original_content, edits, shown_context)
+
+    with patch(
+        "kriya.workflow.attempt._run_developer_generation",
+        side_effect=fake_run_developer_generation,
+    ), patch(
+        "kriya.workflow.attempt.apply_anchored_edits", side_effect=capturing_apply,
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    assert captured_contexts
+    # The empty-shown_context calls are _materialize_candidate_content's
+    # own internal ones (MA9's in-memory candidate materialization, by
+    # design - see that function's own docstring); the non-empty one(s)
+    # are the shared staging loop's real active_code_context, and must
+    # carry the first participant's own just-generated candidate content.
+    assert any("return;" in ctx_text for ctx_text in captured_contexts)
 
 
 # --- REQUIRED_RUNTIME_VERIFICATION_MISSING observability (PRV-06, 2026-08-28) ---
@@ -8865,6 +9010,34 @@ async def test_handle_attempt_failure_stops_immediately_on_environment_failure(t
     assert should_break is True
     assert state.environment_failure is not None
     assert state.budgets.retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_classifies_internal_exception_and_stops_immediately(tmp_path):
+    """PRV-06 completion (2026-08-29, 'MA8.1 <-> MA9 composition and
+    AttemptContext correctness'): a bare, non-QualityGateFailure exception -
+    Kriya's OWN implementation breaking (live-reproduced: an UnboundLocal
+    Error inside run_attempt's own coordinated-repair branch) - must be
+    classified as internal_framework_error, never general_error/an
+    ordinary model defect, and must stop the retry loop on the very first
+    occurrence: no amount of Developer regeneration can fix a bug in
+    Kriya's own code, and it must never be fed back to the model as
+    diagnosis or open a new MA8.1 cross-owner recovery requirement."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "targeted"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = UnboundLocalError(
+        "cannot access local variable 'active_code_context' where it is not associated with a value"
+    )
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.environment_failure is not None
+    assert state.last_failure.type == "internal_framework_error"
+    assert "INTERNAL KRIYA ERROR" in state.last_failure.message
+    assert state.plan_scope_conflict is None
 
 
 @pytest.mark.asyncio
@@ -17195,7 +17368,7 @@ async def test_run_attempt_coordinated_repair_denies_unauthorized_participant_at
         return [
             {"filepath": app_path, "content": fixed_app, "edits": []},
             {"filepath": test_path, "content": fixed_test, "edits": []},
-        ]
+        ], {app_path: fixed_app, test_path: fixed_test}
 
     with patch(
         "kriya.workflow.attempt._run_coordinated_repair_generation", side_effect=fake_coordinated,
@@ -17260,7 +17433,7 @@ async def test_run_coordinated_repair_generation_allows_participant_no_change(tm
     with patch(
         "kriya.workflow.attempt._run_developer_generation", side_effect=fake_run_developer_generation,
     ):
-        results = await _run_coordinated_repair_generation(
+        results, _candidate_view = await _run_coordinated_repair_generation(
             state, ctx, contract, base_code_context="", stream_callback=None,
             attempt_operation=CodeOperation.REPAIR_WITH_PATCH,
         )
@@ -17301,7 +17474,7 @@ async def test_run_attempt_coordinated_contract_survives_compile_failure_across_
         return [
             {"filepath": app_path, "content": broken_app, "edits": []},
             {"filepath": test_path, "content": "public class AppTest {}\n", "edits": []},
-        ]
+        ], {app_path: broken_app, test_path: "public class AppTest {}\n"}
 
     with patch(
         "kriya.workflow.attempt._run_coordinated_repair_generation", side_effect=fake_coordinated_first,
@@ -17327,7 +17500,7 @@ async def test_run_attempt_coordinated_contract_survives_compile_failure_across_
         return [
             {"filepath": app_path, "content": fixed_app, "edits": []},
             {"filepath": test_path, "content": "public class AppTest {}\n", "edits": []},
-        ]
+        ], {app_path: fixed_app, test_path: "public class AppTest {}\n"}
 
     with patch(
         "kriya.workflow.attempt._run_coordinated_repair_generation", side_effect=fake_coordinated_second,

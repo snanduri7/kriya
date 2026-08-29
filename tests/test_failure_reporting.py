@@ -42,6 +42,7 @@ _REAL_FAILURE_TYPES = {
     "misdirected_edit": FailureCategory.EDIT_TARGETING,
     "no_op_edit": FailureCategory.EDIT_TARGETING,
     "time_budget_exhausted": FailureCategory.RESOURCE,
+    "internal_framework_error": FailureCategory.INTERNAL,
     "general_error": FailureCategory.UNCLASSIFIED,
 }
 
