@@ -17504,3 +17504,36 @@ def test_derive_repair_groups_jvm_heterogeneous_artifacts_build_and_config(tmp_p
     assert groups[4].depends_on_group_ids == (
         "group.build", "group.model", "group.source", "group.config",
     )
+
+
+def test_derive_repair_groups_literal_worked_example_filenames(tmp_path):
+    """Uses the v3 design review's OWN literal example filenames verbatim
+    (pom.xml/Order.java/OrderMapper.java/OrderRepository.java/
+    OrderService.java/application.yml/OrderServiceTest.java) rather than
+    the adapted ones used by the sibling test above - documents an honest,
+    verified discrepancy: bare "Order.java" (no models/ directory, no
+    *Request/*Response/*Dto/*Model/*Entity suffix) classifies as SOURCE
+    under classify_file_role's real heuristic, not MODEL as the design
+    review's own G2 grouping assumed. Kriya still handles this correctly
+    (Order.java simply joins the other SOURCE-role files) - this test
+    exists to make that fact explicit and checked, not silently glossed
+    over, and to prove the coarser 4-group outcome (no separate MODEL
+    group) is still a fully valid, deterministic repair."""
+    from kriya.workflow.repair_contract import ArtifactRelationKind, _derive_repair_groups
+
+    participants = (
+        "pom.xml", "Order.java", "OrderMapper.java", "OrderRepository.java",
+        "OrderService.java", "application.yml", "OrderServiceTest.java",
+    )
+    groups = _derive_repair_groups(participants, {})
+
+    # No group.model - "Order.java" alone doesn't trigger MODEL
+    # classification (verified directly against classify_file_role).
+    assert [g.id for g in groups] == ["group.build", "group.source", "group.config", "group.test"]
+    assert set(groups[1].artifacts) == {
+        "Order.java", "OrderMapper.java", "OrderRepository.java", "OrderService.java",
+    }
+    assert groups[1].relationship_kind == ArtifactRelationKind.DEPENDS_ON
+    assert groups[-1].artifacts == ("OrderServiceTest.java",)
+    flattened = tuple(p for g in groups for p in g.generation_order)
+    assert set(flattened) == set(participants)
