@@ -17,6 +17,7 @@ from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.triage import EngineeringRoute
 from kriya.workflow.process_profile import ProcessProfile
+from kriya.workflow.repair_contract import RepairContract
 
 
 class APIContractRecoveryPhase(str, Enum):
@@ -425,6 +426,15 @@ class GenerationState:
     # A single occurrence is ordinary quality-gate failure/retry; recurrence
     # is what confirms the underlying architectural choice itself is wrong.
     architectural_changes: List[CandidateArchitecturalChange] = field(default_factory=list)
+    # MA9 (2026-08-29, PRV-06 Bucket A forensic finding): the run's current
+    # coordinated-repair transaction, if any - see kriya/workflow/
+    # repair_contract.py's own module docstring for why this exists and why
+    # it's deliberately in-memory/per-run-sticky only, not checkpointed.
+    # None (the default) means no coordinated repair is active - every
+    # existing single-file targeted-retry call site is completely unchanged
+    # whenever this stays None, which is every run except one with a live,
+    # unambiguously-evidenced PROCESS_BOUNDARY_COMPATIBILITY violation.
+    repair_contract: Optional[RepairContract] = None
 
     def record_event(self, event: RunEvent) -> None:
         self.run_events.append(event)

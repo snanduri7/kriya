@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from typing import Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,13 +24,16 @@ from kriya.workflow.attempt import (
     _diagnosis_mismatch_bypass_reason,
     _directly_executable_runtime_verifiers,
     _directly_executable_verifiers,
+    _materialize_candidate_content,
     _operation_map,
     _process_boundary_obligation_id,
     _record_process_boundary_obligation,
     _record_self_correction_scope_conflict,
     _required_runtime_verification_missing_message,
+    _run_coordinated_repair_generation,
     _run_verification_basis_hash,
     _spec_requirements_contradicting_authority,
+    _sync_active_repair_contract,
     run_attempt,
 )
 from kriya.workflow.obligations import (
@@ -38,6 +42,11 @@ from kriya.workflow.obligations import (
     ObligationLedger,
     ObligationRecord,
     ObligationStatus,
+)
+from kriya.workflow.repair_contract import (
+    RepairContract,
+    RepairContractStatus,
+    RepairKind,
 )
 from kriya.workflow.operations import CodeOperation
 from kriya.workflow.attribution import AttributionResult
@@ -1378,6 +1387,417 @@ def test_record_process_boundary_obligation_noop_without_ledger():
 
     # Must not raise even though there's no ledger to write to.
     _record_process_boundary_obligation(fake_ctx, state, violated=True, evidence={})
+
+
+# --- MA9: Obligation-Driven Coordinated Repair (PRV-06 Bucket A, 2026-08-29) ---
+
+_PRV06_CRASHED_TESTS_OUTPUT = (
+    "[ERROR] The forked VM terminated without properly saying goodbye. VM crash or "
+    "System.exit called?\n"
+    "[ERROR] Crashed tests:\n"
+    "[ERROR] AppTest\n"
+    "[ERROR] org.apache.maven.surefire.booter.SurefireBooterForkException: The forked VM "
+    "terminated without properly saying goodbye. VM crash or System.exit called?\n"
+)
+
+
+def _write_prv06_fixture(tmp_path):
+    app_path = "src/main/java/App.java"
+    test_path = "src/test/java/AppTest.java"
+    (tmp_path / "src/main/java").mkdir(parents=True)
+    (tmp_path / "src/test/java").mkdir(parents=True)
+    (tmp_path / app_path).write_text(
+        "public class App {\n"
+        "    public static void main(String[] args) {\n"
+        "        if (args.length == 0) { System.exit(1); }\n"
+        "    }\n"
+        "}\n"
+    )
+    (tmp_path / test_path).write_text(
+        "public class AppTest {\n"
+        "    void testMain() { App.main(new String[0]); }\n"
+        "}\n"
+    )
+    return app_path, test_path
+
+
+def test_sync_active_repair_contract_creates_contract_on_unambiguous_evidence(tmp_path):
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    ledger = ObligationLedger()
+    state = GenerationState()
+    state.attempt_number = 4
+    state.all_files_written = {app_path, test_path}
+    ctx = type("FakeCtx", (), {
+        "obligation_ledger": ledger, "current_subtask_id": "s3",
+        "worktree_path": str(tmp_path), "established_files": [],
+    })()
+
+    _record_process_boundary_obligation(
+        ctx, state, violated=True, evidence={"raw_output": _PRV06_CRASHED_TESTS_OUTPUT},
+    )
+
+    contract = state.repair_contract
+    assert contract is not None
+    assert contract.status == RepairContractStatus.ACTIVE
+    assert contract.kind == RepairKind.COORDINATED
+    assert contract.source_obligation_id == _process_boundary_obligation_id("s3")
+    assert contract.participating_artifacts == tuple(sorted([app_path, test_path]))
+    assert contract.generation_order == (app_path, test_path)
+    assert contract.participant_roles == {
+        app_path: "termination_surface", test_path: "crashed_consumer",
+    }
+    assert contract.immediate_correction_targets == contract.participating_artifacts
+
+
+def test_sync_active_repair_contract_ambiguous_evidence_stays_none(tmp_path):
+    """Two files calling System.exit(...) is ambiguous evidence (2026-08-29
+    design review: 'a signature scan finds ExitHandler.java, but that doesn't
+    prove that particular termination surface caused this test failure') -
+    must fall back to no contract, never guess."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    other_path = "src/main/java/ShutdownHook.java"
+    (tmp_path / other_path).write_text("public class ShutdownHook { void x() { System.exit(2); } }")
+    ledger = ObligationLedger()
+    state = GenerationState()
+    state.attempt_number = 4
+    state.all_files_written = {app_path, test_path, other_path}
+    ctx = type("FakeCtx", (), {
+        "obligation_ledger": ledger, "current_subtask_id": "s3",
+        "worktree_path": str(tmp_path), "established_files": [],
+    })()
+
+    _record_process_boundary_obligation(
+        ctx, state, violated=True, evidence={"raw_output": _PRV06_CRASHED_TESTS_OUTPUT},
+    )
+
+    assert state.repair_contract is None
+
+
+def test_sync_active_repair_contract_sticky_across_attempts(tmp_path):
+    """A SAME still-unresolved conflict recurring on a later attempt must not
+    rebuild/replace the in-progress coordinated contract (repair_contract.py's
+    own 'sticky across attempts' rule)."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    ledger = ObligationLedger()
+    state = GenerationState()
+    state.attempt_number = 4
+    state.all_files_written = {app_path, test_path}
+    ctx = type("FakeCtx", (), {
+        "obligation_ledger": ledger, "current_subtask_id": "s3",
+        "worktree_path": str(tmp_path), "established_files": [],
+    })()
+
+    _record_process_boundary_obligation(
+        ctx, state, violated=True, evidence={"raw_output": _PRV06_CRASHED_TESTS_OUTPUT},
+    )
+    first_contract = state.repair_contract
+    assert first_contract is not None
+
+    state.attempt_number = 6
+    _record_process_boundary_obligation(
+        ctx, state, violated=True, evidence={"raw_output": _PRV06_CRASHED_TESTS_OUTPUT},
+    )
+
+    assert state.repair_contract is first_contract
+    assert state.repair_contract.status == RepairContractStatus.ACTIVE
+
+
+def test_record_process_boundary_satisfied_closes_repair_contract(tmp_path):
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    ledger = ObligationLedger()
+    state = GenerationState()
+    state.attempt_number = 4
+    state.all_files_written = {app_path, test_path}
+    ctx = type("FakeCtx", (), {
+        "obligation_ledger": ledger, "current_subtask_id": "s3",
+        "worktree_path": str(tmp_path), "established_files": [],
+    })()
+
+    _record_process_boundary_obligation(
+        ctx, state, violated=True, evidence={"raw_output": _PRV06_CRASHED_TESTS_OUTPUT},
+    )
+    assert state.repair_contract.status == RepairContractStatus.ACTIVE
+
+    state.attempt_number = 5
+    _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
+
+    assert state.repair_contract.status == RepairContractStatus.CLOSED
+
+
+def test_ordinary_test_failure_never_creates_repair_contract(tmp_path):
+    """No 'Crashed tests:' evidence at all (an ordinary test_process_terminated
+    with different output shape, or a plain test assertion failure that never
+    even reaches this obligation) - state.repair_contract must stay None,
+    matching every existing LOCAL/targeted-retry path unchanged."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    ledger = ObligationLedger()
+    state = GenerationState()
+    state.attempt_number = 1
+    state.all_files_written = {app_path, test_path}
+    ctx = type("FakeCtx", (), {
+        "obligation_ledger": ledger, "current_subtask_id": "s3",
+        "worktree_path": str(tmp_path), "established_files": [],
+    })()
+
+    _record_process_boundary_obligation(
+        ctx, state, violated=True, evidence={"raw_output": "ORDINARY ASSERTION FAILURE"},
+    )
+
+    assert state.repair_contract is None
+
+
+@pytest.mark.asyncio
+async def test_run_coordinated_repair_generation_candidate_view_isolation(tmp_path):
+    """(Rule 2A, 2026-08-29 design review - 'probably the single most
+    load-bearing implementation rule in MA9') A later coordinated participant
+    must see an EARLIER participant's freshly-generated candidate content,
+    not that file's stale baseline - while the authoritative worktree file
+    itself remains completely untouched at the moment the later participant's
+    call is made."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    app_baseline = (tmp_path / app_path).read_text()
+    test_baseline = (tmp_path / test_path).read_text()
+
+    contract = RepairContract(
+        id="repair.s3.attempt.subtask.s3.process_boundary_compatibility",
+        source_obligation_id=_process_boundary_obligation_id("s3"),
+        kind=RepairKind.COORDINATED,
+        repair_intent="Resolve a process-boundary conflict.",
+        must_fix=("App.java must not terminate the process on a path AppTest.java invokes in-process",),
+        must_preserve=("AppTest.java must continue to exercise the same production behavior",),
+        participating_artifacts=tuple(sorted([app_path, test_path])),
+        participant_roles={app_path: "termination_surface", test_path: "crashed_consumer"},
+        generation_order=(app_path, test_path),
+        created_attempt=2,
+        immediate_correction_targets=(app_path, test_path),
+    )
+
+    state = GenerationState()
+    state.attempt_number = 2
+    state.all_files_written = {app_path, test_path}
+    state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict"
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, architect_files=[app_path, test_path],
+        expected_files_upfront=[app_path, test_path],
+    )
+
+    captured_contexts: Dict[str, str] = {}
+    disk_seen_during_second_call: Dict[str, str] = {}
+
+    async def fake_run_developer_generation(state_arg, ctx_arg, **kwargs):
+        filepath = kwargs["known_target_files"][0]
+        captured_contexts[filepath] = kwargs["existing_code_context"]
+        assert kwargs["implicated_files"] == list(contract.participating_artifacts)
+        if filepath == app_path:
+            return [{"filepath": app_path, "content": "NEW_APP_CANDIDATE_BODY", "edits": []}]
+        disk_seen_during_second_call[app_path] = (tmp_path / app_path).read_text()
+        return [{"filepath": test_path, "content": "NEW_TEST_CANDIDATE_BODY", "edits": []}]
+
+    with patch(
+        "kriya.workflow.attempt._run_developer_generation",
+        side_effect=fake_run_developer_generation,
+    ):
+        results = await _run_coordinated_repair_generation(
+            state, ctx, contract, base_code_context="", stream_callback=None,
+            attempt_operation=CodeOperation.REPAIR_WITH_PATCH,
+        )
+
+    # Candidate-view propagation: the SECOND participant's own prompt context
+    # shows the FIRST participant's just-generated candidate, not its stale
+    # baseline.
+    assert "NEW_APP_CANDIDATE_BODY" in captured_contexts[test_path]
+    assert app_baseline not in captured_contexts[test_path]
+
+    # Transaction isolation: the real worktree file was still exactly the
+    # baseline at the moment the second participant's call was made, and
+    # remains so after this function returns (nothing here writes to disk -
+    # that's the existing staged-write pipeline's job, elsewhere).
+    assert disk_seen_during_second_call[app_path] == app_baseline
+    assert (tmp_path / app_path).read_text() == app_baseline
+    assert (tmp_path / test_path).read_text() == test_baseline
+
+    assert [r["filepath"] for r in results] == [app_path, test_path]
+    assert [r["content"] for r in results] == ["NEW_APP_CANDIDATE_BODY", "NEW_TEST_CANDIDATE_BODY"]
+
+
+@pytest.mark.asyncio
+async def test_run_coordinated_repair_generation_candidate_view_isolation_with_anchored_edit(tmp_path):
+    """Same isolation guarantee as above, but the FIRST participant returns
+    an anchored edit (edits=[...], content=None) rather than full content -
+    the exact shape _fill_missing_content's own within-batch sibling section
+    would silently miss (it only shows a sibling when entry["content"] is
+    truthy), and the reason this module orchestrates sequential calls with
+    its own materialization instead of one known_target_files=[A, B] batch
+    call (see _run_coordinated_repair_generation's own docstring)."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    app_baseline = (tmp_path / app_path).read_text()
+
+    contract = RepairContract(
+        id="repair.s3.x", source_obligation_id="attempt.subtask.s3.process_boundary_compatibility",
+        kind=RepairKind.COORDINATED, repair_intent="x", must_fix=("x",), must_preserve=("x",),
+        participating_artifacts=tuple(sorted([app_path, test_path])),
+        participant_roles={app_path: "termination_surface", test_path: "crashed_consumer"},
+        generation_order=(app_path, test_path), created_attempt=2,
+        immediate_correction_targets=(app_path, test_path),
+    )
+    state = GenerationState()
+    state.attempt_number = 2
+    state.all_files_written = {app_path, test_path}
+    state.error_context = "TEST_PROCESS_TERMINATED"
+    ctx = _minimal_attempt_ctx(tmp_path, architect_files=[app_path, test_path])
+
+    captured_contexts: Dict[str, str] = {}
+
+    async def fake_run_developer_generation(state_arg, ctx_arg, **kwargs):
+        filepath = kwargs["known_target_files"][0]
+        captured_contexts[filepath] = kwargs["existing_code_context"]
+        if filepath == app_path:
+            return [{
+                "filepath": app_path, "content": None,
+                "edits": [{"search": "System.exit(1);", "replace": "return;"}],
+            }]
+        return [{"filepath": test_path, "content": "NEW_TEST_CANDIDATE_BODY", "edits": []}]
+
+    with patch(
+        "kriya.workflow.attempt._run_developer_generation",
+        side_effect=fake_run_developer_generation,
+    ):
+        await _run_coordinated_repair_generation(
+            state, ctx, contract, base_code_context="", stream_callback=None,
+            attempt_operation=CodeOperation.REPAIR_WITH_PATCH,
+        )
+
+    # The materialized (post-anchored-edit) content, not the raw edits list
+    # and not the untouched baseline, is what the second participant sees.
+    assert "return;" in captured_contexts[test_path]
+    assert "System.exit(1);" not in captured_contexts[test_path]
+    # The real worktree file is still untouched.
+    assert (tmp_path / app_path).read_text() == app_baseline
+
+
+def test_materialize_candidate_content_no_change_needed_returns_none(tmp_path):
+    app_path, _ = _write_prv06_fixture(tmp_path)
+    ctx = _minimal_attempt_ctx(tmp_path, architect_files=[app_path])
+    assert _materialize_candidate_content(ctx, app_path, {"filepath": app_path, "content": None, "edits": []}) is None
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_uses_coordinated_generation_when_contract_active(tmp_path):
+    """The direct counter to the PRV-06 Bucket A oscillation: with an ACTIVE
+    RepairContract, a single targeted-retry attempt must generate/stage BOTH
+    participants together, via _run_coordinated_repair_generation - never
+    falling back to _build_targeted_retry_prompt's single-file framing, even
+    though state.last_implicated_files (ordinary grounded attribution) only
+    ever names one of the two files."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    contract = RepairContract(
+        id="repair.s3.x", source_obligation_id="attempt.subtask.s3.process_boundary_compatibility",
+        kind=RepairKind.COORDINATED, repair_intent="x", must_fix=("x",), must_preserve=("x",),
+        participating_artifacts=tuple(sorted([app_path, test_path])),
+        participant_roles={app_path: "termination_surface", test_path: "crashed_consumer"},
+        generation_order=(app_path, test_path), created_attempt=1,
+        immediate_correction_targets=(app_path, test_path),
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {app_path, test_path}
+    state.last_implicated_files = [test_path]  # ordinary attribution would only ever name ONE file
+    state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict"
+    state.repair_contract = contract
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, architect_files=[app_path, test_path],
+        expected_files_upfront=[app_path, test_path],
+        allowed_write_relpaths=[app_path, test_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    fixed_app = (
+        "public class App {\n"
+        "    public static void main(String[] args) {\n"
+        "        if (args.length == 0) { System.out.println(\"No command line argument provided.\"); }\n"
+        "    }\n"
+        "}\n"
+    )
+    fixed_test = (
+        "public class AppTest {\n"
+        "    void testMain() { App.main(new String[0]); }\n"
+        "}\n"
+    )
+
+    async def fake_coordinated(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation):
+        assert contract_arg is contract
+        return [
+            {"filepath": app_path, "content": fixed_app, "edits": []},
+            {"filepath": test_path, "content": fixed_test, "edits": []},
+        ]
+
+    with patch(
+        "kriya.workflow.attempt._run_coordinated_repair_generation",
+        side_effect=fake_coordinated,
+    ) as mock_coordinated, patch(
+        "kriya.workflow.attempt._build_targeted_retry_prompt",
+    ) as mock_local_prompt, patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    mock_coordinated.assert_called_once()
+    mock_local_prompt.assert_not_called()
+    assert (tmp_path / app_path).read_text() == fixed_app
+    assert (tmp_path / test_path).read_text() == fixed_test
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_ordinary_targeted_retry_unaffected_without_contract(tmp_path):
+    """Regression: with NO active RepairContract (state.repair_contract is
+    None, the default/every-existing-run case), the ordinary single-file
+    _build_targeted_retry_prompt path must run completely unchanged -
+    _run_coordinated_repair_generation must never be called."""
+    app_path, test_path = _write_prv06_fixture(tmp_path)
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {app_path, test_path}
+    state.last_implicated_files = [app_path]
+    state.error_context = "COMPILE ERROR: missing return statement"
+    assert state.repair_contract is None
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, architect_files=[app_path, test_path],
+        expected_files_upfront=[app_path, test_path],
+        allowed_write_relpaths=[app_path, test_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    fixed_app_local = (
+        "public class App {\n"
+        "    public static void main(String[] args) {\n"
+        "        if (args.length == 0) { System.out.println(\"No command line argument provided.\"); }\n"
+        "    }\n"
+        "}\n"
+    )
+    ctx.developer.run_generation = AsyncMock(
+        return_value=[{"filepath": app_path, "content": fixed_app_local}],
+    )
+
+    with patch(
+        "kriya.workflow.attempt._run_coordinated_repair_generation",
+    ) as mock_coordinated, patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    mock_coordinated.assert_not_called()
+    assert (tmp_path / app_path).read_text() == fixed_app_local
 
 
 # --- REQUIRED_RUNTIME_VERIFICATION_MISSING observability (PRV-06, 2026-08-28) ---

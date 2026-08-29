@@ -45,6 +45,7 @@ from kriya.workflow.file_resolution import (
 )
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
+from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.state import APIContractRecovery, GenerationState
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.worktree import remove_git_worktree
@@ -666,6 +667,29 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         else:
             state.last_implicated_files = implicated if implicated else None
             state.last_missing_files = None
+
+    # MA9 (2026-08-29): the ONE place attribution's own output ordinarily
+    # already narrows to "which file(s) does THIS failure implicate" - reused
+    # here purely as prompt-emphasis metadata (RepairContract.
+    # immediate_correction_targets), never to narrow participating_artifacts
+    # itself or drop a participant from the next coordinated generation pass
+    # (see repair_contract.py's own RepairContract docstring for the
+    # three-way authorized/participating/immediate distinction this
+    # maintains). A no-op whenever no RepairContract is active, or this
+    # failure's own implication doesn't overlap the active contract's
+    # participants at all (keeps the contract's existing targets rather than
+    # collapsing to an empty tuple on an unrelated failure).
+    if (
+        state.repair_contract is not None
+        and state.repair_contract.status == RepairContractStatus.ACTIVE
+        and state.last_implicated_files
+    ):
+        narrowed = tuple(
+            f for f in state.last_implicated_files
+            if f in state.repair_contract.participating_artifacts
+        )
+        if narrowed:
+            state.repair_contract.immediate_correction_targets = narrowed
 
     if state.api_contract_recovery:
         # Later compiler/test failures remain diagnostic history; they cannot

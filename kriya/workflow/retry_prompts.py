@@ -170,6 +170,105 @@ def _build_targeted_retry_prompt(
     return task_desc, targeted_context
 
 
+def _build_coordinated_retry_prompt(
+    goal: str, plan: str, error_context: str, contract: Any, generation_target: str,
+    all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+    candidate_view: Optional[Dict[str, str]] = None,
+    ecosystem_invariant_block: str = "",
+    resource_lifecycle_block: str = "",
+    verification_contract_block: str = "",
+) -> Tuple[str, str]:
+    """MA9 (2026-08-29): coordinated-repair variant of
+    _build_targeted_retry_prompt for an ACTIVE RepairContract (kriya/
+    workflow/repair_contract.py) - see that module's own docstring for the
+    PRV-06 Bucket A forensic finding this exists to close. The ordinary
+    targeted-retry framing ("the following file(s) are most likely
+    responsible... the rest of the codebase is already correct") is exactly
+    what drives a coordinated structural repair into permanent single-file
+    oscillation - this framing instead names every participating artifact as
+    part of ONE coherent transformation, explicitly permits (never requires)
+    any participant to answer NO CHANGE NEEDED, and never claims the rest of
+    the codebase excludes its own coordinated siblings.
+
+    candidate_view: filepath -> content already generated for another
+    participant EARLIER in this SAME coordinated attempt (staged, not yet
+    committed to the worktree or the authoritative workspace) - shown
+    instead of that file's stale worktree copy so a later participant call
+    reasons against what the earlier one actually just produced, not what it
+    still contains on disk (see repair_contract.py's RepairContract
+    docstring, "Rule 2A": candidate state must accumulate during coordinated
+    generation while the real worktree stays untouched until the whole
+    batch is atomically accepted by the existing staged-write pipeline
+    further down run_attempt())."""
+    candidate_view = candidate_view or {}
+    participants = set(contract.participating_artifacts)
+    target_section = ""
+    reference_section = ""
+    for filepath in sorted(set(all_files_written) | participants):
+        current_content = candidate_view.get(filepath)
+        if current_content is None:
+            try:
+                with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                    current_content = fh.read()
+            except Exception as ex:
+                logger.debug(f"Failed to read '{filepath}' from worktree for coordinated retry context: {ex}")
+                continue
+        candidate_label = (
+            " (candidate generated earlier in this same coordinated repair - not yet committed)"
+            if filepath in candidate_view else ""
+        )
+        if filepath == generation_target:
+            target_section += f"=== File to generate now: {filepath}{candidate_label} ===\n{current_content}\n\n"
+        elif filepath in participants:
+            role = contract.participant_roles.get(filepath, "participant")
+            target_section += (
+                f"=== Coordinated repair participant ({role}) - reference only, generated "
+                f"separately (before or after this call) as part of this SAME coordinated repair, "
+                f"do not return its content here: {filepath}{candidate_label} ===\n{current_content}\n\n"
+            )
+        else:
+            reference_section += (
+                f"=== Existing file (already correct, reference only - regenerate ONLY if your fix "
+                f"genuinely cannot be made without it): {filepath}{candidate_label} ===\n{current_content}\n\n"
+            )
+
+    participant_list = ", ".join(contract.generation_order)
+    must_fix = "; ".join(contract.must_fix) or "resolve the coordinated repair intent below"
+    must_preserve = "; ".join(contract.must_preserve) or "none declared"
+    immediate_targets = sorted(set(contract.immediate_correction_targets) & participants)
+    immediate_line = (
+        f"\nThe most recent failure specifically implicates: {', '.join(immediate_targets)}. "
+        "That does not mean other participant(s) are exempt from this repair - only that this "
+        "is where the current error text points."
+        if immediate_targets and set(immediate_targets) != participants
+        else ""
+    )
+
+    task_desc = f"Goal: {goal}\nPlan: {plan}"
+    task_desc += ecosystem_invariant_block
+    task_desc += resource_lifecycle_block
+    task_desc += verification_contract_block
+    task_desc += (
+        f"\n\n=== Previous Error to Fix ===\n{error_context}\n\n"
+        "=== ACTIVE COORDINATED REPAIR ===\n"
+        f"Repair intent: {contract.repair_intent}\n"
+        f"Participating artifacts (ALL are part of ONE coherent transformation, generated one at "
+        f"a time across separate calls that share this same contract): {participant_list}.\n"
+        f"MUST FIX: {must_fix}\n"
+        f"MUST PRESERVE: {must_preserve}"
+        f"{immediate_line}\n\n"
+        f"You are generating exactly one file right now: {generation_target}. The other "
+        "participant(s), shown above for reference, are generated separately as part of this "
+        "SAME coordinated repair - do not include their content in your response. If, after "
+        "considering the whole coordinated repair, this specific file genuinely needs no change, "
+        "say so via NO CHANGE NEEDED rather than inventing an edit just to have one. Do not "
+        "resolve this by toggling the same call on and off between attempts - the fix must hold "
+        "for every participant together, not one file at a time."
+    )
+    coordinated_context = active_code_context + "\n\n" + reference_section + target_section
+    return task_desc, coordinated_context
+
+
 def _build_full_set_retry_prompt(
     goal: str, plan: str, error_context: str, required_files_prompt_block: str,
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,

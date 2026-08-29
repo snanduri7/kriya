@@ -43,7 +43,7 @@ from kriya.workflow.context_budget import (
     _reserve_sibling_content_budget,
     build_code_context,
 )
-from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
+from kriya.workflow.retry_prompts import _build_coordinated_retry_prompt, _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
 from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action
 from kriya.workflow.skill_extraction import _skill_verification_context
@@ -73,6 +73,7 @@ from kriya.workflow.verification_contract import extract_contract_verdict, pass_
 from kriya.workflow.verification_authority import deterministic_sequence_kind
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
 from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationLedger, ObligationRecord, ObligationStatus
+from kriya.workflow.repair_contract import RepairContractStatus, build_repair_contract, derive_process_boundary_participants
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
@@ -560,7 +561,7 @@ def _record_process_boundary_obligation(
         record_evidence["current_attempt"] = state.attempt_number
         if is_recurrence:
             record_evidence["prior_violation_attempt"] = prior.revision
-    ctx.obligation_ledger.record(ObligationRecord(
+    record = ObligationRecord(
         id=obligation_id, kind=ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY,
         status=ObligationStatus.VIOLATED if violated else ObligationStatus.SATISFIED,
         authority=ObligationAuthority.DETERMINISTIC,
@@ -568,8 +569,174 @@ def _record_process_boundary_obligation(
                     "in already-written production code invoked in-process by a test",
         source="attempt.run_attempt", revision=state.attempt_number,
         evidence=record_evidence, owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
-    ))
+    )
+    ctx.obligation_ledger.record(record)
+    # MA9 (2026-08-29): a VIOLATED record is the trigger to (re)derive a
+    # coordinated RepairContract; a SATISFIED record closes whichever
+    # contract this exact obligation opened, if any - see
+    # kriya/workflow/repair_contract.py's own module docstring. Neither
+    # branch does anything when build_repair_contract()/evidence extraction
+    # can't unambiguously classify this - state.repair_contract simply stays
+    # whatever it already was (None for every run that never hits this).
+    if violated:
+        _sync_active_repair_contract(ctx, state, record)
+    elif state.repair_contract is not None and state.repair_contract.source_obligation_id == obligation_id:
+        state.repair_contract.status = RepairContractStatus.CLOSED
     return is_recurrence
+
+
+def _sync_active_repair_contract(
+    ctx: "AttemptContext", state: "GenerationState", obligation_record: ObligationRecord,
+) -> None:
+    """Called only on a VIOLATED process-boundary record (see
+    _record_process_boundary_obligation above). Sticky: if a RepairContract
+    is already ACTIVE for this EXACT obligation id, leaves it untouched
+    (never rebuilds/replaces an in-progress coordinated repair just because
+    the same conflict recurred again - see RepairContract's own docstring,
+    "sticky across attempts"). Otherwise attempts to derive one from this
+    attempt's raw failure output; on ambiguous/insufficient evidence,
+    build_repair_contract() returns None and state.repair_contract is left
+    exactly as it was (None on a first occurrence - ordinary LOCAL targeted
+    retry continues unchanged)."""
+    existing = state.repair_contract
+    if (
+        existing is not None
+        and existing.source_obligation_id == obligation_record.id
+        and existing.status == RepairContractStatus.ACTIVE
+    ):
+        return
+    raw_output = obligation_record.evidence.get("raw_output", "")
+    if not raw_output:
+        return
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    evidence = derive_process_boundary_participants(raw_output, ctx.worktree_path, known_files)
+    contract = build_repair_contract(
+        obligation_record, evidence, created_attempt=state.attempt_number,
+    )
+    if contract is None:
+        return
+    state.repair_contract = contract
+    logger.info(
+        "MA9: unambiguous evidence found - opening a COORDINATED RepairContract '%s' "
+        "(participants: %s).", contract.id, ", ".join(contract.participating_artifacts),
+    )
+
+
+def _materialize_candidate_content(
+    ctx: "AttemptContext", filepath: str, file_obj: Dict[str, Any],
+) -> Optional[str]:
+    """Best-effort materialization of one Developer response's real resulting
+    content, for the coordinated candidate-view (see
+    _run_coordinated_repair_generation's "Rule 2A" note below) - NOT the
+    authoritative write path (that's the existing staged_writes loop further
+    down run_attempt(), which re-applies these same edits independently and
+    remains the only place that can raise on a genuine anchor mismatch).
+    Returns None (candidate view falls back to that file's prior/baseline
+    content for the next participant) whenever there is nothing to
+    materialize - a NO CHANGE NEEDED response (no content, no edits) or an
+    edit whose SEARCH block doesn't match; a real anchor-mismatch failure
+    still surfaces correctly, just later, through the authoritative staging
+    loop's own error handling, not duplicated here."""
+    content = file_obj.get("content")
+    if content:
+        return content
+    edits = file_obj.get("edits") or []
+    if not edits:
+        return None
+    current_file_path = os.path.join(ctx.worktree_path, filepath)
+    if not os.path.exists(current_file_path):
+        current_file_path = os.path.join(ctx.workspace_path, filepath)
+    orig_text = ""
+    if os.path.exists(current_file_path):
+        with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
+            orig_text = fh.read()
+    try:
+        return apply_anchored_edits(orig_text, edits, "")
+    except ValueError:
+        return None
+
+
+async def _run_coordinated_repair_generation(
+    state: "GenerationState", ctx: "AttemptContext", contract: Any,
+    base_code_context: str, stream_callback: Optional[Callable[[str], None]],
+    attempt_operation: Any,
+) -> List[Dict[str, str]]:
+    """MA9 (2026-08-29): the coordinated counterpart to a single
+    _run_developer_generation(known_target_files=state.last_implicated_files)
+    call - one sequential Developer call per contract.generation_order entry,
+    every call sharing the SAME RepairContract framing (via
+    _build_coordinated_retry_prompt) instead of _build_targeted_retry_prompt's
+    single-file "focus your fix there" wording. See repair_contract.py's own
+    module docstring for why this exists (PRV-06 Bucket A).
+
+    Deliberately NOT a single known_target_files=[A, B] call: DeveloperAgent.
+    _fill_missing_content's own within-batch sibling section only shows an
+    earlier participant's content when that participant returned FULL file
+    content (entry["content"]), never when it returned an anchored edit
+    (entry["edits"], content left None) - so a batch call would silently fail
+    "Rule 2A" (below) exactly whenever the model preferred a small patch over
+    a full rewrite for the first participant, which this codebase's own
+    REPAIR mode prompt explicitly asks it to prefer. Sequential calls, each
+    orchestrated here, close that gap by materializing every participant's
+    real resulting content (via _materialize_candidate_content, applying
+    anchored edits the same way the authoritative staging loop does) into an
+    explicit `candidate_view` dict BEFORE building the next participant's
+    prompt.
+
+    Rule 2A (2026-08-29 design review - "probably the single most load-bearing
+    implementation rule in MA9"): candidate_view accumulates in memory only;
+    nothing here writes to ctx.worktree_path or ctx.workspace_path. The
+    authoritative worktree stays exactly as it was before this attempt began
+    until the existing staged_writes/AuthorizedFileWriter pipeline further
+    down run_attempt() atomically accepts (or, on any gate failure, discards)
+    the WHOLE returned list - both participants land together or neither
+    does, the same all-or-nothing behavior that pipeline already gives any
+    multi-file `files` list, coordinated or not."""
+    candidate_view: Dict[str, str] = {}
+    results: List[Dict[str, str]] = []
+    for filepath in contract.generation_order:
+        task_desc, active_code_context = _build_coordinated_retry_prompt(
+            ctx.goal, ctx.plan, state.error_context, contract, filepath,
+            state.all_files_written, ctx.worktree_path, base_code_context,
+            candidate_view=candidate_view,
+            ecosystem_invariant_block=ctx.ecosystem_invariant_block,
+            resource_lifecycle_block=ctx.resource_lifecycle_block,
+            verification_contract_block=ctx.verification_contract_block,
+        )
+        file_results = await _run_developer_generation(
+            state, ctx,
+            task_description=task_desc,
+            design_context=ctx.design,
+            existing_code_context=active_code_context,
+            stream_callback=stream_callback,
+            model_override=None, base_url_override=None, api_key_override=None, extra_body_override=None,
+            known_target_files=[filepath],
+            prior_error_context=state.error_context or None,
+            # Every participant, always - never narrowed to just this call's
+            # own filepath. See RepairContract's own docstring: an active
+            # coordinated contract must never let single-file attribution
+            # collapse it back to narrow targeting; implicated_files=[filepath]
+            # here would also silently disable the NO CHANGE NEEDED option
+            # for every participant the CURRENT failure doesn't specifically
+            # name (_fill_missing_content only offers it when
+            # apply_fix_analysis is True, which requires filepath to be IN
+            # implicated_files).
+            implicated_files=list(contract.participating_artifacts),
+            error_source_context=state.last_error_source_context or None,
+            retry_temperature=ctx.kernel.config.llm.retry_temperature,
+            extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+            files_with_current_content=state.all_files_written,
+            sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+            operation_by_file=_operation_map(ctx, [filepath], attempt_operation, state),
+            default_operation=attempt_operation,
+        )
+        for entry in file_results:
+            if entry.get("filepath") == filepath:
+                materialized = _materialize_candidate_content(ctx, filepath, entry)
+                if materialized is not None:
+                    candidate_view[filepath] = materialized
+            results.append(entry)
+    return results
 
 
 def _extract_grounded_contract_verdict(
@@ -1702,93 +1869,125 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             state.last_implicated_files = sorted({
                 item["owner"] for item in state.api_contract_recovery["violations"]
             })
-        retry_package = _retry_package_for_attempt(
-            state, ctx,
-            target_files=state.last_implicated_files,
-            context_window=ctx.kernel.config.llm.context_window,
+
+        # MA9 (2026-08-29): an ACTIVE coordinated RepairContract takes over
+        # this entire targeted-retry branch for as long as it stays ACTIVE -
+        # see repair_contract.py's own module docstring for the PRV-06
+        # Bucket A finding this closes. Never active at the same time as
+        # API_CONTRACT_RECOVERY (a different, unrelated sticky contract on
+        # the same state object). Every other targeted-retry mechanic below
+        # this if/else (budget accounting, model_hops, the shared staged-
+        # write/atomic-commit pipeline further down run_attempt()) is
+        # unchanged either way - this only changes WHAT gets asked for and
+        # HOW it's framed.
+        active_repair_contract = (
+            state.repair_contract
+            if (
+                not use_api_contract_recovery
+                and state.repair_contract is not None
+                and state.repair_contract.status == RepairContractStatus.ACTIVE
+            ) else None
         )
-        retry_error_context = (
-            retry_package.authoritative_error if retry_package else state.error_context
-        )
-        task_desc, active_code_context = _build_targeted_retry_prompt(
-            ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
-            state.all_files_written, ctx.worktree_path, base_code_context,
-            ecosystem_invariant_block=ctx.ecosystem_invariant_block,
-            resource_lifecycle_block=ctx.resource_lifecycle_block,
-            verification_contract_block=ctx.verification_contract_block,
-            retry_package=retry_package,
-        )
-        if use_api_contract_recovery:
-            contract = state.api_contract_recovery
-            required = ", ".join(
-                f"{item['owner']}::{item['removed_signature']}"
-                for item in contract["violations"]
-            )
-            protected = ", ".join(contract["protected_evidence_files"])
-            baseline_owners = "\n\n".join(
-                f"=== EXACT BASELINE OWNER SOURCE: {owner} ===\n"
-                + state.all_original_contents.get(owner, "<baseline source unavailable>")[:12000]
-                for owner in sorted({item["owner"] for item in contract["violations"]})
-            )
-            if contract.phase in (
-                APIContractRecoveryPhase.REPAIR_BEHAVIOR,
-                APIContractRecoveryPhase.AWAIT_TERMINAL_SUCCESS,
-            ):
-                task_desc = (
-                    "=== API_CONTRACT_RECOVERY: REPAIR_BEHAVIOR ===\n"
-                    f"The following restored public contracts are immutable: {required}.\n"
-                    f"Protected baseline callers/tests are immutable evidence: {protected}.\n"
-                    "Now repair the requested behavior behind the existing public contract. "
-                    "Prefer private/internal helper changes. Do not rename, remove, replace, "
-                    "or redirect the public API.\n\n"
-                    f"Original goal:\n{ctx.goal}\n\n{baseline_owners}"
-                )
-            else:
-                task_desc = (
-                    "=== API_CONTRACT_RECOVERY: RESTORE_PUBLIC_CONTRACT ===\n"
-                    "This is the only objective for this phase.\n"
-                    f"Restore these exact public signatures in their existing owners: {required}.\n"
-                    "Do not solve the behavioral issue yet. Do not rename or replace a method. "
-                    "Do not modify protected callers/tests. The candidate is invalid unless "
-                    "every exact signature exists after this edit.\n"
-                    f"Protected contract evidence: {protected}.\n\n{baseline_owners}"
-                )
-            active_code_context = base_code_context + "\n\n" + baseline_owners
-            retry_error_context = task_desc
+
+        if active_repair_contract is not None:
             logger.info(
-                "API_CONTRACT_RECOVERY %s %d/%d: signatures=%s protected_evidence=%s",
-                contract.phase.value, state.budgets.api_contract_recovery_count + 1,
-                API_CONTRACT_RECOVERY_MAX_ATTEMPTS, required, protected,
+                "Targeted retry %d/%d: COORDINATED repair '%s' - generating %s together.",
+                state.budgets.targeted_retry_count + 1, ctx.targeted_max_retries,
+                active_repair_contract.id, ", ".join(active_repair_contract.generation_order),
+            )
+            state.model_hops.append(ctx.kernel.config.llm.model)
+            dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
+            files = await _run_coordinated_repair_generation(
+                state, ctx, active_repair_contract, base_code_context, dev_stream, attempt_operation,
             )
         else:
-            logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
+            retry_package = _retry_package_for_attempt(
+                state, ctx,
+                target_files=state.last_implicated_files,
+                context_window=ctx.kernel.config.llm.context_window,
+            )
+            retry_error_context = (
+                retry_package.authoritative_error if retry_package else state.error_context
+            )
+            task_desc, active_code_context = _build_targeted_retry_prompt(
+                ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
+                state.all_files_written, ctx.worktree_path, base_code_context,
+                ecosystem_invariant_block=ctx.ecosystem_invariant_block,
+                resource_lifecycle_block=ctx.resource_lifecycle_block,
+                verification_contract_block=ctx.verification_contract_block,
+                retry_package=retry_package,
+            )
+            if use_api_contract_recovery:
+                contract = state.api_contract_recovery
+                required = ", ".join(
+                    f"{item['owner']}::{item['removed_signature']}"
+                    for item in contract["violations"]
+                )
+                protected = ", ".join(contract["protected_evidence_files"])
+                baseline_owners = "\n\n".join(
+                    f"=== EXACT BASELINE OWNER SOURCE: {owner} ===\n"
+                    + state.all_original_contents.get(owner, "<baseline source unavailable>")[:12000]
+                    for owner in sorted({item["owner"] for item in contract["violations"]})
+                )
+                if contract.phase in (
+                    APIContractRecoveryPhase.REPAIR_BEHAVIOR,
+                    APIContractRecoveryPhase.AWAIT_TERMINAL_SUCCESS,
+                ):
+                    task_desc = (
+                        "=== API_CONTRACT_RECOVERY: REPAIR_BEHAVIOR ===\n"
+                        f"The following restored public contracts are immutable: {required}.\n"
+                        f"Protected baseline callers/tests are immutable evidence: {protected}.\n"
+                        "Now repair the requested behavior behind the existing public contract. "
+                        "Prefer private/internal helper changes. Do not rename, remove, replace, "
+                        "or redirect the public API.\n\n"
+                        f"Original goal:\n{ctx.goal}\n\n{baseline_owners}"
+                    )
+                else:
+                    task_desc = (
+                        "=== API_CONTRACT_RECOVERY: RESTORE_PUBLIC_CONTRACT ===\n"
+                        "This is the only objective for this phase.\n"
+                        f"Restore these exact public signatures in their existing owners: {required}.\n"
+                        "Do not solve the behavioral issue yet. Do not rename or replace a method. "
+                        "Do not modify protected callers/tests. The candidate is invalid unless "
+                        "every exact signature exists after this edit.\n"
+                        f"Protected contract evidence: {protected}.\n\n{baseline_owners}"
+                    )
+                active_code_context = base_code_context + "\n\n" + baseline_owners
+                retry_error_context = task_desc
+                logger.info(
+                    "API_CONTRACT_RECOVERY %s %d/%d: signatures=%s protected_evidence=%s",
+                    contract.phase.value, state.budgets.api_contract_recovery_count + 1,
+                    API_CONTRACT_RECOVERY_MAX_ATTEMPTS, required, protected,
+                )
+            else:
+                logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
 
-        state.model_hops.append(ctx.kernel.config.llm.model)
+            state.model_hops.append(ctx.kernel.config.llm.model)
 
-        dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await _run_developer_generation(
-            state, ctx,
-            task_description=task_desc,
-            design_context=(task_desc if use_api_contract_recovery else ctx.design),
-            existing_code_context=active_code_context,
-            stream_callback=dev_stream,
-            model_override=model_override,
-            base_url_override=base_url_override,
-            api_key_override=api_key_override,
-            extra_body_override=extra_body_override,
-            known_target_files=state.last_implicated_files,
-            prior_error_context=retry_error_context or None,
-            implicated_files=state.last_implicated_files,
-            error_source_context=state.last_error_source_context or None,
-            retry_temperature=ctx.kernel.config.llm.retry_temperature,
-            extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
-            files_with_current_content=state.all_files_written,
-            sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
-            operation_by_file=_operation_map(
-                ctx, state.last_implicated_files, attempt_operation, state,
-            ),
-            default_operation=attempt_operation,
-        )
+            dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
+            files = await _run_developer_generation(
+                state, ctx,
+                task_description=task_desc,
+                design_context=(task_desc if use_api_contract_recovery else ctx.design),
+                existing_code_context=active_code_context,
+                stream_callback=dev_stream,
+                model_override=model_override,
+                base_url_override=base_url_override,
+                api_key_override=api_key_override,
+                extra_body_override=extra_body_override,
+                known_target_files=state.last_implicated_files,
+                prior_error_context=retry_error_context or None,
+                implicated_files=state.last_implicated_files,
+                error_source_context=state.last_error_source_context or None,
+                retry_temperature=ctx.kernel.config.llm.retry_temperature,
+                extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+                files_with_current_content=state.all_files_written,
+                sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+                operation_by_file=_operation_map(
+                    ctx, state.last_implicated_files, attempt_operation, state,
+                ),
+                default_operation=attempt_operation,
+            )
     elif use_fallback_targeted:
         # One-shot targeted fix on the first fallback model (see
         # fallback_targeted_attempted's own docstring above) - same
@@ -3596,7 +3795,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     if failure.type == "test_process_terminated":
                         if _record_process_boundary_obligation(
                             ctx, state, violated=True,
-                            evidence={"detected_via": "test_selection_fallback"},
+                            evidence={"detected_via": "test_selection_fallback", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
                     state.gate_outcomes.append(failure.to_gate_outcome())
@@ -3668,7 +3867,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     if failure.type == "test_process_terminated":
                         if _record_process_boundary_obligation(
                             ctx, state, violated=True,
-                            evidence={"detected_via": "targeted_test"},
+                            evidence={"detected_via": "targeted_test", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
                     state.gate_outcomes.append(failure.to_gate_outcome())
@@ -3695,7 +3894,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     if failure.type == "test_process_terminated":
                         if _record_process_boundary_obligation(
                             ctx, state, violated=True,
-                            evidence={"detected_via": "full_suite"},
+                            evidence={"detected_via": "full_suite", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
                     state.gate_outcomes.append(failure.to_gate_outcome())
