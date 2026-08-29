@@ -15,16 +15,19 @@ import pytest
 
 from kriya.control.persistence import load_approved_plan, load_control_state
 from kriya.control.state import ControlState
+from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
     ExecutionMethod,
+    ExecutionRole,
     FileAction,
     GlobalInvariant,
     PlannedFile,
     Subtask,
     VerificationMethod,
     VerificationMethodType,
+    VerifierKind,
 )
 from kriya.workflow.plan_validation import PlanValidationResult, validate_plan
 from kriya.workflow.planning_diagnostics import (
@@ -3569,6 +3572,116 @@ async def test_enforce_duplicate_type_shape_resolves_effective_owner_via_executi
     # And the OLD dependency-only resolver genuinely could not have found
     # this owner - confirming this is a real fix, not incidental.
     assert resolve_scope_conflict_owners(plan, ["App.java"], plan.subtask_by_id("s3")) == {}
+
+
+@pytest.mark.asyncio
+async def test_enforce_deny_all_runtime_verification_failure_routes_through_owner_recovery_and_resumes(tmp_path):
+    """Verification-Only Recovery Routing, WHOLE-CHAIN proof (PRV-06,
+    2026-08-29) - user's own explicit request: prove the two fixes
+    together, not each in isolation. `s4` is a REAL files=[]/
+    execution_role=VERIFICATION subtask whose sole verifier declares
+    verifier_kind=application_runtime with requires_runtime_execution
+    OMITTED at construction - the exact live incident shape. Its FIRST
+    run_generation_workflow() call returns a DENY_ALL-shaped
+    plan_scope_conflict (allowed_files=[] - the shape Fix 2 produces for a
+    grounded runtime-verification failure discovered inside a non-
+    mutating context) naming App.java, owned by s2 (execution provenance,
+    not depends_on - s4 depends only on s2 here, but the mechanism under
+    test is the SAME effective-owner resolution MA8.1 already uses).
+    Must: (1) confirm Fix 1's Pydantic self-heal already normalized s4's
+    own verifier before this test ever uses it; (2) resolve owner=s2;
+    (3) schedule cross-owner recovery with ALLOWLIST(App.java), not
+    DENY_ALL - the repair itself must run outside the verifier context;
+    (4) resume s4 afterward with DENY_ALL restored; (5) reach overall
+    success."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create App", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.MODIFY)]),
+            Subtask(
+                id="s4", description="run the application with sample input",
+                execution_method=ExecutionMethod.MODEL, execution_role=ExecutionRole.VERIFICATION,
+                depends_on=["s2"], planned_files=[],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.JUDGMENT,
+                    description="run the application and confirm the transformed value is printed",
+                    verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+                    # requires_runtime_execution deliberately OMITTED - Fix 1's
+                    # own model_validator must normalize this to True.
+                )],
+            ),
+        ],
+    )
+    # (1) Fix 1 already fired on THIS plan's own s4 before it's used below -
+    # not asserted only in isolation elsewhere.
+    assert plan.subtask_by_id("s4").verification[0].requires_runtime_execution is True
+
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "App.java").write_text("class App {}\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App { /* reads stdin, not argv */ }\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            # s4's own first attempt - direct runtime verification ran
+            # under DENY_ALL, discovered a real defect, and Fix 2 produced
+            # a DENY_ALL-shaped scope conflict.
+            assert kwargs["write_scope_mode"] == WriteScopeMode.DENY_ALL
+            assert kwargs["allowed_write_relpaths"] == []
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "run_verification",
+                    "reason": "app reads stdin but the runtime contract supplies argv",
+                    "raw_evidence": "Error reading input: No line found",
+                    "required_files": ["App.java"],
+                    "allowed_files": [],
+                },
+            }
+        if n == 4:
+            # (3) s2's real owner-recovery call.
+            (tmp_path / "App.java").write_text("class App { /* reads args[0] now */ }\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        # (4) s4's resumed consumer_retry - runtime verification passes now.
+        assert kwargs["write_scope_mode"] == WriteScopeMode.DENY_ALL
+        return {
+            "status": "success", "quality_gates_passed": True, "files": [],
+            "verification_results": [{
+                "type": "judgment", "tool_name": None,
+                "description": "run the application and confirm the transformed value is printed",
+                "passed": True, "source": "run_verification",
+            }],
+        }
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    # (5)
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 5
+    assert calls[3]["allowed_write_relpaths"] == ["App.java"]
+    owner_recovery_context = calls[3]["supplementary_context"]
+    assert "MUST FIX" in owner_recovery_context
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 1
+    # (2)
+    assert events[0]["reopened_owner"] == "s2"
+    assert events[0]["failed_subtask"] == "s4"
 
 
 def test_revise_plan_for_grounded_scope_owner_normalizes_multiple_active_owners(tmp_path):

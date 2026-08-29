@@ -9598,6 +9598,63 @@ async def test_handle_attempt_failure_never_offers_a_deny_all_target_even_at_low
 
 
 @pytest.mark.asyncio
+async def test_handle_attempt_failure_write_scope_deny_all_denial_never_becomes_a_developer_target(tmp_path):
+    """Verification-Only Recovery Routing, user-requested regression test
+    (PRV-06, 2026-08-29): "Kriya policy failure != generated application
+    failure." A real PolicyDeniedError(reason_code=WRITE_SCOPE_DENY_ALL) -
+    the exact shape the live incident's own log repeatedly showed the
+    Developer reasoning about ("the error shows a DENY_ALL write scope...")
+    - is a control-plane/architecture fact, not evidence the generated
+    application is broken. Even under a deliberately worst-case,
+    HIGH-confidence attribution mistake (attribute_failure() guessing the
+    denial text names a real file), the file must never become the next
+    attempt's Developer-facing target. Test-only assertion of an existing
+    invariant (this pass added no new production code for this - see
+    Fix 2's own DENY_ALL scope-conflict generalization, which already
+    covers this exact shape as a side effect): no new runtime behavior
+    is asserted here, only that the invariant already holds."""
+    from kriya.policy.errors import PolicyDeniedError
+    from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+    from kriya.workflow.attribution import AttributionResult
+
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    ctx.allowed_write_relpaths = []
+    ctx.write_scope_mode = WriteScopeMode.DENY_ALL
+
+    full_path = str(tmp_path / "src/main/java/com/example/App.java")
+    exc = PolicyDeniedError(
+        request=ActionRequest(action_type=ActionType.WRITE_FILE, target=full_path),
+        result=PolicyResult(
+            decision=PolicyDecision.DENY, reason_code="WRITE_SCOPE_DENY_ALL",
+            explanation=f"'{full_path}' cannot be written - this execution context is "
+                        "write_scope_mode=DENY_ALL.",
+            matched_rule="filesystem.authorized_writer.deny_all",
+        ),
+    )
+    worst_case_attribution = AttributionResult(
+        tier="judge", files=["src/main/java/com/example/App.java"], confidence="high",
+        reasoning="the policy denial message happens to name App.java",
+    )
+
+    with patch(
+        "kriya.workflow.retry_strategy.attribute_failure",
+        AsyncMock(return_value=worst_case_attribution),
+    ):
+        await handle_attempt_failure(state, ctx, exc)
+
+    # A policy denial is never mistaken for a compile/test/goal-spec
+    # failure type - it stays exactly what it is.
+    assert state.last_failure.type == "general_error"
+    # The critical invariant: regardless of what attribution guessed, the
+    # file is never offered to the Developer as something to fix.
+    assert state.last_implicated_files is None
+    assert "src/main/java/com/example/App.java" in state.rejected_generation_targets
+
+
+@pytest.mark.asyncio
 async def test_authoritative_migration_evidence_outside_scope_stops_without_developer_call(tmp_path):
     """PRV-05 run 7 (2026-08-28): deterministic migration evidence
     (Failure.authoritative_files) must be treated as HIGH-confidence,
