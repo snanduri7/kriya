@@ -2128,8 +2128,15 @@ class RunVerifierAgent(BaseAgent):
             '  "should_run": true or false,\n'
             '  "run_commands": [["executable", "arg1", "arg2"], ...] or null,\n'
             '  "command_source": "goal_explicit" or "inferred",\n'
-            '  "success_criteria": "one or two sentences describing what observable output would prove success"\n'
+            '  "success_criteria": "one or two sentences describing what observable output would prove success",\n'
+            '  "reasoning": "one or two sentences explaining WHY should_run is what it is"\n'
             "}\n"
+            "reasoning is required in both cases, but matters most when should_run is false - state "
+            "the actual, specific reason this goal has no observable runtime behavior worth running "
+            "(e.g. a concrete fact about what the goal does or doesn't ask for, or about the code "
+            "generated), not a generic restatement of the should_run/false decision itself. This "
+            "field is for observability only - it does not change what should_run should be; decide "
+            "should_run first from the rules above, then explain that decision.\n"
             "run_commands is an ORDERED LIST of commands to run in sequence, in the same working "
             "directory (so files/state one command creates persist for the next). Most goals need "
             "only ONE command - return a single-element list. But if the goal's correctness can "
@@ -2272,15 +2279,15 @@ class RunVerifierAgent(BaseAgent):
             )
         except Exception as e:
             logger.warning(f"Run Verifier judge() call failed entirely, skipping run verification: {e}")
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "infrastructure_error": str(e)}
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "reasoning": f"judge() call failed entirely: {e}", "infrastructure_error": str(e)}
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
             logger.warning(f"Run Verifier judge() returned unparseable JSON, skipping run verification: {e}")
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "infrastructure_error": f"unparseable response: {e}"}
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "reasoning": f"judge() response was unparseable JSON: {e}", "infrastructure_error": f"unparseable response: {e}"}
 
         if not isinstance(parsed, dict):
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "infrastructure_error": "response was not a JSON object"}
+            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "reasoning": "judge() response was not a JSON object", "infrastructure_error": "response was not a JSON object"}
 
         raw_commands = parsed.get("run_commands")
         # Tolerate a model still returning the old single-command shape
@@ -2330,6 +2337,13 @@ class RunVerifierAgent(BaseAgent):
             "run_commands": run_commands,
             "command_source": parsed.get("command_source") if parsed.get("command_source") in ("goal_explicit", "inferred") else "inferred",
             "success_criteria": parsed.get("success_criteria") or "",
+            # Observability only (PRV-06, 2026-08-28) - never consulted by any
+            # should_run/run_commands decision anywhere in this codebase, only
+            # persisted so a REQUIRED_RUNTIME_VERIFICATION_MISSING failure
+            # carries the judge's own stated reason instead of a bare boolean.
+            # Model may omit it despite the system prompt asking for it -
+            # never fabricated here if absent.
+            "reasoning": parsed.get("reasoning") or "",
         }
 
     async def grade(

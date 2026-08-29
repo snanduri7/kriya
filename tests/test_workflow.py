@@ -21,11 +21,13 @@ from kriya.workflow.attempt import (
     AttemptContext,
     _brownfield_owner_contract_block,
     _diagnosis_mismatch_bypass_reason,
+    _directly_executable_runtime_verifiers,
     _directly_executable_verifiers,
     _operation_map,
     _process_boundary_obligation_id,
     _record_process_boundary_obligation,
     _record_self_correction_scope_conflict,
+    _required_runtime_verification_missing_message,
     _run_verification_basis_hash,
     _spec_requirements_contradicting_authority,
     run_attempt,
@@ -1378,6 +1380,24 @@ def test_record_process_boundary_obligation_noop_without_ledger():
     _record_process_boundary_obligation(fake_ctx, state, violated=True, evidence={})
 
 
+# --- REQUIRED_RUNTIME_VERIFICATION_MISSING observability (PRV-06, 2026-08-28) ---
+
+def test_required_runtime_verification_missing_message_includes_judge_reasoning():
+    message = _required_runtime_verification_missing_message(
+        {"reasoning": "the goal only asks for a library with no entrypoint"},
+    )
+    assert "REQUIRED_RUNTIME_VERIFICATION_MISSING" in message
+    assert "the goal only asks for a library with no entrypoint" in message
+
+
+def test_required_runtime_verification_missing_message_placeholder_when_absent():
+    """The judge can omit reasoning despite the prompt asking for it - the
+    message says so explicitly rather than silently dropping the line, so
+    a missing explanation is itself visible in the persisted record."""
+    message = _required_runtime_verification_missing_message({})
+    assert "no reasoning field returned by the judge" in message
+
+
 @pytest.mark.asyncio
 async def test_run_attempt_classifies_surefire_fork_crash_and_records_obligation(tmp_path):
     """Integration regression test for PRV-06 (2026-08-28): a real
@@ -1638,11 +1658,14 @@ async def test_run_attempt_verification_only_subtask_raises_typed_failure_on_tes
 
 @pytest.mark.asyncio
 async def test_run_attempt_verification_only_subtask_falls_through_without_a_direct_verifier(tmp_path):
-    """Safety net: a verification-only subtask declaring ONLY a judgment/
-    runtime-execution verifier (not yet directly executable) must fall
-    through to the ordinary Developer path unchanged - still fully
-    protected by DENY_ALL (proven separately), just not yet optimized for
-    this shape."""
+    """Safety net (PRV-06, 2026-08-28: updated for the new application_runtime
+    direct-execution path added below - this specific requirement dict is
+    deliberately under-specified, missing verifier_kind entirely, so it
+    must NOT be mistaken for a genuine application_runtime verifier and
+    must still fall through to the ordinary Developer path - the strict
+    guard requires an EXPLICIT verifier_kind=="application_runtime" match,
+    never "files==[] alone" or a loosely-shaped judgment entry. Still fully
+    protected by DENY_ALL either way."""
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = set()
@@ -1667,6 +1690,226 @@ async def test_run_attempt_verification_only_subtask_falls_through_without_a_dir
     await run_attempt(state, ctx)
 
     assert developer.run_generation.called
+
+
+def _runtime_verifier_ctx(tmp_path, *, developer, run_verifier, goal="Run the app and print output", **overrides):
+    return _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier, goal=goal,
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+        allowed_write_relpaths=[], write_scope_mode=WriteScopeMode.DENY_ALL,
+        required_verification=[{
+            "type": "judgment", "description": "Run the app and confirm output.",
+            "tool_name": None, "verifier_kind": "application_runtime",
+            "requires_runtime_execution": True,
+        }],
+        **overrides,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_application_runtime_verification_only_never_calls_developer(tmp_path):
+    """(1) files=[] + application_runtime: Developer must never be called,
+    the judge is called exactly once, and DENY_ALL is retained throughout -
+    the exact live PRV-06 defect (Developer invented a duplicate entrypoint
+    for a subtask that should write nothing) can no longer happen because
+    the Developer is never invoked in the first place for this shape."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for an application_runtime verification-only subtask"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["java", "-cp", "target/classes", "com.example.App"]],
+        "command_source": "inferred", "success_criteria": "prints HELLO",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "printed HELLO", "likely_files": []})
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "HELLO", "steps": []},
+    ):
+        await run_attempt(state, ctx)  # must not raise
+
+    assert not developer.run_generation.called
+    run_verifier.judge.assert_awaited_once()
+    assert ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_application_runtime_verification_passes_with_zero_writes(tmp_path):
+    """(2) Runtime verifier passes -> subtask PASS (no exception), a
+    run_verification gate_outcome is recorded, and nothing on disk changes."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    (tmp_path / "App.java").write_text("class App {}\n")
+    before = (tmp_path / "App.java").read_text()
+
+    developer = AsyncMock()
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["java", "App"]],
+        "command_source": "goal_explicit", "success_criteria": "prints HELLO",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "printed HELLO", "likely_files": []})
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "HELLO", "steps": []},
+    ):
+        await run_attempt(state, ctx)
+
+    assert state.candidate_gates_succeeded is True
+    assert any(o["type"] == "run_verification" and o["success"] for o in state.gate_outcomes)
+    assert (tmp_path / "App.java").read_text() == before
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_application_runtime_verification_fails_with_typed_failure(tmp_path):
+    """(3) Runtime verifier fails -> a typed QualityGateFailure(type=
+    "run_verification"), the same shape the mutating path already raises,
+    so the EXISTING recovery/attribution machinery (which CAN re-enter a
+    mutating context for a different subtask/attempt) picks it up
+    unchanged - this function does not invent a new recovery path."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["java", "App"]],
+        "command_source": "goal_explicit", "success_criteria": "prints HELLO",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": False, "reasoning": "printed nothing", "likely_files": []})
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "", "steps": []},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "run_verification"
+    assert not developer.run_generation.called
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_application_runtime_verifier_deterministic_process_exit_failure(tmp_path):
+    """A deterministic run-command sequence (e.g. an allowlisted build/test
+    tool) trusts its own process exit status over LLM grading - same
+    "process_exit" authority the mutating path's identical branch already
+    uses, confirmed reachable from the verification-only path too."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["mvn", "test"]],
+        "command_source": "goal_explicit", "success_criteria": "tests pass",
+    })
+    run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("grade() must not be called when a deterministic process-exit verdict is available"),
+    )
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": False, "timed_out": False, "returncode": 1, "output": "BUILD FAILURE", "steps": []},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "run_verification"
+    # graded_by is attached to the appended gate_outcomes dict directly, not
+    # to Failure itself (matching the mutating path's identical pattern) -
+    # check the actually-recorded outcome, not a fresh to_gate_outcome() call.
+    assert state.gate_outcomes[-1]["graded_by"] == "process_exit"
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_mutating_subtask_with_planned_files_ignores_direct_execution_path(tmp_path):
+    """(5) files present + application_runtime: the normal mutating flow
+    remains available when the subtask actually owns files to write - the
+    direct-execution short-circuit only ever fires under DENY_ALL, which a
+    subtask with real planned_files/an allowlist never has."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    app_path = "App.java"
+    (tmp_path / app_path).write_text("class App {}\n")
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": app_path, "content": "class App { }\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": False, "run_commands": [], "command_source": "inferred", "success_criteria": "",
+    })
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Fix App.java", architect_files=[app_path], expected_files_upfront=[app_path],
+        architect_basename_to_path={"App.java": app_path},
+        allowed_write_relpaths=[app_path], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        required_verification=[{
+            "type": "judgment", "description": "Run the app.", "tool_name": None,
+            "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    assert developer.run_generation.called
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_application_runtime_verification_only_cannot_write_pom_or_app(tmp_path):
+    """(6) A verification-only subtask can never create App.java/pom.xml/
+    etc: since the Developer is never invoked at all on this path (proven
+    by test (1) above), there is no candidate-write step for DENY_ALL to
+    even need to intercept - confirmed here by asserting neither file
+    exists after a full run, success or not."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["java", "App"]],
+        "command_source": "goal_explicit", "success_criteria": "prints HELLO",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "ok", "likely_files": []})
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "HELLO", "steps": []},
+    ):
+        await run_attempt(state, ctx)
+
+    assert not (tmp_path / "App.java").exists()
+    assert not (tmp_path / "pom.xml").exists()
 
 
 _APP_MAIN_JAVA = (

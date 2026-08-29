@@ -953,22 +953,79 @@ def _build_workspace_type_index(state: GenerationState, ctx: "AttemptContext") -
         return {}
 
 
+def _required_runtime_verification_missing_message(judgment: Dict[str, Any]) -> str:
+    """PRV-06 (2026-08-28): observability fix, not a behavioral one - the
+    judge's own stated reasoning (RunVerifierAgent.judge()'s `reasoning`
+    field) is never consulted by any should_run/run_commands decision
+    anywhere in this codebase, only surfaced here so a
+    REQUIRED_RUNTIME_VERIFICATION_MISSING failure's persisted gate_outcome/
+    traces.db record carries the judge's own explanation instead of a bare
+    boolean with no way to tell a genuine "no runtime behavior to check"
+    call apart from a judgment mistake. Found live, PRV-06 (2026-08-28):
+    a Legacy run hit this exact failure after 8 prior compile/test-gate
+    failures (the judge is called at most once per subtask, only once
+    compile+test finally pass), and there was no way to tell whether the
+    single should_run=False verdict was a genuine call or a mistake -
+    `reasoning` may still be empty (the model can omit it despite the
+    prompt asking for it; never fabricated here), but when present this
+    closes that exact gap."""
+    reasoning = judgment.get("reasoning") or "(no reasoning field returned by the judge)"
+    return (
+        "REQUIRED_RUNTIME_VERIFICATION_MISSING: the declared verification contract requires "
+        "observable runtime behavior, but no executable verification sequence was produced.\n"
+        f"Judge's own reasoning: {reasoning}"
+    )
+
+
 def _directly_executable_verifiers(required_verification: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """type=tool verifiers naming a BUILTIN_QUALITY_GATE_VERIFIERS tool_name
     (compile/test/tests/regression/quality_gates) - the ones
     _run_verification_only_attempt can execute directly via
     PolymorphicValidator, the same deterministic gate every ordinary
-    implementation-subtask attempt already uses. A judgment/requires_
-    runtime_execution verifier (RunVerifierAgent-based runtime execution)
-    is deliberately NOT included - that machinery lives deep inside this
-    module's own Developer/Quality-Gates loop and extracting it safely is a
-    larger, separate lift; see this function's own caller for what happens
-    when a verification-only subtask declares ONLY that kind of verifier."""
+    implementation-subtask attempt already uses. See
+    _directly_executable_runtime_verifiers below for the sibling case
+    (a runtime-execution verifier) - kept as a separate function rather
+    than folded in here since the two are executed through genuinely
+    different machinery (PolymorphicValidator vs RunVerifierAgent)."""
     from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS
     return [
         requirement for requirement in required_verification
         if requirement.get("type") == "tool"
         and requirement.get("tool_name") in BUILTIN_QUALITY_GATE_VERIFIERS
+    ]
+
+
+def _directly_executable_runtime_verifiers(required_verification: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """PRV-06 (2026-08-28, real live-validation finding): a verification-
+    only subtask (write_scope_mode=DENY_ALL, planned_files=[]) declaring
+    ONLY an application_runtime verifier used to fall through to the
+    ordinary Developer/Quality-Gates loop anyway (this exact case is what
+    _directly_executable_verifiers' own docstring flagged as "a larger,
+    separate lift" not yet built) - the Developer, asked to generate files
+    for a subtask that legitimately has none, reliably invented a
+    duplicate entrypoint every attempt. DENY_ALL correctly rejected each
+    one before it ever reached disk (zero corruption, confirmed live), but
+    the subtask still burned its entire retry budget on candidates that
+    could never be written, because nothing short-circuited BEFORE the
+    Developer call for this specific verifier shape.
+
+    Deliberately narrow, matching _directly_executable_verifiers' own
+    discipline: only matches an entry whose `verifier_kind` is EXPLICITLY
+    "application_runtime" AND `requires_runtime_execution` is True - not
+    just "files == []" alone (a malformed/under-specified plan could
+    accidentally have zero planned_files for a genuinely mutating subtask;
+    that must still enter ordinary validation/repair, never be silently
+    reinterpreted as verification-only). `type` is intentionally NOT
+    checked here (a validated plan's application_runtime verifier is
+    normally type=judgment/tool_name=None, but the CALLER already only
+    reaches this function under write_scope_mode=DENY_ALL, which is itself
+    gated on execution_role=verification/planned_files=[] upstream - the
+    verifier_kind+requires_runtime_execution pair is what actually
+    identifies "this is the runtime-execution check," not the type tag)."""
+    return [
+        requirement for requirement in required_verification
+        if requirement.get("verifier_kind") == "application_runtime"
+        and requirement.get("requires_runtime_execution") is True
     ]
 
 
@@ -1055,6 +1112,9 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
+    if _directly_executable_runtime_verifiers(ctx.required_verification):
+        await _execute_runtime_verification_directly(state, ctx, validator)
+
     state.candidate_gates_succeeded = True
     state.record_event(RunEvent(
         kind="candidate_gates.passed",
@@ -1067,6 +1127,340 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
         "CANDIDATE GATES", "PASSED", state.attempt_number,
         scope=ctx.execution_scope,
     )
+
+
+async def _execute_runtime_verification_directly(
+    state: GenerationState, ctx: "AttemptContext", validator: "PolymorphicValidator",
+) -> None:
+    """PRV-06 (2026-08-28): the application_runtime half of
+    _run_verification_only_attempt's direct-execution path - judge, correct,
+    (approve), execute, grade, raise-or-return, with NO Developer
+    invocation anywhere in this function. Deliberately reuses every
+    existing sub-helper by reference (RunVerifierAgent.judge()/grade(),
+    _resolve_run_command, ground_java_entrypoint_in_no_build_file_projects,
+    the JDK/JVM-flag preflight corrections, run_app_sequence,
+    deterministic_sequence_kind, _extract_grounded_contract_verdict,
+    _build_quality_gate_failure) - none of their own internal logic is
+    reimplemented here, only the SEQUENCE in which a verification-only
+    subtask needs to call them is new.
+
+    Deliberately narrower than the mutating path's inline runtime-
+    verification block (kriya/workflow/attempt.py's own "Quality Gates:
+    Runtime Verification" section) in two respects, both intentional:
+    - No self-correction micro-loop. That loop exists to patch
+      infrastructure/classpath issues in code a Developer just wrote in
+      THIS attempt - a verification-only subtask writes nothing, so
+      self_correction_loop's own writable_files would already collapse to
+      [] under DENY_ALL, making it a pure no-op burn of one extra LLM call.
+      "Verification does not generate code. Failure recovery may generate
+      code" (this fix's own design principle) - on failure, this function
+      raises the same typed Failure the mutating path already raises, and
+      the EXISTING outer retry/recovery machinery (which CAN re-enter a
+      mutating context for a different subtask/attempt) takes over from
+      there, unchanged.
+    - No SpecCompliance goal-check. That check verifies concrete literal
+      requirements (exact field/method/class names) in code just written -
+      irrelevant for a subtask that writes no new code; whatever
+      established files it's verifying already passed that check when an
+      earlier, mutating subtask wrote them.
+
+    Judgment caching (state.cached_run_verification_judgment) is preserved
+    across this subtask's own retry attempts, exactly like the mutating
+    path - a repeat attempt after a transient failure re-judges only when
+    the workspace's invocation-affecting content actually changed."""
+    autonomy_cfg_rv = ctx.kernel.config.autonomy
+    if ctx.runtime_verification_required and not autonomy_cfg_rv.run_verification_enabled:
+        message = (
+            "REQUIRED_RUNTIME_VERIFICATION_DISABLED: the declared verification contract "
+            "requires observable execution, but runtime verification is disabled."
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    if ctx.runtime_verification_required and state.run_verification_declined:
+        message = (
+            "REQUIRED_RUNTIME_VERIFICATION_DECLINED: the declared runtime check was not "
+            "authorized, so correctness remains unverified."
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    if not autonomy_cfg_rv.run_verification_enabled or state.run_verification_declined:
+        return
+
+    if not state.toolchain_checked:
+        state.toolchain_checked = True
+        state.toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+        if state.toolchain_warning:
+            logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
+        if validator.stack == "java":
+            state.java_home_override = _resolve_java_home_override(ctx.goal)
+            if state.java_home_override:
+                logger.warning(
+                    "JVM toolchain enforcement: forcing Maven subprocess calls to "
+                    f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
+                    "version doesn't match what 'mvn' resolves to by default here."
+                )
+    validator.java_home_override = state.java_home_override
+
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    current_judgment_basis = _run_verification_basis_hash(ctx, state)
+    if (
+        state.cached_run_verification_judgment is not None
+        and state.cached_run_verification_basis_hash != current_judgment_basis
+    ):
+        logger.info(
+            "Invocation-affecting workspace content changed - invalidating cached "
+            "runtime-verification judgment."
+        )
+        state.cached_run_verification_judgment = None
+    if state.cached_run_verification_judgment is None:
+        pom_content_for_judge = None
+        try:
+            with open(os.path.join(ctx.worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+                pom_content_for_judge = f.read()
+        except Exception as e:
+            logger.debug(f"No pom.xml available for run-verification judgment: {e}")
+        raw_judgment = await ctx.run_verifier.judge(
+            goal=ctx.goal, design=ctx.design,
+            files_written=known_files, build_file_content=pom_content_for_judge,
+        )
+        if raw_judgment.get("infrastructure_error") and ctx.runtime_verification_required:
+            message = (
+                "VERIFICATION INFRASTRUCTURE FAILURE: runtime behavior is required, but "
+                f"the runtime-verification judge was unavailable: {raw_judgment['infrastructure_error']}"
+            )
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        state.cached_run_verification_judgment = downgrade_ungrounded_goal_explicit_commands(
+            raw_judgment, ctx.goal
+        )
+        state.cached_run_verification_basis_hash = current_judgment_basis
+    else:
+        logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
+    judgment = state.cached_run_verification_judgment
+
+    if ctx.runtime_verification_required and not judgment.get("should_run"):
+        message = _required_runtime_verification_missing_message(judgment)
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    if not judgment.get("should_run"):
+        return
+    if deterministic_sequence_kind(judgment.get("run_commands") or []) == "build":
+        message = (
+            "BEHAVIORAL_GOAL_WITH_BUILD_ONLY_VERIFICATION: observable runtime behavior "
+            "is required, but the inferred sequence contains only build commands."
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+
+    if judgment.get("run_commands"):
+        pom_content_for_correction = None
+        try:
+            with open(os.path.join(ctx.worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+                pom_content_for_correction = f.read()
+        except Exception:
+            pass
+        java_files = [f for f in known_files if f.endswith(".java")]
+        if java_files and not pom_content_for_correction:
+            corrected_commands = ground_java_entrypoint_in_no_build_file_projects(
+                judgment["run_commands"], judgment["command_source"], known_files,
+                _build_java_main_class_map(java_files, ctx),
+                extract_jvm_module_flags(ctx.skills_prompt), pom_content_for_correction,
+            )
+            if corrected_commands is None:
+                logger.info(
+                    "Deterministic Java entrypoint resolution: no pom.xml/build.gradle found "
+                    "and no known .java file has a main() method - overriding should_run to "
+                    "False instead of executing a command that targets a nonexistent entrypoint class."
+                )
+                judgment = dict(judgment)
+                judgment["should_run"] = False
+                judgment["run_commands"] = None
+            elif corrected_commands != judgment["run_commands"]:
+                judgment = dict(judgment)
+                judgment["run_commands"] = corrected_commands
+
+    if not judgment.get("should_run"):
+        return
+
+    proceed_with_run = True
+    if judgment["command_source"] == "inferred" and not state.run_verification_confirmed:
+        if autonomy_cfg_rv.mode == "human-in-the-loop":
+            commands_desc = "\n".join(
+                f"    {i}. {' '.join(cmd)}" for i, cmd in enumerate(judgment["run_commands"], 1)
+            )
+            confirm_reason = (
+                "Kriya judged that this goal describes runtime behavior compile/test checks "
+                "can't verify, and wants to actually run the generated app (verification-only "
+                "subtask):\n"
+                f"  Command(s):\n{commands_desc}\n"
+                f"  Looking for: {judgment['success_criteria']}\n"
+                "Allow Kriya to execute these command(s) inside the sandboxed worktree?"
+            )
+            if ctx.approval_callback:
+                approved = ctx.approval_callback([], confirm_reason)
+                if asyncio.iscoroutine(approved):
+                    approved = await approved
+                proceed_with_run = bool(approved)
+            else:
+                logger.warning(
+                    "Runtime verification warrants human approval but no approval_callback "
+                    "is available. Proceeding under default policy."
+                )
+        if not proceed_with_run:
+            state.run_verification_declined = True
+    if not proceed_with_run:
+        return
+
+    state.run_verification_confirmed = True
+    resolved_run_commands = [_resolve_run_command(cmd, ctx.worktree_path) for cmd in judgment["run_commands"]]
+    jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(ctx.worktree_path, state.java_home_override)
+    if jvm_flag_correction:
+        state.toolchain_warning = (
+            f"{state.toolchain_warning} {jvm_flag_correction}" if state.toolchain_warning else jvm_flag_correction
+        )
+    exec_pin_correction = _pin_exec_plugin_executable_to_resolved_jdk(ctx.worktree_path, state.java_home_override)
+    if exec_pin_correction:
+        state.toolchain_warning = (
+            f"{state.toolchain_warning} {exec_pin_correction}" if state.toolchain_warning else exec_pin_correction
+        )
+    logger.info(
+        "Quality Gates: Running runtime verification (verification-only subtask): "
+        + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
+    )
+    pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
+    run_res = validator.run_app_sequence(
+        resolved_run_commands, timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+    )
+    clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
+    if run_command_targets_missing_entrypoint(run_res["output"]):
+        state.cached_run_verification_judgment = None
+
+    gate_type = "run_verification"
+    verification_authority = "llm"
+    if run_res["timed_out"]:
+        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+        if contract_verdict is not None:
+            verification_authority = "contract"
+            grade = contract_verdict
+        else:
+            grade = await ctx.run_verifier.grade(
+                goal=ctx.goal, success_criteria=judgment["success_criteria"],
+                output=run_res["output"], returncode=run_res["returncode"],
+                files_written=known_files, timed_out=True,
+            )
+        timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
+        if grade["passed"]:
+            gate_type = "run_verification_hung"
+            grade["reasoning"] = (
+                f"The goal's described output WAS produced correctly, but the process never "
+                f"exited on its own and had to be killed after {timeout_s}s. This is still a "
+                "real defect - almost always an unclosed resource keeping the process alive "
+                f"after all application logic already finished. Grader's evidence: {grade['reasoning']}"
+            )
+        else:
+            grade["reasoning"] = (
+                f"Run timed out after {timeout_s}s, and the output captured before the forced "
+                f"kill does not show the goal was achieved either: {grade['reasoning']}"
+            )
+        grade["passed"] = False
+    elif not run_res["success"]:
+        deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
+        if deterministic_kind is not None:
+            verification_authority = "process_exit"
+            grade = {
+                "passed": False,
+                "reasoning": (
+                    f"One or more deterministic {deterministic_kind} verification commands "
+                    "returned a non-zero process status."
+                ),
+                "likely_files": [],
+            }
+        else:
+            contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+            if contract_verdict is not None:
+                verification_authority = "contract"
+                grade = contract_verdict
+            else:
+                grade = await ctx.run_verifier.grade(
+                    goal=ctx.goal, success_criteria=judgment["success_criteria"],
+                    output=run_res["output"], returncode=run_res["returncode"],
+                    files_written=known_files,
+                )
+        if grade.get("passed"):
+            grade["passed"] = False
+            grade["reasoning"] = (
+                "Observed output appeared semantically correct, but one or more required "
+                f"verification steps exited non-zero. Semantic evidence: {grade.get('reasoning', '')}"
+            )
+    else:
+        deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
+        if deterministic_kind is not None:
+            verification_authority = "process_exit"
+            grade = {
+                "passed": True,
+                "reasoning": (
+                    f"All deterministic {deterministic_kind} verification commands completed "
+                    "successfully (exit code 0)."
+                ),
+                "likely_files": [],
+            }
+        else:
+            contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+            if contract_verdict is not None:
+                verification_authority = "contract"
+                grade = contract_verdict
+            else:
+                grade = await ctx.run_verifier.grade(
+                    goal=ctx.goal, success_criteria=judgment["success_criteria"],
+                    output=run_res["output"], returncode=run_res["returncode"],
+                    files_written=known_files,
+                )
+
+    if not grade["passed"]:
+        message = (
+            f"RUNTIME VERIFICATION FAILURE (verification-only subtask): {grade['reasoning']}"
+            f"\n\nCaptured output:\n{run_res['output']}"
+        )
+        enriched_output = run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
+        failure = _build_quality_gate_failure(
+            gate_type, message, enriched_output, ctx.worktree_path, known_files,
+            state.attempt_number, extra_likely_files=grade.get("likely_files") or [],
+        )
+        failure_outcome = failure.to_gate_outcome()
+        failure_outcome.update({
+            "graded_by": verification_authority, "commands": resolved_run_commands,
+            "steps": run_res.get("steps", []),
+        })
+        state.gate_outcomes.append(failure_outcome)
+        raise QualityGateFailure(failure)
+
+    state.gate_outcomes.append({
+        "attempt": state.attempt_number, "type": "run_verification", "success": True,
+        "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
+        "graded_by": verification_authority, "commands": resolved_run_commands,
+        "steps": run_res.get("steps", []),
+        "deterministic_result": "PASS" if verification_authority == "process_exit" else None,
+    })
 
 
 def _spec_compliance_authoritative_context(ledger: Optional[ObligationLedger]) -> Optional[str]:
@@ -1172,17 +1566,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     Raises QualityGateFailure or IncompleteGenerationError on any gate
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
-    if (
-        ctx.write_scope_mode == WriteScopeMode.DENY_ALL
-        and _directly_executable_verifiers(ctx.required_verification)
+    if ctx.write_scope_mode == WriteScopeMode.DENY_ALL and (
+        _directly_executable_verifiers(ctx.required_verification)
+        or _directly_executable_runtime_verifiers(ctx.required_verification)
     ):
         # Verification-only subtask with at least one directly-executable
-        # verifier - take the whole rest of this function out of the loop
-        # entirely (see _run_verification_only_attempt's own docstring for
-        # why). Falls through to the ordinary path below ONLY when no
-        # required_verification entry is directly executable (e.g. a
-        # judgment/runtime-execution-only verifier) - still fully protected
-        # by DENY_ALL either way, just not yet optimized for that shape.
+        # verifier (compile/test, or - PRV-06, 2026-08-28 - an explicit
+        # application_runtime check) - take the whole rest of this function
+        # out of the loop entirely (see _run_verification_only_attempt's own
+        # docstring for why). Falls through to the ordinary path below ONLY
+        # when NOTHING in required_verification is directly executable -
+        # still fully protected by DENY_ALL either way, just not optimized
+        # for that shape (a plan-repair/DAG defect, not a Kriya execution
+        # gap, at that point).
         state.terminal_regression_succeeded = False
         state.overall_attempt_succeeded = False
         await _run_verification_only_attempt(state, ctx)
@@ -3453,11 +3849,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
             judgment = state.cached_run_verification_judgment
             if ctx.runtime_verification_required and not judgment.get("should_run"):
-                message = (
-                    "REQUIRED_RUNTIME_VERIFICATION_MISSING: the declared verification contract "
-                    "requires observable runtime behavior, but no executable verification "
-                    "sequence was produced."
-                )
+                message = _required_runtime_verification_missing_message(judgment)
                 failure = Failure(
                     type="verification_infrastructure_failure", message=message,
                     raw_output=message, attempt=state.attempt_number,

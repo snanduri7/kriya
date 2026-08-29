@@ -228,6 +228,66 @@ async def test_run_verifier_judge_includes_pom_content_when_given():
     assert "Actual pom.xml content" in sent_prompt
 
 
+# --- judge() reasoning field (PRV-06, 2026-08-28: observability only) ---
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_returns_the_models_own_reasoning():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": False, "run_commands": None, "command_source": "inferred",
+        "success_criteria": "", "reasoning": "the goal only asks for a library with no entrypoint",
+    }))
+    verifier = RunVerifierAgent("run_verifier", llm)
+
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["lib.py"])
+
+    assert judgment["reasoning"] == "the goal only asks for a library with no entrypoint"
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_reasoning_defaults_to_empty_string_never_fabricated():
+    """The model can omit reasoning despite the prompt asking for it - never
+    invented here, same "degrade, don't guess" discipline as every other
+    optional field this module parses."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True, "run_commands": [["python", "app.py"]],
+        "command_source": "goal_explicit", "success_criteria": "prints done",
+    }))
+    verifier = RunVerifierAgent("run_verifier", llm)
+
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+
+    assert judgment["reasoning"] == ""
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_reasoning_explains_infrastructure_failures_too():
+    """Each of the three infrastructure-failure fallback paths (call failed,
+    unparseable JSON, non-dict response) also carries a synthetic reasoning
+    string explaining WHY should_run came back False - so a
+    REQUIRED_RUNTIME_VERIFICATION_MISSING record downstream is never just a
+    bare boolean with no explanation, even when the judge call itself broke."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(return_value="not json at all")
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+    assert judgment["should_run"] is False
+    assert "unparseable" in judgment["reasoning"].lower()
+
+    llm.complete = AsyncMock(return_value=json.dumps(["not", "a", "dict"]))
+    judgment2 = await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+    assert "not a json object" in judgment2["reasoning"].lower()
+
+    llm.complete = AsyncMock(side_effect=RuntimeError("connection refused"))
+    judgment3 = await verifier.judge(goal="Goal", design="", files_written=["app.py"])
+    assert "connection refused" in judgment3["reasoning"]
+
+
 def test_run_verifier_judge_system_prompt_requires_file_content_evidence():
     """Regression test for a real live gap found 2026-08-21
     (milestone_task_cli): judge() picked a command sequence (add, list) that
