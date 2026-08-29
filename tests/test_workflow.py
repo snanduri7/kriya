@@ -6626,6 +6626,7 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         ecosystem_invariant_block="",
         resource_lifecycle_block="",
         verification_contract_block="",
+        recovery_contract_block="",
         required_files_prompt_block="",
         required_dependencies_prompt_block="",
         expected_files_upfront=["app.py"],

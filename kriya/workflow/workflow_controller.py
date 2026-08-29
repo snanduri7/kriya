@@ -2895,6 +2895,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # ledger's own history() - no new counter needed for that part.
         recovery_generation_by_key: Dict[Tuple[str, str, Tuple[str, ...]], int] = {}
         plan_recovery_events: List[Dict[str, Any]] = []
+        # Recovery Execution Contract (PRV-06, 2026-08-29) - a live incident
+        # this closes: an owner's OWN regenerated candidate can be byte-
+        # identical to what it already had, pass the owner's own local
+        # gates (nothing there checks the cross-owner requirement itself),
+        # and still get logged OWNER_RECOVERY_COMPLETED passed=True -
+        # burning a full consumer-retry cycle (and, once the consumer fails
+        # again, an entire FRESH generation) rediscovering a defect that
+        # was never actually touched. Keyed by (owner, required files) -
+        # deliberately NOT by generation/requirement_id, which change every
+        # cycle by design - so it survives across generations for the SAME
+        # underlying recurring problem. See the no-progress check at this
+        # dict's own use site for the full reasoning.
+        recovery_candidate_fingerprints: Dict[Tuple[str, Tuple[str, ...]], Tuple[str, ...]] = {}
 
         async def _invoke_bounded_subtask(
             target: Subtask,
@@ -2916,10 +2929,24 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 supplementary_context="\n\n".join(filter(None, (
                     build_subtask_constraint_context(goal),
                     build_subtask_semantic_context(plan, target),
-                    recovery_context,
                     render_established_file_context(established_file_context),
                     target_context_text,
                 ))),
+                # Recovery Execution Contract (PRV-06, 2026-08-29): NO LONGER
+                # folded into supplementary_context above - a live incident
+                # traced this exact text (MUST_FIX/MUST_PRESERVE/EVIDENCE/
+                # ACCEPTANCE) ending up inside "existing code context," a
+                # passive reference blob the full-set generation prompt
+                # explicitly frames as "the model's own prior attempt's
+                # content," never as an active instruction. A recovery
+                # requirement is not code context, a coding convention, or
+                # repository history - it is the CURRENT GOVERNING
+                # INSTRUCTION for this specific invocation. Threaded as its
+                # own first-class field all the way into the task
+                # description retry_prompts.py builds (see AttemptContext.
+                # recovery_contract_block's own docstring) - never merely
+                # another paragraph prepended to existing context.
+                recovery_contract_block=recovery_context,
                 established_files=sorted(established_file_context.keys()),
                 predetermined_plan=build_subtask_plan_text(target),
                 predetermined_design=target_goal,
@@ -3367,6 +3394,24 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "OWNER_RECOVERY_STARTED requirement_id=%s owner=%s generation=%d",
                         candidate_requirement_id, owner_id, generation,
                     )
+                    # Recovery Execution Contract (PRV-06, 2026-08-29): seed
+                    # the no-progress baseline from the file's CURRENT
+                    # (pre-recovery) content the FIRST time this (owner,
+                    # required files) pair is ever reopened - so even
+                    # generation 0's own candidate can be caught if it
+                    # reproduces exactly what was already there before
+                    # recovery started (the live incident's own worst case:
+                    # every single regeneration, including the first,
+                    # matched the original unfixed content). Never
+                    # overwritten once seeded here - only the comparison/
+                    # update after the recovery attempt itself (below) ever
+                    # advances it.
+                    fingerprint_key = (owner_id, tuple(sorted(required_owner_files)))
+                    if fingerprint_key not in recovery_candidate_fingerprints:
+                        recovery_candidate_fingerprints[fingerprint_key] = tuple(
+                            read_file_revision(os.path.join(plan_workspace_path, path))
+                            for path in sorted(required_owner_files)
+                        )
                     owner_result = await _invoke_bounded_subtask(
                         owner, owner_position, recovery_context=recovery_context,
                         execution_role="owner_recovery",
@@ -3376,11 +3421,44 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         set(owner_result.get("files") or []) - owner_declared
                     )
                     owner_written = set(owner_result.get("files") or [])
+                    # Recovery Execution Contract (PRV-06, 2026-08-29): the
+                    # owner's own local gates (compile/goal-spec for ITS OWN
+                    # file, nothing cross-owner-aware) are necessary but not
+                    # sufficient - a regenerated candidate that is BYTE-
+                    # IDENTICAL to the immediately prior recovery attempt's
+                    # own candidate for this exact (owner, required files)
+                    # pair proves the requirement was never actually acted
+                    # on, regardless of what the owner's own gates say.
+                    # Live incident this closes: pom.xml regenerated
+                    # identically across 3 separate generations, each one
+                    # locally "passing" (nothing there checks whether
+                    # <mainClass> actually matches the real entrypoint
+                    # class), burning a full consumer-retry cycle each time
+                    # before the SAME unresolved defect surfaced again.
+                    candidate_fingerprint = tuple(
+                        read_file_revision(os.path.join(plan_workspace_path, path))
+                        for path in sorted(required_owner_files)
+                    )
+                    recovery_no_progress = (
+                        bool(owner_result.get("quality_gates_passed"))
+                        and recovery_candidate_fingerprints.get(fingerprint_key) == candidate_fingerprint
+                    )
+                    recovery_candidate_fingerprints[fingerprint_key] = candidate_fingerprint
                     owner_passed = (
                         bool(owner_result.get("quality_gates_passed"))
                         and not owner_undeclared
                         and set(required_owner_files).issubset(owner_written)
+                        and not recovery_no_progress
                     )
+                    if recovery_no_progress:
+                        logger.warning(
+                            "RECOVERY_NO_PROGRESS requirement_id=%s owner=%s generation=%d - "
+                            "the regenerated candidate for %s is byte-identical to the immediately "
+                            "prior recovery attempt for this exact (owner, required files) pair - "
+                            "the owner's own local gates passed, but this is not treated as "
+                            "legitimate recovery progress.",
+                            candidate_requirement_id, owner_id, generation, sorted(required_owner_files),
+                        )
                     logger.info(
                         "OWNER_RECOVERY_COMPLETED requirement_id=%s owner=%s generation=%d passed=%s",
                         candidate_requirement_id, owner_id, generation, owner_passed,

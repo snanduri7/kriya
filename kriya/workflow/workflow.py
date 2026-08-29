@@ -607,6 +607,7 @@ class WorkflowEngine:
         milestone_index: Optional[int] = None,
         milestone_total: Optional[int] = None,
         supplementary_context: str = "",
+        recovery_contract_block: str = "",
         established_files: Optional[List[str]] = None,
         predetermined_plan: Optional[str] = None,
         predetermined_design: Optional[str] = None,
@@ -646,6 +647,25 @@ class WorkflowEngine:
         regardless of whether Graph RAG's own relevance scoring surfaces them.
         Empty string (the default) preserves today's exact behavior for every
         other caller.
+
+        recovery_contract_block: Recovery Execution Contract (PRV-06,
+        2026-08-29) - deliberately NOT folded into supplementary_context
+        above, even though both eventually reach the Developer. A live
+        incident traced exactly why: supplementary_context's own documented
+        contract (this docstring, unchanged above) is "raw text folded into
+        convention_prompt... the one accumulator Planner/Architect/Developer
+        all share" - i.e. passive, cross-cutting reference material,
+        exactly what workflow_controller.py's own MA8.1 owner-recovery
+        MUST_FIX/MUST_PRESERVE/EVIDENCE/ACCEPTANCE text is NOT. A recovery
+        requirement is the CURRENT GOVERNING INSTRUCTION for this specific
+        invocation, not code context, a coding convention, or repository
+        history. Threaded onto AttemptContext.recovery_contract_block and,
+        from there, into retry_prompts.py's task-description builders
+        directly (prepended to the returned task_desc with its own
+        authoritative framing) - reaching the Developer as part of WHAT TO
+        DO, never folded into "existing code context" the model is free to
+        treat as passive background. Empty string (the default) is a
+        complete no-op for every caller outside owner-recovery.
 
         milestone_group_id/milestone_index/milestone_total: pure passthrough to
         every trace_logger.log_run() call below, no other effect on this
@@ -2095,6 +2115,7 @@ class WorkflowEngine:
             ecosystem_invariant_block=ecosystem_invariant_block,
             resource_lifecycle_block=resource_lifecycle_block,
             verification_contract_block=verification_contract_block,
+            recovery_contract_block=recovery_contract_block,
             required_files_prompt_block=required_files_prompt_block,
             required_dependencies_prompt_block=required_dependencies_prompt_block,
             expected_files_upfront=_expected_files_upfront,

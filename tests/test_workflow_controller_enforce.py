@@ -1239,6 +1239,94 @@ async def test_enforce_reopens_unique_upstream_owner_and_reruns_consumer(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_enforce_owner_recovery_no_progress_blocks_completion_and_never_resumes_consumer(tmp_path):
+    """Recovery Execution Contract (PRV-06, 2026-08-29): the live incident
+    this closes reopened pom.xml across THREE separate generations, each
+    regenerating byte-identical content that still failed the real (cross-
+    owner) requirement while its own local gates happily kept saying PASS -
+    burning a full consumer-retry cycle each time before the same defect
+    resurfaced. This test pins down generation 0 of that failure mode in
+    isolation: s1 owns build.config (baseline references OldMain), s2 is
+    the consumer that needs it to reference RequiredMain and cannot edit
+    build.config itself. When s1's owner-recovery attempt regenerates
+    build.config UNCHANGED (still OldMain), that must be treated as
+    RECOVERY_NO_PROGRESS regardless of its own quality_gates_passed=True -
+    owner_recovery_passed must be False, s1 must land in NEEDS_REVIEW (not
+    COMPLETED), and - critically - the consumer must NEVER be re-invoked
+    off the back of a no-progress "recovery". Compare
+    test_enforce_reopens_unique_upstream_owner_and_reruns_consumer just
+    above, which is the mirror-image PROGRESS case (corrected, non-
+    identical content) and must keep succeeding unchanged."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build config", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)],
+                provides=["entrypoint.configured"],
+            ),
+            Subtask(
+                id="s2", description="create application entrypoint", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app_entrypoint.txt", action=FileAction.CREATE)],
+                requires=["entrypoint.configured"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (tmp_path / "build.config").write_text("entrypoint=OldMain")
+            return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+        if len(calls) == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "misdirected_edit",
+                    "required_files": ["build.config"],
+                    "allowed_files": ["app_entrypoint.txt"],
+                },
+            }
+        # Generation 0's owner-recovery candidate: byte-identical to what
+        # was already there before recovery started - its own local gate
+        # (nothing there can see the cross-owner RequiredMain requirement)
+        # happily reports success anyway.
+        (tmp_path / "build.config").write_text("entrypoint=OldMain")
+        return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    # Only s1's initial pass, s2's failing attempt, and s1's one no-progress
+    # recovery attempt happened - the consumer was never re-invoked off the
+    # back of a "recovery" that changed nothing.
+    assert len(calls) == 3
+    assert result.legacy_result["status"] != "success"
+    assert len(result.legacy_result["plan_recovery_events"]) == 1
+    recovery_event = result.legacy_result["plan_recovery_events"][0]
+    assert recovery_event["failed_subtask"] == "s2"
+    assert recovery_event["reopened_owner"] == "s1"
+    assert recovery_event["owner_recovery_passed"] is False
+    assert recovery_event["generation"] == 0
+    owner_result = next(item for item in result.subtask_results if item.subtask_id == "s1")
+    assert owner_result.status == SubtaskStatus.NEEDS_REVIEW
+    assert "PLAN_RECOVERY_OWNER_FAILED" in owner_result.reason_codes
+    consumer_result = next(item for item in result.subtask_results if item.subtask_id == "s2")
+    assert consumer_result.status != SubtaskStatus.COMPLETED
+    # build.config on disk is still exactly the unfixed baseline - nothing
+    # about the "recovery" actually changed it.
+    assert (tmp_path / "build.config").read_text() == "entrypoint=OldMain"
+
+
+@pytest.mark.asyncio
 async def test_enforce_reopens_completed_predecessor_for_authoritative_deterministic_scope_conflict_instead_of_merging(tmp_path):
     """MA8 (spec §30, 'owner is a completed predecessor'): a DETERMINISTIC-
     authority scope conflict (attribution_tier="authoritative_deterministic"
@@ -1548,7 +1636,7 @@ async def test_enforce_reopens_owner_with_grounded_diagnosis_and_commits_plan_at
                 },
             }
         if len(calls) == 3:
-            assert diagnosis in kwargs["supplementary_context"]
+            assert diagnosis in kwargs["recovery_contract_block"]
             (sandbox / source_path).write_text("complete\n")
             return {"status": "success", "quality_gates_passed": True, "files": [source_path]}
         return {"status": "success", "quality_gates_passed": True, "files": [test_path]}
@@ -2833,7 +2921,7 @@ async def test_enforce_reopened_owner_receives_grounded_requirement_not_generic_
     assert len(calls) == 6
     # The reopened owner (call index 4, s1's owner_recovery) must have
     # received the exact grounded requirement, not generic framing.
-    owner_recovery_context = calls[4]["supplementary_context"]
+    owner_recovery_context = calls[4]["recovery_contract_block"]
     assert "MUST FIX" in owner_recovery_context
     assert "pom.xml is missing the JUnit 5 dependency" in owner_recovery_context
     assert "EVIDENCE" in owner_recovery_context
@@ -2909,7 +2997,7 @@ async def test_enforce_cross_owner_recovery_generic_non_maven_shape(tmp_path):
 
     assert result.legacy_result["status"] == "success"
     assert len(calls) == 5
-    owner_recovery_context = calls[3]["supplementary_context"]
+    owner_recovery_context = calls[3]["recovery_contract_block"]
     assert "MUST FIX" in owner_recovery_context
     assert "pytest dependency" in owner_recovery_context
     assert "ModuleNotFoundError" in owner_recovery_context
@@ -3049,7 +3137,13 @@ async def test_enforce_bounds_recovery_attempts_per_downstream_owner_pair(tmp_pa
             return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
         if n >= 3 and n % 2 == 1:
             # every owner_recovery call (n=3,5,7) "succeeds" its own narrow
-            # gate but never actually resolves the downstream requirement.
+            # gate but never actually resolves the downstream requirement -
+            # each writes DISTINCT (not byte-identical) content so this
+            # stays a pure test of the surrounding generation-count bound,
+            # not of RECOVERY_NO_PROGRESS (see
+            # test_enforce_owner_recovery_no_progress_blocks_completion_and_
+            # never_resumes_consumer for that, dedicated, invariant).
+            (tmp_path / "pom.xml").write_text(f"<project><attempt-{n}/></project>")
             return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
         # every s3 attempt - the initial one (n=2) and every consumer_retry
         # (n=4,6,8) - hits the same unresolved requirement, forever.
@@ -3182,7 +3276,7 @@ async def test_enforce_second_owner_recovery_preserves_earlier_requirements_must
     # Test F: the SECOND owner-recovery prompt (call index 5) must carry
     # forward the FIRST requirement's own MUST_FIX text as something to
     # preserve, not just its own new one.
-    second_owner_recovery_context = calls[5]["supplementary_context"]
+    second_owner_recovery_context = calls[5]["recovery_contract_block"]
     assert "MUST FIX" in second_owner_recovery_context
     assert "Jackson dependency" in second_owner_recovery_context
     assert "MUST PRESERVE" in second_owner_recovery_context
@@ -3557,7 +3651,7 @@ async def test_enforce_duplicate_type_shape_resolves_effective_owner_via_executi
     # calls[3] is s2's real owner-recovery call - proof the fallback
     # actually ran, not just logged.
     assert calls[3]["allowed_write_relpaths"] == ["App.java"]
-    owner_recovery_context = calls[3]["supplementary_context"]
+    owner_recovery_context = calls[3]["recovery_contract_block"]
     assert "MUST FIX" in owner_recovery_context
     assert "InMemoryService is already declared in App.java" in owner_recovery_context
     events = result.legacy_result["plan_recovery_events"]
@@ -3675,7 +3769,7 @@ async def test_enforce_deny_all_runtime_verification_failure_routes_through_owne
     assert result.legacy_result["status"] == "success"
     assert len(calls) == 5
     assert calls[3]["allowed_write_relpaths"] == ["App.java"]
-    owner_recovery_context = calls[3]["supplementary_context"]
+    owner_recovery_context = calls[3]["recovery_contract_block"]
     assert "MUST FIX" in owner_recovery_context
     events = result.legacy_result["plan_recovery_events"]
     assert len(events) == 1

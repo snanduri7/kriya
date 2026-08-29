@@ -369,6 +369,16 @@ class AttemptContext:
     ecosystem_invariant_block: str
     resource_lifecycle_block: str
     verification_contract_block: str
+    # Recovery Execution Contract (PRV-06, 2026-08-29) - the MA8.1 owner-
+    # recovery MUST_FIX/MUST_PRESERVE/EVIDENCE/ACCEPTANCE text (or the
+    # simpler consumer_retry "upstream recovery completed" note), threaded
+    # here as its OWN field rather than folded into skills_prompt/
+    # supplementary_context - see run_generation_workflow's own
+    # recovery_contract_block docstring (workflow.py) for the live incident
+    # this closes: that shared accumulator is documented, deliberately, as
+    # passive cross-agent reference material, exactly what a recovery
+    # requirement is NOT. Empty string for every non-recovery invocation.
+    recovery_contract_block: str
     required_files_prompt_block: str
     required_dependencies_prompt_block: str
     expected_files_upfront: List[str]
@@ -2202,6 +2212,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 resource_lifecycle_block=ctx.resource_lifecycle_block,
                 verification_contract_block=ctx.verification_contract_block,
                 retry_package=retry_package,
+                recovery_contract_block=ctx.recovery_contract_block,
             )
             if use_api_contract_recovery:
                 contract = state.api_contract_recovery
@@ -2320,6 +2331,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
             retry_package=retry_package,
+            recovery_contract_block=ctx.recovery_contract_block,
         )
         logger.info(f"Fallback-targeted retry: focusing on {', '.join(state.last_implicated_files)}.")
 
@@ -2460,6 +2472,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
             retry_package=retry_package,
+            recovery_contract_block=ctx.recovery_contract_block,
         )
 
         # Track model hops
