@@ -1162,6 +1162,10 @@ async def test_enforce_reopens_unique_upstream_owner_and_reruns_consumer(tmp_pat
         "ownership_revalidated": True,
         "revalidation_basis": "unique approved upstream file owner",
         "owner_recovery_passed": True,
+        # MA8.1 completion (2026-08-29 v2): requirement-scoped identity,
+        # not just the owner id - see _cross_owner_obligation_id.
+        "requirement_id": "recovery.s3.s1.pom.xml.misdirected_edit.0",
+        "generation": 0,
     }]
 
 
@@ -2563,11 +2567,24 @@ def test_revise_plan_for_grounded_scope_owner_does_not_invert_dependency_directi
 
 
 def test_cross_owner_obligation_id_stable_and_scoped():
-    id1 = _cross_owner_obligation_id("s4", "s1", ["pom.xml"])
-    id2 = _cross_owner_obligation_id("s4", "s1", ["pom.xml"])
-    id3 = _cross_owner_obligation_id("s4", "s2", ["pom.xml"])
+    id1 = _cross_owner_obligation_id("s4", "s1", ["pom.xml"], "compile", 0)
+    id2 = _cross_owner_obligation_id("s4", "s1", ["pom.xml"], "compile", 0)
+    id3 = _cross_owner_obligation_id("s4", "s2", ["pom.xml"], "compile", 0)
     assert id1 == id2
     assert id1 != id3
+
+
+def test_cross_owner_obligation_id_distinguishes_failure_family_and_generation():
+    """Test C-equivalent: same origin/owner/files, different failure_family
+    or generation, must NOT collide - this is what lets a genuinely new
+    requirement coexist with (rather than silently overwrite) an earlier
+    one on the same owner+artifact."""
+    base = _cross_owner_obligation_id("s4", "s3", ["MainApplication.java"], "diagnosis_mismatch", 0)
+    different_family = _cross_owner_obligation_id("s4", "s3", ["MainApplication.java"], "structural_corruption", 0)
+    different_generation = _cross_owner_obligation_id("s4", "s3", ["MainApplication.java"], "diagnosis_mismatch", 1)
+    assert base != different_family
+    assert base != different_generation
+    assert different_family != different_generation
 
 
 def _scope_conflict_fixture(reason="grounded reason", raw_evidence="javac error", required_files=("pom.xml",)):
@@ -2594,7 +2611,7 @@ def test_get_or_create_cross_owner_obligation_creates_with_real_evidence():
 
     record = _get_or_create_cross_owner_obligation(
         ledger, originating_subtask_id="s4", owner_subtask_id="s1",
-        required_files=["pom.xml"], scope_conflict=scope_conflict, revision=1,
+        required_files=["pom.xml"], scope_conflict=scope_conflict, generation=0, revision=1,
     )
 
     assert record is not None
@@ -2610,12 +2627,15 @@ def test_get_or_create_cross_owner_obligation_creates_with_real_evidence():
 
 
 def test_get_or_create_cross_owner_obligation_is_sticky_across_a_failed_attempt():
-    """A second call for the SAME (originating subtask, owner, required
-    files) while the obligation is still VIOLATED must return the exact
-    same record - even when the current scope_conflict's own evidence is
-    weaker/different (e.g. a later static-rule violation instead of the
-    original compiler error) - never silently regressing the MUST_FIX
-    text an owner-recovery prompt depends on."""
+    """A second call for the SAME requirement (same originating subtask,
+    owner, required files, failure_family, AND generation) while it is
+    still VIOLATED must reuse the exact same MUST_FIX/evidence CONTENT -
+    even when the current scope_conflict's own evidence is weaker/
+    different (e.g. a later static-rule violation instead of the original
+    compiler error) - never silently regressing the text an owner-recovery
+    prompt depends on. A fresh history entry IS still recorded each time
+    (Test B-equivalent: recurrence must remain countable, not invisible -
+    see the function's own docstring for why)."""
     ledger = ObligationLedger()
     strong_evidence = _scope_conflict_fixture(
         reason="pom.xml is missing the JUnit 5 dependency",
@@ -2623,7 +2643,7 @@ def test_get_or_create_cross_owner_obligation_is_sticky_across_a_failed_attempt(
     )
     first = _get_or_create_cross_owner_obligation(
         ledger, originating_subtask_id="s4", owner_subtask_id="s1",
-        required_files=["pom.xml"], scope_conflict=strong_evidence, revision=1,
+        required_files=["pom.xml"], scope_conflict=strong_evidence, generation=0, revision=1,
     )
 
     weaker_evidence = _scope_conflict_fixture(
@@ -2631,17 +2651,18 @@ def test_get_or_create_cross_owner_obligation_is_sticky_across_a_failed_attempt(
     )
     second = _get_or_create_cross_owner_obligation(
         ledger, originating_subtask_id="s4", owner_subtask_id="s1",
-        required_files=["pom.xml"], scope_conflict=weaker_evidence, revision=2,
+        required_files=["pom.xml"], scope_conflict=weaker_evidence, generation=0, revision=2,
     )
 
-    assert second is first
+    assert second.id == first.id
     assert second.evidence["raw_evidence"] == "package org.junit.jupiter.api does not exist"
+    assert len(ledger.history(first.id)) == 2
 
 
 def test_get_or_create_cross_owner_obligation_no_ledger_returns_none():
     assert _get_or_create_cross_owner_obligation(
         None, originating_subtask_id="s4", owner_subtask_id="s1",
-        required_files=["pom.xml"], scope_conflict=_scope_conflict_fixture(), revision=1,
+        required_files=["pom.xml"], scope_conflict=_scope_conflict_fixture(), generation=0, revision=1,
     ) is None
 
 
@@ -2823,3 +2844,386 @@ async def test_enforce_cross_owner_recovery_generic_non_maven_shape(tmp_path):
     assert "MUST FIX" in owner_recovery_context
     assert "pytest dependency" in owner_recovery_context
     assert "ModuleNotFoundError" in owner_recovery_context
+
+
+@pytest.mark.asyncio
+async def test_enforce_permits_a_second_distinct_generation_recovery_on_the_same_owner(tmp_path):
+    """MA8.1 completion, Test A: the exact live PRV-06 shape - s3's first
+    recovery of s1 (pom.xml) succeeds, but s3's OWN retry then surfaces a
+    SECOND, genuinely different requirement on the SAME owner+file (same
+    required_files, but a different failure_type: "misdirected_edit" then
+    "diagnosis_mismatch" - mirroring the real incident where both
+    occurrences happened to share the same failure_type yet were still
+    different requirements). A bare owner-id one-shot guard would silently
+    block this second recovery; the requirement-scoped identity must
+    permit it. Expected: two owner-recovery cycles run, both requirement
+    ids differ (R1.id != R2.id) even though owner/originating-subtask/
+    required_files are identical, and the run still finishes as an overall
+    success once the second recovery actually resolves the requirement."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s3", description="create application", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="src/App.java", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    def _conflict(failure_type):
+        return {
+            "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+            "failure_type": failure_type,
+            "required_files": ["pom.xml"],
+            "allowed_files": ["src/App.java"],
+        }
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            # s3 attempt 1 - first requirement.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": _conflict("misdirected_edit"),
+            }
+        if n == 3:
+            # s1 owner_recovery, generation 0.
+            (tmp_path / "pom.xml").write_text("<project><dependencies/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 4:
+            # s3 consumer_retry, generation 0 - passes its own gate for
+            # requirement 1 but surfaces a SECOND, distinct requirement.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": _conflict("diagnosis_mismatch"),
+            }
+        if n == 5:
+            # s1 owner_recovery, generation 1 - the second, real fix.
+            (tmp_path / "pom.xml").write_text("<project><dependencies><junit/></dependencies></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        # s3 consumer_retry, generation 1 - now genuinely passes.
+        (tmp_path / "src").mkdir(exist_ok=True)
+        (tmp_path / "src" / "App.java").write_text("class App {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["src/App.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert result.legacy_result["quality_gates_passed"] is True
+    assert len(calls) == 6
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 2
+    assert events[0]["generation"] == 0
+    assert events[1]["generation"] == 1
+    assert events[0]["requirement_id"] == "recovery.s3.s1.pom.xml.misdirected_edit.0"
+    assert events[1]["requirement_id"] == "recovery.s3.s1.pom.xml.diagnosis_mismatch.1"
+    # The defining claim of Test A: two genuinely different requirements
+    # on the same owner get two genuinely different requirement ids.
+    assert events[0]["requirement_id"] != events[1]["requirement_id"]
+    assert events[0]["reopened_owner"] == events[1]["reopened_owner"] == "s1"
+
+
+@pytest.mark.asyncio
+async def test_enforce_bounds_recovery_attempts_per_downstream_owner_pair(tmp_path):
+    """MA8.1 completion, Tests B/G: even though every completed recovery
+    cycle advances the generation counter (so the requirement id keeps
+    changing and never itself hits its own per-id cap), the SURROUNDING
+    loop is still bounded by the existing, unchanged
+    _MAX_PLAN_SCOPE_REVISION_ATTEMPTS=3 - the global recovery budget this
+    module already enforced before MA8.1 ever existed. A requirement that
+    keeps recurring (never actually gets fixed) must not reopen its owner
+    forever."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s3", description="create application", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="src/App.java", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+    conflict = {
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+        "failure_type": "compile",
+        "required_files": ["pom.xml"],
+        "allowed_files": ["src/App.java"],
+    }
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n >= 3 and n % 2 == 1:
+            # every owner_recovery call (n=3,5,7) "succeeds" its own narrow
+            # gate but never actually resolves the downstream requirement.
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        # every s3 attempt - the initial one (n=2) and every consumer_retry
+        # (n=4,6,8) - hits the same unresolved requirement, forever.
+        return {
+            "status": "failed", "quality_gates_passed": False, "files": [],
+            "plan_scope_conflict": dict(conflict),
+        }
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    # 1 (s1 initial) + 1 (s3's own first attempt) + 3 * (owner_recovery,
+    # consumer_retry) = 8.
+    assert len(calls) == 8
+    assert result.legacy_result["status"] != "success"
+    events = result.legacy_result["plan_recovery_events"]
+    assert [event["generation"] for event in events] == [0, 1, 2]
+    requirement_ids = {event["requirement_id"] for event in events}
+    # Three distinct requirement ids (generation keeps advancing) - the
+    # bound comes from the surrounding loop, not from any one id's own
+    # history ever reaching the cap.
+    assert len(requirement_ids) == 3
+
+
+@pytest.mark.asyncio
+async def test_enforce_second_owner_recovery_preserves_earlier_requirements_must_fix_text(tmp_path):
+    """MA8.1 completion, Tests D/F: two DIFFERENT downstream subtasks (s3,
+    s4) independently discover two DIFFERENT requirements on the SAME
+    upstream owner (s1, pom.xml). Both requirements must be able to exist
+    (Test D - simultaneously active, distinct ids scoped by originating
+    subtask as well as failure_family/generation), and the SECOND owner
+    recovery's own prompt must carry forward the FIRST requirement's
+    MUST_FIX text as a MUST_PRESERVE entry (Test F / invariant 6 - "a
+    later recovery of an owner must preserve corrections established by
+    earlier active recovery requirements")."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s3", description="create App", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="src/App.java", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s4", description="create tests", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1", "s3"],
+                planned_files=[PlannedFile(path="src/AppTest.java", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            # s1 initial.
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            # s3 attempt 1 - first requirement, grounded on JUnit.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "reason": "pom.xml is missing the JUnit 5 dependency required by App.java",
+                    "raw_evidence": "package org.junit.jupiter.api does not exist",
+                    "required_files": ["pom.xml"],
+                    "allowed_files": ["src/App.java"],
+                },
+            }
+        if n == 3:
+            # s1 owner_recovery for s3's requirement - fixes it for real.
+            (tmp_path / "pom.xml").write_text("<project><dependencies><junit/></dependencies></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 4:
+            # s3 consumer_retry - passes.
+            (tmp_path / "src").mkdir(exist_ok=True)
+            (tmp_path / "src" / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["src/App.java"]}
+        if n == 5:
+            # s4 attempt 1 - a DIFFERENT requirement, grounded on Jackson.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "reason": "pom.xml is missing the Jackson dependency required by AppTest.java",
+                    "raw_evidence": "package com.fasterxml.jackson.databind does not exist",
+                    "required_files": ["pom.xml"],
+                    "allowed_files": ["src/AppTest.java"],
+                },
+            }
+        if n == 6:
+            # s1 owner_recovery for s4's requirement.
+            (tmp_path / "pom.xml").write_text(
+                "<project><dependencies><junit/><jackson/></dependencies></project>",
+            )
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        # s4 consumer_retry - passes.
+        (tmp_path / "src" / "AppTest.java").write_text("class AppTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["src/AppTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 7
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 2
+    # Test D: two simultaneously-active requirements on the same owner,
+    # from two different origins, get two distinct ids.
+    assert events[0]["requirement_id"] == "recovery.s3.s1.pom.xml.compile.0"
+    assert events[1]["requirement_id"] == "recovery.s4.s1.pom.xml.compile.0"
+    assert events[0]["requirement_id"] != events[1]["requirement_id"]
+    # Test F: the SECOND owner-recovery prompt (call index 5) must carry
+    # forward the FIRST requirement's own MUST_FIX text as something to
+    # preserve, not just its own new one.
+    second_owner_recovery_context = calls[5]["supplementary_context"]
+    assert "MUST FIX" in second_owner_recovery_context
+    assert "Jackson dependency" in second_owner_recovery_context
+    assert "MUST PRESERVE" in second_owner_recovery_context
+    assert "JUnit 5 dependency required by App.java" in second_owner_recovery_context
+
+
+def test_get_or_create_cross_owner_obligation_satisfying_one_generation_leaves_another_untouched():
+    """MA8.1 completion, Test E: marking one requirement's obligation
+    SATISFIED (the real acceptance signal is always the ORIGINATING
+    subtask's own consumer_retry passing - see workflow_controller.py's
+    own comment where this exact ObligationRecord construction lives)
+    must not incidentally satisfy a DIFFERENT requirement that happens to
+    share the same owner+artifact - satisfaction is per requirement id,
+    never per owner."""
+    ledger = ObligationLedger()
+    first = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s3", owner_subtask_id="s1",
+        required_files=["pom.xml"], scope_conflict=_scope_conflict_fixture(reason="needs junit"),
+        generation=0, revision=1,
+    )
+    second = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s4", owner_subtask_id="s1",
+        required_files=["pom.xml"], scope_conflict=_scope_conflict_fixture(reason="needs jackson"),
+        generation=0, revision=1,
+    )
+    assert first.id != second.id
+
+    # s3's own retry passes - only s3's requirement is satisfied.
+    ledger.record(ObligationRecord(
+        id=first.id, kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        description=first.description, source="test", revision=2,
+        evidence=first.evidence, owner_subtask_id=first.owner_subtask_id,
+        terminal_required=False, repair_scope=first.repair_scope,
+    ))
+
+    assert ledger.current(first.id).status == ObligationStatus.SATISFIED
+    assert ledger.current(second.id).status == ObligationStatus.VIOLATED
+
+
+@pytest.mark.asyncio
+async def test_enforce_generic_non_maven_shape_permits_a_second_distinct_recovery(tmp_path):
+    """MA8.1 completion, Test H: the genericity proof for the two-
+    requirement shape (mirrors test_enforce_cross_owner_recovery_generic_
+    non_maven_shape, extended to a second, distinct recovery cycle) -
+    nothing about requirement-scoped identity or the bounded loop is
+    Java/Maven-specific."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pyproject.toml", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="create tests", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="test_service.py", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    def _conflict(failure_type):
+        return {
+            "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+            "failure_type": failure_type,
+            "required_files": ["pyproject.toml"],
+            "allowed_files": ["test_service.py"],
+        }
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pyproject.toml").write_text("[project]\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pyproject.toml"]}
+        if n == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": _conflict("missing_dependency"),
+            }
+        if n == 3:
+            (tmp_path / "pyproject.toml").write_text("[project]\ndependencies = ['pytest']\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pyproject.toml"]}
+        if n == 4:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": _conflict("import_error"),
+            }
+        if n == 5:
+            (tmp_path / "pyproject.toml").write_text(
+                "[project]\ndependencies = ['pytest', 'requests']\n",
+            )
+            return {"status": "success", "quality_gates_passed": True, "files": ["pyproject.toml"]}
+        (tmp_path / "test_service.py").write_text("def test_x(): pass\n")
+        return {"status": "success", "quality_gates_passed": True, "files": ["test_service.py"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 6
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 2
+    assert events[0]["requirement_id"] != events[1]["requirement_id"]
+    assert events[0]["generation"] == 0
+    assert events[1]["generation"] == 1

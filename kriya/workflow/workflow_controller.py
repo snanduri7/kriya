@@ -768,8 +768,57 @@ def resolve_scope_conflict_owners(
 
 def _cross_owner_obligation_id(
     originating_subtask_id: str, owner_subtask_id: str, required_files: List[str],
+    failure_family: str, generation: int,
 ) -> str:
-    return f"recovery.{originating_subtask_id}.{owner_subtask_id}.{'.'.join(sorted(required_files))}"
+    """MA8.1 completion (2026-08-29 v2 design review): identity is keyed by
+    REQUIREMENT, not by owner alone - see this module's own "Requirement-
+    scoped repeated owner recovery" note (near `recovery_generation_by_key`
+    below) for the live incident this closes. `failure_family` is the
+    EXISTING, already-typed `scope_conflict["failure_type"]` (compile,
+    diagnosis_mismatch, misdirected_edit, ...) - deliberately NOT a hash of
+    free-text requirement prose (the design review's own explicit
+    instruction: "identity must be based primarily on deterministic/typed
+    information"). `generation` is a monotonic counter, incremented once
+    per completed owner-recovery-and-downstream-retry cycle for this exact
+    (origin, owner, files) tuple (see `recovery_generation_by_key`) - NOT
+    incremented per raw occurrence, so a requirement recurring *within* the
+    same still-in-progress cycle keeps the SAME id (sticky - see
+    `_get_or_create_cross_owner_obligation`), while a requirement that
+    surfaces *after* a full cycle has already completed gets a NEW id even
+    when its failure_family happens to match the prior one - exactly the
+    live PRV-06 case (both occurrences were "diagnosis_mismatch", but the
+    second arose only after the first owner-recovery-plus-retry cycle had
+    already finished)."""
+    return (
+        f"recovery.{originating_subtask_id}.{owner_subtask_id}."
+        f"{'.'.join(sorted(required_files))}.{failure_family}.{generation}"
+    )
+
+
+def _prior_cross_owner_musts(
+    ledger: Optional[ObligationLedger], *, owner_subtask_id: str, required_files: List[str],
+) -> List[str]:
+    """Every earlier-generation CROSS_OWNER_ARTIFACT_REQUIREMENT's own
+    MUST_FIX text for this exact owner+artifact combination, regardless of
+    which originating subtask or failure_family raised it - folded into a
+    LATER generation's own MUST_PRESERVE (see _get_or_create_cross_owner_
+    obligation) so a second recovery of the same owner cannot silently
+    regress a correction an earlier, still-relevant requirement already
+    established (2026-08-29 v2 design review, invariant 6: "a later
+    recovery of an owner must preserve corrections established by earlier
+    active recovery requirements unless authoritative evidence explicitly
+    invalidates them"). Uses the ledger's own current_by_kind() - no new
+    query surface - and filters by the same required_files tuple already
+    stored in repair_scope."""
+    if ledger is None:
+        return []
+    target_scope = tuple(sorted(required_files))
+    musts: List[str] = []
+    for record in ledger.current_by_kind(ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT):
+        if record.owner_subtask_id != owner_subtask_id or record.repair_scope != target_scope:
+            continue
+        musts.extend(record.evidence.get("must_fix", []))
+    return musts
 
 
 def _get_or_create_cross_owner_obligation(
@@ -779,28 +828,38 @@ def _get_or_create_cross_owner_obligation(
     owner_subtask_id: str,
     required_files: List[str],
     scope_conflict: Dict[str, Any],
+    generation: int,
     revision: Any,
 ) -> Optional[ObligationRecord]:
-    """MA8.1 (PRV-06, 2026-08-29): the single place a downstream failure's
-    grounded requirement for an upstream owner becomes a durable, ledger-
-    tracked fact instead of a one-shot prompt string that can be lost or
-    overwritten - see ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT's own
-    docstring for the live incident (a downstream test subtask proved an
-    upstream build-manifest owner was missing a dependency; the owner was
-    reopened with a generic "preserve brownfield identity" framing instead
-    of that specific requirement, regenerated an equally incomplete
-    manifest, and the same failure recurred).
+    """MA8.1 (PRV-06, 2026-08-29; completed 2026-08-29 v2): the single place
+    a downstream failure's grounded requirement for an upstream owner
+    becomes a durable, ledger-tracked fact instead of a one-shot prompt
+    string that can be lost or overwritten - see ObligationKind.
+    CROSS_OWNER_ARTIFACT_REQUIREMENT's own docstring for the original live
+    incident, and this module's "Requirement-scoped repeated owner
+    recovery" note for the v2 completion (a SECOND, genuinely different
+    requirement on the same owner was being silently blocked by an owner-
+    level one-shot guard).
 
-    Sticky by construction: if this EXACT obligation (same originating
-    subtask, same owner, same required files) is already on record as
+    Sticky WITHIN one generation: if this EXACT requirement (same
+    originating subtask, owner, required files, failure_family, AND
+    generation - see _cross_owner_obligation_id) is already on record as
     VIOLATED, returns it UNCHANGED rather than re-deriving from the
     CURRENT scope_conflict - a later attempt's own grounded evidence can
     be weaker or differently shaped than the first, strongest occurrence
-    (confirmed live: the second failure that recurred was a static-rule
-    violation, not the original compiler error) - the obligation's own
-    MUST_FIX/evidence must not silently regress just because a later
-    symptom looks different. Reuses ObligationRecord as-is (no new
-    dataclass, per the 2026-08-29 design review) - owner_subtask_id and
+    within the same cycle - the obligation's own MUST_FIX/evidence must
+    not silently regress just because a later symptom looks different. A
+    NEW generation (see the caller's own `recovery_generation_by_key`)
+    always gets a fresh obligation, even when failure_family repeats -
+    genuinely different requirements are allowed to coexist rather than
+    collapsing into one.
+
+    A new obligation's own MUST_PRESERVE always folds in every prior
+    generation's MUST_FIX for the same owner+artifact (_prior_cross_owner_
+    musts) - the mechanism behind invariant 6 (later recovery must
+    preserve earlier corrections).
+
+    Reuses ObligationRecord as-is (no new dataclass) - owner_subtask_id and
     repair_scope are already exactly the fields this needs; must_fix/
     must_preserve/acceptance_conditions/raw_evidence live in the free-form
     `evidence` dict.
@@ -811,19 +870,44 @@ def _get_or_create_cross_owner_obligation(
     hook's own "no ledger -> no-op" convention)."""
     if ledger is None:
         return None
-    obligation_id = _cross_owner_obligation_id(originating_subtask_id, owner_subtask_id, required_files)
+    failure_family = scope_conflict.get("failure_type") or "unknown"
+    obligation_id = _cross_owner_obligation_id(
+        originating_subtask_id, owner_subtask_id, required_files, failure_family, generation,
+    )
     existing = ledger.current(obligation_id)
     if existing is not None and existing.status == ObligationStatus.VIOLATED:
-        return existing
+        # Sticky CONTENT (must_fix/must_preserve/evidence unchanged - never
+        # regresses to a weaker later symptom), but a NEW history entry is
+        # still recorded each time - recurrence must remain a durable,
+        # countable ledger fact (matching PROCESS_BOUNDARY_COMPATIBILITY's
+        # own precedent), not silently invisible. This is what gives the
+        # caller's own bound check (ledger.history(id) vs
+        # _MAX_PLAN_SCOPE_REVISION_ATTEMPTS) real teeth - a requirement
+        # that keeps recurring within the same generation actually
+        # exhausts its own budget instead of looking, forever, like a
+        # single untouched record.
+        recurring = ObligationRecord(
+            id=obligation_id, kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
+            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+            description=existing.description, source="workflow_controller.owner_recovery",
+            revision=revision, evidence=existing.evidence,
+            owner_subtask_id=existing.owner_subtask_id, terminal_required=False,
+            repair_scope=existing.repair_scope,
+        )
+        ledger.record(recurring)
+        return recurring
     grounded_reason = scope_conflict.get("reason") or "a grounded requirement discovered by the reopened downstream subtask"
+    must_preserve = [
+        "existing project/module identity",
+        "existing configuration and declarations unrelated to this requirement",
+    ] + _prior_cross_owner_musts(ledger, owner_subtask_id=owner_subtask_id, required_files=required_files)
     evidence = {
         "must_fix": [grounded_reason],
-        "must_preserve": [
-            "existing project/module identity",
-            "existing configuration and declarations unrelated to this requirement",
-        ],
+        "must_preserve": must_preserve,
         "raw_evidence": scope_conflict.get("raw_evidence") or "",
         "required_artifacts": list(required_files),
+        "failure_family": failure_family,
+        "generation": generation,
         "acceptance_conditions": [
             f"subtask {originating_subtask_id} passes its own Quality Gates without the same "
             "grounded requirement recurring",
@@ -844,6 +928,11 @@ def _get_or_create_cross_owner_obligation(
         repair_scope=tuple(sorted(required_files)),
     )
     ledger.record(record)
+    logger.info(
+        "CROSS_OWNER_REQUIREMENT_CREATED requirement_id=%s origin=%s owner=%s "
+        "failure_family=%s generation=%d",
+        obligation_id, originating_subtask_id, owner_subtask_id, failure_family, generation,
+    )
     return record
 
 
@@ -2450,7 +2539,27 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         subtask_results: List[SubtaskResult] = []
         subtask_call_results: List[Dict[str, Any]] = []
         knowledge_gap_break: Optional[Dict[str, Any]] = None
-        recovered_owner_ids: set[str] = set()
+        # MA8.1 completion (2026-08-29 v2 design review): "Requirement-
+        # scoped repeated owner recovery." A live PRV-06 run proved a bare
+        # owner-id set (reopen each owner at most once per run) is the
+        # wrong abstraction - it blocked a SECOND, genuinely different
+        # grounded requirement on the same owner (s3/MainApplication.java)
+        # purely because s3 had already been reopened once for a DIFFERENT
+        # requirement earlier in the same run. Replaced with a per-
+        # (originating subtask, owner, required files) generation counter -
+        # incremented once a full owner-recovery-and-downstream-retry cycle
+        # completes for that exact tuple (see the increment site near
+        # execution_role="consumer_retry" below), never per raw occurrence.
+        # A requirement recurring WITHIN the current generation is sticky
+        # (same obligation id, same MUST_FIX - see _get_or_create_cross_
+        # owner_obligation); a requirement surfacing AFTER a generation has
+        # completed gets a fresh id and is eligible for a new reopening.
+        # Boundedness is preserved WITHOUT a new retry engine or budget: a
+        # given requirement id's own recovery attempts are capped by
+        # reusing _MAX_PLAN_SCOPE_REVISION_ATTEMPTS (the same constant the
+        # sibling DAG-mutation revision loop already uses), checked via the
+        # ledger's own history() - no new counter needed for that part.
+        recovery_generation_by_key: Dict[Tuple[str, str, Tuple[str, ...]], int] = {}
         plan_recovery_events: List[Dict[str, Any]] = []
 
         async def _invoke_bounded_subtask(
@@ -2781,18 +2890,48 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "terminates with the scope conflict unresolved.",
                         run_id, subtask.id, _MAX_PLAN_SCOPE_REVISION_ATTEMPTS, grounded_scope_files,
                     )
-            owner_map = resolve_scope_conflict_owners(
-                plan, list(scope_conflict.get("required_files", [])), subtask,
-            ) if scope_conflict else {}
-            required_scope_files = set(scope_conflict.get("required_files", []))
-            resolved_scope_files = {
-                path for owner_paths in owner_map.values() for path in owner_paths
-            }
-            if len(owner_map) == 1 and resolved_scope_files == required_scope_files:
+            # MA8.1 completion (2026-08-29 v2): looped, not one-shot - a
+            # downstream retry after a successful owner recovery may
+            # surface a genuinely NEW grounded requirement on the SAME
+            # owner (see "Requirement-scoped repeated owner recovery"
+            # near recovery_generation_by_key's own declaration above).
+            # Each iteration re-resolves owner_map fresh against the
+            # CURRENT scope_conflict; boundedness comes from each
+            # requirement's own attempt count (via the ledger's history()),
+            # not from a blanket "this owner already ran once" guard.
+            for _owner_recovery_cycle in range(_MAX_PLAN_SCOPE_REVISION_ATTEMPTS):
+                owner_map = resolve_scope_conflict_owners(
+                    plan, list(scope_conflict.get("required_files", [])), subtask,
+                ) if scope_conflict else {}
+                required_scope_files = set(scope_conflict.get("required_files", []))
+                resolved_scope_files = {
+                    path for owner_paths in owner_map.values() for path in owner_paths
+                }
+                if not (len(owner_map) == 1 and resolved_scope_files == required_scope_files):
+                    break
                 owner_id, required_owner_files = next(iter(owner_map.items()))
                 owner = plan.subtask_by_id(owner_id)
-                if owner is not None and owner_id not in recovered_owner_ids:
-                    recovered_owner_ids.add(owner_id)
+                if owner is None:
+                    break
+                generation_key = (subtask.id, owner_id, tuple(sorted(required_owner_files)))
+                generation = recovery_generation_by_key.get(generation_key, 0)
+                candidate_requirement_id = _cross_owner_obligation_id(
+                    subtask.id, owner_id, required_owner_files,
+                    scope_conflict.get("failure_type") or "unknown", generation,
+                )
+                prior_attempts = (
+                    len(obligation_ledger.history(candidate_requirement_id))
+                    if obligation_ledger is not None else 0
+                )
+                if prior_attempts >= _MAX_PLAN_SCOPE_REVISION_ATTEMPTS:
+                    logger.warning(
+                        "WorkflowController enforce run %r: requirement %r exhausted its "
+                        "bounded recovery attempts (%d) - stopping rather than reopening %r "
+                        "again for the same unresolved requirement.",
+                        run_id, candidate_requirement_id, prior_attempts, owner_id,
+                    )
+                    break
+                if owner is not None:
                     invalidated = transitive_subtask_dependents(plan, owner_id)
                     for invalidated_id in invalidated:
                         approved_stage_states[invalidated_id] = "pending"
@@ -2818,17 +2957,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # CROSS_OWNER_ARTIFACT_REQUIREMENT obligation and
                     # threaded explicitly into the owner's own Developer
                     # prompt - the exact requirement-propagation gap the
-                    # live incident exposed. Sticky across a failed owner
-                    # attempt (see _get_or_create_cross_owner_obligation's
-                    # own docstring) - a second reopening for the SAME
-                    # unresolved requirement reuses the SAME MUST_FIX text,
-                    # never degrading back to generic brownfield framing.
+                    # live incident exposed. Sticky within one generation
+                    # (see _get_or_create_cross_owner_obligation's own
+                    # docstring) - a recurring unresolved requirement reuses
+                    # the SAME MUST_FIX text, never degrading back to
+                    # generic brownfield framing; a genuinely new generation
+                    # gets its own fresh requirement instead of being
+                    # silently blocked.
                     cross_owner_obligation = _get_or_create_cross_owner_obligation(
                         obligation_ledger,
                         originating_subtask_id=subtask.id,
                         owner_subtask_id=owner_id,
                         required_files=required_owner_files,
                         scope_conflict=scope_conflict,
+                        generation=generation,
                         revision=len(plan_recovery_events),
                     )
                     recovery_context = _build_owner_recovery_context(
@@ -2837,6 +2979,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         required_owner_files=required_owner_files,
                         cross_owner_obligation=cross_owner_obligation,
                         scope_conflict=scope_conflict,
+                    )
+                    logger.info(
+                        "OWNER_RECOVERY_STARTED requirement_id=%s owner=%s generation=%d",
+                        candidate_requirement_id, owner_id, generation,
                     )
                     owner_result = await _invoke_bounded_subtask(
                         owner, owner_position, recovery_context=recovery_context,
@@ -2852,6 +2998,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         and not owner_undeclared
                         and set(required_owner_files).issubset(owner_written)
                     )
+                    logger.info(
+                        "OWNER_RECOVERY_COMPLETED requirement_id=%s owner=%s generation=%d passed=%s",
+                        candidate_requirement_id, owner_id, generation, owner_passed,
+                    )
                     plan_recovery_events.append({
                         "failed_subtask": subtask.id,
                         "reopened_owner": owner_id,
@@ -2864,6 +3014,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "ownership_revalidated": True,
                         "revalidation_basis": "unique approved upstream file owner",
                         "owner_recovery_passed": owner_passed,
+                        "requirement_id": candidate_requirement_id,
+                        "generation": generation,
                     })
                     approved_stage_states[owner_id] = "completed" if owner_passed else "needs_review"
                     control_state = control_state.with_updates(
@@ -2918,6 +3070,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             ),
                         )
                         save_control_state(workspace_path, control_state)
+                        logger.info(
+                            "CONSUMER_RETRY_STARTED subtask=%s active_requirement_id=%s",
+                            subtask.id, candidate_requirement_id,
+                        )
                         call_result = await _invoke_bounded_subtask(
                             subtask, position,
                             recovery_context=(
@@ -2954,6 +3110,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                     terminal_required=False,
                                     repair_scope=cross_owner_obligation.repair_scope,
                                 ))
+                        # This exact (origin, owner, files) tuple has now
+                        # completed one full owner-recovery-and-downstream-
+                        # retry cycle - the NEXT scope conflict for this
+                        # same tuple (if any) is a new generation, eligible
+                        # for its own fresh requirement rather than being
+                        # silently treated as a continuation of this one.
+                        recovery_generation_by_key[generation_key] = generation + 1
+                        if bool(call_result.get("quality_gates_passed")):
+                            break
+                        scope_conflict = call_result.get("plan_scope_conflict") or {}
+                        if not scope_conflict:
+                            break
+                        continue
                     else:
                         for result_index, prior_result in enumerate(subtask_results):
                             if prior_result.subtask_id == owner_id:
@@ -2965,6 +3134,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                     reason_codes=("PLAN_RECOVERY_OWNER_FAILED",),
                                 )
                                 break
+                        recovery_generation_by_key[generation_key] = generation + 1
+                        break
             subtask_call_results.append(call_result)
 
             quality_gates_passed = bool(call_result.get("quality_gates_passed"))
