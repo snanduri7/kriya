@@ -51,6 +51,8 @@ from kriya.workflow.obligations import (
     ObligationRecord,
     ObligationStatus,
 )
+from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
+from kriya.workflow.triage import ChangeKind
 from kriya.workflow.repair_contract import (
     RepairContract,
     RepairContractStatus,
@@ -12415,6 +12417,299 @@ async def test_predetermined_design_alone_without_plan_raises():
         await we.run_generation_workflow(
             goal="x", workspace_path="/tmp", predetermined_design="only the design",
         )
+
+
+# ============================================================
+# FUTURE_OWNER_VERIFICATION end-to-end production-path proof (PRV-11,
+# 2026-08-30). Drives the REAL run_generation_workflow() - not just
+# resolve_future_owner_verification_deferral() in isolation - across a
+# REAL 3-hop subtask sequence (s1 -> s2 -> s3), using the SAME
+# predetermined_plan/predetermined_design/predetermined_architect_files
+# bypass _invoke_bounded_subtask() itself uses in production (MA7-C1):
+# real Developer/QualityGates/Reviewer pipeline, real failure grounding,
+# real ObligationLedger, real retry_strategy - only Planner/Architect are
+# skipped, matching what production already skips for every bounded
+# subtask. Answers a live incident's own exact question directly: a live
+# PRV-11 run whose Planner never assigned CustomerController.java to any
+# subtask (the actual observed cause) left it genuinely unproven whether
+# the deferral wiring fires through the REAL raise site in workflow.py
+# when the plan DOES have a valid 4-subtask deferral shape - every prior
+# live run either failed before reaching it or lacked a matching owner.
+# This proves it deterministically, without spending another live run.
+# ============================================================
+
+def _future_owner_e2e_plan() -> EngineeringPlan:
+    return EngineeringPlan(
+        plan_id="prv11-e2e", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            Subtask(
+                id="s1", description="add displayName to Customer",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="src/main/java/com/example/customer/Customer.java", action=FileAction.MODIFY,
+                )],
+                provides=["customer_entity_with_display_name"],
+            ),
+            Subtask(
+                id="s2", description="compute displayName in CustomerService",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s1"],
+                planned_files=[PlannedFile(
+                    path="src/main/java/com/example/customer/CustomerService.java", action=FileAction.MODIFY,
+                )],
+                requires=["customer_entity_with_display_name"],
+                provides=["customer_service_with_display_name_logic"],
+            ),
+            Subtask(
+                id="s3", description="propagate displayName in CustomerController",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s2"],
+                planned_files=[PlannedFile(
+                    path="src/main/java/com/example/customer/CustomerController.java", action=FileAction.MODIFY,
+                )],
+                requires=["customer_service_with_display_name_logic"],
+                provides=["customer_controller_with_display_name_response"],
+            ),
+            Subtask(
+                id="s4", description="test displayName in the controller response",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s3"],
+                planned_files=[PlannedFile(
+                    path="src/test/java/com/example/customer/CustomerControllerTest.java", action=FileAction.MODIFY,
+                )],
+                requires=["customer_controller_with_display_name_response"],
+            ),
+        ],
+    )
+
+
+_FUTURE_OWNER_E2E_REGRESSION_OUTPUT = (
+    "[INFO] Running com.example.customer.CustomerControllerTest\n"
+    "[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0\n"
+    "org.opentest4j.AssertionFailedError: expected: <JOHN SMITH> but was: <null>\n"
+    "\tat org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:1145)\n"
+    "\tat com.example.customer.CustomerControllerTest.detailsIncludesUppercaseDisplayName"
+    "(CustomerControllerTest.java:8)\n"
+    "\tat java.base/java.lang.reflect.Method.invoke(Method.java:568)\n"
+)
+
+
+def _seed_future_owner_e2e_repo(tmp_path):
+    files = {
+        "src/main/java/com/example/customer/Customer.java": (
+            "package com.example.customer;\n"
+            "public record Customer(long id, String firstName, String lastName) {}\n"
+        ),
+        "src/main/java/com/example/customer/CustomerService.java": (
+            "package com.example.customer;\n"
+            "public class CustomerService {\n"
+            "    public Customer find(long id) { return new Customer(id, \"John\", \"Smith\"); }\n"
+            "}\n"
+        ),
+        "src/main/java/com/example/customer/CustomerController.java": (
+            "package com.example.customer;\n"
+            "import java.util.Map;\n"
+            "import java.util.HashMap;\n"
+            "public class CustomerController {\n"
+            "    public Map<String, Object> details(Customer c) {\n"
+            "        Map<String, Object> m = new HashMap<>();\n"
+            "        return m;\n"
+            "    }\n"
+            "}\n"
+        ),
+        "src/test/java/com/example/customer/CustomerControllerTest.java": (
+            "package com.example.customer;\n"
+            "class CustomerControllerTest {\n"
+            "    // detailsIncludesUppercaseDisplayName asserts displayName == JOHN SMITH\n"
+            "}\n"
+        ),
+    }
+    for relpath, content in files.items():
+        full = tmp_path / relpath
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+
+
+@pytest.mark.asyncio
+async def test_future_owner_verification_end_to_end_through_real_run_generation_workflow(tmp_path):
+    """The main lifecycle proof: s1 local PASS -> full regression FAIL ->
+    defer (not ordinary retry) -> s1 completes -> s2 becomes executable ->
+    s2 ALSO defers (same unresolved requirement) -> s3 completes for real
+    -> the SAME regression genuinely passes -> obligation settles
+    SATISFIED, terminal-obligation safety net sees nothing unresolved."""
+    _seed_future_owner_e2e_repo(tmp_path)
+    _init_git_repo(tmp_path)
+    plan = _future_owner_e2e_plan()
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+    ledger = ObligationLedger()
+
+    world = {"controller_fixed": False}
+
+    def fake_run_tests(self, target_test=None):
+        if target_test:
+            return {"success": True, "output": ""}
+        if world["controller_fixed"]:
+            return {"success": True, "output": ""}
+        return {"success": False, "output": _FUTURE_OWNER_E2E_REGRESSION_OUTPUT}
+
+    llm.complete = AsyncMock(side_effect=[
+        # s1
+        json.dumps([{
+            "filepath": "src/main/java/com/example/customer/Customer.java",
+            "content": (
+                "package com.example.customer;\n"
+                "public record Customer(long id, String firstName, String lastName) {\n"
+                "    public String displayName() { return (firstName + \" \" + lastName).toUpperCase(); }\n"
+                "}\n"
+            ),
+        }]),
+        "Review: Approved",
+        # s2
+        json.dumps([{
+            "filepath": "src/main/java/com/example/customer/CustomerService.java",
+            "content": (
+                "package com.example.customer;\n"
+                "public class CustomerService {\n"
+                "    public Customer find(long id) { return new Customer(id, \"John\", \"Smith\"); }\n"
+                "}\n"
+            ),
+        }]),
+        "Review: Approved",
+        # s3 - this is the attempt that REALLY fixes the controller
+        json.dumps([{
+            "filepath": "src/main/java/com/example/customer/CustomerController.java",
+            "content": (
+                "package com.example.customer;\n"
+                "import java.util.Map;\n"
+                "import java.util.HashMap;\n"
+                "public class CustomerController {\n"
+                "    public Map<String, Object> details(Customer c) {\n"
+                "        Map<String, Object> m = new HashMap<>();\n"
+                "        m.put(\"displayName\", c.displayName());\n"
+                "        return m;\n"
+                "    }\n"
+                "}\n"
+            ),
+        }]),
+        "Review: Approved",
+    ])
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", autospec=True, side_effect=fake_run_tests,
+    ):
+        res1 = await we.run_generation_workflow(
+            goal="Add displayName to Customer", workspace_path=str(tmp_path),
+            predetermined_plan="p1", predetermined_design="d1",
+            predetermined_architect_files=["src/main/java/com/example/customer/Customer.java"],
+            allowed_write_relpaths=["src/main/java/com/example/customer/Customer.java"],
+            write_scope_mode=WriteScopeMode.ALLOWLIST,
+            structured_plan=plan, current_subtask_id="s1", obligation_ledger=ledger,
+            completed_subtask_ids=frozenset(),
+        )
+        assert res1["quality_gates_passed"] is True, res1
+
+        pending = ledger.current_by_kind(ObligationKind.FUTURE_OWNER_VERIFICATION)
+        assert len(pending) == 1
+        assert pending[0].status == ObligationStatus.PENDING
+        assert pending[0].owner_subtask_id == "s3"
+        assert pending[0].terminal_required is True
+
+        res2 = await we.run_generation_workflow(
+            goal="Compute displayName in CustomerService", workspace_path=str(tmp_path),
+            predetermined_plan="p2", predetermined_design="d2",
+            predetermined_architect_files=["src/main/java/com/example/customer/CustomerService.java"],
+            allowed_write_relpaths=["src/main/java/com/example/customer/CustomerService.java"],
+            write_scope_mode=WriteScopeMode.ALLOWLIST,
+            structured_plan=plan, current_subtask_id="s2", obligation_ledger=ledger,
+            completed_subtask_ids=frozenset({"s1"}),
+        )
+        assert res2["quality_gates_passed"] is True, res2
+        still_pending = ledger.current_by_kind(ObligationKind.FUTURE_OWNER_VERIFICATION)
+        assert still_pending[0].status == ObligationStatus.PENDING
+
+        world["controller_fixed"] = True
+        res3 = await we.run_generation_workflow(
+            goal="Propagate displayName in CustomerController", workspace_path=str(tmp_path),
+            predetermined_plan="p3", predetermined_design="d3",
+            predetermined_architect_files=["src/main/java/com/example/customer/CustomerController.java"],
+            allowed_write_relpaths=["src/main/java/com/example/customer/CustomerController.java"],
+            write_scope_mode=WriteScopeMode.ALLOWLIST,
+            structured_plan=plan, current_subtask_id="s3", obligation_ledger=ledger,
+            completed_subtask_ids=frozenset({"s1", "s2"}),
+        )
+        assert res3["quality_gates_passed"] is True, res3
+
+    settled = ledger.current_by_kind(ObligationKind.FUTURE_OWNER_VERIFICATION)
+    assert settled[0].status == ObligationStatus.SATISFIED
+    assert ledger.unresolved_terminal_obligations() == []
+
+
+@pytest.mark.asyncio
+async def test_future_owner_verification_genuine_compile_break_still_uses_ordinary_path(tmp_path):
+    """Opposite case: a genuine COMPILE failure (not a regression_test
+    failure) must never reach resolve_future_owner_verification_
+    deferral() at all - that function is called from exactly one place
+    (workflow.py's own full-regression raise site), structurally
+    unreachable from a compile failure raised earlier, inside attempt.py's
+    own candidate-gates loop. The existing PLAN_SCOPE_DEFECT/attribution
+    machinery (already covered by its own dedicated tests in
+    test_workflow_controller_enforce.py) remains completely unmodified
+    and untouched by this fix."""
+    _seed_future_owner_e2e_repo(tmp_path)
+    _init_git_repo(tmp_path)
+    plan = _future_owner_e2e_plan()
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    we = WorkflowEngine(kernel, llm)
+    ledger = ObligationLedger()
+
+    # A genuinely broken candidate every attempt - proves this stays an
+    # ordinary compile-failure retry loop (never a deferral, never
+    # FUTURE_OWNER_VERIFICATION), exhausting its own real retry budget.
+    broken_content = (
+        "package com.example.customer;\n"
+        "public record Customer(long id, String firstName, String lastName) {\n"
+        "    public String displayName() { return firstName.toUpperCase(  // syntax error\n"
+        "}\n"
+    )
+    llm.complete = AsyncMock(return_value=json.dumps([{
+        "filepath": "src/main/java/com/example/customer/Customer.java", "content": broken_content,
+    }]))
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": False, "output": "[ERROR] Customer.java:[3,45] ';' expected"},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+    ) as mock_run_tests, patch(
+        "kriya.workflow.workflow.resolve_future_owner_verification_deferral",
+    ) as mock_deferral:
+        res = await we.run_generation_workflow(
+            goal="Add displayName to Customer", workspace_path=str(tmp_path),
+            predetermined_plan="p1", predetermined_design="d1",
+            predetermined_architect_files=["src/main/java/com/example/customer/Customer.java"],
+            allowed_write_relpaths=["src/main/java/com/example/customer/Customer.java"],
+            write_scope_mode=WriteScopeMode.ALLOWLIST,
+            structured_plan=plan, current_subtask_id="s1", obligation_ledger=ledger,
+            completed_subtask_ids=frozenset(),
+        )
+
+    assert res["quality_gates_passed"] is False
+    mock_run_tests.assert_not_called()
+    mock_deferral.assert_not_called()
+    assert ledger.current_by_kind(ObligationKind.FUTURE_OWNER_VERIFICATION) == []
 
 
 @pytest.mark.asyncio
