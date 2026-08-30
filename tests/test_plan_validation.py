@@ -88,6 +88,165 @@ async def test_legacy_validation_keeps_empty_model_scope_backward_compatible(tmp
     assert result.valid is True
 
 
+# --- VERIFICATION_EVIDENCE_PATH_MISSING (PRV-11, 2026-08-30) ---
+# A live incident proved the Planner can emit a verification requirement
+# (type=judgment, tool_name=None, requires_runtime_execution=false) that no
+# execution mechanism Kriya has can ever produce evidence for - the plan
+# still passed candidate gates (nothing failed - nothing ran) and only then
+# unconditionally failed pre-apply with REQUIRED VERIFICATION UNRESOLVED.
+# These tests confirm validate_plan() now catches the same defect before
+# execution starts, without inferring intent from English wording.
+
+def _verification_only_subtask(verification, **overrides):
+    defaults = dict(
+        id="s4", description="execute the application and verify its output",
+        execution_method=ExecutionMethod.MODEL, execution_role=ExecutionRole.VERIFICATION,
+        planned_files=[], verification=verification,
+    )
+    defaults.update(overrides)
+    return Subtask(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_verification_only_application_runtime_passes_validation(tmp_path):
+    subtask = _verification_only_subtask([VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="verify the application output shows transformed customer name in uppercase",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME, requires_runtime_execution=True,
+    )])
+    plan = _plan([subtask])
+    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    assert result.valid is True
+    assert "VERIFICATION_EVIDENCE_PATH_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_verification_only_compile_tool_passes_validation(tmp_path):
+    subtask = _verification_only_subtask([VerificationMethod(
+        type=VerificationMethodType.TOOL, description="compiles", tool_name="compile",
+    )])
+    plan = _plan([subtask])
+    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    assert result.valid is True
+    assert "VERIFICATION_EVIDENCE_PATH_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_verification_only_judgment_no_runtime_no_tool_is_rejected(tmp_path):
+    """The exact PRV-11 live shape: verifier_kind=judgment,
+    requires_runtime_execution=false, tool_name=None."""
+    subtask = _verification_only_subtask([VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="Verify that the application output shows transformed customer name in uppercase",
+    )])
+    plan = _plan([subtask])
+    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    assert result.valid is False
+    assert "VERIFICATION_EVIDENCE_PATH_MISSING" in result.reason_codes
+    error = next(e for e in result.errors if "transformed customer name" in e)
+    assert "subtask 's4'" in error
+    assert "verifier_kind='judgment'" in error
+    assert "requires_runtime_execution=False" in error
+    assert "tool_name=None" in error
+
+
+@pytest.mark.asyncio
+async def test_mixed_compile_and_unresolved_judgment_still_rejected(tmp_path):
+    """One executable-and-passing verifier on a subtask must not mask a
+    sibling, genuinely unexecutable requirement on the SAME subtask - this
+    is exactly the s3 shape from the underlying PRV-11 incident (a real
+    pom.xml fix discarded alongside an unrelated unresolved requirement),
+    reproduced here at the plan-validation layer."""
+    subtask = _verification_only_subtask([
+        VerificationMethod(type=VerificationMethodType.TOOL, description="compiles", tool_name="compile"),
+        VerificationMethod(
+            type=VerificationMethodType.JUDGMENT,
+            description="Verify that the application output shows transformed customer name in uppercase",
+        ),
+    ])
+    plan = _plan([subtask])
+    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    assert result.valid is False
+    assert "VERIFICATION_EVIDENCE_PATH_MISSING" in result.reason_codes
+    assert not any("compiles" in e for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_application_runtime_runtime_omitted_self_heals_and_validation_passes(tmp_path):
+    """requires_runtime_execution omitted (defaults False) with
+    verifier_kind=application_runtime - VerificationMethod's own pairing
+    self-heal (plan_schema.py) must flip it to True BEFORE validate_plan
+    ever sees it, so this is valid, not rejected."""
+    subtask = _verification_only_subtask([VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="run the application and observe uppercase output",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+    )])
+    assert subtask.verification[0].requires_runtime_execution is True
+    plan = _plan([subtask])
+    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
+async def test_acceptance_criterion_judgment_entry_is_not_a_terminal_verification_requirement(tmp_path):
+    """A plan-level AcceptanceCriterion with method=judgment (the Reviewer's
+    own holistic grading surface, never routed through
+    _build_required_verification_evidence) must NOT be swept into this
+    check - it is not a Subtask.verification entry and has no verifier_kind/
+    requires_runtime_execution fields to even evaluate. Only an ordinary
+    implementation subtask's OWN verification list is in scope."""
+    subtask = _model_subtask(
+        planned_files=[PlannedFile(path="a.txt", action=FileAction.CREATE)],
+        acceptance_criteria_ids=["ac1"],
+    )
+    plan = _plan(
+        [subtask],
+        acceptance_criteria=[AcceptanceCriterion(id="ac1", description="reads well", method=VerificationMethodType.JUDGMENT)],
+    )
+    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    assert result.valid is True
+    assert "VERIFICATION_EVIDENCE_PATH_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_evidence_path_check_not_enforced_without_require_model_planned_files(tmp_path):
+    """Scoped the same way as the sibling model_subtask_unscoped check it
+    sits beside - a caller not opting into authoritative enforcement (e.g.
+    WorkflowController's shadow-mode validation) is unaffected."""
+    subtask = _verification_only_subtask([VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="Verify that the application output shows transformed customer name in uppercase",
+    )])
+    plan = _plan([subtask])
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True
+
+
+@pytest.mark.asyncio
+async def test_repaired_verification_requirement_converts_to_executable_and_validation_passes(tmp_path):
+    """Simulates a PLAN_REPAIR round: the Planner's corrected redraft
+    converts the previously-unexecutable requirement to
+    verifier_kind=application_runtime, and the corrected plan is accepted."""
+    broken_subtask = _verification_only_subtask([VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="Verify that the application output shows transformed customer name in uppercase",
+    )])
+    broken_plan = _plan([broken_subtask])
+    first = await validate_plan(broken_plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    assert first.valid is False
+    assert "VERIFICATION_EVIDENCE_PATH_MISSING" in first.reason_codes
+
+    repaired_subtask = _verification_only_subtask([VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="Verify that the application output shows transformed customer name in uppercase",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME, requires_runtime_execution=True,
+    )])
+    repaired_plan = _plan([repaired_subtask])
+    second = await validate_plan(repaired_plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    assert second.valid is True
+
+
 @pytest.mark.asyncio
 async def test_semantic_requirement_requires_provider_dependency_edge(tmp_path):
     provider = _model_subtask(

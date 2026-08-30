@@ -173,6 +173,48 @@ def test_directly_executable_runtime_verifiers_matches_a_self_healed_entry():
     assert len(matched) == 1
 
 
+def test_has_evidence_producer_true_for_application_runtime_with_runtime_true():
+    vm = VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="run the application and observe uppercase output",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+        requires_runtime_execution=True,
+    )
+    assert vm.has_evidence_producer is True
+
+
+def test_has_evidence_producer_true_for_compile_tool():
+    vm = VerificationMethod(type=VerificationMethodType.TOOL, description="compiles", tool_name="compile")
+    assert vm.has_evidence_producer is True
+
+
+def test_has_evidence_producer_false_for_judgment_with_no_runtime_and_no_tool():
+    """PRV-11 (2026-08-30): the exact shape a live incident proved Kriya can
+    plan but never execute - type=judgment, tool_name=None,
+    requires_runtime_execution=false. Neither the compile/test executor nor
+    the runtime/judge executor can ever produce evidence for it."""
+    vm = VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="Verify that the application output shows transformed customer name in uppercase",
+    )
+    assert vm.tool_name is None
+    assert vm.requires_runtime_execution is False
+    assert vm.has_evidence_producer is False
+
+
+def test_has_evidence_producer_true_after_application_runtime_self_heal():
+    """The pairing self-heal (application_runtime -> requires_runtime_execution=True)
+    must leave this entry with a real producer - the two mechanisms must agree."""
+    vm = VerificationMethod(
+        type=VerificationMethodType.JUDGMENT,
+        description="run the application with sample input",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+        requires_runtime_execution=False,
+    )
+    assert vm.requires_runtime_execution is True
+    assert vm.has_evidence_producer is True
+
+
 # --- AcceptanceCriterion ---
 
 def test_acceptance_criterion_blank_id_rejected():

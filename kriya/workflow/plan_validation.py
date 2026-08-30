@@ -31,12 +31,17 @@ sent a resumed run down the legacy whole-goal fallback, which regenerated
 and broke an already-working, already-completed file),
 refactor_baseline is set for refactor plans, every TOOL-tagged
 subtask/verification/acceptance-criterion tool_name resolves to a real
-registered tool, every planned file lands inside the supplied context
-package (when one is supplied), and - reusing kriya.workflow.triage's own
-MA2.4 `EngineeringTriageService.recompute_from_files` machinery rather than
-inventing new heuristics - the plan's real touched-file set is used to
-recompute risk, which can only ESCALATE the caller's EngineeringRoute
-(MA6 invariant 5), never silently continue under a stale, lighter profile.
+registered tool, every MODEL subtask's own verification requirements each
+have a real Kriya evidence-production path (PRV-11, 2026-08-30 - see
+VerificationMethod.has_evidence_producer's own docstring, kriya/workflow/
+plan_schema.py; gated on require_model_planned_files, same as the
+model_subtask_unscoped check it sits beside), every planned file lands
+inside the supplied context package (when one is supplied), and - reusing
+kriya.workflow.triage's own MA2.4 `EngineeringTriageService.
+recompute_from_files` machinery rather than inventing new heuristics - the
+plan's real touched-file set is used to recompute risk, which can only
+ESCALATE the caller's EngineeringRoute (MA6 invariant 5), never silently
+continue under a stale, lighter profile.
 """
 from __future__ import annotations
 
@@ -496,6 +501,36 @@ async def validate_plan(
                 owner_subtask_id=st.id,
                 terminal_required=True,
             ))
+        # PRV-11 (2026-08-30): every terminal verification requirement must
+        # have SOME real Kriya evidence-production path, or the plan is
+        # authorized to reach execution while carrying an obligation nothing
+        # can ever satisfy - see VerificationMethod.has_evidence_producer's
+        # own docstring for the live incident and why this deliberately does
+        # NOT try to infer intent from description wording (that would move
+        # the Planner's own ambiguity into either this validator or the
+        # executor, and the executor is explicitly out of scope for this
+        # fix). Gated on require_model_planned_files, same as
+        # model_subtask_unscoped just above - both are "is this MODEL
+        # subtask's own execution contract complete" checks, both meaningful
+        # only when the caller is enforcing that contract at all.
+        if require_model_planned_files and st.execution_method == ExecutionMethod.MODEL:
+            for vm in st.verification:
+                if not vm.has_evidence_producer:
+                    errors.append(
+                        f"subtask {st.id!r} verification requirement {vm.description!r} "
+                        f"(verifier_kind={vm.verifier_kind.value if vm.verifier_kind else None!r}, "
+                        f"requires_runtime_execution={vm.requires_runtime_execution!r}, "
+                        f"tool_name={vm.tool_name!r}) has no executable or deterministic evidence "
+                        "producer - no execution mechanism Kriya has can ever confirm this "
+                        "requirement passed. The requirement cannot remain judgment-only if "
+                        "satisfying it requires application execution; revise the verification "
+                        "method to an executable verifier appropriate to the requirement "
+                        "(verifier_kind=compile/test for build/test evidence, or "
+                        "verifier_kind=application_runtime with requires_runtime_execution=true "
+                        "when only running the application can prove it)."
+                    )
+                    reason_codes.append("VERIFICATION_EVIDENCE_PATH_MISSING")
+
         for pf in st.planned_files:
             full_path = os.path.join(workspace_path, pf.path)
             action_mismatch = not os.path.exists(full_path) and pf.action != FileAction.CREATE

@@ -242,6 +242,47 @@ class VerificationMethod(BaseModel):
             )
         )
 
+    @property
+    def has_evidence_producer(self) -> bool:
+        """PRV-11 (2026-08-30): a live incident proved the Planner can emit a
+        verification requirement (type=judgment, verifier_kind=judgment,
+        requires_runtime_execution=false, tool_name=None) that NO execution
+        mechanism Kriya actually has can ever produce authoritative pass/fail
+        evidence for. The plan reached execution, its verification-only
+        subtask "passed" its own candidate gates (nothing failed because
+        nothing ran), then the SAME requirement unconditionally failed
+        pre-apply with REQUIRED VERIFICATION UNRESOLVED - a real defect, just
+        caught far too late (after a Developer/compile/test attempt was
+        already spent).
+
+        This property is the single source of truth for "can this
+        requirement ever resolve" - kriya/workflow/plan_validation.py's
+        VERIFICATION_EVIDENCE_PATH_MISSING check calls it to reject an
+        unsatisfiable plan BEFORE execution starts, instead of only
+        discovering the same defect live. It intentionally mirrors, rather
+        than infers from English wording, the exact two shapes kriya/
+        workflow/workflow.py::_build_required_verification_evidence() can
+        actually resolve at the pre-apply boundary - keep the two in sync if
+        either ever changes; this is deliberately NOT a heuristic ("does the
+        description mention output/runtime/execute") - a plan whose
+        requirement text obviously describes runtime behavior but whose
+        verifier_kind is still wrong is exactly the shape this exists to
+        catch, not silently rewrite.
+
+        compile/test (type=tool, tool_name in BUILTIN_QUALITY_GATE_VERIFIERS)
+        - PolymorphicValidator runs it directly: a producer exists.
+        judgment + requires_runtime_execution=true (covers verifier_kind=
+        application_runtime too, via this class's own pairing self-heal
+        above) - RunVerifierAgent's judge/execute path is the producer.
+        Anything else - a bare judgment with no tool_name and no runtime
+        flag, or a registered-but-non-BUILTIN tool_name - has no producer:
+        _build_required_verification_evidence() can never mark it passed,
+        no matter how long execution retries."""
+        return bool(
+            (self.type == VerificationMethodType.TOOL and self.tool_name in BUILTIN_QUALITY_GATE_VERIFIERS)
+            or (self.type == VerificationMethodType.JUDGMENT and self.requires_runtime_execution is True)
+        )
+
 
 class AcceptanceCriterion(BaseModel):
     """One item of the plan's GLOBAL acceptance surface (as distinct from a
