@@ -161,6 +161,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional
 from kriya.workflow.edit_safety import normalize_whitespace
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import extract_error_source_locations, extract_implicated_files
+from kriya.workflow.generation_manifest import FileRole, classify_file_role
 from kriya.workflow.plan_schema import EngineeringPlan
 
 logger = logging.getLogger(__name__)
@@ -346,6 +347,47 @@ def extract_self_diagnosed_files(files: List[dict], known_files: List[str]) -> L
     return implicated
 
 
+# PRV-11 (2026-08-30): a JUnit5/Jupiter assertion mismatch (assertEquals,
+# assertTrue, ...) always throws this exact exception type from INSIDE the
+# assertion framework's own call chain - the stack trace's nearest
+# known-file frame is therefore ALWAYS the test method's own assertion call
+# site, structurally, regardless of where the asserted value actually came
+# from. That is real evidence of WHERE THE MISMATCH WAS OBSERVED, never
+# evidence that the test file's own source needs to change - unlike a
+# genuine uncaught exception thrown FROM the code under test (the shape
+# _attribute_from_locator's own docstring cites, BufferUnderflowException,
+# where the throwing frame legitimately is often the buggy file) or a test
+# COMPILE failure (javac's own locator shape, a different regex entirely -
+# untouched here, since a compile error genuinely means the named file's
+# own source is broken). Deliberately narrow: only this one confirmed,
+# structurally-precise, live-observed exception type - not a broader
+# "assertion-shaped text" heuristic, and not extended to other assertion
+# libraries/frameworks (AssertJ, Hamcrest, TestNG, pytest, ...) until a live
+# incident demonstrates the same gap for one of them.
+_JUNIT_ASSERTION_FAILURE_RE = re.compile(r"\borg\.opentest4j\.AssertionFailedError\b")
+
+
+def _exclude_test_files_for_junit_assertion_mismatch(
+    files: List[str], failure: Failure, raw_text: str,
+) -> List[str]:
+    """Shared by BOTH _attribute_from_locator (a precise file:line match)
+    and _attribute_from_judge_evidence's own substring fallback
+    (extract_implicated_files) - a JUnit assertion mismatch's raw output
+    structurally NAMES the test file (its own class/method appears in the
+    stack trace text, which is exactly what a plain substring scan matches
+    on too), so both mechanisms independently rediscover it unless both are
+    told to exclude it. See _JUNIT_ASSERTION_FAILURE_RE's own docstring for
+    why this is narrow and safe - a test file genuinely responsible for its
+    own failure (compile error, malformed test) never matches this
+    predicate, so it is never excluded."""
+    if not (
+        failure.type in ("test", "targeted_test", "regression_test")
+        and _JUNIT_ASSERTION_FAILURE_RE.search(raw_text)
+    ):
+        return files
+    return [f for f in files if classify_file_role(f) is not FileRole.TEST]
+
+
 def _attribute_from_locator(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
     """A real file:line locator always wins - both the tier label AND which
     files get used - over failure.likely_files/a substring scan, even if
@@ -359,11 +401,32 @@ def _attribute_from_locator(failure: Failure, known_files: List[str]) -> Optiona
     attribute_failure() can insert the subtask_scope/subtask_dependency
     tiers strictly BETWEEN locator and judge - the combined function is
     kept below, unchanged in behavior, as a thin wrapper for any caller
-    that still wants the old all-in-one check."""
+    that still wants the old all-in-one check.
+
+    PRV-11 (2026-08-30, live incident): failure location is not necessarily
+    repair location. A test-run failure (never a compile failure - see
+    _JUNIT_ASSERTION_FAILURE_RE's own docstring) whose raw output shows a
+    JUnit5 assertion-mismatch exception has its OWN test file excluded from
+    the locator match - that locator only ever points at the assertion's
+    own call site, not at whatever produced the asserted value. Live
+    incident this closes: a CustomerControllerTest.java assertion
+    ("expected: <JOHN SMITH> but was: <null>") was promoted straight to a
+    PLAN_SCOPE_DEFECT `required_repair_files` target via this exact locator
+    tier, while the Developer's own (never-consulted, because the locator
+    tier returns before self_diagnosis is ever reached on a first
+    occurrence) diagnosis correctly named the real provider,
+    CustomerController.details(). Excluding the test file here lets the
+    cascade fall through to a weaker-but-more-appropriate tier
+    (self_diagnosis/judge) instead of wrongly short-circuiting on a
+    structurally-guaranteed-to-be-the-test-file locator. A test file
+    genuinely responsible for its own failure (a compile error, a malformed
+    generated test) is UNAFFECTED - this filter only ever fires for the one
+    exception type that structurally can never mean that."""
     raw_text = failure.raw_output or failure.message
     located_basenames = {b for b, _ in extract_error_source_locations(raw_text)}
     if located_basenames:
         locator_files = [f for f in known_files if os.path.basename(f) in located_basenames]
+        locator_files = _exclude_test_files_for_junit_assertion_mismatch(locator_files, failure, raw_text)
         if locator_files:
             return AttributionResult(
                 tier="locator", files=locator_files, confidence="high",
@@ -373,10 +436,23 @@ def _attribute_from_locator(failure: Failure, known_files: List[str]) -> Optiona
 
 
 def _attribute_from_judge_evidence(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
+    """PRV-11 (2026-08-30): failure.likely_files (an already-validated,
+    separate signal - RunVerifierAgent's own inference, an anchored-edit's
+    known filepath) is trusted as given, including a test file it names -
+    that is a deliberate, external signal, not a raw-text accident. The
+    extract_implicated_files() substring-scan FALLBACK is different: run
+    over the SAME raw stack-trace text _attribute_from_locator's own
+    precise locator already excludes a test file from for a JUnit
+    assertion mismatch (see _exclude_test_files_for_junit_assertion_
+    mismatch's own docstring) - a plain substring scan rediscovers the
+    identical test-file name from that same text unless it is ALSO told to
+    exclude it, which defeated the locator's own exclusion entirely until
+    this was found live (both mechanisms read the same raw_output)."""
     raw_text = failure.raw_output or failure.message
     files = list(failure.likely_files) if failure.likely_files else []
     if not files:
         files = extract_implicated_files(raw_text, known_files)
+        files = _exclude_test_files_for_junit_assertion_mismatch(files, failure, raw_text)
     if not files:
         return None
     return AttributionResult(

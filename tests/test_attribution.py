@@ -112,6 +112,111 @@ async def test_attribution_falls_back_to_substring_scan_when_likely_files_empty(
     llm.complete.assert_not_called()
 
 
+# --- Failure location is not necessarily repair location (PRV-11, 2026-08-30) ---
+#
+# Live incident: a JUnit5 assertion mismatch's own stack trace always
+# locates the test's own assertion call site - CustomerControllerTest.java:8
+# for "expected: <JOHN SMITH> but was: <null>" - which used to be promoted
+# straight to a PLAN_SCOPE_DEFECT `required_repair_files` target via the
+# "locator" tier, even though the Developer's own diagnosis correctly named
+# the real provider, CustomerController.details(). The test's own assertion
+# line is WHERE THE MISMATCH WAS OBSERVED, never evidence the test file
+# itself needs to change.
+
+_JUNIT_ASSERTION_TRACE = (
+    "org.opentest4j.AssertionFailedError: expected: <RIGHT> but was: <WRONG>\n"
+    "\tat org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)\n"
+    "\tat org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:182)\n"
+    "\tat com.example.FooTest.testService(FooTest.java:20)\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_assertion_failure_locator_excludes_the_test_file_itself():
+    """Test assertion location != production repair target: FooTest fails on
+    line 20 because Foo.service() returned the wrong value - the locator
+    must not claim FooTest.java as the (sole, high-confidence) attribution
+    target merely because that is where Surefire's own stack trace points."""
+    failure = Failure(type="regression_test", message="regression failed", raw_output=_JUNIT_ASSERTION_TRACE)
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value='{"files": [], "confidence": "low", "reasoning": "no evidence"}')
+    result = await attribute_failure(failure, ["Foo.java", "FooTest.java"], 0, [], llm, lambda fp: "content")
+    assert result.tier != "locator"
+    assert "FooTest.java" not in (result.files or [])
+
+
+@pytest.mark.asyncio
+async def test_test_compile_failure_still_locates_the_test_file():
+    """The nuance that must be preserved: a genuine test COMPILE failure
+    (a malformed/duplicate generated test method - javac's own locator
+    shape, not a JUnit assertion) still correctly locates the test file
+    itself as the repair target - tests absolutely can be the correct
+    repair target."""
+    failure = Failure(
+        type="compile", message="compile failed",
+        raw_output="FooTest.java:[12,10] method testService() is already defined in class FooTest",
+    )
+    llm = MagicMock()
+    result = await attribute_failure(failure, ["Foo.java", "FooTest.java"], 0, [], llm, lambda fp: None)
+    assert result.tier == "locator"
+    assert result.files == ["FooTest.java"]
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_production_compiler_failure_still_locates_the_production_file():
+    """Validates the FIRST PRV-11 recovery event's own shape remains
+    working: a genuine production compiler failure (Bar.java cannot call
+    Foo's changed constructor) is completely unaffected by the assertion-
+    failure filter, since Bar.java is not a test file at all."""
+    failure = Failure(
+        type="compile", message="compile failed",
+        raw_output="Bar.java:[15,8] constructor Foo(String) is undefined",
+    )
+    llm = MagicMock()
+    result = await attribute_failure(failure, ["Foo.java", "Bar.java"], 0, [], llm, lambda fp: None)
+    assert result.tier == "locator"
+    assert result.files == ["Bar.java"]
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_assertion_failure_falls_through_to_the_real_provider_when_known():
+    """Provider outside current scope: once the test-file locator is
+    correctly excluded, a real judge-tier signal (e.g. an upstream
+    diagnosis already naming the provider) takes over instead of being
+    silently outranked by the (wrongly authoritative) locator - matching
+    _attribute_from_locator's own documented "locator always wins over
+    likely_files" precedence, now correctly not triggered by the test
+    file's own assertion-observation site."""
+    failure = Failure(
+        type="regression_test", message="regression failed",
+        raw_output=_JUNIT_ASSERTION_TRACE, likely_files=["Foo.java"],
+    )
+    llm = MagicMock()
+    result = await attribute_failure(failure, ["Foo.java", "FooTest.java"], 0, [], llm, lambda fp: None)
+    assert result.tier == "judge"
+    assert result.files == ["Foo.java"]
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_assertion_failure_with_no_resolvable_provider_fails_closed_not_to_the_test_file():
+    """Provider attribution ambiguous: several plausible providers, none
+    grounded. Must fail closed to full_set (unresolved) - never default to
+    blindly modifying the test merely because it was the only file:line
+    reference in the raw output."""
+    failure = Failure(type="regression_test", message="regression failed", raw_output=_JUNIT_ASSERTION_TRACE)
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value='{"files": [], "confidence": "low", "reasoning": "no evidence"}')
+    result = await attribute_failure(
+        failure, ["Foo.java", "Bar.java", "FooTest.java"], 0, [], llm, lambda fp: "content",
+    )
+    assert result.tier == "full_set"
+    assert result.files == []
+    assert "FooTest.java" not in result.files
+
+
 # --- failure.authoritative_files (PRV-05 run 7, 2026-08-28) ---
 
 @pytest.mark.asyncio
