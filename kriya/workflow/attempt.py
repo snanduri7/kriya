@@ -21,6 +21,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
+from kriya.agents.contracts import (
+    AUTHORITATIVE_GOAL_SECTION_HEADER,
+    PLANNED_IMPLEMENTATION_SECTION_HEADER,
+)
 from kriya.core.kernel import Kernel
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
@@ -1930,6 +1934,89 @@ def _spec_requirements_contradicting_authority(
         matched = any(re.search(rf"\b{re.escape(term)}\b", lowered) for term in identity_terms)
         (contradicted if matched else kept).append(requirement)
     return kept, contradicted
+
+
+_REQUIREMENT_IDENTIFIER_TOKEN_RE = re.compile(
+    r"`([A-Za-z_][A-Za-z0-9_]*)`"
+    r"|'([A-Za-z_][A-Za-z0-9_]*)'"
+    r"|\"([A-Za-z_][A-Za-z0-9_]*)\""
+    r"|\b([a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+)\b"
+)
+
+
+def _extract_requirement_identifier_tokens(requirement: str) -> List[str]:
+    """Pulls concrete, code-shaped identifier tokens out of a SpecCompliance
+    missing_requirement string (e.g. "displayName field" -> ["displayName"])
+    - backtick/quote-wrapped names and camelCase names only, deliberately
+    NOT every capitalized/plain word (a bare "Customer" or "The" would be a
+    false positive). Used only by _spec_requirements_naming_planner_only_
+    identifiers below to decide whether THIS specific identifier is the
+    Planner's own word choice - never to guess a requirement's meaning."""
+    tokens: List[str] = []
+    for match in _REQUIREMENT_IDENTIFIER_TOKEN_RE.finditer(requirement):
+        token = next((g for g in match.groups() if g), None)
+        if token and len(token) >= 3 and token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
+def _spec_requirements_naming_planner_only_identifiers(
+    missing_requirements: List[str], goal_text: str,
+) -> Tuple[List[str], List[str]]:
+    """PRV-11 (2026-08-30) - the deterministic other half of build_subtask_
+    goal_text()'s own authority-isolation split (kriya/workflow/
+    workflow_controller.py). That function already labels a Planner-only
+    identifier under PLANNED IMPLEMENTATION STRATEGY and SpecComplianceAgent's
+    own system_prompt already instructs the model not to treat it as a
+    requirement - but a prompt instruction alone is not a guarantee, the same
+    "do not trust the prompt alone" principle _spec_requirements_
+    contradicting_authority above already applies to the migration case, just
+    never extended to this one. Live incident this closes: SpecCompliance's
+    own judge repeatedly reported "the goal requires a displayName field",
+    reconstructing the model's own worked counter-example from its system
+    prompt almost verbatim, even though "displayName field" appears ONLY in
+    the Planned Implementation Strategy section of the exact goal text it was
+    given, never in the Authoritative Goal section.
+
+    Splits missing_requirements into (kept, planner_only): an entry is
+    planner_only when it names at least one concrete identifier token that
+    appears in the Planned Implementation Strategy section, and NONE of its
+    identifier tokens appear anywhere in the Authoritative Goal section. An
+    entry naming no extractable identifier token at all, or naming one that
+    DOES appear in the Authoritative Goal section (a real user requirement,
+    still enforced exactly as before), is always kept - this only ever
+    suppresses a requirement with positive, text-grounded evidence it is the
+    Planner's own word choice, never a vague/behavioral requirement this
+    function has no way to evaluate.
+
+    A no-op (everything kept) when goal_text doesn't carry both section
+    headers - every pre-MA6 caller, and every subtask goal without a real
+    top-level goal to separate out, sees identical behavior to before this
+    function existed."""
+    if (
+        AUTHORITATIVE_GOAL_SECTION_HEADER not in goal_text
+        or PLANNED_IMPLEMENTATION_SECTION_HEADER not in goal_text
+    ):
+        return list(missing_requirements), []
+    authoritative_text = goal_text.split(AUTHORITATIVE_GOAL_SECTION_HEADER, 1)[1].split(
+        PLANNED_IMPLEMENTATION_SECTION_HEADER, 1,
+    )[0]
+    planned_text = goal_text.split(PLANNED_IMPLEMENTATION_SECTION_HEADER, 1)[1]
+    kept: List[str] = []
+    planner_only: List[str] = []
+    for requirement in missing_requirements:
+        tokens = _extract_requirement_identifier_tokens(requirement)
+        if not tokens:
+            kept.append(requirement)
+            continue
+        in_authoritative = any(
+            re.search(rf"\b{re.escape(tok)}\b", authoritative_text) for tok in tokens
+        )
+        in_planned = any(
+            re.search(rf"\b{re.escape(tok)}\b", planned_text) for tok in tokens
+        )
+        (planner_only if (not in_authoritative and in_planned) else kept).append(requirement)
+    return kept, planner_only
 
 
 def _goal_spec_requirement_obligation_id(subtask_id: str) -> str:
@@ -5339,8 +5426,32 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "CONTRADICTS_AUTHORITY, suppressed (not used to trigger retry): %s",
                     arbitrated_contradictions,
                 )
+            # PRV-11 (2026-08-30): the other half of build_subtask_goal_
+            # text()'s own authority-isolation split - a prompt instruction
+            # telling SpecComplianceAgent not to treat a Planned-Implementation
+            # -only identifier as a requirement is not a deterministic
+            # guarantee (same "do not trust the prompt alone" principle the
+            # migration arbitration above already applies), and this model
+            # was observed reconstructing its own worked counter-example
+            # almost verbatim. Deterministically re-checks each surviving
+            # requirement's own identifier token(s) against ctx.goal's two
+            # labeled sections directly - never a prompt-only fix.
+            kept_requirements, planner_only_requirements = _spec_requirements_naming_planner_only_identifiers(
+                kept_requirements, ctx.goal,
+            )
+            if planner_only_requirements:
+                logger.warning(
+                    "Quality Gates: Goal spec compliance reported requirement(s) naming an "
+                    "identifier that appears only in the Planned Implementation Strategy "
+                    "section of the goal, never in the Authoritative Goal section - "
+                    "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY (planner-only identifier), "
+                    "suppressed (not used to trigger retry): %s",
+                    planner_only_requirements,
+                )
         else:
             kept_requirements = []
+            arbitrated_contradictions = []
+            planner_only_requirements = []
         if not spec_result["compliant"] and kept_requirements:
             missing_desc = "; ".join(kept_requirements)
             message = (
@@ -5369,6 +5480,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
                     "arbitrated_contradictions": arbitrated_contradictions}
                    if arbitrated_contradictions else {}),
+                **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                    "planner_only_requirements": planner_only_requirements}
+                   if planner_only_requirements else {}),
             }
             if goal_spec_obligation_id and ctx.obligation_ledger is not None:
                 # Correctness Continuity Part A6: this IS new/changed evidence
@@ -5402,6 +5516,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
                 "arbitrated_contradictions": arbitrated_contradictions}
                if arbitrated_contradictions else {}),
+            **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                "planner_only_requirements": planner_only_requirements}
+               if planner_only_requirements else {}),
             **({"reason_code": spec_result["reason_code"]} if spec_result.get("reason_code") else {}),
         })
         logger.info(f"Quality Gates: Goal spec compliance PASSED: {spec_result['reasoning']}")

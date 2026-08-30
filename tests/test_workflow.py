@@ -12,6 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kriya.agents.agent import DeveloperAgent
+from kriya.agents.contracts import (
+    AUTHORITATIVE_GOAL_SECTION_HEADER,
+    PLANNED_IMPLEMENTATION_SECTION_HEADER,
+)
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -33,8 +37,10 @@ from kriya.workflow.attempt import (
     _record_self_correction_scope_conflict,
     _required_runtime_verification_missing_message,
     _run_coordinated_repair_generation,
+    _extract_requirement_identifier_tokens,
     _run_verification_basis_hash,
     _spec_requirements_contradicting_authority,
+    _spec_requirements_naming_planner_only_identifiers,
     _sync_active_repair_contract,
     run_attempt,
 )
@@ -10082,6 +10088,178 @@ def test_spec_compliance_arbitration_is_a_no_op_without_a_ledger():
     kept, contradicted = _spec_requirements_contradicting_authority(["anything"], None)
     assert kept == ["anything"]
     assert contradicted == []
+
+
+# --- PRV-11 (2026-08-30): the other half of build_subtask_goal_text()'s own
+# authority-isolation split - deterministic re-check of a SpecCompliance
+# missing_requirement against ctx.goal's two labeled sections directly,
+# rather than trusting the prompt instruction alone
+# (_spec_requirements_naming_planner_only_identifiers, kriya/workflow/
+# attempt.py). Reproduces the real live incident verbatim: SpecCompliance's
+# own judge repeatedly reported "the goal requires a displayName field" -
+# reconstructing its own worked counter-example - even though "displayName
+# field" appears only under Planned Implementation Strategy, never under
+# Authoritative Goal, in the exact goal text it was given. ---
+
+def _split_goal(authoritative: str, planned: str) -> str:
+    return (
+        f"{AUTHORITATIVE_GOAL_SECTION_HEADER}\n{authoritative}\n\n"
+        f"{PLANNED_IMPLEMENTATION_SECTION_HEADER}\n{planned}"
+    )
+
+
+def test_extract_requirement_identifier_tokens_finds_camel_case_and_quoted_names():
+    assert _extract_requirement_identifier_tokens("displayName field") == ["displayName"]
+    assert _extract_requirement_identifier_tokens("a `protocolVersion` value") == ["protocolVersion"]
+    assert _extract_requirement_identifier_tokens("a 'stored' name") == ["stored"]
+    # No code-shaped identifier at all - a vague/behavioral requirement.
+    assert _extract_requirement_identifier_tokens("the response must be sorted") == []
+
+
+def test_planner_only_requirement_is_suppressed_reproducing_the_live_incident():
+    """The literal live incident: the Planner's own subtask.description said
+    "add a displayName field", the real goal never mentioned a field at
+    all, and SpecCompliance's own judge reported it as a missing goal
+    requirement anyway."""
+    goal_text = _split_goal(
+        "Transform the customer name to uppercase and print the result.",
+        "Modify the Customer entity to add a displayName field that is "
+        "derived from existing name fields and stored as uppercase.",
+    )
+
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["displayName field"], goal_text,
+    )
+
+    assert kept == []
+    assert planner_only == ["displayName field"]
+
+
+def test_requirement_named_in_authoritative_goal_is_still_enforced():
+    """A concrete identifier the AUTHORITATIVE goal itself names is a real
+    requirement and must still be enforced exactly as before, regardless of
+    what the Planned Implementation Strategy also says about it."""
+    goal_text = _split_goal(
+        "The response must include a stored protocolVersion field.",
+        "Add a protocolVersion field to the response record.",
+    )
+
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["protocolVersion field"], goal_text,
+    )
+
+    assert kept == ["protocolVersion field"]
+    assert planner_only == []
+
+
+def test_planner_only_arbitration_suppresses_only_the_planner_only_requirement():
+    """Partial overlap, mirroring the migration arbitration's own required
+    test shape: one planner-only requirement suppressed, one genuine
+    unrelated requirement stays actionable."""
+    goal_text = _split_goal(
+        "The response must include a stored protocolVersion field.",
+        "Add a protocolVersion field and a displayName field to the response.",
+    )
+
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["protocolVersion field", "displayName field"], goal_text,
+    )
+
+    assert kept == ["protocolVersion field"]
+    assert planner_only == ["displayName field"]
+
+
+def test_planner_only_arbitration_keeps_requirement_with_no_identifier_token():
+    """A vague/behavioral requirement naming no concrete identifier at all
+    is always kept - this function only ever suppresses with positive,
+    text-grounded evidence, never a guess."""
+    goal_text = _split_goal(
+        "Transform the customer name to uppercase.",
+        "Add a displayName field derived from existing name fields.",
+    )
+
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["the output must be formatted correctly"], goal_text,
+    )
+
+    assert kept == ["the output must be formatted correctly"]
+    assert planner_only == []
+
+
+def test_planner_only_arbitration_is_a_no_op_without_both_section_headers():
+    """Every pre-MA6 caller and every subtask goal without a real top-level
+    goal to separate out sees identical behavior to before this function
+    existed - no section headers means everything stays kept, unconditionally."""
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["displayName field"], "Add a displayName field to the Customer entity.",
+    )
+
+    assert kept == ["displayName field"]
+    assert planner_only == []
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_does_not_fail_candidate_gates_on_planner_only_spec_requirement(tmp_path):
+    """Integration regression test for the live incident: a real run_attempt()
+    call whose SpecComplianceAgent mock reproduces the exact observed verdict
+    ("the goal requires a displayName field") against a properly
+    header-split ctx.goal must NOT raise QualityGateFailure - the candidate
+    gate must pass, not burn a retry re-litigating the Planner's own word
+    choice."""
+    owner = "src/main/java/com/example/customer/Customer.java"
+    (tmp_path / "src/main/java/com/example/customer").mkdir(parents=True)
+    (tmp_path / owner).write_text(
+        "package com.example.customer;\n"
+        "public record Customer(long id, String firstName, String lastName) {\n"
+        "    public String displayName() {\n"
+        "        return (firstName + \" \" + lastName).toUpperCase();\n"
+        "    }\n"
+        "}\n"
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {owner}
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": owner, "content": (tmp_path / owner).read_text()}])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": False,
+        "status": "ok",
+        "reasoning": (
+            "The goal requires an uppercase `displayName` field, but the implementation "
+            "provides a `displayName()` method instead."
+        ),
+        "missing_requirements": ["displayName field"],
+        "likely_files": [],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+        goal=_split_goal(
+            "Transform the customer name to uppercase and print the result.",
+            "Modify the Customer entity to add a displayName field that is "
+            "derived from existing name fields and stored as uppercase.",
+        ),
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={"Customer.java": owner},
+        allowed_write_relpaths=[owner], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    spec_compliance.check.assert_awaited()
+    assert state.candidate_gates_succeeded is True
 
 
 @pytest.mark.asyncio
