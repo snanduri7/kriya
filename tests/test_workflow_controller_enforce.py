@@ -245,6 +245,54 @@ def test_subtask_goal_preserves_overall_constraints_and_mapped_acceptance_withou
     assert "not this stage's completion scope" in constraints
 
 
+def test_subtask_goal_text_without_grounding_goal_is_unchanged():
+    """Backward compatibility: a caller not passing grounding_goal (its
+    default is "") gets the exact prior flat return - no section headers,
+    no behavior change for that call shape."""
+    from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER
+    subtask = Subtask(
+        id="s1", description="do a thing", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+    )
+    rendered = build_subtask_goal_text(subtask, 1, 1)
+    assert AUTHORITATIVE_GOAL_SECTION_HEADER not in rendered
+    assert rendered == "do a thing\n\nFiles this subtask should touch:\n- a.py (create)"
+
+
+def test_subtask_goal_text_separates_authoritative_goal_from_planner_strategy():
+    """PRV-11 authority-isolation fix (2026-08-30): when grounding_goal (the
+    real, unmediated top-level user request) is supplied, it must appear
+    under its own labeled section, separate from the Planner's own
+    subtask.description/acceptance/planned_files/verification - and a word
+    the Planner introduced (here: "field") that never appears in the
+    grounding_goal itself must NOT appear on the Authoritative Goal side of
+    that split."""
+    from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER, PLANNED_IMPLEMENTATION_SECTION_HEADER
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="Modify Customer.java to add a displayName field.",
+            execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="Customer.java", action=FileAction.MODIFY)],
+            acceptance_criteria_ids=["ac1"],
+        )],
+        acceptance_criteria=[AcceptanceCriterion(
+            id="ac1", description="Customer returns a displayName field that is uppercase",
+        )],
+    )
+    rendered = build_subtask_goal_text(
+        plan.subtasks[0], 1, 1, plan=plan,
+        grounding_goal="Add an uppercase displayName derived from the existing customer name fields.",
+    )
+    assert AUTHORITATIVE_GOAL_SECTION_HEADER in rendered
+    assert PLANNED_IMPLEMENTATION_SECTION_HEADER in rendered
+    authoritative_part, planner_part = rendered.split(PLANNED_IMPLEMENTATION_SECTION_HEADER)
+    assert "displayName field" not in authoritative_part
+    assert "displayName field" in planner_part
+    assert "Modify Customer.java" in planner_part
+    assert "Customer.java (modify)" in planner_part
+
+
 def test_subtask_semantic_context_projects_invariants_upstream_and_downstream_contracts():
     invariant = "runtime configuration remains external"
     plan = EngineeringPlan(
@@ -833,8 +881,16 @@ async def test_enforce_subtask_goal_text_names_the_real_subtask_and_dependency(t
         await controller.execute("goal", str(tmp_path), migration_mode="enforce")
 
     # s1 has no depends_on - no header, matching build_milestone_goal_text's
-    # own precedent (a DAG root gets no "depends on" preamble either)
-    assert calls[0]["goal"] == "write a.py\n\nFiles this subtask should touch:\n- a.py (create)"
+    # own precedent (a DAG root gets no "depends on" preamble either). Authority-
+    # isolation fix (PRV-11, 2026-08-30): the real top-level goal ("goal") is now
+    # a labeled section, separate from the Planner's own subtask.description -
+    # both still appear, so this is a substring check (like the s2 assertions
+    # below always were), not the old full-string equality.
+    from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER, PLANNED_IMPLEMENTATION_SECTION_HEADER
+    assert AUTHORITATIVE_GOAL_SECTION_HEADER in calls[0]["goal"]
+    assert PLANNED_IMPLEMENTATION_SECTION_HEADER in calls[0]["goal"]
+    assert "goal" in calls[0]["goal"].split(PLANNED_IMPLEMENTATION_SECTION_HEADER)[0]
+    assert "write a.py\n\nFiles this subtask should touch:\n- a.py (create)" in calls[0]["goal"]
     # s2 depends on s1 - real header naming both the subtask id/position and the dependency
     assert "'s2' (2 of 2)" in calls[1]["goal"]
     assert "depending on: s1" in calls[1]["goal"]

@@ -5,7 +5,14 @@ import re
 from abc import ABC
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from kriya.agents.contracts import MilestoneV2, parse_file_list, parse_milestone_list, parse_milestone_list_v2
+from kriya.agents.contracts import (
+    AUTHORITATIVE_GOAL_SECTION_HEADER,
+    PLANNED_IMPLEMENTATION_SECTION_HEADER,
+    MilestoneV2,
+    parse_file_list,
+    parse_milestone_list,
+    parse_milestone_list_v2,
+)
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 
@@ -2542,7 +2549,30 @@ class SpecComplianceAgent(BaseAgent):
     the model's judgment - a second, vaguer ReviewerAgent-style critique here would
     burn retry budget on unwinnable, subjective gates (the exact failure mode
     _EXPLICIT_TEST_REQUEST_RE's own docstring already documents for an overly broad
-    deterministic pattern)."""
+    deterministic pattern).
+
+    Authority-isolation fix (PRV-11, 2026-08-30): a live incident proved this
+    gate's own narrow, literal-minded mandate is exactly what makes it unsafe
+    against a Planner-authored bounded-subtask goal. A Planner subtask
+    description said "add a displayName field" - the ORIGINAL user goal never
+    said "field" at all, only "displayName, derived from the existing customer
+    name fields" (an existing-fields reference, not a mandate on displayName's
+    OWN representation). build_subtask_goal_text() (kriya/workflow/
+    workflow_controller.py) used to flatten the Planner's own subtask.
+    description into the SAME string handed to this gate as "the goal" - so
+    this gate, faithfully following its own documented mandate ("the goal says
+    a protocolVersion field - does a field with that exact name exist?"),
+    correctly-per-its-own-rules rejected a compiler-valid displayName()
+    accessor, and the literal-field alternative then hit a real Java
+    constraint (a record cannot declare extra instance fields) - a conflict
+    Kriya manufactured between its own Planner and its own compliance gate,
+    not a genuine requirement/architecture conflict. build_subtask_goal_text()
+    now labels its two sections explicitly when it has a real top-level goal
+    to separate out (see contracts.py's own AUTHORITATIVE_GOAL_SECTION_HEADER/
+    PLANNED_IMPLEMENTATION_SECTION_HEADER docstring) - this gate's own prompt
+    below is the other half of that fix: it must never promote a PLANNER-only
+    identifier into a requirement just because it's concrete and literally
+    named."""
 
     @property
     def system_prompt(self) -> str:
@@ -2573,6 +2603,25 @@ class SpecComplianceAgent(BaseAgent):
             "describe behavior in prose, not a literal field/method list), that is fully "
             "compliant by definition - say so, do not invent a requirement that isn't "
             "actually there.\n"
+            f"The goal text you are given may contain two labeled sections, "
+            f"\"{AUTHORITATIVE_GOAL_SECTION_HEADER}\" and \"{PLANNED_IMPLEMENTATION_SECTION_HEADER}\". "
+            "When both are present: judge compliance ONLY against the Authoritative Goal "
+            "section - that is the real, unmediated user request. The Planned Implementation "
+            "Strategy section is a Planner's OWN chosen approach for satisfying that goal, not "
+            "itself a new user requirement. A concrete identifier, structure, or value that "
+            "appears ONLY in the Planned Implementation Strategy section (never in the "
+            "Authoritative Goal section) is a Planner implementation choice - do not flag its "
+            "absence from the code as non-compliance, even though it is concrete and literally "
+            "named; planning may choose HOW to satisfy a requirement, but that choice does not "
+            "become a WHAT the user required. Example: if the Authoritative Goal says "
+            "\"add a derived uppercase displayName\" and the Planned Implementation Strategy "
+            "says \"add a displayName field\", an implementation using a displayName() method "
+            "instead of a field is still compliant - \"field\" was the Planner's own word "
+            "choice, not the user's. If the Authoritative Goal ITSELF names the identifier "
+            "(e.g. it explicitly says \"a stored displayName field\"), that IS a real "
+            "requirement and must still be enforced exactly as before, regardless of what the "
+            "Planned Implementation Strategy also says. When neither section label is present, "
+            "the entire goal text is authoritative, exactly as it always has been.\n"
             "Return ONLY a JSON object, no markdown fences, no extra commentary:\n"
             '{"compliant": true or false, "reasoning": "one or two sentences", '
             '"missing_requirements": ["exact identifier/value from the goal that is '

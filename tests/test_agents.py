@@ -13,6 +13,7 @@ from kriya.agents.agent import (
     SpecComplianceAgent,
     call_with_escalation,
 )
+from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER, PLANNED_IMPLEMENTATION_SECTION_HEADER
 from kriya.config import AppConfig, FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 from kriya.workflow.operations import CodeOperation
@@ -3014,6 +3015,121 @@ async def test_spec_compliance_check_prepends_authoritative_context_to_prompt():
     context_pos = prompt_sent.index("AUTHORITATIVELY ESTABLISHED")
     goal_pos = prompt_sent.index("=== Goal ===")
     assert context_pos < goal_pos
+
+
+# --- Authority isolation (PRV-11, 2026-08-30) ---
+#
+# Live incident: a Planner subtask description said "add a displayName
+# field" - the ORIGINAL goal never said "field", only "displayName, derived
+# from the existing customer name fields" (a reference to the EXISTING
+# firstName/lastName fields, not a mandate on displayName's own
+# representation). build_subtask_goal_text() used to flatten the Planner's
+# own subtask.description into the SAME string this gate judges as "the
+# goal" - so a Planner word choice got enforced as an authoritative user
+# requirement, rejecting a compiler-valid displayName() accessor, and the
+# literal-field alternative then hit a real Java constraint (a record
+# cannot declare extra instance fields) - a conflict Kriya manufactured
+# between its own Planner and its own compliance gate.
+#
+# These tests can only verify the CONTRACT (the right information reaches
+# the model, correctly separated, with the correct instruction) - not that
+# a live LLM actually follows it; that is a live_model-tier concern, same
+# as every other agent judgment-quality question in this mocked suite.
+
+def _authority_separated_goal(subtask_field_wording: str, grounding_goal: str) -> str:
+    """Builds exactly what build_subtask_goal_text() produces with a real
+    grounding_goal - used directly here (not re-imported) so this test file
+    stays independent of workflow_controller.py's own import graph, matching
+    every other test in this file testing SpecComplianceAgent in isolation."""
+    return (
+        f"{AUTHORITATIVE_GOAL_SECTION_HEADER}\n"
+        "This is the real, unmediated user request - the source of truth for what is "
+        "actually required. Nothing below this section may expand it: a concrete "
+        "identifier, structure, or value that appears ONLY in the Planned Implementation "
+        "Strategy below (never in this section) is the Planner's own implementation "
+        "choice, not a new user requirement.\n"
+        f"{grounding_goal}\n\n"
+        f"{PLANNED_IMPLEMENTATION_SECTION_HEADER}\n"
+        "The Planner's own chosen approach for satisfying the authoritative goal above "
+        "for THIS subtask - follow it, but it may be adapted if it conflicts with the "
+        "authoritative goal or with real constraints discovered while implementing it.\n"
+        f"{subtask_field_wording}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_spec_compliance_planner_only_field_wording_does_not_fail_when_goal_is_generic():
+    """The exact PRV-11 live shape: the Authoritative Goal says nothing about
+    a field; only the Planner's own Planned Implementation Strategy does. A
+    compiler-valid displayName() accessor must be judged compliant - the
+    Planner's word choice must not become a new user requirement."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "compliant": True,
+        "reasoning": "displayName is present as a derived uppercase accessor, satisfying the "
+                     "authoritative goal; 'field' only appears in the Planner's own implementation "
+                     "strategy, not in the authoritative goal, so it is not a requirement.",
+        "missing_requirements": [],
+        "likely_files": [],
+    }))
+    goal = _authority_separated_goal(
+        subtask_field_wording="Modify Customer.java to add a displayName field that is derived "
+                               "from existing name fields and stored as uppercase.",
+        grounding_goal="Add an uppercase displayName to the customer lookup behavior, derived "
+                        "from the existing customer name fields.",
+    )
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(
+        goal=goal, files_written=["Customer.java"],
+        file_contents={"Customer.java": (
+            "public record Customer(long id, String firstName, String lastName) {\n"
+            "    public String displayName() { return (firstName + \" \" + lastName).toUpperCase(); }\n"
+            "}\n"
+        )},
+    )
+
+    assert result["compliant"] is True
+    assert result["missing_requirements"] == []
+    prompt_sent = llm.complete.call_args_list[0][0][1]
+    assert AUTHORITATIVE_GOAL_SECTION_HEADER in prompt_sent
+    assert PLANNED_IMPLEMENTATION_SECTION_HEADER in prompt_sent
+
+
+@pytest.mark.asyncio
+async def test_spec_compliance_still_fails_when_goal_itself_requires_the_field():
+    """Inverse of the above: when the AUTHORITATIVE section itself names the
+    field (not just the Planner's own strategy section), that is a genuine
+    requirement and must still be enforced exactly as before this fix."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "compliant": False,
+        "reasoning": "The authoritative goal itself requires Customer to contain a stored "
+                     "displayName field, but the implementation only defines a displayName() "
+                     "method, not a field.",
+        "missing_requirements": ["displayName field"],
+        "likely_files": ["Customer.java"],
+    }))
+    goal = _authority_separated_goal(
+        subtask_field_wording="Modify Customer.java to add the required displayName field.",
+        grounding_goal="Customer must contain a stored displayName field, entirely uppercase, "
+                        "derived from the existing customer name fields.",
+    )
+
+    checker = SpecComplianceAgent("spec_compliance", llm)
+    result = await checker.check(
+        goal=goal, files_written=["Customer.java"],
+        file_contents={"Customer.java": (
+            "public record Customer(long id, String firstName, String lastName) {\n"
+            "    public String displayName() { return (firstName + \" \" + lastName).toUpperCase(); }\n"
+            "}\n"
+        )},
+    )
+
+    assert result["compliant"] is False
+    assert "displayName field" in result["missing_requirements"]
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,32 @@ from kriya.workflow.triage import ChangeKind
 logger = logging.getLogger(__name__)
 
 
+# Authority-isolation fix (PRV-11, 2026-08-30): a live incident proved a
+# Planner subtask description ("add a displayName field") can get flattened,
+# by kriya/workflow/workflow_controller.py::build_subtask_goal_text(), into
+# the SAME single string SpecComplianceAgent (kriya/agents/agent.py) judges
+# literal-requirement compliance against - so a Planner's own IMPLEMENTATION
+# word choice ("field" vs "method") got enforced as if the ORIGINAL user
+# goal had mandated it, and that specific over-commitment then collided with
+# a real Java language constraint (a record cannot declare extra instance
+# fields). The conflict was manufactured inside Kriya, between two of its
+# own components - not a genuine requirement/architecture conflict.
+#
+# These two literal header strings are the ONLY contract between the
+# PRODUCER (build_subtask_goal_text, which emits them when it has a real
+# top-level grounding_goal to separate out) and the CONSUMER
+# (SpecComplianceAgent.system_prompt, which looks for them to decide what
+# counts as authoritative vs. Planner-chosen strategy) - defined once, here,
+# specifically so the two can never drift apart the way two independently
+# hand-typed literals would. Absence of both headers (the ordinary,
+# non-bounded single-shot pipeline, where there is no separate Planner-
+# authored subtask text to isolate from) means the ENTIRE goal text stays
+# authoritative, exactly as it always has - this is additive, not a
+# behavior change for that path.
+AUTHORITATIVE_GOAL_SECTION_HEADER = "=== Authoritative Goal ==="
+PLANNED_IMPLEMENTATION_SECTION_HEADER = "=== Planned Implementation Strategy ==="
+
+
 class FileList(BaseModel):
     """A validated list of workspace-relative file paths - the authoritative
     set of files a design calls for (ArchitectAgent), or the set a Developer

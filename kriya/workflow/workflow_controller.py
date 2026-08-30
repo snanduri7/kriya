@@ -80,7 +80,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-from kriya.agents.contracts import parse_planner_structured_output
+from kriya.agents.contracts import (
+    AUTHORITATIVE_GOAL_SECTION_HEADER,
+    PLANNED_IMPLEMENTATION_SECTION_HEADER,
+    parse_planner_structured_output,
+)
 from kriya.control.decisions import (
     Decision,
     DecisionLedger,
@@ -290,6 +294,7 @@ def build_subtask_goal_text(
     total: int,
     *,
     plan: Optional[EngineeringPlan] = None,
+    grounding_goal: str = "",
 ) -> str:
     """MA7.8 - the per-subtask analogue of kriya/workflow/milestones.py's
     build_milestone_goal_text(): deterministic string assembly, no extra
@@ -298,7 +303,26 @@ def build_subtask_goal_text(
     output is visible once applied. Plan-level semantic contracts and
     global invariants are rendered separately by
     build_subtask_semantic_context(), keeping this string the bounded
-    executable goal rather than an unstructured copy of the whole plan)."""
+    executable goal rather than an unstructured copy of the whole plan).
+
+    grounding_goal (authority-isolation fix, PRV-11, 2026-08-30): the
+    unmediated top-level user request, passed by the ONE real caller
+    (_invoke_bounded_subtask, which already has it in scope as its own
+    outer `goal`). When present, everything this function would otherwise
+    return unlabeled (subtask.description, mapped acceptance criteria,
+    planned_files, verification - ALL Planner-authored, however faithfully
+    derived from the real goal) is rendered under an explicit "Planned
+    Implementation Strategy" header, separate from the "Authoritative
+    Goal" section holding grounding_goal verbatim - see contracts.py's own
+    AUTHORITATIVE_GOAL_SECTION_HEADER/PLANNED_IMPLEMENTATION_SECTION_HEADER
+    docstring for the live incident this closes and how SpecComplianceAgent
+    (the one consumer that was actually treating this flattening as unsafe)
+    now reads the split. Every existing test-visible substring (the
+    dependency header, subtask.description, mapped acceptance text, the
+    planned-files list, verification text) is preserved verbatim - this is
+    an additive relabeling, not a content change. Omitting grounding_goal
+    (default "") reproduces the exact prior flat return, unchanged - no
+    caller that doesn't pass it sees any difference."""
     header = ""
     if subtask.depends_on:
         dep_list = ", ".join(sorted(subtask.depends_on))
@@ -332,7 +356,23 @@ def build_subtask_goal_text(
     verification = ""
     if subtask.verification:
         verification = "\n\nVerification: " + "; ".join(v.description for v in subtask.verification)
-    return header + subtask.description + acceptance + planned + verification
+    planned_strategy = header + subtask.description + acceptance + planned + verification
+    if not grounding_goal:
+        return planned_strategy
+    return (
+        f"{AUTHORITATIVE_GOAL_SECTION_HEADER}\n"
+        "This is the real, unmediated user request - the source of truth for what is "
+        "actually required. Nothing below this section may expand it: a concrete "
+        "identifier, structure, or value that appears ONLY in the Planned Implementation "
+        "Strategy below (never in this section) is the Planner's own implementation "
+        "choice, not a new user requirement.\n"
+        f"{grounding_goal}\n\n"
+        f"{PLANNED_IMPLEMENTATION_SECTION_HEADER}\n"
+        "The Planner's own chosen approach for satisfying the authoritative goal above "
+        "for THIS subtask - follow it, but it may be adapted if it conflicts with the "
+        "authoritative goal or with real constraints discovered while implementing it.\n"
+        f"{planned_strategy}"
+    )
 
 
 def build_subtask_constraint_context(original_goal: str) -> str:
@@ -3373,7 +3413,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             recovery_context: str = "",
             execution_role: str = "planned",
         ) -> Dict[str, Any]:
-            target_goal = build_subtask_goal_text(target, target_position, total, plan=plan)
+            target_goal = build_subtask_goal_text(
+                target, target_position, total, plan=plan, grounding_goal=goal,
+            )
             target_files = [pf.path for pf in target.planned_files]
             target_context = project_for_subtask(execution_context, target)
             target_context_text = subtask_executor._render_context_package(target_context)
