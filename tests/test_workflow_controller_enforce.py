@@ -48,6 +48,7 @@ from kriya.workflow.workflow_controller import (
     _StructuredPlanUnavailable,
     ArtifactOwnerResolutionBasis,
     WorkflowController,
+    _attempt_owner_recovery_self_correction,
     _authoritative_planner_extension_candidates,
     _build_owner_recovery_context,
     _cross_owner_obligation_id,
@@ -69,6 +70,7 @@ from kriya.workflow.workflow_controller import (
     revise_plan_for_grounded_scope_owner,
 )
 from kriya.workflow.recovery_plan import RecoveryParticipant, RecoveryParticipantRole
+from kriya.workflow.self_correction import SelfCorrectionResult
 from kriya.workflow.workflow_types import SubtaskStatus
 
 
@@ -2483,6 +2485,241 @@ def test_order_recovery_groups_fails_closed_on_cycle():
         ),
     )
     assert _order_recovery_groups(plan, participants) is None
+
+
+# --- Targeted repair for grounded owner recovery (2026-08-30, PRV-06
+# follow-up): _attempt_owner_recovery_self_correction() reuses the existing
+# self_correction.py tool loop as a cheaper first attempt at an owner-
+# recovery fix, but must NEVER let its own narrow (cross-owner-blind)
+# compile check bypass the SAME downstream safety net the Developer-
+# generation path already goes through. ---
+
+def _fake_kernel(*, self_correction_enabled=True, max_turns=4):
+    kernel = MagicMock()
+    kernel.config.autonomy.self_correction_loop_enabled = self_correction_enabled
+    kernel.config.autonomy.self_correction_loop_max_turns = max_turns
+    return kernel
+
+
+@pytest.mark.asyncio
+async def test_attempt_owner_recovery_self_correction_returns_none_when_disabled(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project/>")
+    owner = Subtask(id="s1", description="build manifest", execution_method=ExecutionMethod.MODEL,
+                     planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)])
+    result = await _attempt_owner_recovery_self_correction(
+        kernel=_fake_kernel(self_correction_enabled=False),
+        developer_llm=MagicMock(),
+        plan_workspace_path=str(tmp_path), workspace_path=str(tmp_path),
+        owner=owner, required_owner_files=["pom.xml"],
+        scope_conflict={"raw_evidence": "package org.junit.jupiter.api does not exist"},
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_attempt_owner_recovery_self_correction_returns_none_without_raw_evidence(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project/>")
+    owner = Subtask(id="s1", description="build manifest", execution_method=ExecutionMethod.MODEL,
+                     planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)])
+    result = await _attempt_owner_recovery_self_correction(
+        kernel=_fake_kernel(), developer_llm=MagicMock(),
+        plan_workspace_path=str(tmp_path), workspace_path=str(tmp_path),
+        owner=owner, required_owner_files=["pom.xml"],
+        scope_conflict={},  # no raw_evidence to seed the loop
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_attempt_owner_recovery_self_correction_rejects_trivial_resolve_with_no_real_change(tmp_path):
+    """The critical safety property: self_correction_loop's own `resolved`
+    flag comes from a compile check scoped to the OWNER's own files - the
+    exact same cross-owner-blind signal that let the live PRV-06 defect
+    slip past App.java's own Quality Gates. A "resolved" loop that never
+    actually modified any file must NOT be trusted as a real fix."""
+    (tmp_path / "App.java").write_text("class App { private static class InMemoryService {} }")
+    owner = Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                     planned_files=[PlannedFile(path="App.java", action=FileAction.MODIFY)])
+    trivial_resolve = SelfCorrectionResult(
+        resolved=True, turns_used=1, final_compile_output="SUCCESS", modified_files={},
+    )
+    with patch(
+        "kriya.workflow.self_correction.run_self_correction_loop",
+        new=AsyncMock(return_value=trivial_resolve),
+    ), patch("kriya.tools.validate.PolymorphicValidator"):
+        result = await _attempt_owner_recovery_self_correction(
+            kernel=_fake_kernel(), developer_llm=MagicMock(),
+            plan_workspace_path=str(tmp_path), workspace_path=str(tmp_path),
+            owner=owner, required_owner_files=["App.java"],
+            scope_conflict={"raw_evidence": "App.InMemoryService has private access in App"},
+        )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_attempt_owner_recovery_self_correction_returns_candidate_on_real_fix(tmp_path):
+    (tmp_path / "App.java").write_text("class App { static class InMemoryService {} }")
+    owner = Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                     planned_files=[PlannedFile(path="App.java", action=FileAction.MODIFY)])
+    real_resolve = SelfCorrectionResult(
+        resolved=True, turns_used=2, final_compile_output="SUCCESS",
+        modified_files={"App.java": "class App { static class InMemoryService {} }"},
+    )
+    with patch(
+        "kriya.workflow.self_correction.run_self_correction_loop",
+        new=AsyncMock(return_value=real_resolve),
+    ), patch("kriya.tools.validate.PolymorphicValidator"):
+        result = await _attempt_owner_recovery_self_correction(
+            kernel=_fake_kernel(), developer_llm=MagicMock(),
+            plan_workspace_path=str(tmp_path), workspace_path=str(tmp_path),
+            owner=owner, required_owner_files=["App.java"],
+            scope_conflict={"raw_evidence": "App.InMemoryService has private access in App"},
+        )
+    assert result == {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_self_correction_produces_candidate_and_resumes_consumer(tmp_path):
+    """Full-controller integration: self-correction produces a REAL fix for
+    group.s1 - the owner-recovery loop must use it directly (no
+    _invoke_bounded_subtask call spent on that owner) and the rest of the
+    pipeline (established_file_context, consumer retry, success) must work
+    completely unchanged, exactly as if a Developer-generation call had
+    produced the identical content."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    we.kernel = _fake_kernel()
+    we.developer.llm = MagicMock()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "compile",
+                    "raw_evidence": "package org.junit.jupiter.api does not exist",
+                    "required_files": ["pom.xml"], "allowed_files": ["AppTest.java"],
+                },
+            }
+        # This is the CONSUMER's own resumed retry - the owner (s1) never
+        # got a second run_generation_workflow call, since self-correction
+        # (mocked below) already produced its candidate directly.
+        (tmp_path / "AppTest.java").write_text("class AppTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["AppTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    real_resolve = SelfCorrectionResult(
+        resolved=True, turns_used=1, final_compile_output="SUCCESS",
+        modified_files={"pom.xml": "<project><dependencies><junit/></dependencies></project>"},
+    )
+
+    def _fake_self_correction(*args, **kwargs):
+        (tmp_path / "pom.xml").write_text(real_resolve.modified_files["pom.xml"])
+        return real_resolve
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3, patch(
+        "kriya.workflow.self_correction.run_self_correction_loop",
+        new=AsyncMock(side_effect=_fake_self_correction),
+    ), patch("kriya.tools.validate.PolymorphicValidator"):
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    # 1 (s1 initial) + 1 (s2 fail) + 1 (consumer retry) = 3 - NOT 4, since
+    # self-correction replaced what would otherwise have been a fourth
+    # run_generation_workflow call for s1's own owner-recovery attempt.
+    assert len(calls) == 3
+    assert (tmp_path / "pom.xml").read_text() == "<project><dependencies><junit/></dependencies></project>"
+    events = result.legacy_result["plan_recovery_events"]
+    assert events[0]["owner_recovery_passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_self_correction_still_wrong_fix_caught_by_no_progress(tmp_path):
+    """Safety proof: self-correction's own `resolved=True` must NOT bypass
+    the existing RECOVERY_NO_PROGRESS/acceptance pipeline. Here it
+    genuinely modifies the file (so the trivial-resolve guard doesn't catch
+    it) but reproduces content byte-identical to the pre-recovery baseline -
+    the SAME downstream fingerprint check that already protects the
+    Developer-generation path must catch this too, with zero special-casing
+    for where the candidate came from."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build config", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="create entrypoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="app_entrypoint.txt", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    we.kernel = _fake_kernel()
+    we.developer.llm = MagicMock()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "build.config").write_text("entrypoint=OldMain")
+            return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+        return {
+            "status": "failed", "quality_gates_passed": False, "files": [],
+            "plan_scope_conflict": {
+                "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "misdirected_edit",
+                "raw_evidence": "entrypoint mismatch", "required_files": ["build.config"],
+                "allowed_files": ["app_entrypoint.txt"],
+            },
+        }
+
+    we.run_generation_workflow = fake_run
+    # "Resolved" its own narrow check, DID write something (passes the
+    # trivial-resolve guard) - but the content is byte-identical to the
+    # pre-recovery baseline. Must still be rejected.
+    still_wrong_resolve = SelfCorrectionResult(
+        resolved=True, turns_used=1, final_compile_output="SUCCESS",
+        modified_files={"build.config": "entrypoint=OldMain"},
+    )
+
+    def _fake_self_correction(*args, **kwargs):
+        (tmp_path / "build.config").write_text(still_wrong_resolve.modified_files["build.config"])
+        return still_wrong_resolve
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3, patch(
+        "kriya.workflow.self_correction.run_self_correction_loop",
+        new=AsyncMock(side_effect=_fake_self_correction),
+    ), patch("kriya.tools.validate.PolymorphicValidator"):
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 1
+    assert events[0]["owner_recovery_passed"] is False
+    # Only 2 real run_generation_workflow calls (s1 initial + s2 initial
+    # fail) - self-correction's own no-progress candidate never triggered a
+    # third (consumer was never resumed off the back of it).
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio

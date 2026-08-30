@@ -1441,6 +1441,112 @@ def build_recovery_execution_plan(
     )
 
 
+async def _attempt_owner_recovery_self_correction(
+    *,
+    kernel: Any,
+    developer_llm: Any,
+    plan_workspace_path: str,
+    workspace_path: str,
+    owner: Subtask,
+    required_owner_files: List[str],
+    scope_conflict: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Targeted repair for grounded owner recovery (2026-08-30, PRV-06
+    follow-up): reuses the existing, proven `self_correction.py` tool loop
+    (read_file/apply_patch/recompile, already opt-in via `autonomy.
+    self_correction_loop_enabled`) as a cheap, bounded FIRST attempt at a
+    grounded owner-recovery fix, before falling through to the existing full
+    Developer-generation owner-recovery path unchanged. No new agent, no new
+    state machine, no change to any generation retry counter -
+    self_correction_loop's own `max_turns` bound is independent and
+    untouched.
+
+    Why this, not exact-line highlighting (failure_grounding.py::
+    extract_error_source_locations, already used for ordinary in-subtask
+    retries): traced live against the PRV-06 2026-08-30 09:18-09:39 run - a
+    cross-owner failure's own compiler locator names the CONSUMER file
+    (where the symptom was detected: `AppTest.java:[29,12]` for a `pom.xml`/
+    `App.java` requirement), never the owner's own file where the fix
+    belongs - by construction, since that is the entire reason this is a
+    cross-owner recovery rather than an ordinary same-file retry. Matching
+    the locator's own file against the owner's required files would find
+    zero matches for this whole failure class, so that mechanism was not
+    reused here.
+
+    CRITICAL safety property, found and fixed during design, not shipped
+    broken: self_correction_loop's own `resolved` flag comes from
+    `validator.run_compile_check()` scoped to the OWNER's own files - the
+    exact same narrow, cross-owner-blind signal `owner_local_accepted`'s
+    plain `quality_gates_passed` already is (confirmed live: App.java
+    compiles fine standalone regardless of InMemoryService's visibility,
+    which is exactly the PRV-06 defect this exists to fix). `resolved=True`
+    is therefore NEVER treated as sufficient evidence on its own. This
+    function returns an owner_result-shaped dict (status/quality_gates_
+    passed/files, matching _invoke_bounded_subtask's own contract) ONLY
+    when self-correction both resolved its own narrow gate AND genuinely
+    modified at least one file - the caller then feeds this candidate
+    through the EXACT SAME downstream pipeline (owner_undeclared check,
+    candidate_fingerprint/RECOVERY_NO_PROGRESS, owner_local_accepted, and
+    eventually the plan-level acceptance precheck/consumer retry) already
+    built for the Developer-generation path, completely unchanged. A trivial
+    "already fine, nothing to patch" resolve (modified_files empty) is
+    rejected here directly rather than trusted, AND would additionally be
+    caught downstream by RECOVERY_NO_PROGRESS even if this check were
+    somehow bypassed - defense in depth, not a single point of trust.
+
+    Returns None (caller falls through to the unchanged
+    _invoke_bounded_subtask(execution_role="owner_recovery") path) when: the
+    feature flag is off, there is no raw compiler/failure evidence to seed
+    the loop, or self-correction did not resolve/modify anything within its
+    own bounded turns."""
+    if not getattr(kernel.config.autonomy, "self_correction_loop_enabled", False):
+        return None
+    raw_evidence = scope_conflict.get("raw_evidence") or ""
+    if not raw_evidence.strip():
+        return None
+
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.self_correction import run_self_correction_loop
+
+    active_code_context_parts: List[str] = []
+    for path in required_owner_files:
+        full_path = os.path.join(plan_workspace_path, path)
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        active_code_context_parts.append(f"--- {path} ---\n{content}")
+    if not active_code_context_parts:
+        return None
+
+    validator = PolymorphicValidator(
+        plan_workspace_path, original_workspace_path=workspace_path,
+        autonomy_cfg=kernel.config.autonomy,
+    )
+    result = await run_self_correction_loop(
+        llm=developer_llm,
+        worktree_path=plan_workspace_path,
+        validator=validator,
+        files_in_scope=sorted({pf.path for pf in owner.planned_files} | set(required_owner_files)),
+        writable_files=list(required_owner_files),
+        compile_error_output=raw_evidence,
+        active_code_context="\n\n".join(active_code_context_parts),
+        max_turns=kernel.config.autonomy.self_correction_loop_max_turns,
+    )
+    if not result.resolved or not result.modified_files:
+        return None
+    logger.info(
+        "OWNER_RECOVERY_SELF_CORRECTION_RESOLVED owner=%s files=%s turns=%d",
+        owner.id, sorted(result.modified_files.keys()), result.turns_used,
+    )
+    return {
+        "status": "success",
+        "quality_gates_passed": True,
+        "files": sorted(result.modified_files.keys()),
+    }
+
+
 def _integration_reference_token(path: str) -> str:
     """The stem of a file's basename (no directory, no extension) - e.g.
     "InMemoryService" from "src/main/java/com/example/InMemoryService.java",
@@ -3702,10 +3808,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             read_file_revision(os.path.join(plan_workspace_path, path))
                             for path in sorted(required_owner_files)
                         )
-                    owner_result = await _invoke_bounded_subtask(
-                        owner, owner_position, recovery_context=recovery_context,
-                        execution_role="owner_recovery",
-                    )
+                    owner_result = None
+                    _self_correction_kernel = getattr(self.workflow_engine, "kernel", None)
+                    if _self_correction_kernel is not None:
+                        owner_result = await _attempt_owner_recovery_self_correction(
+                            kernel=_self_correction_kernel,
+                            developer_llm=self.workflow_engine.developer.llm,
+                            plan_workspace_path=plan_workspace_path,
+                            workspace_path=workspace_path,
+                            owner=owner,
+                            required_owner_files=required_owner_files,
+                            scope_conflict=scope_conflict,
+                        )
+                    if owner_result is None:
+                        owner_result = await _invoke_bounded_subtask(
+                            owner, owner_position, recovery_context=recovery_context,
+                            execution_role="owner_recovery",
+                        )
                     owner_declared = {pf.path for pf in owner.planned_files}
                     owner_undeclared = sorted(
                         set(owner_result.get("files") or []) - owner_declared
