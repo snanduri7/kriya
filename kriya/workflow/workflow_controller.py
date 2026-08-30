@@ -146,6 +146,7 @@ from kriya.workflow.plan_schema import (
     build_engineering_plan_from_planner_output,
 )
 from kriya.workflow.recovery_plan import (
+    RecoveryAction,
     RecoveryExecutionPlan,
     RecoveryExecutionPlanStatus,
     RecoveryOwnerGroup,
@@ -1263,12 +1264,39 @@ def _evaluate_recovery_acceptance_precheck(
     return False
 
 
+def _participant_evidence_is_grounded(scope_conflict: Dict[str, Any]) -> bool:
+    """MUST_CHANGE vs VERIFY disposition (PRV-11, 2026-08-30) - see
+    RecoveryAction's own docstring (kriya/workflow/recovery_plan.py) for the
+    live incident this closes.
+
+    Deliberately narrow, in the SAFE direction: only `Failure.type ==
+    "attribution_rejected"` is treated as NOT grounded - the one shape this
+    codebase produces today that is BY CONSTRUCTION always `authority=
+    "advisory"` (a Developer's own free-text FIX ANALYSIS naming files,
+    never a compiler/test locator or a deterministic write-scope denial -
+    see failure.py's own docstring for that type, and attempt.py's own
+    Failure(type="attribution_rejected", ...) construction site, the ONLY
+    place it is ever raised). Every OTHER scope_conflict shape (the ordinary
+    PLAN_SCOPE_DEFECT path, the DENY_ALL/VERIFICATION_CONTRACT_DEFECT path,
+    ...) is treated as grounded - this is NOT a claim that every such path
+    is equally strong evidence (a genuinely differentiated per-artifact
+    evidence tier remains future work, see derive_recovery_participants's
+    own mutation_reason note); it is the smallest change that closes the
+    ONE confirmed live gap (self-diagnosed files silently promoted to the
+    same "must change" status as a real compiler locator) without
+    reclassifying every existing, already-proven recovery scenario as
+    VERIFY - a much larger, unproven behavior change this round does not
+    make."""
+    return scope_conflict.get("failure_type") != "attribution_rejected"
+
+
 def derive_recovery_participants(
     plan: EngineeringPlan,
     scope_conflict: Dict[str, Any],
     failed_subtask: Subtask,
     order: Optional[List[str]] = None,
     control_state: Optional[ControlState] = None,
+    recovery_generation_by_key: Optional[Dict[Tuple[str, str, Tuple[str, ...]], int]] = None,
 ) -> Tuple[RecoveryParticipant, ...]:
     """General Obligation-Centric Recovery Execution (2026-08-30) - see
     `Kriya_General_Obligation_Centric_Recovery_Execution_Implementation_
@@ -1284,9 +1312,25 @@ def derive_recovery_participants(
     shares today - not yet independently derived per artifact
     (retry_strategy.py's own scope-conflict construction has no per-file
     evidence breakdown to draw from). Disclosed, not silently assumed - see
-    RecoveryParticipant's own docstring in kriya/workflow/recovery_plan.py."""
+    RecoveryParticipant's own docstring in kriya/workflow/recovery_plan.py.
+
+    recovery_action (PRV-11, 2026-08-30): MUST_CHANGE when
+    `_participant_evidence_is_grounded` says this scope_conflict's own
+    evidence is independently verified, OR when this exact (originating
+    subtask, effective owner, artifact) triple has ALREADY been through at
+    least one full recovery cycle before (`recovery_generation_by_key`,
+    the SAME per-(subtask,owner,files) counter the owner-recovery loop
+    already threads through `build_recovery_execution_plan` - reused here,
+    keyed per-artifact as `(subtask, owner, (artifact,))`, not invented
+    fresh) - a requirement that RECURRED after a full skip-and-reverify
+    cycle already gave it the benefit of the doubt is no longer treated as
+    merely "implicated." Otherwise VERIFY. `recovery_generation_by_key`
+    defaults to None (treated as empty - generation 0 for everything),
+    matching every other optional-dependency default in this module."""
     required_files = _plan_scope_conflict_files(scope_conflict)
     mutation_reason = scope_conflict.get("reason") or ""
+    grounded = _participant_evidence_is_grounded(scope_conflict)
+    generation_by_key = recovery_generation_by_key or {}
     participants: List[RecoveryParticipant] = []
     for path in required_files:
         resolution = resolve_effective_artifact_owner(
@@ -1299,11 +1343,19 @@ def derive_recovery_participants(
                 mutation_reason="",
             ))
             continue
+        prior_generation = generation_by_key.get(
+            (failed_subtask.id, resolution.owner_subtask_id, (path,)), 0,
+        )
+        recovery_action = (
+            RecoveryAction.MUST_CHANGE if (grounded or prior_generation > 0)
+            else RecoveryAction.VERIFY
+        )
         participants.append(RecoveryParticipant(
             artifact=path, role=RecoveryParticipantRole.REQUIRED_MUTATION,
             effective_owner_subtask_id=resolution.owner_subtask_id,
             owner_resolution_basis=resolution.resolution_basis.value,
             mutation_reason=mutation_reason,
+            recovery_action=recovery_action,
         ))
     return tuple(participants)
 
@@ -1389,6 +1441,7 @@ def build_recovery_execution_plan(
     order: Optional[List[str]] = None,
     control_state: Optional[ControlState] = None,
     plan_generation: int = 0,
+    recovery_generation_by_key: Optional[Dict[Tuple[str, str, Tuple[str, ...]], int]] = None,
 ) -> Optional[RecoveryExecutionPlan]:
     """General Obligation-Centric Recovery Execution (2026-08-30) - see the
     implementation spec (repo root) for the full design this generalizes
@@ -1407,6 +1460,7 @@ def build_recovery_execution_plan(
         return None
     participants = derive_recovery_participants(
         plan, scope_conflict, failed_subtask, order=order, control_state=control_state,
+        recovery_generation_by_key=recovery_generation_by_key,
     )
     required = [p for p in participants if p.role is RecoveryParticipantRole.REQUIRED_MUTATION]
     unresolved = [p for p in participants if p.owner_resolution_basis == "unresolved"]
@@ -3681,6 +3735,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 exec_plan = build_recovery_execution_plan(
                     plan, scope_conflict, subtask, order=order, control_state=control_state,
                     plan_generation=recovery_plan_generation_by_subtask.get(subtask.id, 0),
+                    recovery_generation_by_key=recovery_generation_by_key,
                 )
                 if exec_plan is None:
                     # build_recovery_execution_plan already logged
@@ -3711,6 +3766,50 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         subtask.id, owner_id, required_owner_files,
                         scope_conflict.get("failure_type") or "unknown", generation,
                     )
+                    # PRV-11 (2026-08-30): MUST_CHANGE vs VERIFY - see
+                    # RecoveryAction's own docstring (recovery_plan.py) for
+                    # the live incident this closes. A group is MUST_CHANGE
+                    # if ANY of its participants is (the group is only as
+                    # conservative as its most demanding participant) -
+                    # everything below this point branches on it.
+                    group_disposition = (
+                        RecoveryAction.MUST_CHANGE
+                        if any(p.recovery_action is RecoveryAction.MUST_CHANGE for p in group.participants)
+                        else RecoveryAction.VERIFY
+                    )
+                    if group_disposition is RecoveryAction.VERIFY:
+                        # Do not call the Developer at all - the evidence
+                        # that named this artifact never proved its current
+                        # content needs to change. Carry it forward
+                        # unconditionally (never RECOVERY_NO_PROGRESS for an
+                        # untouched VERIFY participant - nothing was ever
+                        # asked to change) and let the ORIGINATING CONSUMER's
+                        # own retry be the real arbiter, exactly as the
+                        # owner's own local gates already were for a
+                        # MUST_CHANGE participant. `recovery_generation_by_key`
+                        # still advances - this is what lets a requirement
+                        # that RECURS after a full skip-and-reverify cycle
+                        # promote to MUST_CHANGE on the NEXT generation (see
+                        # derive_recovery_participants's own promotion note).
+                        logger.info(
+                            "RECOVERY_VERIFY_CARRIED_FORWARD requirement_id=%s owner=%s generation=%d "
+                            "artifacts=%s - evidence did not prove current content requires mutation; "
+                            "Developer not called, existing content carried forward.",
+                            candidate_requirement_id, owner_id, generation, sorted(required_owner_files),
+                        )
+                        owner_result = {"status": "success", "quality_gates_passed": True, "files": []}
+                        recovery_generation_by_key[generation_key] = generation + 1
+                        invoked_group_records.append({
+                            "owner_id": owner_id,
+                            "required_owner_files": required_owner_files,
+                            "invalidated": (),
+                            "candidate_requirement_id": candidate_requirement_id,
+                            "generation": generation,
+                            "cross_owner_obligation": None,
+                            "owner_result": owner_result,
+                        })
+                        exec_plan.completed_group_ids = exec_plan.completed_group_ids + (group_id,)
+                        continue
                     prior_attempts = (
                         len(obligation_ledger.history(candidate_requirement_id))
                         if obligation_ledger is not None else 0

@@ -43,6 +43,46 @@ class RecoveryParticipantRole(str, Enum):
     READ_ONLY_CONTEXT = "read_only_context"
 
 
+class RecoveryAction(str, Enum):
+    """PRV-11 (2026-08-30): a live incident proved `REQUIRED_MUTATION` alone
+    is too coarse - it was implicitly treated as "this file MUST end up
+    different," which is only true when the evidence that put it in
+    `required_files` actually PROVES the current content is wrong. Live
+    case: s3's own compile failure never once mentioned `Customer.java` -
+    it entered `required_files` purely because the Developer's own FIX
+    ANALYSIS text, on an out-of-scope-rejected targeted retry, named it
+    alongside `pom.xml` (`Failure.type == "attribution_rejected"` -
+    `authority="advisory"` by construction, never independently verified,
+    see `failure.py`'s own docstring for that type). `pom.xml` genuinely
+    needed a dependency added; `Customer.java` was already correct.
+    Regenerating both and rejecting the WHOLE plan when `Customer.java`
+    came back byte-identical (`RECOVERY_NO_PROGRESS`) discarded `pom.xml`'s
+    own genuine, already-verified fix along with it.
+
+    MUST_CHANGE: authoritative evidence proves the CURRENT artifact state
+    violates the recovery obligation - regenerate it, and a byte-identical
+    result is genuinely `RECOVERY_NO_PROGRESS`.
+
+    VERIFY: the artifact participates in satisfying the cross-artifact
+    obligation, but the evidence that named it does not prove its current
+    content itself needs to change - do not call the Developer for it at
+    all (a real efficiency gain, not just a safety one - see
+    `derive_recovery_participants`'s own disposition derivation for
+    exactly which evidence shapes qualify), carry its current content
+    forward unconditionally, and let the ORIGINATING CONSUMER's own retry
+    be the actual arbiter of whether the combined candidate is correct -
+    never `RECOVERY_NO_PROGRESS` for an untouched VERIFY participant, since
+    nothing was ever asked to change in the first place.
+
+    Deliberately two values, not four (`MAY_CHANGE`/`CONTEXT_ONLY` were
+    considered and explicitly deferred) - matching this codebase's own
+    "add only when a live incident demonstrates the need" discipline; nothing
+    in the PRV-11 incident needed a third state."""
+
+    MUST_CHANGE = "must_change"
+    VERIFY = "verify"
+
+
 @dataclass(frozen=True)
 class RecoveryParticipant:
     """One artifact considered for one recovery cycle.
@@ -66,6 +106,12 @@ class RecoveryParticipant:
     owner_resolution_basis: str  # ArtifactOwnerResolutionBasis.value, or "unresolved"
     mutation_reason: str
     evidence_ids: Tuple[str, ...] = ()
+    # PRV-11 (2026-08-30) - see RecoveryAction's own docstring. Defaults to
+    # MUST_CHANGE (the pre-existing, only-ever behavior) so any caller that
+    # constructs a RecoveryParticipant without naming this explicitly keeps
+    # today's semantics unchanged - only derive_recovery_participants()'s own
+    # disposition derivation ever produces VERIFY.
+    recovery_action: RecoveryAction = RecoveryAction.MUST_CHANGE
 
 
 @dataclass(frozen=True)

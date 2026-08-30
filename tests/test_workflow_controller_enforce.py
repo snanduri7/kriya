@@ -69,7 +69,7 @@ from kriya.workflow.workflow_controller import (
     resolve_scope_conflict_owners,
     revise_plan_for_grounded_scope_owner,
 )
-from kriya.workflow.recovery_plan import RecoveryParticipant, RecoveryParticipantRole
+from kriya.workflow.recovery_plan import RecoveryAction, RecoveryParticipant, RecoveryParticipantRole
 from kriya.workflow.self_correction import SelfCorrectionResult
 from kriya.workflow.workflow_types import SubtaskStatus
 
@@ -2453,6 +2453,289 @@ async def test_enforce_recovery_plan_group_two_fails_after_group_one_staged_succ
     # earlier_subtask_when_plan_fails for that exact boundary proven with a
     # REAL separate worktree sandbox.
     assert (tmp_path / "pom.xml").read_text() == "<project><fixed/></project>"
+
+
+# --- MUST_CHANGE vs VERIFY recovery disposition (PRV-11, 2026-08-30) - see
+# RecoveryAction's own docstring (kriya/workflow/recovery_plan.py) for the
+# live incident this closes: a downstream test failure self-diagnosed BOTH
+# pom.xml (genuinely broken) and Customer.java (already correct) as
+# required participants (Failure.type == "attribution_rejected" -
+# authority="advisory" by construction, never a compiler/test locator).
+# Regenerating both and rejecting the WHOLE plan when Customer.java came
+# back byte-identical discarded pom.xml's own genuine fix along with it. ---
+
+def test_derive_recovery_participants_model_naming_alone_cannot_promote_verify(tmp_path):
+    """spec item 4 (the user's own requested test): the Developer's own
+    free-text self-diagnosis (an attribution_rejected scope_conflict) must
+    stay VERIFY no matter how prominently or how many times it names the
+    file in its own 'reason' text - only genuinely grounded evidence
+    (failure_type != 'attribution_rejected') or a real recurrence
+    (generation > 0, via recovery_generation_by_key) can produce
+    MUST_CHANGE. Text content itself has zero influence."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="create Customer", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="src/main/java/com/example/Customer.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1", "s2"],
+                    planned_files=[PlannedFile(path="src/test/java/com/example/CustomerTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    scope_conflict = {
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+        "failure_type": "attribution_rejected",
+        # The model's own analysis names Customer.java repeatedly and
+        # emphatically - this must have ZERO bearing on disposition.
+        "reason": "Customer.java Customer.java Customer.java must change, this is definitely required",
+        "required_files": ["pom.xml", "src/main/java/com/example/Customer.java"],
+        "allowed_files": ["src/test/java/com/example/CustomerTest.java"],
+    }
+    participants = derive_recovery_participants(
+        plan, scope_conflict, plan.subtask_by_id("s3"),
+        recovery_generation_by_key={},  # generation 0 for everything - no prior cycle
+    )
+    assert {p.artifact: p.recovery_action for p in participants} == {
+        "pom.xml": RecoveryAction.VERIFY,
+        "src/main/java/com/example/Customer.java": RecoveryAction.VERIFY,
+    }
+
+
+def test_derive_recovery_participants_grounded_evidence_is_must_change():
+    """The mirror case: a scope_conflict NOT reached via self-diagnosis
+    (any failure_type other than 'attribution_rejected') defaults to
+    MUST_CHANGE - the pre-existing, only-ever behavior for every recovery
+    scenario this codebase already had before PRV-11, unchanged."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="CustomerTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    scope_conflict = {
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "compile",
+        "required_files": ["pom.xml"], "allowed_files": ["CustomerTest.java"],
+    }
+    participants = derive_recovery_participants(plan, scope_conflict, plan.subtask_by_id("s3"))
+    assert participants[0].recovery_action is RecoveryAction.MUST_CHANGE
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_must_change_and_verify_unchanged_consumer_passes(tmp_path):
+    """spec item 1 (the user's own requested test): one MUST_CHANGE
+    participant (pom.xml, promoted via a real prior recovery cycle - see
+    below for why this is how a mixed disposition arises in this
+    architecture, since one scope_conflict shares one failure_type across
+    all its required_files) and one VERIFY participant (Customer.java,
+    fresh attribution_rejected self-diagnosis) in the SAME
+    RecoveryExecutionPlan. Customer.java must never be regenerated
+    (zero Developer calls for it) and must not block the consumer's own
+    retry from succeeding once pom.xml's real fix lands.
+
+    Cycle 0: s3 fails with a GROUNDED, single-artifact conflict
+    (pom.xml only, failure_type='compile') - ordinary MUST_CHANGE recovery,
+    pom.xml genuinely fixed. Consumer retries and fails AGAIN, this time
+    self-diagnosing BOTH pom.xml and Customer.java (attribution_rejected).
+    Cycle 1: pom.xml's own (subtask,owner,files) tuple already went through
+    one full cycle in cycle 0 (generation=1 now) -> promoted to MUST_CHANGE
+    despite the ungrounded scope_conflict; Customer.java is seeing its
+    first cycle (generation=0) -> stays VERIFY, carried forward untouched.
+    """
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="create Customer", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="Customer.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1", "s2"],
+                    planned_files=[PlannedFile(path="CustomerTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "Customer.java").write_text("class Customer {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["Customer.java"]}
+        if n == 3:
+            # s3 attempt 1 - grounded, single-artifact conflict.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "compile",
+                    "required_files": ["pom.xml"], "allowed_files": ["CustomerTest.java"],
+                },
+            }
+        if n == 4:
+            # cycle 0's MUST_CHANGE owner-recovery for pom.xml - genuine fix.
+            (tmp_path / "pom.xml").write_text("<project><junit/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 5:
+            # s3 consumer retry (cycle 0) - fails AGAIN, this time
+            # self-diagnosing BOTH pom.xml and Customer.java.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "attribution_rejected",
+                    "reason": "Developer self-diagnosis names both files",
+                    "required_files": ["pom.xml", "Customer.java"], "allowed_files": ["CustomerTest.java"],
+                },
+            }
+        if n == 6:
+            # cycle 1's owner-recovery for pom.xml - promoted to MUST_CHANGE
+            # via recurrence (generation=1), gets a REAL further fix.
+            (tmp_path / "pom.xml").write_text("<project><junit/><surefire/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        # Customer.java's OWN owner-recovery must NEVER be called (VERIFY,
+        # carried forward) - if this branch is ever reached, the test
+        # fixture itself is wrong (there is no n==7 owner_recovery call for
+        # s2 in the expected call sequence below).
+        (tmp_path / "CustomerTest.java").write_text("class CustomerTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["CustomerTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    # 1(s1) + 1(s2) + 1(s3 fail#1) + 1(pom.xml recovery cycle0) +
+    # 1(s3 consumer retry cycle0, fails again) + 1(pom.xml recovery cycle1)
+    # + 1(s3 consumer retry cycle1, succeeds) = 7 - Customer.java's own
+    # owner-recovery NEVER consumed a call.
+    assert len(calls) == 7
+    assert (tmp_path / "Customer.java").read_text() == "class Customer {}"  # untouched throughout
+    assert (tmp_path / "pom.xml").read_text() == "<project><junit/><surefire/></project>"
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_verify_unchanged_then_consumer_fail_promotes_to_must_change(tmp_path):
+    """spec item 2 (the user's own requested test): a VERIFY participant
+    carried forward unconditionally, the consumer's own retry STILL fails
+    (the requirement recurs), and on the NEXT generation that same
+    (subtask, owner, file) triple is promoted to MUST_CHANGE - now getting
+    a real Developer call - and the genuine fix lets the consumer pass."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build config", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="CustomerTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n in (2, 3):
+            # n=2: s2's own first attempt. n=3: s2's consumer retry after
+            # cycle 0's VERIFY carry-forward (pom.xml never touched) - fails
+            # the SAME way both times, self-diagnosed, never grounded.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "attribution_rejected",
+                    "required_files": ["pom.xml"], "allowed_files": ["CustomerTest.java"],
+                },
+            }
+        if n == 4:
+            # Cycle 1: pom.xml promoted to MUST_CHANGE (generation=1) - the
+            # first REAL owner-recovery call for it, genuine fix.
+            (tmp_path / "pom.xml").write_text("<project><junit/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        (tmp_path / "CustomerTest.java").write_text("class CustomerTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["CustomerTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    # 1(s1) + 1(s2 fail#1) + 1(s2 consumer retry cycle0, VERIFY carried
+    # forward, fails again) + 1(pom.xml recovery cycle1, promoted) +
+    # 1(s2 consumer retry cycle1, succeeds) = 5 - pom.xml's owner-recovery
+    # was NEVER called during cycle 0.
+    assert len(calls) == 5
+    assert (tmp_path / "pom.xml").read_text() == "<project><junit/></project>"
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_must_change_unchanged_still_no_progress(tmp_path):
+    """spec item 3 (the user's own requested test, regression proof): a
+    genuinely GROUNDED (non-attribution_rejected) MUST_CHANGE participant
+    that regenerates byte-identically must still trigger
+    RECOVERY_NO_PROGRESS and reject the plan - VERIFY's new "carry forward,
+    never reject" behavior must never leak into the MUST_CHANGE path."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="CustomerTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "compile",
+                    "required_files": ["pom.xml"], "allowed_files": ["CustomerTest.java"],
+                },
+            }
+        # Grounded MUST_CHANGE owner-recovery regenerates byte-identically.
+        (tmp_path / "pom.xml").write_text("<project/>")
+        return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    assert len(calls) == 3
+    events = result.legacy_result["plan_recovery_events"]
+    assert events[0]["owner_recovery_passed"] is False
 
 
 def test_order_recovery_groups_fails_closed_on_cycle():
