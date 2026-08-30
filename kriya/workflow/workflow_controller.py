@@ -1174,7 +1174,14 @@ def _get_or_create_cross_owner_obligation(
         # single untouched record.
         recurring = ObligationRecord(
             id=obligation_id, kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
-            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+            status=ObligationStatus.VIOLATED,
+            # Sticky like every other field on this branch (see the comment
+            # above) - reuses the ORIGINAL authority this obligation earned
+            # when first created, never re-derived from the CURRENT
+            # scope_conflict (control-plane audit, 2026-08-30 - was
+            # hardcoded DETERMINISTIC here regardless of `existing`'s own
+            # real authority, same defect as the fresh-record branch below).
+            authority=existing.authority,
             description=existing.description, source="workflow_controller.owner_recovery",
             revision=revision, evidence=existing.evidence,
             owner_subtask_id=existing.owner_subtask_id, terminal_required=False,
@@ -1204,7 +1211,16 @@ def _get_or_create_cross_owner_obligation(
         id=obligation_id,
         kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
         status=ObligationStatus.VIOLATED,
-        authority=ObligationAuthority.DETERMINISTIC,
+        # Control-plane audit (2026-08-30): was hardcoded DETERMINISTIC
+        # unconditionally - a Developer's own advisory, unverified
+        # self-diagnosis (Failure.type=="attribution_rejected") could stamp
+        # its own MUST_FIX text with the ledger's HIGHEST authority tier,
+        # letting it wrongly outrank a later, genuinely correct JUDGMENT-
+        # tier contradiction under ObligationLedger's own DETERMINISTIC >
+        # GROUNDED > JUDGMENT precedence rule - authority escalating merely
+        # because advisory text got copied into a typed record's evidence
+        # field. See _scope_conflict_evidence_authority's own docstring.
+        authority=_scope_conflict_evidence_authority(scope_conflict),
         description=f"{owner_subtask_id} must satisfy a requirement grounded by {originating_subtask_id}'s own failure: {grounded_reason}",
         source="workflow_controller.owner_recovery",
         revision=revision,
@@ -1357,6 +1373,78 @@ def _participant_evidence_is_grounded(scope_conflict: Dict[str, Any]) -> bool:
     VERIFY - a much larger, unproven behavior change this round does not
     make."""
     return scope_conflict.get("failure_type") != "attribution_rejected"
+
+
+# Recovery obligations grounded in attribute_failure()'s own tier vocabulary
+# (kriya/workflow/attribution.py) - reused here, not re-derived, matching
+# _participant_evidence_is_grounded's own precedent of consulting existing
+# typed evidence rather than inventing a parallel signal.
+#
+# DETERMINISTIC: a structural fact or a precise, parsed locator - not a
+# guess. "architectural_owner" is included here (matching retry_strategy.
+# py's own _plan_scope_conflict_files docstring, "a deterministic
+# AuthorizedFileWriter write-scope denial always lands there") even though
+# ObligationAuthority's own class docstring uses "an architectural-owner
+# scan" as its illustrative GROUNDED example - that docstring predates this
+# fix and was never reconciled against attribute_failure()'s own tier
+# semantics; the write-scope DENIAL this tier actually represents in this
+# codebase today (AuthorizedFileWriter mechanically rejecting an out-of-
+# scope write) is a real structural fact, not an interpreted scan, so
+# DETERMINISTIC is the correct read of what this tier means as PRODUCED
+# here - not a reinterpretation of the docstring's own example.
+_DETERMINISTIC_ATTRIBUTION_TIERS = frozenset({
+    "authoritative_deterministic",  # migration.py's own parsed manifest evidence
+    "architectural_owner",  # AuthorizedFileWriter's own deterministic write-scope denial
+    "locator",  # a real compiler/test file:line reference
+    "subtask_scope", "subtask_dependency",  # the validated plan's own structural ownership
+})
+# Everything else attribute_failure() can produce - self_diagnosis (the
+# model's claim about ITS OWN prior output), judge/triage (an LLM verdict),
+# full_set (no evidence at all, the lowest-confidence fallback), or any
+# tier this function doesn't yet recognize - is real evidence at best, but
+# an LLM's own semantic read rather than a parsed/structural fact, so it is
+# classified JUDGMENT by the fallthrough below rather than enumerated here.
+
+
+def _scope_conflict_evidence_authority(scope_conflict: Dict[str, Any]) -> ObligationAuthority:
+    """PRV-11 control-plane audit (2026-08-30) - the governing invariant:
+    recovery obligation authority must never exceed the authority of the
+    evidence it was constructed from. _get_or_create_cross_owner_obligation
+    used to stamp EVERY cross-owner obligation ObligationAuthority.
+    DETERMINISTIC unconditionally - including one built from
+    scope_conflict["reason"] originating in Failure.type==
+    "attribution_rejected" (a Developer's own advisory, unverified FIX
+    ANALYSIS self-diagnosis - see _participant_evidence_is_grounded's own
+    docstring for the confirmed live incident this class of evidence
+    produces). A mislabeled DETERMINISTIC record could then wrongly outrank
+    a later, genuinely correct JUDGMENT-tier contradiction under
+    ObligationLedger's own precedence rule (DETERMINISTIC > GROUNDED >
+    JUDGMENT) - authority escalating merely because advisory text got
+    copied into a typed record's evidence field, not because the evidence
+    itself became any stronger.
+
+    Reuses _participant_evidence_is_grounded's own narrow, safety-first
+    attribution_rejected check FIRST (never promoted past JUDGMENT
+    regardless of what attribution_tier happens to say - matching that
+    function's own precedent exactly, so the two mechanisms can never
+    disagree about this ONE confirmed case), then classifies by
+    scope_conflict["attribution_tier"] (attribute_failure()'s own real tier
+    vocabulary) for every other, already-grounded case. An unrecognized or
+    absent tier fails toward the SAFER, lower-authority JUDGMENT reading
+    rather than assuming DETERMINISTIC for evidence this function has never
+    actually evaluated - the same "never guess upward" discipline
+    RecoveryAction's own docstring already established.
+
+    GROUNDED is not yet reachable from any tier attribute_failure() or
+    retry_strategy.py currently produce (see the tier-set comments above) -
+    left as a real, supported outcome, not hardcoded away, for whenever a
+    future tier genuinely earns it; not built speculatively today."""
+    if not _participant_evidence_is_grounded(scope_conflict):
+        return ObligationAuthority.JUDGMENT
+    tier = scope_conflict.get("attribution_tier")
+    if tier in _DETERMINISTIC_ATTRIBUTION_TIERS:
+        return ObligationAuthority.DETERMINISTIC
+    return ObligationAuthority.JUDGMENT
 
 
 def derive_recovery_participants(
@@ -4208,7 +4296,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             id=cross_owner_obligation.id,
                             kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
                             status=ObligationStatus.SATISFIED,
-                            authority=ObligationAuthority.DETERMINISTIC,
+                            # Sticky, matching _get_or_create_cross_owner_obligation's own
+                            # "recurring" branch (control-plane audit, 2026-08-30) - this
+                            # SATISFIED closing record must carry the SAME authority the
+                            # obligation was actually created with, never re-hardcoded
+                            # DETERMINISTIC regardless of whether the originating evidence
+                            # was advisory self-diagnosis.
+                            authority=cross_owner_obligation.authority,
                             description=cross_owner_obligation.description,
                             source="workflow_controller.owner_recovery",
                             revision=len(plan_recovery_events),

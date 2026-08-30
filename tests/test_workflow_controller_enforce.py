@@ -56,6 +56,7 @@ from kriya.workflow.workflow_controller import (
     _get_or_create_cross_owner_obligation,
     _integration_reference_token,
     _order_recovery_groups,
+    _scope_conflict_evidence_authority,
     _transitive_upstream_ids,
     build_authoritative_planner_request,
     build_recovery_execution_plan,
@@ -2558,6 +2559,113 @@ def test_derive_recovery_participants_model_naming_alone_cannot_promote_verify(t
         "pom.xml": RecoveryAction.VERIFY,
         "src/main/java/com/example/Customer.java": RecoveryAction.VERIFY,
     }
+
+
+# --- Recovery obligation authority (control-plane audit, 2026-08-30) ---
+#
+# Governing invariant: recovery obligation authority must never exceed the
+# authority of the evidence it was constructed from. Found live during a
+# static audit (not a PRV rerun): _get_or_create_cross_owner_obligation()
+# stamped EVERY cross-owner obligation authority=DETERMINISTIC
+# unconditionally - including one built from scope_conflict["reason"]
+# originating in Failure.type=="attribution_rejected" (a Developer's own
+# advisory, unverified self-diagnosis - the exact evidence shape §11.11's
+# own PRV-11 incident already proved this codebase produces live). A
+# mislabeled DETERMINISTIC record could then wrongly outrank a later,
+# genuinely correct JUDGMENT-tier contradiction under ObligationLedger's
+# own DETERMINISTIC > GROUNDED > JUDGMENT precedence rule.
+
+def test_compiler_failure_cross_owner_obligation_is_deterministic():
+    ledger = ObligationLedger()
+    scope_conflict = {
+        "failure_type": "compile",
+        "attribution_tier": "locator",
+        "reason": "pom.xml is missing the junit-jupiter dependency required by CustomerTest.java",
+    }
+    record = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s3", owner_subtask_id="s1",
+        required_files=["pom.xml"], scope_conflict=scope_conflict, generation=0, revision=0,
+    )
+    assert record.authority is ObligationAuthority.DETERMINISTIC
+
+
+def test_deterministic_write_scope_evidence_cross_owner_obligation_is_deterministic():
+    """The AuthorizedFileWriter write-scope-denial shape (PLAN_SCOPE_DEFECT,
+    attribution_tier="architectural_owner") - the mechanism §11.9's own
+    multi-owner recovery is built around."""
+    ledger = ObligationLedger()
+    scope_conflict = {
+        "failure_type": "goal_spec_compliance",
+        "attribution_tier": "architectural_owner",
+        "reason": "AuthorizedFileWriter denied a write to CustomerService.java outside the validated subtask scope",
+    }
+    record = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s1", owner_subtask_id="s2",
+        required_files=["CustomerService.java"], scope_conflict=scope_conflict, generation=0, revision=0,
+    )
+    assert record.authority is ObligationAuthority.DETERMINISTIC
+
+
+def test_attribution_rejected_cross_owner_obligation_is_not_deterministic():
+    """The exact PRV-11 live shape: a Developer's own free-text FIX ANALYSIS
+    self-diagnosis, never independently verified by a compiler/test
+    locator. Must never be stamped DETERMINISTIC - JUDGMENT, matching
+    _participant_evidence_is_grounded's own precedent for this identical
+    evidence shape."""
+    ledger = ObligationLedger()
+    scope_conflict = {
+        "failure_type": "attribution_rejected",
+        "attribution_tier": "self_diagnosis",
+        "reason": "The Developer's own analysis claims Customer.java also needs a displayName field",
+    }
+    record = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s3", owner_subtask_id="s1",
+        required_files=["Customer.java"], scope_conflict=scope_conflict, generation=0, revision=0,
+    )
+    assert record.authority is not ObligationAuthority.DETERMINISTIC
+    assert record.authority is ObligationAuthority.JUDGMENT
+
+
+def test_deterministic_evidence_outranks_a_prior_advisory_obligation():
+    """Proves this isn't merely an enum-assignment change - it restores the
+    MA8 evidence precedence semantics. An advisory (JUDGMENT) obligation is
+    recorded VIOLATED first; a later, genuinely deterministic record for the
+    SAME obligation id then reports SATISFIED - deterministic evidence must
+    win, becoming the ledger's own authoritative current() state."""
+    ledger = ObligationLedger()
+    advisory_scope_conflict = {
+        "failure_type": "attribution_rejected",
+        "attribution_tier": "self_diagnosis",
+        "reason": "The Developer's own analysis claims Customer.java also needs a displayName field",
+    }
+    advisory = _get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s3", owner_subtask_id="s1",
+        required_files=["Customer.java"], scope_conflict=advisory_scope_conflict, generation=0, revision=0,
+    )
+    assert advisory.status == ObligationStatus.VIOLATED
+    assert advisory.authority is ObligationAuthority.JUDGMENT
+
+    ledger.record(ObligationRecord(
+        id=advisory.id, kind=ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        description=advisory.description, source="workflow_controller.owner_recovery",
+        revision=1, evidence=advisory.evidence, owner_subtask_id=advisory.owner_subtask_id,
+    ))
+
+    current = ledger.current(advisory.id)
+    assert current.status == ObligationStatus.SATISFIED
+    assert current.authority is ObligationAuthority.DETERMINISTIC
+
+
+def test_scope_conflict_evidence_authority_unrecognized_tier_fails_toward_judgment():
+    """An attribution_tier this function doesn't recognize (e.g. a future
+    addition to attribution.py) must never be assumed DETERMINISTIC."""
+    assert _scope_conflict_evidence_authority(
+        {"failure_type": "compile", "attribution_tier": "some_future_tier"}
+    ) is ObligationAuthority.JUDGMENT
+    assert _scope_conflict_evidence_authority(
+        {"failure_type": "compile"}
+    ) is ObligationAuthority.JUDGMENT
 
 
 def test_derive_recovery_participants_grounded_evidence_is_must_change():
