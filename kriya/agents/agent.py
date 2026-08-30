@@ -722,6 +722,20 @@ class DeveloperAgent(BaseAgent):
             "3. If a previous compilation error is provided, fix the exact error and do not repeat the mistake.\n"
             "4. You must implement ALL files defined in the Architect Design Guidelines. Do not omit any files, leave placeholders, or defer their creation to a future step.\n"
             "\n"
+            f"AUTHORITY OF YOUR TASK DESCRIPTION: when it contains two labeled sections, "
+            f"\"{AUTHORITATIVE_GOAL_SECTION_HEADER}\" and \"{PLANNED_IMPLEMENTATION_SECTION_HEADER}\" - the "
+            "Authoritative Goal section is the real, unmediated user request; satisfy it. The Planned "
+            "Implementation Strategy section is a Planner-chosen APPROACH for satisfying that goal, not "
+            "itself part of the requirement - follow it by default, but you are free to deviate from one "
+            "of its specific details (a proposed field/method/class/structure) when a real constraint "
+            "(a compiler error, an existing test, an existing API you must not break) proves that exact "
+            "detail cannot be satisfied while still meeting the Authoritative Goal above it. When "
+            "diagnosing a failure that has nothing to do with a Planned Implementation detail (e.g. a "
+            "missing test file, an out-of-scope write, a whitespace/anchor mismatch), do not reintroduce "
+            "or re-litigate that detail in your own analysis - address only what the CURRENT error "
+            "actually says. When neither section label is present, treat your entire task description as "
+            "authoritative, exactly as before.\n"
+            "\n"
             "Return a clean JSON block list containing the code modifications. Do NOT wrap your JSON in any extra markdown text (no ```json code blocks), just return the raw JSON array. "
             "Format your output EXACTLY as a JSON array of file objects, like this:\n"
             "[\n"
@@ -1768,6 +1782,28 @@ class DeveloperAgent(BaseAgent):
                 "listed there."
                 if has_skill_conventions else ""
             )
+            # Authority-isolation fix (PRV-11, 2026-08-30): a system-prompt-only mention of
+            # this arbitration rule (file_sys_prompt above is short, format-only, and never
+            # varies with task_description's own content) was confirmed live NOT sufficient -
+            # a live incident traced the model's own FIX ANALYSIS text reasserting a Planner-
+            # only "displayName field" detail as "the requirement" while diagnosing THREE
+            # separate, genuinely unrelated failures (a missing test module, an out-of-scope
+            # write, a whitespace/anchor mismatch), none of which had anything to do with that
+            # detail. Same "stated once, buried under everything the prompt adds after it" gap
+            # this function's own skill_reminder/verification_reminder precedent already fixed
+            # for two other instructions - repeated here, right before generation, rather than
+            # trusting a single early system-prompt mention alone.
+            authority_reminder = (
+                "\nReminder: the Task above may separate an Authoritative Goal section from a "
+                "Planned Implementation Strategy section. A concrete detail (a field/method/class/"
+                "structure) named ONLY in the Planned Implementation Strategy is the Planner's own "
+                "choice, not itself part of the requirement - you may deviate from it when a real "
+                "constraint (this error, an existing test, an existing API) proves it cannot be "
+                "satisfied while still meeting the Authoritative Goal. If the CURRENT error above has "
+                "nothing to do with that detail, do not reintroduce or re-litigate it here - diagnose "
+                "only what the current error actually says."
+                if AUTHORITATIVE_GOAL_SECTION_HEADER in task_description else ""
+            )
             # Same contradiction as file_sys_prompt above, one level down: this line
             # used to unconditionally say "return ONLY the content" even on a retry,
             # directly ahead of fix_analysis_instruction telling the model to instead
@@ -1823,6 +1859,7 @@ class DeveloperAgent(BaseAgent):
                 f"{generation_directive}"
                 f"{verification_reminder}"
                 f"{skill_reminder}"
+                f"{authority_reminder}"
                 f"{source_context_block}"
                 f"{fix_analysis_instruction}"
             )

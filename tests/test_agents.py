@@ -944,6 +944,74 @@ async def test_fill_missing_content_no_fix_analysis_instruction_without_prior_er
     assert "FIX ANALYSIS" not in file_prompt
     assert files[0]["content"] == "public class App {}"
 
+def test_developer_agent_system_prompt_documents_authority_sections():
+    """PRV-11 authority-isolation fix (2026-08-30, follow-up): the batch/
+    full-generation path (self.system_prompt) must also know how to
+    interpret the two labeled sections, not just SpecComplianceAgent."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    dev = DeveloperAgent("developer", llm)
+    sp = dev.system_prompt
+    assert AUTHORITATIVE_GOAL_SECTION_HEADER in sp
+    assert PLANNED_IMPLEMENTATION_SECTION_HEADER in sp
+
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_reminds_authority_split_when_sections_present():
+    """PRV-11 authority-isolation fix (2026-08-30, follow-up): a live
+    incident proved SpecComplianceAgent's own correction alone was NOT
+    enough - the per-file REPAIR path (file_sys_prompt, used for every
+    targeted/fallback retry) never got told how to interpret the same two
+    labeled sections, so the Developer's own FIX ANALYSIS text kept
+    reasserting a Planner-only "displayName field" detail as "the
+    requirement" even while diagnosing THREE separate, genuinely unrelated
+    failures (a missing test module, an out-of-scope write, a whitespace/
+    anchor mismatch). The reminder must reach the per-file prompt - a
+    system-prompt-only mention was confirmed live insufficient, matching
+    this same function's own skill_reminder/verification_reminder
+    precedent (repeat near the generation point, not just once early)."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public record Customer(long id) {}")
+
+    task_description = (
+        f"{AUTHORITATIVE_GOAL_SECTION_HEADER}\n"
+        "Add an uppercase displayName derived from existing customer name fields.\n\n"
+        f"{PLANNED_IMPLEMENTATION_SECTION_HEADER}\n"
+        "Modify Customer.java to add a displayName field."
+    )
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        task_description, "Design", "Existing code",
+        known_target_files=["src/main/java/com/example/customer/Customer.java"],
+        prior_error_context="Customer.java:[3,19] field declaration must be static",
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "Reminder: the Task above may separate an Authoritative Goal" in file_prompt
+    assert "you may deviate from it" in file_prompt
+
+
+@pytest.mark.asyncio
+async def test_fill_missing_content_no_authority_reminder_without_sections():
+    """Backward compatibility: a task_description with no section headers
+    (the ordinary non-bounded pipeline) gets no reminder - nothing to
+    arbitrate, matching has_skill_conventions' own established conditional-
+    reminder precedent in this exact function."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="public class App {}")
+
+    dev = DeveloperAgent("developer", llm)
+    await dev.run_generation(
+        "Plain task with no sections", "Design", "Existing code",
+        known_target_files=["src/main/java/com/example/App.java"],
+    )
+
+    file_prompt = llm.complete.call_args_list[0][0][1]
+    assert "Reminder: the Task above may separate an Authoritative Goal" not in file_prompt
+
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_scopes_fix_analysis_to_implicated_files_only():
     """Regression test for a real bug found live during golden-use-case
