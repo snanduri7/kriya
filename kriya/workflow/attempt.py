@@ -50,6 +50,7 @@ from kriya.workflow.retry_package import RetryPackage, build_retry_package
 from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import (
+    APIContractRecovery,
     APIContractRecoveryPhase,
     GenerationState,
     RecoveryPhaseAdvanced,
@@ -1985,6 +1986,54 @@ def _settled_goal_spec_requirement(
     return current
 
 
+def _restore_api_contract_owners_deterministically(
+    state: GenerationState, contract: APIContractRecovery,
+) -> List[Dict[str, str]]:
+    """Control-plane audit (2026-08-30): RESTORE_PUBLIC_CONTRACT's own real
+    objective - "restore these exact signatures, do not solve the
+    behavioral issue yet" - is a FACT Kriya already has, not a generation
+    task. `state.all_original_contents[owner]` is populated at violation-
+    detection time (run_attempt's own "BEFORE WRITE" early-violation
+    branch), before any byte of the offending candidate that triggered
+    recovery ever reached the sandbox - it is the exact, authoritative
+    pre-mutation content for every owner file this phase exists to restore.
+
+    Live incident this closes (PRV-11, 2026-08-30): asking the Developer to
+    reproduce this already-known content is not merely redundant, it is
+    unreliable - a real run burned all 3 RESTORE_PUBLIC_CONTRACT attempts
+    with the model repeatedly re-adding the very field whose presence broke
+    the signature in the first place, despite a prompt that never once
+    mentioned that field. This mirrors an ALREADY-EXISTING precedent one
+    phase over: protected_evidence_files (damaged callers/tests) are
+    already restored deterministically, never via the Developer, a few
+    hundred lines below in run_attempt's own staged-write section - this
+    closes the one remaining asymmetric case (the owner file itself).
+
+    Returns the SAME [{"filepath": ..., "content": ...}, ...] shape
+    _run_developer_generation would have returned, so every downstream
+    consumer (the staged-write commit, find_unrestored_public_api_contracts,
+    the RESTORE_PUBLIC_CONTRACT -> REPAIR_BEHAVIOR transition) is completely
+    unaware this attempt never called the Developer at all - none of that
+    machinery needed to change.
+
+    Fails closed, not silently: a missing baseline for a real violating
+    owner is a genuine internal-state defect (that owner's content should
+    ALWAYS have been captured at violation-detection time) - raising here,
+    rather than skipping that owner or silently falling back to asking the
+    Developer anyway, surfaces the bug instead of masking it."""
+    files: List[Dict[str, str]] = []
+    for owner in contract.owner_files:
+        baseline = state.all_original_contents.get(owner)
+        if baseline is None:
+            raise IncompleteGenerationError(
+                [owner],
+                f"API_CONTRACT_RECOVERY: no captured baseline content for owner "
+                f"{owner!r} - cannot restore deterministically without it.",
+            )
+        files.append({"filepath": owner, "content": baseline})
+    return files
+
+
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """Runs one Developer + Quality Gates attempt. Mutates state in place
     (files_written, gate_outcomes, model_hops, run_verification_*, etc.).
@@ -2260,32 +2309,48 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             else:
                 logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
 
-            state.model_hops.append(ctx.kernel.config.llm.model)
+            if use_api_contract_recovery and contract.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
+                # Deterministic, not generative (control-plane audit,
+                # 2026-08-30) - see _restore_api_contract_owners_
+                # deterministically's own docstring for the live incident
+                # this closes and why no Developer call belongs here at
+                # all: the exact answer is already known. state.model_hops
+                # deliberately untouched - no model was invoked this
+                # attempt, so nothing belongs in a MODEL escalation history.
+                files = _restore_api_contract_owners_deterministically(state, contract)
+                logger.info(
+                    "API_CONTRACT_RECOVERY %s %d/%d (deterministic restore, no Developer "
+                    "call): owners=%s",
+                    contract.phase.value, state.budgets.api_contract_recovery_count + 1,
+                    API_CONTRACT_RECOVERY_MAX_ATTEMPTS, contract.owner_files,
+                )
+            else:
+                state.model_hops.append(ctx.kernel.config.llm.model)
 
-            dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-            files = await _run_developer_generation(
-                state, ctx,
-                task_description=task_desc,
-                design_context=(task_desc if use_api_contract_recovery else ctx.design),
-                existing_code_context=active_code_context,
-                stream_callback=dev_stream,
-                model_override=model_override,
-                base_url_override=base_url_override,
-                api_key_override=api_key_override,
-                extra_body_override=extra_body_override,
-                known_target_files=state.last_implicated_files,
-                prior_error_context=retry_error_context or None,
-                implicated_files=state.last_implicated_files,
-                error_source_context=state.last_error_source_context or None,
-                retry_temperature=ctx.kernel.config.llm.retry_temperature,
-                extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
-                files_with_current_content=state.all_files_written,
-                sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
-                operation_by_file=_operation_map(
-                    ctx, state.last_implicated_files, attempt_operation, state,
-                ),
-                default_operation=attempt_operation,
-            )
+                dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
+                files = await _run_developer_generation(
+                    state, ctx,
+                    task_description=task_desc,
+                    design_context=(task_desc if use_api_contract_recovery else ctx.design),
+                    existing_code_context=active_code_context,
+                    stream_callback=dev_stream,
+                    model_override=model_override,
+                    base_url_override=base_url_override,
+                    api_key_override=api_key_override,
+                    extra_body_override=extra_body_override,
+                    known_target_files=state.last_implicated_files,
+                    prior_error_context=retry_error_context or None,
+                    implicated_files=state.last_implicated_files,
+                    error_source_context=state.last_error_source_context or None,
+                    retry_temperature=ctx.kernel.config.llm.retry_temperature,
+                    extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+                    files_with_current_content=state.all_files_written,
+                    sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+                    operation_by_file=_operation_map(
+                        ctx, state.last_implicated_files, attempt_operation, state,
+                    ),
+                    default_operation=attempt_operation,
+                )
     elif use_fallback_targeted:
         # One-shot targeted fix on the first fallback model (see
         # fallback_targeted_attempted's own docstring above) - same

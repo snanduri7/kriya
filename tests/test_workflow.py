@@ -88,6 +88,7 @@ from kriya.workflow.state import (
     APIContractRecovery,
     APIContractRecoveryPhase,
     GenerationState,
+    RecoveryPhaseAdvanced,
 )
 from kriya.workflow.checkpoint import (
     checkpoint_path,
@@ -224,6 +225,275 @@ def test_intermediate_recovery_failure_does_not_poison_final_terminal_pass():
     state.api_contract_recovery = None
 
     assert state.final_workflow_quality_passed() is True
+
+
+# --- Deterministic RESTORE_PUBLIC_CONTRACT restoration (control-plane audit
+# follow-up, 2026-08-30): RESTORE_PUBLIC_CONTRACT's own objective - put back
+# an exact, already-known baseline signature - was previously delegated to a
+# fresh Developer generation call, even though the true baseline content was
+# already captured in state.all_original_contents at violation-detection
+# time. A real PRV-11 run exhausted all 3 RESTORE_PUBLIC_CONTRACT attempts
+# because the model kept re-adding a field the prompt never mentioned,
+# despite the correct answer being deterministically known. These tests lock
+# in the fix: RESTORE_PUBLIC_CONTRACT now restores each owner_file via the
+# existing StagedFileWrite path (the same mechanism already used a few lines
+# below for protected_evidence_files) instead of calling the Developer. ---
+
+@pytest.mark.asyncio
+async def test_restore_public_contract_restores_owner_byte_for_byte_from_baseline(tmp_path):
+    owner = "formatter.py"
+    baseline = "def format(x):\n    return x\n"
+    (tmp_path / owner).write_text("def format_renamed(x):\n    return x\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner: baseline}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner, "removed_signature": "format(x)"}], [], {owner: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=AsyncMock(),
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+    )
+
+    with pytest.raises(RecoveryPhaseAdvanced):
+        await run_attempt(state, ctx)
+
+    assert (tmp_path / owner).read_text() == baseline
+
+
+@pytest.mark.asyncio
+async def test_restore_public_contract_never_invokes_the_developer(tmp_path):
+    owner = "formatter.py"
+    baseline = "def format(x):\n    return x\n"
+    (tmp_path / owner).write_text("def format_renamed(x):\n    return x\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner: baseline}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner, "removed_signature": "format(x)"}], [], {owner: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=AsyncMock(),
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+    )
+
+    with patch(
+        "kriya.workflow.attempt._run_developer_generation",
+        new_callable=AsyncMock,
+    ) as dev_gen:
+        with pytest.raises(RecoveryPhaseAdvanced):
+            await run_attempt(state, ctx)
+
+    dev_gen.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restore_public_contract_restores_multiple_owners_atomically(tmp_path):
+    owner_a, baseline_a = "formatter.py", "def format(x):\n    return x\n"
+    owner_b, baseline_b = "validator.py", "def validate(x):\n    return bool(x)\n"
+    (tmp_path / owner_a).write_text("def format_renamed(x):\n    return x\n")
+    (tmp_path / owner_b).write_text("def validate_renamed(x):\n    return bool(x)\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner_a: baseline_a, owner_b: baseline_b}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [
+            {"owner": owner_a, "removed_signature": "format(x)"},
+            {"owner": owner_b, "removed_signature": "validate(x)"},
+        ],
+        [], {owner_a: "API_OWNER", owner_b: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=AsyncMock(),
+        architect_files=[owner_a, owner_b],
+        expected_files_upfront=[owner_a, owner_b],
+        architect_basename_to_path={owner_a: owner_a, owner_b: owner_b},
+    )
+
+    committed_batches = []
+    from kriya.policy.filesystem import AuthorizedFileWriter
+    real_commit_batch = AuthorizedFileWriter.commit_batch
+
+    def capturing_commit_batch(self, staged_writes):
+        committed_batches.append(list(staged_writes))
+        return real_commit_batch(self, staged_writes)
+
+    with patch.object(AuthorizedFileWriter, "commit_batch", capturing_commit_batch):
+        with pytest.raises(RecoveryPhaseAdvanced):
+            await run_attempt(state, ctx)
+
+    assert (tmp_path / owner_a).read_text() == baseline_a
+    assert (tmp_path / owner_b).read_text() == baseline_b
+    # Both owners were part of the SAME staged-write commit - proves the
+    # restoration is atomic (one batch, all-or-nothing), not two independent
+    # sequential writes that could partially fail.
+    assert len(committed_batches) == 1
+    restored_targets = {staged.target_path for staged in committed_batches[0]}
+    assert os.path.join(str(tmp_path), owner_a) in restored_targets
+    assert os.path.join(str(tmp_path), owner_b) in restored_targets
+
+
+@pytest.mark.asyncio
+async def test_restore_public_contract_still_restores_protected_evidence_as_before(tmp_path):
+    owner = "formatter.py"
+    baseline_owner = "def format(x):\n    return x\n"
+    evidence = "caller.py"
+    baseline_evidence = "from formatter import format\n\n\ndef run():\n    return format(5)\n"
+    damaged_evidence = "def run():\n    return 5\n"
+
+    (tmp_path / owner).write_text("def format_renamed(x):\n    return x\n")
+    (tmp_path / evidence).write_text(damaged_evidence)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner: baseline_owner, evidence: baseline_evidence}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{
+            "owner": owner, "removed_signature": "format(x)",
+            "evidence_files": [evidence],
+        }],
+        [evidence],
+        {owner: "API_OWNER", evidence: "EVIDENCE_CALLER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=AsyncMock(),
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+    )
+
+    with pytest.raises(RecoveryPhaseAdvanced):
+        await run_attempt(state, ctx)
+
+    assert (tmp_path / owner).read_text() == baseline_owner
+    assert (tmp_path / evidence).read_text() == baseline_evidence
+
+
+@pytest.mark.asyncio
+async def test_restore_public_contract_preserves_unrelated_baseline_content_exactly(tmp_path):
+    """(6) No behavioral drift during restoration: the baseline carries an
+    unrelated helper function and a comment that have nothing to do with the
+    broken signature - a generative "close enough" restoration could easily
+    have dropped or reworded either. Deterministic restoration must reproduce
+    the WHOLE baseline file, not just the piece find_unrestored_public_api_
+    contracts() happens to check for."""
+    owner = "formatter.py"
+    baseline = (
+        "# formatter module - keep in sync with the public contract\n"
+        "def format(x):\n"
+        "    return x\n"
+        "\n"
+        "\n"
+        "def _internal_helper(x):\n"
+        "    return x.strip()\n"
+    )
+    (tmp_path / owner).write_text("def format_renamed(x):\n    return x\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner: baseline}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner, "removed_signature": "format(x)"}], [], {owner: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=AsyncMock(),
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+    )
+
+    with pytest.raises(RecoveryPhaseAdvanced):
+        await run_attempt(state, ctx)
+
+    assert (tmp_path / owner).read_text() == baseline
+
+
+@pytest.mark.asyncio
+async def test_restore_public_contract_advances_phase_to_repair_behavior(tmp_path):
+    owner = "formatter.py"
+    baseline = "def format(x):\n    return x\n"
+    (tmp_path / owner).write_text("def format_renamed(x):\n    return x\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner: baseline}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner, "removed_signature": "format(x)"}], [], {owner: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+    assert state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=AsyncMock(),
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+    )
+
+    with pytest.raises(RecoveryPhaseAdvanced) as exc_info:
+        await run_attempt(state, ctx)
+
+    assert exc_info.value.source == APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT.value
+    assert exc_info.value.target == APIContractRecoveryPhase.REPAIR_BEHAVIOR.value
+    assert state.api_contract_recovery.phase is APIContractRecoveryPhase.REPAIR_BEHAVIOR
+    assert find_unrestored_public_api_contracts(
+        {owner: (tmp_path / owner).read_text()}, state.api_contract_recovery,
+    ) == []
+
+
+@pytest.mark.asyncio
+async def test_restore_public_contract_fails_closed_on_missing_baseline(tmp_path):
+    """(7) A missing captured baseline must never fall back to a Developer
+    call or silently leave the broken owner in place - it fails closed with
+    IncompleteGenerationError, the same exception type already used
+    elsewhere in this module for "generation could not produce what the
+    pipeline needs.\""""
+    owner = "formatter.py"
+    (tmp_path / owner).write_text("def format_renamed(x):\n    return x\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {}  # no captured baseline for `owner`
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner, "removed_signature": "format(x)"}], [], {owner: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=AsyncMock(),
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+    )
+
+    with patch(
+        "kriya.workflow.attempt._run_developer_generation",
+        new_callable=AsyncMock,
+    ) as dev_gen:
+        with pytest.raises(IncompleteGenerationError, match="no captured baseline"):
+            await run_attempt(state, ctx)
+
+    dev_gen.assert_not_called()
+    # Left untouched on disk - fail-closed means no silent write either.
+    assert (tmp_path / owner).read_text() == "def format_renamed(x):\n    return x\n"
 
 
 def test_required_verification_evidence_preserves_identity_and_only_resolves_builtin_gates():
