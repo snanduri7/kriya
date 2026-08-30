@@ -69,6 +69,7 @@ from kriya.workflow.acceptance import (
     goal_explicitly_requires_tests,
     output_confirms_nonzero_test_execution,
     run_command_targets_missing_entrypoint,
+    subtask_owns_test_obligation,
 )
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
@@ -4262,7 +4263,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 })
                 accepted_test_output = test_res.get("output", "")
 
-        if accepted_test_output is None and goal_explicitly_requires_tests(ctx.goal):
+        # PRV-11 (2026-08-30): obligation/ownership-aware, not a blind scan
+        # over ctx.goal - see subtask_owns_test_obligation's own docstring
+        # for the live incident (a FUTURE_ORDERED test obligation genuinely
+        # owned by a LATER subtask was being treated as CURRENT for every
+        # OTHER subtask, merely because the full top-level goal - correctly,
+        # since the authority-isolation fix - is visible in every subtask's
+        # own ctx.goal, not because anything actually reassigned ownership).
+        this_subtask_owns_tests = subtask_owns_test_obligation(
+            ctx.grounding_goal or ctx.goal, ctx.structured_plan, ctx.current_subtask_id,
+        )
+        if accepted_test_output is None and this_subtask_owns_tests:
             failure = Failure(
                 type="test_acceptance",
                 message=(
@@ -4282,7 +4293,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # never change an explicit user contract.
         if (
             accepted_test_output is not None
-            and goal_explicitly_requires_tests(ctx.goal)
+            and this_subtask_owns_tests
             and not output_confirms_nonzero_test_execution(accepted_test_output)
         ):
             failure = Failure(

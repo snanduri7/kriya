@@ -1,6 +1,12 @@
 """Deterministic acceptance assertions above compiler/test exit codes."""
 
 import re
+from typing import TYPE_CHECKING, Optional
+
+from kriya.workflow.generation_manifest import FileRole, classify_file_role
+
+if TYPE_CHECKING:
+    from kriya.workflow.plan_schema import EngineeringPlan, Subtask
 
 
 _EXPLICIT_TEST_REQUEST_RE = re.compile(
@@ -79,6 +85,74 @@ _RUNTIME_BEHAVIOR_RE = re.compile(
 
 def goal_explicitly_requires_tests(goal: str) -> bool:
     return bool(_EXPLICIT_TEST_REQUEST_RE.search(goal or ""))
+
+
+def _subtask_owns_tests(subtask: "Subtask") -> bool:
+    return (
+        any(classify_file_role(pf.path) is FileRole.TEST for pf in subtask.planned_files)
+        or goal_explicitly_requires_tests(subtask.description)
+    )
+
+
+def subtask_owns_test_obligation(
+    overall_goal: str,
+    plan: Optional["EngineeringPlan"],
+    current_subtask_id: Optional[str],
+) -> bool:
+    """Whether the CURRENTLY EXECUTING bounded subtask must itself produce a
+    runnable test module to satisfy the goal's own test requirement -
+    obligation/ownership-aware for a structured plan, never a blind scan over
+    the FULL goal text (which, since the authority-isolation fix (§11.13),
+    legitimately contains the ENTIRE raw top-level goal on EVERY subtask's
+    own ctx.goal, not just the current one's own scope).
+
+    PRV-11 (2026-08-30, live incident): `goal_explicitly_requires_tests(ctx.goal)`
+    used to be called directly and unconditionally on every subtask attempt.
+    Before the authority-isolation fix, this happened to be harmless for a
+    subtask whose own Planner-authored description never mentioned tests
+    (ctx.goal was scoped to just that text). Once ctx.goal started ALSO
+    carrying the real top-level goal (correct and necessary for
+    SpecCompliance/the Developer - see contracts.py's own
+    AUTHORITATIVE_GOAL_SECTION_HEADER docstring), this ownership-blind check
+    started firing for ANY subtask whenever the goal mentioned tests
+    ANYWHERE in the plan - live case: s1 (Customer.java, zero test
+    ownership) kept failing TEST ACCEPTANCE FAILURE because s3 (which
+    genuinely owns "add unit tests...", with its own planned test file) was
+    a LATER, not-yet-reached subtask. In MA8 terms: a FUTURE_ORDERED
+    obligation was being treated as CURRENT merely because ITS OWN TEXT
+    happened to be visible in ctx.goal - not because plan-scope recovery (or
+    anything else) actually reassigned ownership.
+
+    ctx.goal itself is deliberately NOT narrowed back to fix this - the
+    authority-isolation fix stays exactly as it is. This function fixes the
+    ACTUAL bug: a consumer that was using raw goal text as a proxy for
+    subtask ownership, when real plan/ownership state was available and
+    should have been consulted instead.
+
+    Rule: the overall goal must require tests at all (unchanged legacy
+    signal, still text-based - there is no narrower authoritative source for
+    "does this GOAL want tests" than the goal's own words). If a structured
+    plan and a current subtask id are both available, defer to whichever
+    OTHER subtask already owns test-writing (a planned file that classifies
+    as FileRole.TEST, or its own description explicitly requesting tests) -
+    when one exists, this subtask's own obligation is FUTURE_ORDERED/
+    PAST_ORDERED relative to it, not CURRENT, regardless of whether this
+    subtask was just reopened by plan-scope recovery (recovery never
+    reassigns verification ownership by itself - see
+    revise_plan_for_grounded_scope_owner's own docstring). When NO other
+    subtask owns it (including the single-subtask-plan case, and the
+    legacy/unpartitioned pipeline where no plan exists at all), the current
+    subtask remains responsible - unchanged, backward-compatible legacy
+    behavior."""
+    if not goal_explicitly_requires_tests(overall_goal):
+        return False
+    if plan is None or not current_subtask_id:
+        return True
+    other_subtask_owns_it = any(
+        st.id != current_subtask_id and _subtask_owns_tests(st)
+        for st in plan.subtasks
+    )
+    return not other_subtask_owns_it
 
 
 def goal_requires_runtime_behavior(goal: str) -> bool:
