@@ -178,3 +178,47 @@ def test_api_contract_recovery_stops_at_its_own_bound():
     )
     assert decision.action is RetryAction.STOP_EXHAUSTED
     assert "API contract recovery" in decision.reason
+
+
+def test_api_contract_recovery_discovered_at_the_global_ceiling_still_gets_its_own_budget():
+    """PRV-11 (2026-08-30): max_total_attempts' own formula already adds
+    api_contract_recovery_max_attempts as a dedicated allowance for this
+    family - but attempt_number is a single counter SHARED across every
+    family, so a live run that discovered API_CONTRACT_RECOVERY on the
+    exact attempt that also equalled the global ceiling used to hit
+    STOP_EXHAUSTED before api_contract_recovery_count ever moved off
+    zero - the family's whole reserved budget went unused. This is the
+    literal shape of that incident: attempt_number == max_total_attempts,
+    AND has_api_contract_recovery is newly True with its own count still
+    at 0 - the family must still get its own attempt, not be preempted by
+    a global ceiling its own formula already accounted for it in."""
+    decision = decide_retry_action(
+        retry_count=1, max_retries=4, targeted_retry_count=0,
+        targeted_max_retries=3, has_implicated_files=True,
+        has_missing_files=False, has_fallback_model=True,
+        fallback_targeted_attempted=True, environment_failure=None,
+        attempt_number=11, max_total_attempts=11,
+        has_api_contract_recovery=True, api_contract_recovery_count=0,
+        api_contract_recovery_max_attempts=3,
+    )
+    assert decision.action is RetryAction.API_CONTRACT_RECOVERY
+
+
+def test_api_contract_recovery_own_bound_still_governs_past_the_global_ceiling():
+    """The reorder above must not turn the global ceiling into a no-op for
+    THIS family either - once api_contract_recovery_count itself reaches
+    its own bound, the result is still STOP_EXHAUSTED (via the family's
+    own existing check), not an infinite API_CONTRACT_RECOVERY loop, even
+    though attempt_number is now further past max_total_attempts than in
+    the test above."""
+    decision = decide_retry_action(
+        retry_count=1, max_retries=4, targeted_retry_count=0,
+        targeted_max_retries=3, has_implicated_files=True,
+        has_missing_files=False, has_fallback_model=True,
+        fallback_targeted_attempted=True, environment_failure=None,
+        attempt_number=14, max_total_attempts=11,
+        has_api_contract_recovery=True, api_contract_recovery_count=3,
+        api_contract_recovery_max_attempts=3,
+    )
+    assert decision.action is RetryAction.STOP_EXHAUSTED
+    assert "API contract recovery" in decision.reason

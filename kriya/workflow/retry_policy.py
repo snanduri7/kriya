@@ -49,14 +49,24 @@ def decide_retry_action(
 ) -> RetryDecision:
     if environment_failure:
         return RetryDecision(RetryAction.STOP_ENVIRONMENT, environment_failure)
-    if (
-        attempt_number is not None and max_total_attempts is not None
-        and attempt_number >= max_total_attempts
-    ):
-        return RetryDecision(
-            RetryAction.STOP_EXHAUSTED,
-            "global attempt bound reached across all failure families",
-        )
+    # Checked BEFORE the global ceiling below, not after (PRV-11, 2026-08-30):
+    # max_total_attempts' own formula already adds api_contract_recovery_
+    # max_attempts as a dedicated allowance for this family, on the
+    # assumption that those attempts are always available once discovered.
+    # But attempt_number is a single counter SHARED across every family
+    # (full-set/targeted/fallback_targeted/api_contract_recovery) - if the
+    # ordinary families' own attempts (each independently bounded by their
+    # own budgets below) have already driven attempt_number up to the
+    # ceiling by the time API_CONTRACT_RECOVERY is first DISCOVERED (a live
+    # incident: discovered on the exact attempt that also equalled the
+    # ceiling), the global check used to fire first and consume the entire
+    # reserved allowance without api_contract_recovery_count ever moving
+    # off zero. Safe to prioritize: once state.api_contract_recovery is
+    # set it is sticky (kept until terminal_succeeded() clears it or its
+    # own count below reaches api_contract_recovery_max_attempts) - this
+    # cannot loop indefinitely, it only guarantees the family's own
+    # separately-bounded budget is honored regardless of how much of the
+    # shared counter other families spent getting here.
     if has_api_contract_recovery:
         if api_contract_recovery_count >= api_contract_recovery_max_attempts:
             return RetryDecision(
@@ -66,6 +76,14 @@ def decide_retry_action(
         return RetryDecision(
             RetryAction.API_CONTRACT_RECOVERY,
             "authoritative baseline API contract must be restored",
+        )
+    if (
+        attempt_number is not None and max_total_attempts is not None
+        and attempt_number >= max_total_attempts
+    ):
+        return RetryDecision(
+            RetryAction.STOP_EXHAUSTED,
+            "global attempt bound reached across all failure families",
         )
     # fallback_targeted_requested only ever disqualifies TARGETED below (an
     # authoritative locator outranks another attempt by the SAME, already-
