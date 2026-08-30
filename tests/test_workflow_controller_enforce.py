@@ -54,17 +54,21 @@ from kriya.workflow.workflow_controller import (
     _evaluate_integration_obligations,
     _get_or_create_cross_owner_obligation,
     _integration_reference_token,
+    _order_recovery_groups,
     _transitive_upstream_ids,
     build_authoritative_planner_request,
+    build_recovery_execution_plan,
     build_subtask_constraint_context,
     build_subtask_goal_text,
     build_subtask_semantic_context,
     build_structured_plan_repair_prompt,
+    derive_recovery_participants,
     resolve_effective_artifact_owner,
     resolve_effective_scope_conflict_owners,
     resolve_scope_conflict_owners,
     revise_plan_for_grounded_scope_owner,
 )
+from kriya.workflow.recovery_plan import RecoveryParticipant, RecoveryParticipantRole
 from kriya.workflow.workflow_types import SubtaskStatus
 
 
@@ -1478,6 +1482,1133 @@ async def test_enforce_owner_recovery_correct_fix_via_reference_token_completes_
     recovery_event = result.legacy_result["plan_recovery_events"][0]
     assert recovery_event["owner_recovery_passed"] is True
     assert (tmp_path / "build.config").read_text() == "entrypoint=RequiredMain"
+
+
+# --- General Obligation-Centric Recovery Execution (2026-08-30) -
+# generalizes the owner-recovery loop above from exactly-one-owner to N
+# independently, unambiguously resolved owners. See
+# Kriya_General_Obligation_Centric_Recovery_Execution_Implementation_
+# Specification.md (repo root) for the full design; deterministic test
+# matrix per that spec's §14. ---
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_single_owner_matches_legacy_behavior(tmp_path):
+    """spec §14 item 1 / §11.1: a single-owner scope_conflict must produce a
+    one-group RecoveryExecutionPlan byte-for-byte equivalent to the
+    pre-existing single-owner behavior - the primary regression bar for
+    this whole change. Deliberately the SAME scenario as
+    test_enforce_owner_recovery_correct_fix_via_reference_token_completes_
+    and_resumes_consumer above, re-asserted under the new group-based
+    execution path."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build config", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)],
+                provides=["entrypoint.configured"],
+            ),
+            Subtask(
+                id="s2", description="create application entrypoint", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app_entrypoint.txt", action=FileAction.CREATE)],
+                requires=["entrypoint.configured"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            (tmp_path / "build.config").write_text("entrypoint=OldMain")
+            return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+        if len(calls) == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "misdirected_edit",
+                    "required_files": ["build.config"],
+                    "allowed_files": ["app_entrypoint.txt"],
+                    "required_reference_token": "RequiredMain",
+                },
+            }
+        if len(calls) == 3:
+            (tmp_path / "build.config").write_text("entrypoint=RequiredMain")
+            return {"status": "success", "quality_gates_passed": True, "files": ["build.config"]}
+        (tmp_path / "app_entrypoint.txt").write_text("RequiredMain")
+        return {"status": "success", "quality_gates_passed": True, "files": ["app_entrypoint.txt"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 4
+    assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 1
+    assert events[0]["owner_recovery_passed"] is True
+    assert events[0]["reopened_owner"] == "s1"
+    assert (tmp_path / "build.config").read_text() == "entrypoint=RequiredMain"
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_two_artifacts_one_owner(tmp_path):
+    """spec §14 item 2: an owner asked to fix two of its OWN files gets
+    exactly ONE RecoveryOwnerGroup (one combined owner-recovery call), not
+    two - the scheduling unit is the whole subtask invocation."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="create build config", execution_method=ExecutionMethod.MODEL,
+                planned_files=[
+                    PlannedFile(path="pom.xml", action=FileAction.CREATE),
+                    PlannedFile(path="Config.java", action=FileAction.CREATE),
+                ],
+            ),
+            Subtask(
+                id="s2", description="create application", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            (tmp_path / "Config.java").write_text("class Config {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml", "Config.java"]}
+        if n == 2:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pom.xml", "Config.java"],
+                    "allowed_files": ["App.java"],
+                },
+            }
+        if n == 3:
+            (tmp_path / "pom.xml").write_text("<project><fixed/></project>")
+            (tmp_path / "Config.java").write_text("class Config { /* fixed */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml", "Config.java"]}
+        (tmp_path / "App.java").write_text("class App {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    # 1 (s1) + 1 (s2 fail) + 1 (ONE combined s1 recovery for both files) +
+    # 1 (s2 consumer retry) = 4 - never two separate owner-recovery calls.
+    assert len(calls) == 4
+    assert calls[2]["allowed_write_relpaths"] == ["pom.xml", "Config.java"]
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 1
+    assert events[0]["required_repair_files"] == ["Config.java", "pom.xml"]
+    assert events[0]["owner_recovery_passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_two_artifacts_two_owners_pom_and_app(tmp_path):
+    """spec §14 item 3 - the literal live PRV-06 shape (2026-08-30 overnight
+    run): s3 needs BOTH pom.xml (owned by s1, via dependency ancestry) AND
+    App.java (owned by s2, via EXECUTION PROVENANCE - s3 depends only on
+    s1, never declares s2) fixed together. This used to fail closed purely
+    because `len(owner_map) != 1` even though each artifact resolved to its
+    own owner unambiguously - the exact defect this round closes. Must
+    reopen BOTH owners (dependency-ordered: s1 before s2, since s2 itself
+    depends_on s1) against ONE shared candidate workspace, then resume the
+    consumer exactly once."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App { /* missing entrypoint */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "reason": "pom.xml is missing the JUnit 5 dependency required by AppTest.java",
+                    "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "pom.xml").write_text("<project><dependencies><junit/></dependencies></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 5:
+            (tmp_path / "App.java").write_text("class App { /* fixed entrypoint */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        (tmp_path / "AppTest.java").write_text("class AppTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["AppTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 6
+    assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
+    assert calls[3]["allowed_write_relpaths"] == ["pom.xml"]
+    assert calls[4]["allowed_write_relpaths"] == ["App.java"]
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 2
+    assert {e["reopened_owner"] for e in events} == {"s1", "s2"}
+    assert all(e["owner_recovery_passed"] is True for e in events)
+    assert (tmp_path / "pom.xml").read_text() == "<project><dependencies><junit/></dependencies></project>"
+    assert (tmp_path / "App.java").read_text() == "class App { /* fixed entrypoint */ }"
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_three_artifacts_two_owners(tmp_path):
+    """spec §14 item 4: N-artifact behavior - s1 owns TWO required files
+    (pom.xml, Model.java), s2 owns a third (App.java). Two groups, s1's own
+    group has two participants generated together in ONE owner-recovery
+    call."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create manifest + model", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[
+                        PlannedFile(path="pom.xml", action=FileAction.CREATE),
+                        PlannedFile(path="Model.java", action=FileAction.CREATE),
+                    ]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            (tmp_path / "Model.java").write_text("class Model {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml", "Model.java"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pom.xml", "Model.java", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "pom.xml").write_text("<project><fixed/></project>")
+            (tmp_path / "Model.java").write_text("class Model { /* fixed */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml", "Model.java"]}
+        if n == 5:
+            (tmp_path / "App.java").write_text("class App { /* fixed */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        (tmp_path / "AppTest.java").write_text("class AppTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["AppTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 6
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 2  # two GROUPS, not three artifacts
+    s1_event = next(e for e in events if e["reopened_owner"] == "s1")
+    assert s1_event["required_repair_files"] == ["Model.java", "pom.xml"]
+    assert calls[3]["allowed_write_relpaths"] == ["pom.xml", "Model.java"]
+
+
+def test_derive_recovery_participants_excludes_artifact_without_grounded_evidence():
+    """spec §14 item 5: only artifacts named by the scope_conflict's own
+    deterministic required_files/grounded_owner_files ever become
+    participants - never a file merely mentioned in free-text reasoning.
+    App.java (named only in the "reason" prose) must never appear."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create App", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s4", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1", "s3"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    scope_conflict = {
+        "reason": "pom.xml is missing a dependency also used by App.java",
+        "required_files": ["pom.xml"],
+    }
+    participants = derive_recovery_participants(plan, scope_conflict, plan.subtask_by_id("s4"))
+    assert [p.artifact for p in participants] == ["pom.xml"]
+    assert participants[0].role is RecoveryParticipantRole.REQUIRED_MUTATION
+    assert participants[0].effective_owner_subtask_id == "s1"
+
+
+def test_build_recovery_execution_plan_fails_closed_on_ambiguous_owner():
+    """spec §14 item 6: at least one required artifact resolving to a
+    genuinely unresolvable owner must fail the WHOLE plan closed, even
+    when every OTHER artifact resolves cleanly."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create pom", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="consumer", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="Other.java", action=FileAction.CREATE)]),
+        ],
+    )
+    scope_conflict = {
+        "reason": "needs pom.xml and a file nobody declares",
+        "required_files": ["pom.xml", "Ghost.java"],
+    }
+    exec_plan = build_recovery_execution_plan(
+        plan, scope_conflict, plan.subtask_by_id("s2"), plan_generation=0,
+    )
+    assert exec_plan is None
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_group_upstream_changes_group_downstream_sees_it(tmp_path):
+    """spec §14 item 7: sequential owner-groups already share ONE candidate
+    workspace (the persistent plan_workspace_path git worktree) - the
+    second group's own recovery call must see the FIRST group's real,
+    freshly-written content, not the pre-recovery baseline. No MA9-style
+    in-memory candidate_view needed at this layer (implementation spec
+    §2)."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "pom.xml").write_text("<project><MARKER_JUNIT_FIXED/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 5:
+            # This is the group.s2 call - its own context must already
+            # contain group.s1's freshly-written marker content.
+            assert "MARKER_JUNIT_FIXED" in kwargs.get("supplementary_context", "")
+            (tmp_path / "App.java").write_text("class App { /* fixed */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        (tmp_path / "AppTest.java").write_text("class AppTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["AppTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 6
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_group_unchanged_is_no_progress(tmp_path):
+    """spec §14 item 8: RECOVERY_NO_PROGRESS still fires per-group under the
+    new architecture - and when the FIRST group in dependency order fails
+    that way, the SECOND group must never even be invoked (the whole plan
+    fails atomically, no wasted call)."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        # group.s1's own recovery candidate: byte-identical to what pom.xml
+        # already had - RECOVERY_NO_PROGRESS must fire, and group.s2 (App.java)
+        # must NEVER be invoked as a result.
+        (tmp_path / "pom.xml").write_text("<project/>")
+        return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    assert len(calls) == 4  # s1, s2, s3-fail, s1-no-progress-recovery - group.s2 NEVER ran
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 1
+    assert events[0]["reopened_owner"] == "s1"
+    assert events[0]["owner_recovery_passed"] is False
+    s2_result = next(item for item in result.subtask_results if item.subtask_id == "s2")
+    assert s2_result.status == SubtaskStatus.COMPLETED  # s2's OWN initial pass is untouched
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_all_groups_pass_locally_but_consumer_still_fails(tmp_path):
+    """spec §14 item 9 - the literal generalization of Invariant 3: "group 1
+    PASS + group 2 PASS" must NOT be treated as "recovery PASS." Both
+    owner-groups' own local gates pass here, but the consumer's own retry
+    fails again (no new scope_conflict) - the whole plan must be rejected
+    and neither cross-owner obligation SATISFIED. Both owners' PLAN state
+    (plan_recovery_events/approved_stage_states) reflects needs_review, but
+    - matching the pre-existing single-owner precedent exactly (see
+    test_enforce_permits_a_second_distinct_generation_recovery_on_the_same_
+    owner, where an owner whose OWN local gate passed must remain eligible
+    for a LATER cycle to still resolve the requirement) - the FINAL
+    reported subtask_results entries for s1/s2 are NOT downgraded to
+    NEEDS_REVIEW, since neither owner's own local recovery gate failed;
+    only a group that fails LOCALLY gets that downgrade."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "pom.xml").write_text("<project><changed/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 5:
+            (tmp_path / "App.java").write_text("class App { /* changed */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        # consumer retry - still fails, for an unrelated/unresolvable reason,
+        # with NO new scope_conflict (so the loop ends rather than looping).
+        return {"status": "failed", "quality_gates_passed": False, "files": []}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    assert len(calls) == 6
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 2
+    assert all(e["owner_recovery_passed"] is False for e in events)
+    for owner_id in ("s1", "s2"):
+        owner_result = next(item for item in result.subtask_results if item.subtask_id == owner_id)
+        # Neither owner's OWN local gate failed - only the plan-level
+        # acceptance (the consumer's own retry) rejected the whole plan, so
+        # the FINAL reported subtask_results entries stay whatever each
+        # owner's own earlier successful pass already recorded (COMPLETED),
+        # never forced to NEEDS_REVIEW - matching the pre-existing
+        # single-owner precedent this generalizes.
+        assert owner_result.status == SubtaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_consumer_resumes_exactly_once(tmp_path):
+    """spec §14 item 10 - the review's own explicit anti-circularity
+    requirement: the originating consumer must be re-invoked EXACTLY ONCE
+    per recovery plan, never once per owner-group."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "pom.xml").write_text("<project><fixed/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 5:
+            (tmp_path / "App.java").write_text("class App { /* fixed */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        (tmp_path / "AppTest.java").write_text("class AppTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["AppTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    consumer_calls = [c for c in calls if c.get("allowed_write_relpaths") == ["AppTest.java"]]
+    assert len(consumer_calls) == 2  # s3's own first attempt + exactly one resumed retry
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_later_distinct_two_owner_requirement_reopens_same_owners(tmp_path):
+    """spec §14 item 11: a SECOND, genuinely distinct multi-owner recovery
+    requirement on the SAME pair of owners (s1, s2) - after the first
+    two-owner plan (recovery.s3.0) succeeds, a later consumer (s4) hits a
+    DIFFERENT requirement needing the same two owners fixed again. Must
+    succeed as its own fresh plan (recovery.s4.0, a different id) without
+    any false RECOVERY_NO_PROGRESS carried over from the first plan's own
+    fingerprints - the fingerprint key is now plan-id-scoped (spec §9)."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+            Subtask(id="s4", description="create integration tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1", "s3"],
+                    planned_files=[PlannedFile(path="IntegrationTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            # s3 - first requirement (JUnit).
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "compile",
+                    "reason": "missing JUnit dependency", "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "pom.xml").write_text("<project><junit/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 5:
+            (tmp_path / "App.java").write_text("class App { /* junit fix */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 6:
+            (tmp_path / "AppTest.java").write_text("class AppTest {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["AppTest.java"]}
+        if n == 7:
+            # s4 - a SECOND, distinct requirement (Jackson) on the SAME
+            # owner pair.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "compile",
+                    "reason": "missing Jackson dependency", "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["IntegrationTest.java"],
+                },
+            }
+        if n == 8:
+            (tmp_path / "pom.xml").write_text("<project><junit/><jackson/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 9:
+            (tmp_path / "App.java").write_text("class App { /* junit fix */ /* jackson fix */ }")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        (tmp_path / "IntegrationTest.java").write_text("class IntegrationTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["IntegrationTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 10
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 4  # 2 groups x 2 distinct plans
+    assert all(e["owner_recovery_passed"] is True for e in events)
+    requirement_ids = {e["requirement_id"] for e in events}
+    assert len(requirement_ids) == 4  # every group/plan combination gets its own id
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_runtime_verification_multi_owner(tmp_path):
+    """spec §14 item 13: a VERIFICATION_CONTRACT_DEFECT-shaped (DENY_ALL)
+    scope conflict spanning TWO owners must go through the same
+    RecoveryExecutionPlan machinery as an ordinary PLAN_SCOPE_DEFECT one -
+    not just the single-owner case Verification-Only Recovery Routing was
+    originally proven against."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create App", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.MODIFY)]),
+            Subtask(id="s3", description="create config", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="application.yml", action=FileAction.CREATE)]),
+            Subtask(
+                id="s4", description="run the application with sample input",
+                execution_method=ExecutionMethod.MODEL, execution_role=ExecutionRole.VERIFICATION,
+                depends_on=["s2", "s3"], planned_files=[],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.JUDGMENT,
+                    description="run the application and confirm the transformed value is printed",
+                    verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+                )],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "App.java").write_text("class App {}\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App { /* reads stdin, not argv */ }\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            (tmp_path / "application.yml").write_text("mode: default\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["application.yml"]}
+        if n == 4:
+            assert kwargs["write_scope_mode"] == WriteScopeMode.DENY_ALL
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "run_verification",
+                    "reason": "app reads stdin but the runtime contract supplies argv, and the "
+                              "configured mode disables argv entirely",
+                    "required_files": ["App.java", "application.yml"], "allowed_files": [],
+                },
+            }
+        if n in (5, 6):
+            path = kwargs["allowed_write_relpaths"][0]
+            if path == "App.java":
+                (tmp_path / "App.java").write_text("class App { /* reads args[0] now */ }\n")
+                return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+            (tmp_path / "application.yml").write_text("mode: argv\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["application.yml"]}
+        assert kwargs["write_scope_mode"] == WriteScopeMode.DENY_ALL
+        return {
+            "status": "success", "quality_gates_passed": True, "files": [],
+            "verification_results": [{
+                "type": "judgment", "tool_name": None,
+                "description": "run the application and confirm the transformed value is printed",
+                "passed": True, "source": "run_verification",
+            }],
+        }
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 7
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 2
+    assert {e["reopened_owner"] for e in events} == {"s2", "s3"}
+    assert all(e["owner_recovery_passed"] is True for e in events)
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_read_context_artifact_never_enters_write_scope(tmp_path):
+    """Spec_v1.0 T7/T8 (repo root, pre-existing doc found 2026-08-30):
+    'unrelated model-proposed artifact' / 'read-context leakage'. The
+    Developer's own FIX ANALYSIS text may mention a file that never appears
+    in the scope_conflict's own deterministic required_files - that file
+    must never become a recovery participant, never get write-authorized in
+    ANY call, and its own on-disk content must remain untouched, while the
+    ONE genuinely grounded artifact (pom.xml) still recovers normally."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="create App", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            # ONLY pom.xml is deterministically grounded (required_files) -
+            # "reason" prose mentions App.java, but that must never make it
+            # a participant.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "reason": "pom.xml is missing a dependency also referenced by App.java",
+                    "required_files": ["pom.xml"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "pom.xml").write_text("<project><fixed/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        (tmp_path / "AppTest.java").write_text("class AppTest {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["AppTest.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 5
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 1
+    assert events[0]["reopened_owner"] == "s1"
+    assert events[0]["required_repair_files"] == ["pom.xml"]
+    # App.java (read context only) never appears in the write scope of any
+    # RECOVERY-cycle call - s2's own ORDINARY initial execution (calls[1])
+    # legitimately writes its own declared file, that's not what's under
+    # test here; calls[3:] are the recovery cycle itself (s1's own
+    # owner-recovery + s3's consumer retry), where App.java must never
+    # surface at all.
+    for call_kwargs in calls[3:]:
+        assert "App.java" not in (call_kwargs.get("allowed_write_relpaths") or [])
+    assert (tmp_path / "App.java").read_text() == "class App {}"  # untouched by recovery
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_group_two_fails_after_group_one_staged_success(tmp_path):
+    """Spec_v1.0 T14: group 1 (s1/pom.xml) succeeds locally and stages a
+    real fix; group 2 (s2/App.java) then fails locally. Neither group's
+    work may become authoritative - the whole plan is atomic. Proven at two
+    levels: (a) this test's own plan_recovery_events/subtask_results
+    assertions for the recovery LOOP's own bookkeeping; (b) the pre-existing,
+    UNCHANGED `all_completed` gate around `commit_revision_grounded_batch`
+    (workflow_controller.py, terminal commit block) - a subtask short of
+    COMPLETED (s2 here, marked NEEDS_REVIEW) makes `all_completed` False,
+    so NO planned file of ANY subtask (including s1's own already-staged
+    fix) is ever copied from plan_workspace_path into the real workspace.
+    That specific atomicity boundary is exercised end-to-end (via a REAL
+    separate worktree sandbox, not this test's own identity-shortcut) by
+    the pre-existing test_enforce_discards_successful_earlier_subtask_when_
+    plan_fails, confirmed still passing in this round's own regression
+    sweep."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        if n == 4:
+            # group.s1 (FIRST in dependency order) succeeds locally and
+            # genuinely stages a real fix.
+            (tmp_path / "pom.xml").write_text("<project><fixed/></project>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        # group.s2 fails its own local gate - the plan must reject
+        # atomically; group.s1's own already-staged fix must not become
+        # authoritative as a result.
+        return {"status": "failed", "quality_gates_passed": False, "files": []}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    assert len(calls) == 5
+    events = result.legacy_result["plan_recovery_events"]
+    # BOTH groups get recorded (invoked_group_records captures a group as
+    # soon as its own owner-recovery call resolves, whether it then passes
+    # or fails locally) - group.s1's own local gate DID pass, but since the
+    # consumer was never reached this cycle (the plan failed before ever
+    # getting there), BOTH owners are finalized with the SAME plan-level
+    # outcome, atomically - matching the "neither becomes authoritative"
+    # requirement, not just "the group that actually failed."
+    assert len(events) == 2
+    assert {e["reopened_owner"] for e in events} == {"s1", "s2"}
+    assert all(e["owner_recovery_passed"] is False for e in events)
+    for owner_id in ("s1", "s2"):
+        owner_result = next(item for item in result.subtask_results if item.subtask_id == owner_id)
+        assert owner_result.status == SubtaskStatus.NEEDS_REVIEW
+        assert "PLAN_RECOVERY_OWNER_FAILED" in owner_result.reason_codes
+    # group.s1's own genuinely-staged fix is real content in the shared
+    # worktree (== tmp_path in this mocked harness) - but the pre-existing,
+    # UNCHANGED `all_completed` gate around commit_revision_grounded_batch
+    # (workflow_controller.py's terminal commit block) means this content
+    # is never copied out as authoritative in a real (non-identity-mocked)
+    # run, since s1 is not COMPLETED. See test_enforce_discards_successful_
+    # earlier_subtask_when_plan_fails for that exact boundary proven with a
+    # REAL separate worktree sandbox.
+    assert (tmp_path / "pom.xml").read_text() == "<project><fixed/></project>"
+
+
+def test_order_recovery_groups_fails_closed_on_cycle():
+    """spec §14 item 15: _order_recovery_groups must fail closed (return
+    None), never guess an order, when two participating owners are
+    mutually upstream of each other - impossible to construct via the real
+    Planner/validator, but the ordering function itself must not silently
+    pick an arbitrary order if it ever sees one."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="A", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s2"],
+                    planned_files=[PlannedFile(path="A.java", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="B", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="B.java", action=FileAction.CREATE)]),
+        ],
+    )
+    participants = (
+        RecoveryParticipant(
+            artifact="A.java", role=RecoveryParticipantRole.REQUIRED_MUTATION,
+            effective_owner_subtask_id="s1", owner_resolution_basis="dependency_ancestry",
+            mutation_reason="fix A",
+        ),
+        RecoveryParticipant(
+            artifact="B.java", role=RecoveryParticipantRole.REQUIRED_MUTATION,
+            effective_owner_subtask_id="s2", owner_resolution_basis="dependency_ancestry",
+            mutation_reason="fix B",
+        ),
+    )
+    assert _order_recovery_groups(plan, participants) is None
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_non_java_fixture(tmp_path):
+    """spec §14 item 12 - genericity proof: a Python-shaped two-owner
+    scenario (pyproject.toml owned by s1, service.py owned by s2), proving
+    zero Java/Maven assumptions in _order_recovery_groups or
+    build_recovery_execution_plan."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pyproject.toml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="write service", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="service.py", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="write tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="test_service.py", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pyproject.toml"]}
+        if n == 2:
+            (tmp_path / "service.py").write_text("def run():\n    pass\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["service.py"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pyproject.toml", "service.py"],
+                    "allowed_files": ["test_service.py"],
+                },
+            }
+        if n == 4:
+            (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\ndependencies=['pytest']\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pyproject.toml"]}
+        if n == 5:
+            (tmp_path / "service.py").write_text("def run():\n    return True\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["service.py"]}
+        (tmp_path / "test_service.py").write_text("def test_run():\n    assert True\n")
+        return {"status": "success", "quality_gates_passed": True, "files": ["test_service.py"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 6
+    events = result.legacy_result["plan_recovery_events"]
+    assert {e["reopened_owner"] for e in events} == {"s1", "s2"}
+
+
+@pytest.mark.asyncio
+async def test_enforce_recovery_plan_atomic_rejection_one_group_corrupt(tmp_path):
+    """spec §14 item 14: one group's owner writing an UNDECLARED file makes
+    that group (and therefore the whole plan) fail locally - the SECOND
+    group must never run, and no application file is ever committed to the
+    real workspace."""
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="create build manifest", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)]),
+            Subtask(id="s2", description="wire App logic", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)]),
+            Subtask(id="s3", description="create tests", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"],
+                    planned_files=[PlannedFile(path="AppTest.java", action=FileAction.CREATE)]),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        n = len(calls)
+        if n == 1:
+            (tmp_path / "pom.xml").write_text("<project/>")
+            return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}
+        if n == 2:
+            (tmp_path / "App.java").write_text("class App {}")
+            return {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
+        if n == 3:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "compile",
+                    "required_files": ["pom.xml", "App.java"],
+                    "allowed_files": ["AppTest.java"],
+                },
+            }
+        # group.s1's own recovery writes an UNDECLARED extra file - locally
+        # rejected, group.s2 (App.java) must never be invoked as a result.
+        (tmp_path / "pom.xml").write_text("<project><fixed/></project>")
+        (tmp_path / "Sneaky.java").write_text("class Sneaky {}")
+        return {"status": "success", "quality_gates_passed": True, "files": ["pom.xml", "Sneaky.java"]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+    assert len(calls) == 4  # group.s2 (App.java) never ran
+    events = result.legacy_result["plan_recovery_events"]
+    assert len(events) == 1
+    assert events[0]["owner_recovery_passed"] is False
+    s2_result = next(item for item in result.subtask_results if item.subtask_id == "s2")
+    assert s2_result.status == SubtaskStatus.COMPLETED  # s2's OWN initial pass untouched - never reopened
 
 
 @pytest.mark.asyncio
