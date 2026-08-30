@@ -3510,6 +3510,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             kernel = getattr(self.workflow_engine, "kernel", None)
             config = getattr(kernel, "config", None)
             process_profiles = getattr(config, "process_profiles", None)
+            # PRV-11 (2026-08-30): which subtasks have ALREADY finished
+            # SUCCESSFULLY as of THIS call, read live off the same
+            # approved_stage_states this loop already maintains - feeds
+            # resolve_future_owner_verification_deferral()'s own "has the
+            # future owner not yet executed" check (kriya/workflow/
+            # workflow.py). Recomputed fresh on every call, never cached -
+            # approved_stage_states is mutated in place as each subtask
+            # completes.
+            completed_subtask_ids = frozenset(
+                subtask_id for subtask_id, status in approved_stage_states.items()
+                if status == SubtaskStatus.COMPLETED.value
+            )
             return await self.workflow_engine.run_generation_workflow(
                 goal=target_goal,
                 workspace_path=plan_workspace_path,
@@ -3551,6 +3563,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # during this subtask's own attempt accumulate into the
                 # SAME per-run ledger, not a fresh one per subtask.
                 obligation_ledger=obligation_ledger,
+                completed_subtask_ids=completed_subtask_ids,
                 # DENY_ALL for a verification-role subtask - enforced at the
                 # real write gate (AuthorizedFileWriter), not merely implied
                 # by target_files being empty. Every other subtask keeps

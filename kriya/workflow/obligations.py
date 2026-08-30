@@ -110,13 +110,45 @@ class ObligationKind(str, Enum):
     validates, satisfied only by later deterministic evidence that the
     consumer's own content actually references the producer's artifact -
     never by the consumer subtask's own local Quality Gates passing, which
-    is exactly the signal that already proved insufficient live."""
+    is exactly the signal that already proved insufficient live.
+
+    FUTURE_OWNER_VERIFICATION (PRV-11, 2026-08-30): a live incident where
+    s1 (Customer.java)'s own full-regression check kept failing on
+    CustomerControllerTest.detailsIncludesUppercaseDisplayName - real
+    evidence, but of a requirement s1's own plan-declared scope can never
+    satisfy alone. The approved plan already knew this: s4 (the test's own
+    owner) declares `requires: [customer_controller_with_display_name_
+    response]`, which s3 (CustomerController.java, not yet executed)
+    `provides`. Nothing consulted that structured graph before retrying
+    s1 - attribution stayed confined to s1's own known_files (no textual
+    locator ever names CustomerController.java; a Map lookup returning
+    null carries no stack frame), so plan-scope-recovery was never even
+    reached. This kind exists so an intermediate full-regression failure
+    that resolve_future_owner_verification_deferral() (kriya/workflow/
+    attribution.py) proves - via exact plan-graph resolution, not a
+    guess - is already covered by unfinished APPROVED work gets recorded
+    as PENDING, terminal_required, owned by the not-yet-executed subtask,
+    while the CURRENTLY executing subtask is allowed to complete rather
+    than burning its own retry budget on a requirement it structurally
+    cannot satisfy. Deliberately NOT a causal-attribution mechanism (see
+    that function's own docstring for why it never touches
+    attribute_failure()) - it answers "is this already scheduled,
+    approved work," a different, narrower deterministic question. No
+    separate recheck step exists: the SAME resolution runs again on every
+    later subtask's own full-regression check, and self-deferral
+    (future_owner == the subtask currently executing) is refused by
+    construction - so when the actual owner (s3) eventually runs, its own
+    regression check either passes for real (obligation settled
+    SATISFIED) or fails for real against the now-responsible owner's own
+    ordinary retry loop (settled VIOLATED, recovered through the existing
+    machinery, not a new one)."""
 
     PLAN_STRUCTURAL_VALIDITY = "plan_structural_validity"
     MIGRATION_COMPLETION = "migration_completion"
     GOAL_SPEC_REQUIREMENT = "goal_spec_requirement"
     PROCESS_BOUNDARY_COMPATIBILITY = "process_boundary_compatibility"
     CROSS_OWNER_ARTIFACT_REQUIREMENT = "cross_owner_artifact_requirement"
+    FUTURE_OWNER_VERIFICATION = "future_owner_verification"
     CROSS_SUBTASK_INTEGRATION = "cross_subtask_integration"
 
 

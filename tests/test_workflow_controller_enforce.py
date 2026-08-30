@@ -73,6 +73,14 @@ from kriya.workflow.workflow_controller import (
 from kriya.workflow.recovery_plan import RecoveryAction, RecoveryParticipant, RecoveryParticipantRole
 from kriya.workflow.self_correction import SelfCorrectionResult
 from kriya.workflow.workflow_types import SubtaskStatus
+from kriya.workflow.attribution import (
+    FutureOwnerVerificationDeferral,
+    resolve_future_owner_verification_deferral,
+)
+from kriya.workflow.workflow import (
+    _record_future_owner_verification_deferred,
+    _settle_future_owner_verification_obligations,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -128,6 +136,234 @@ def test_scope_conflict_owner_resolution_accepts_unique_transitive_upstream_owne
     assert resolve_scope_conflict_owners(
         plan, ["src/Owner.py"], plan.subtask_by_id("consumer"),
     ) == {"owner": ["src/Owner.py"]}
+
+
+# --- FUTURE_OWNER_VERIFICATION deferral (PRV-11, 2026-08-30) ---
+# The live incident: s1 (Customer.java)'s own full-regression check kept
+# failing on CustomerControllerTest.detailsIncludesUppercaseDisplayName -
+# real evidence, but of a requirement s1's own scope can never satisfy
+# alone. The already-approved plan's own provides/requires graph already
+# proved this: s4 (the failing test's own owner) requires exactly the
+# capability s3 (CustomerController.java, not yet executed) provides.
+# Nothing consulted that graph before retrying s1. These tests match the
+# 8-scenario matrix required for this fix, in order.
+
+_S1_CUSTOMER = "src/main/java/com/example/customer/Customer.java"
+_S2_SERVICE = "src/main/java/com/example/customer/CustomerService.java"
+_S3_CONTROLLER = "src/main/java/com/example/customer/CustomerController.java"
+_S4_TEST = "src/test/java/com/example/customer/CustomerControllerTest.java"
+
+_DISPLAY_NAME_FAILURE_OUTPUT = (
+    "org.opentest4j.AssertionFailedError: expected: <JOHN SMITH> but was: <null>\n"
+    "\tat org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:1145)\n"
+    "\tat com.example.customer.CustomerControllerTest.detailsIncludesUppercaseDisplayName"
+    "(CustomerControllerTest.java:8)\n"
+    "\tat java.base/java.lang.reflect.Method.invoke(Method.java:568)\n"
+)
+
+
+def _prv11_style_plan() -> EngineeringPlan:
+    """The exact real PRV-11 shape: s1 Customer -> s2 CustomerService ->
+    s3 CustomerController -> s4 CustomerControllerTest, a linear
+    provides/requires chain matching the real persisted plan verbatim."""
+    return EngineeringPlan(
+        plan_id="prv11", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            Subtask(
+                id="s1", description="add displayName to Customer",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=_S1_CUSTOMER, action=FileAction.MODIFY)],
+                provides=["customer_entity_with_display_name"],
+            ),
+            Subtask(
+                id="s2", description="compute displayName in CustomerService",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s1"],
+                planned_files=[PlannedFile(path=_S2_SERVICE, action=FileAction.MODIFY)],
+                requires=["customer_entity_with_display_name"],
+                provides=["customer_service_with_display_name_logic"],
+            ),
+            Subtask(
+                id="s3", description="propagate displayName in CustomerController",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s2"],
+                planned_files=[PlannedFile(path=_S3_CONTROLLER, action=FileAction.MODIFY)],
+                requires=["customer_service_with_display_name_logic"],
+                provides=["customer_controller_with_display_name_response"],
+            ),
+            Subtask(
+                id="s4", description="test displayName in the controller response",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s3"],
+                planned_files=[PlannedFile(path=_S4_TEST, action=FileAction.MODIFY)],
+                requires=["customer_controller_with_display_name_response"],
+            ),
+        ],
+    )
+
+
+def test_future_owner_verification_defers_exact_multi_hop_capability_chain():
+    """(1) The literal live incident shape: s1 is executing, the only
+    locator in the raw output is the test's own assertion call site, and
+    the chain evidence_path(s4) -> s4.requires -> providers[capability] ->
+    s3 resolves exactly and uniquely. s3 is genuinely FUTURE_ORDERED (not
+    yet completed) relative to s1 - defer."""
+    plan = _prv11_style_plan()
+
+    deferral = resolve_future_owner_verification_deferral(
+        plan, "s1", _DISPLAY_NAME_FAILURE_OUTPUT, frozenset(),
+    )
+
+    assert deferral == FutureOwnerVerificationDeferral(
+        verification_subtask_id="s4",
+        evidence_path=_S4_TEST,
+        required_capability="customer_controller_with_display_name_response",
+        future_owner_id="s3",
+    )
+
+
+def test_future_owner_verification_does_not_defer_unrelated_already_satisfied_capability():
+    """(2) The failing evidence still resolves to a future-owned test file
+    (s4), but s4's OWN declared requirement resolves to a capability that
+    is ALREADY satisfied (s1, completed) - nothing pending explains this
+    failure, so it must not be deferred to anything."""
+    plan = _prv11_style_plan()
+    plan = plan.model_copy(deep=True)
+    plan.subtask_by_id("s4").requires = ["customer_entity_with_display_name"]  # s1's own capability
+
+    deferral = resolve_future_owner_verification_deferral(
+        plan, "s2", _DISPLAY_NAME_FAILURE_OUTPUT, frozenset({"s1"}),
+    )
+
+    assert deferral is None
+
+
+def test_future_owner_verification_does_not_defer_on_missing_provider():
+    """(3) s4 requires a capability nothing in the plan provides at all -
+    fail closed, never guess a provider."""
+    plan = _prv11_style_plan()
+    plan = plan.model_copy(deep=True)
+    plan.subtask_by_id("s4").requires = ["nonexistent_capability"]
+
+    deferral = resolve_future_owner_verification_deferral(
+        plan, "s1", _DISPLAY_NAME_FAILURE_OUTPUT, frozenset(),
+    )
+
+    assert deferral is None
+
+
+def test_future_owner_verification_fails_closed_on_multiple_providers_for_same_capability():
+    """(4) A plan-authoring ambiguity - two subtasks both declare the same
+    `provides` capability s4 requires. There is no unique provider to
+    defer to, so this must fail closed rather than guess between them."""
+    plan = _prv11_style_plan()
+    plan = plan.model_copy(deep=True)
+    duplicate_provider = Subtask(
+        id="s3b", description="an ambiguous second provider of the same capability",
+        execution_method=ExecutionMethod.MODEL, depends_on=["s2"],
+        planned_files=[PlannedFile(path="src/main/java/com/example/customer/Other.java", action=FileAction.CREATE)],
+        provides=["customer_controller_with_display_name_response"],
+    )
+    plan.subtasks.append(duplicate_provider)
+
+    deferral = resolve_future_owner_verification_deferral(
+        plan, "s1", _DISPLAY_NAME_FAILURE_OUTPUT, frozenset(),
+    )
+
+    assert deferral is None
+
+
+def test_future_owner_verification_does_not_defer_when_future_owner_already_completed():
+    """(5) s3 has ALREADY executed (completed_subtask_ids includes it) by
+    the time this failure is observed - there is no pending future work
+    left to explain it, so it must not be deferred."""
+    plan = _prv11_style_plan()
+
+    deferral = resolve_future_owner_verification_deferral(
+        plan, "s1", _DISPLAY_NAME_FAILURE_OUTPUT, frozenset({"s3"}),
+    )
+
+    assert deferral is None
+
+
+def test_future_owner_verification_obligation_settles_satisfied_when_future_owner_later_passes():
+    """(6) s1 defers to s3; s3 later executes and its OWN full regression
+    genuinely passes - the pending obligation settles SATISFIED, and the
+    global terminal-obligation safety net sees nothing left unresolved."""
+    ledger = ObligationLedger()
+    deferral = FutureOwnerVerificationDeferral(
+        verification_subtask_id="s4", evidence_path=_S4_TEST,
+        required_capability="customer_controller_with_display_name_response",
+        future_owner_id="s3",
+    )
+
+    record = _record_future_owner_verification_deferred(
+        ledger, deferral, observed_by_subtask_id="s1", raw_output=_DISPLAY_NAME_FAILURE_OUTPUT,
+    )
+    assert record.status == ObligationStatus.PENDING
+    assert record.owner_subtask_id == "s3"
+    assert record.terminal_required is True
+    assert ledger.unresolved_terminal_obligations() == [record]
+
+    settled = _settle_future_owner_verification_obligations(ledger, "s3", satisfied=True)
+
+    assert len(settled) == 1
+    assert settled[0].id == record.id
+    assert settled[0].status == ObligationStatus.SATISFIED
+    assert ledger.current(record.id).status == ObligationStatus.SATISFIED
+    assert ledger.unresolved_terminal_obligations() == []
+
+
+def test_future_owner_verification_obligation_settles_violated_when_future_owner_still_fails():
+    """(7) s1 defers to s3; s3 later executes but its OWN full regression
+    STILL fails for the same evidence - the obligation settles VIOLATED
+    (never silently cleared), the global terminal-obligation safety net
+    still sees it unresolved, and the resolver itself refuses to defer
+    AGAIN for s3's own execution (self-deferral is impossible by
+    construction) - s3's own ordinary retry/attribution path is what
+    "recovers against the now-responsible owner," not a second deferral."""
+    ledger = ObligationLedger()
+    deferral = FutureOwnerVerificationDeferral(
+        verification_subtask_id="s4", evidence_path=_S4_TEST,
+        required_capability="customer_controller_with_display_name_response",
+        future_owner_id="s3",
+    )
+    record = _record_future_owner_verification_deferred(
+        ledger, deferral, observed_by_subtask_id="s1", raw_output=_DISPLAY_NAME_FAILURE_OUTPUT,
+    )
+
+    settled = _settle_future_owner_verification_obligations(ledger, "s3", satisfied=False)
+
+    assert settled[0].status == ObligationStatus.VIOLATED
+    assert ledger.current(record.id).status == ObligationStatus.VIOLATED
+    unresolved = ledger.unresolved_terminal_obligations()
+    assert len(unresolved) == 1 and unresolved[0].id == record.id
+
+    plan = _prv11_style_plan()
+    replay_deferral = resolve_future_owner_verification_deferral(
+        plan, "s3", _DISPLAY_NAME_FAILURE_OUTPUT, frozenset({"s1", "s2"}),
+    )
+    assert replay_deferral is None
+
+
+def test_future_owner_verification_leaves_existing_scope_recovery_case_unaffected():
+    """(8) The ORIGINAL PRV-11 scope-recovery shape (already fixed,
+    §11.16/§11.18): a genuine locator names an existing production file
+    (CustomerService.java, s2's own file) while s1 is executing. s2's own
+    `requires` resolves to s1 - but s1 is exactly the CURRENTLY executing
+    subtask, so this correctly refuses to defer (self-deferral guard) and
+    falls straight through to the existing attribute_failure()/plan_scope_
+    conflict path, completely unchanged - this new mechanism never
+    intercepts the case it wasn't built for."""
+    plan = _prv11_style_plan()
+    compile_failure_output = (
+        "[ERROR] /work/src/main/java/com/example/customer/CustomerService.java:[23,5] "
+        "cannot find symbol\n"
+    )
+
+    deferral = resolve_future_owner_verification_deferral(
+        plan, "s1", compile_failure_output, frozenset(),
+    )
+
+    assert deferral is None
+
 
 
 @pytest.mark.asyncio

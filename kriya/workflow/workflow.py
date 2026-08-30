@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from kriya.agents.agent import (
     ArchitectAgent,
@@ -43,7 +43,13 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.migration import MigrationResolution, resolve_migration_resolution
-from kriya.workflow.obligations import ObligationLedger
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.policy.telemetry import build_decision_record
 
@@ -76,11 +82,13 @@ from kriya.workflow.edit_safety import (
     normalize_whitespace,
 )
 from kriya.workflow.attribution import (
+    FutureOwnerVerificationDeferral,
     _detect_missing_build_manifest,
     find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
     find_misdirected_edit_target,
     find_whole_response_no_op,
+    resolve_future_owner_verification_deferral,
 )
 from kriya.workflow.file_resolution import (
     EXPECTED_FILE_EXTENSIONS,
@@ -372,6 +380,95 @@ def _resolve_protected_relpath(workspace_path: str, protected_source_file: Optio
     return os.path.normpath(os.path.relpath(abs_target, abs_workspace))
 
 
+def _record_future_owner_verification_deferred(
+    ledger: ObligationLedger,
+    deferral: FutureOwnerVerificationDeferral,
+    *,
+    observed_by_subtask_id: str,
+    raw_output: str,
+) -> ObligationRecord:
+    """Records (or idempotently re-records - ObligationRecord.id is stable
+    per (future_owner, capability), so a LATER subtask deferring the same
+    still-pending requirement just appends another PENDING entry to the
+    same obligation's history, never a duplicate obligation) a PENDING,
+    terminal_required obligation for the not-yet-executed subtask this
+    regression failure is already covered by - see ObligationKind.
+    FUTURE_OWNER_VERIFICATION's own docstring (kriya/workflow/
+    obligations.py) for the live incident. terminal_required=True is the
+    entire safety net: workflow_controller.py's own global terminal-
+    obligation aggregation check (already wired for ANY terminal_required
+    kind, no new gate needed there) fails the whole run if this is still
+    PENDING or VIOLATED once every subtask has finished - so a deferred
+    requirement that never actually gets resolved can never silently
+    produce a false "success"."""
+    obligation_id = (
+        f"future_owner_verification.{deferral.future_owner_id}."
+        f"{deferral.required_capability}"
+    )
+    record = ObligationRecord(
+        id=obligation_id,
+        kind=ObligationKind.FUTURE_OWNER_VERIFICATION,
+        status=ObligationStatus.PENDING,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description=(
+            f"Regression evidence in {deferral.evidence_path!r} (owned by verification "
+            f"subtask {deferral.verification_subtask_id!r}) requires capability "
+            f"{deferral.required_capability!r}, provided by not-yet-executed subtask "
+            f"{deferral.future_owner_id!r} - deferred pending that subtask's own execution."
+        ),
+        source="future_owner_verification_deferral",
+        revision=observed_by_subtask_id,
+        evidence={
+            "verification_subtask_id": deferral.verification_subtask_id,
+            "evidence_path": deferral.evidence_path,
+            "required_capability": deferral.required_capability,
+            "observed_by_subtask_id": observed_by_subtask_id,
+            "raw_output": raw_output[:4000],
+        },
+        owner_subtask_id=deferral.future_owner_id,
+        terminal_required=True,
+    )
+    ledger.record(record)
+    return record
+
+
+def _settle_future_owner_verification_obligations(
+    ledger: ObligationLedger, subtask_id: str, *, satisfied: bool,
+) -> List[ObligationRecord]:
+    """Called from BOTH the regression-success path and the regression-
+    failure-with-no-deferral path (see this module's own call sites) for
+    the CURRENTLY executing subtask - settles every still-PENDING
+    FUTURE_OWNER_VERIFICATION obligation this subtask itself owns.
+    Bookkeeping only, never control flow: the ordinary success/failure
+    handling already does the right thing on its own (a real pass is a
+    real pass; a real failure already falls through to this subtask's own
+    normal retry/attribution path, which IS "recovering against the now-
+    responsible owner" - see ObligationKind.FUTURE_OWNER_VERIFICATION's own
+    docstring for why no separate recheck mechanism exists or is needed:
+    resolve_future_owner_verification_deferral() refuses self-deferral, so
+    THIS subtask's own regression check is never deferred again once it's
+    the one actually executing)."""
+    settled: List[ObligationRecord] = []
+    for record in ledger.current_by_kind(ObligationKind.FUTURE_OWNER_VERIFICATION):
+        if record.owner_subtask_id != subtask_id or record.status != ObligationStatus.PENDING:
+            continue
+        settled_record = ObligationRecord(
+            id=record.id,
+            kind=record.kind,
+            status=ObligationStatus.SATISFIED if satisfied else ObligationStatus.VIOLATED,
+            authority=ObligationAuthority.DETERMINISTIC,
+            description=record.description,
+            source="future_owner_verification_settle",
+            revision=subtask_id,
+            evidence=record.evidence,
+            owner_subtask_id=record.owner_subtask_id,
+            terminal_required=record.terminal_required,
+        )
+        ledger.record(settled_record)
+        settled.append(settled_record)
+    return settled
+
+
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
 
@@ -627,6 +724,7 @@ class WorkflowEngine:
         structured_plan: Optional["EngineeringPlan"] = None,
         current_subtask_id: Optional[str] = None,
         obligation_ledger: Optional["ObligationLedger"] = None,
+        completed_subtask_ids: Optional[FrozenSet[str]] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -2653,13 +2751,70 @@ class WorkflowEngine:
 
                 full_test_res = validator.run_tests()
                 if not full_test_res["success"]:
-                    failure = _build_quality_gate_failure(
-                        "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}",
-                        full_test_res.get("output", ""), worktree_path,
-                        state.all_files_written, state.attempt_number,
+                    # PRV-11 (2026-08-30): before treating this as an ordinary
+                    # regression failure for the CURRENTLY executing subtask,
+                    # check whether the approved plan's own provides/requires
+                    # graph already proves this exact evidence is covered by
+                    # unfinished, approved work - see ObligationKind.FUTURE_
+                    # OWNER_VERIFICATION's own docstring (obligations.py) and
+                    # resolve_future_owner_verification_deferral's own
+                    # docstring (attribution.py) for the full live incident
+                    # and fail-closed resolution rules. None whenever plan/
+                    # subtask/ledger context is absent (every pre-MA6 caller)
+                    # or any link in the chain is ambiguous - falls through
+                    # to the unchanged ordinary path below.
+                    deferral = (
+                        resolve_future_owner_verification_deferral(
+                            structured_plan, current_subtask_id,
+                            full_test_res.get("output", ""), completed_subtask_ids or frozenset(),
+                        )
+                        if structured_plan is not None and current_subtask_id and obligation_ledger is not None
+                        else None
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
-                    raise QualityGateFailure(failure)
+                    if deferral is None:
+                        if obligation_ledger is not None and current_subtask_id:
+                            # This subtask was itself the future owner some
+                            # earlier subtask deferred to, and its own real
+                            # regression check still fails - settle VIOLATED
+                            # for observability only. Control flow is
+                            # unaffected: the raise below already routes
+                            # this through the subtask's own ordinary retry/
+                            # attribution path, which IS "recover against
+                            # the now-responsible owner."
+                            _settle_future_owner_verification_obligations(
+                                obligation_ledger, current_subtask_id, satisfied=False,
+                            )
+                        failure = _build_quality_gate_failure(
+                            "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}",
+                            full_test_res.get("output", ""), worktree_path,
+                            state.all_files_written, state.attempt_number,
+                        )
+                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        raise QualityGateFailure(failure)
+                    _record_future_owner_verification_deferred(
+                        obligation_ledger, deferral,
+                        observed_by_subtask_id=current_subtask_id,
+                        raw_output=full_test_res.get("output", ""),
+                    )
+                    logger.info(
+                        "FUTURE_OWNER_VERIFICATION: regression evidence in %s (owned by "
+                        "verification subtask %s) requires capability %s from not-yet-executed "
+                        "subtask %s - deferring rather than retrying %s; continuing plan "
+                        "execution.",
+                        deferral.evidence_path, deferral.verification_subtask_id,
+                        deferral.required_capability, deferral.future_owner_id, current_subtask_id,
+                    )
+                    state.gate_outcomes.append({
+                        "attempt": state.attempt_number,
+                        "type": "regression_test",
+                        "success": True,
+                        "output": full_test_res.get("output", ""),
+                        "deferred_to_future_owner": deferral.future_owner_id,
+                    })
+                    # Falls through to the same post-regression checks and
+                    # success path below, exactly as a genuinely passing
+                    # full_test_res would - this IS "allow the current
+                    # subtask to complete."
 
                 final_candidate_contents = {}
                 for filepath in sorted(state.all_files_written):
@@ -2761,6 +2916,16 @@ class WorkflowEngine:
                     "output": full_test_res.get("output", "")
                 })
                 state.terminal_regression_succeeded = True
+                if obligation_ledger is not None and current_subtask_id:
+                    # This subtask's own full regression genuinely passed
+                    # (deferred or not) - settle SATISFIED any still-PENDING
+                    # FUTURE_OWNER_VERIFICATION obligation this subtask
+                    # itself owns (i.e. an earlier subtask deferred to it,
+                    # and it just proved the deferred requirement for real).
+                    # A no-op when none exist.
+                    _settle_future_owner_verification_obligations(
+                        obligation_ledger, current_subtask_id, satisfied=True,
+                    )
                 if state.api_contract_recovery:
                     state.api_contract_recovery.terminal_succeeded()
                     logger.info(

@@ -156,13 +156,14 @@ import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, FrozenSet, List, Literal, Optional
 
 from kriya.workflow.edit_safety import normalize_whitespace
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import extract_error_source_locations, extract_implicated_files
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
 from kriya.workflow.plan_schema import EngineeringPlan
+from kriya.workflow.subtask_checkpoint import topological_subtask_order
 
 logger = logging.getLogger(__name__)
 
@@ -516,6 +517,151 @@ def _attribute_from_subtask_context(
             ),
         )
     return None
+
+
+# --------------------------------------------------------------------------
+# C. Future-owner verification deferral (PRV-11, 2026-08-30): a plan-aware
+# PRE-ROUTING step for intermediate full-regression failures, deliberately
+# NOT part of attribute_failure()'s own cascade above and never called from
+# it. attribute_failure() answers "which file caused this" from failure
+# EVIDENCE (a locator, a judge signal, a subtask's own known scope) -
+# resolve_future_owner_verification_deferral() answers a different,
+# narrower, purely structural question: "is this observed failure already
+# covered by unfinished, APPROVED work the plan itself already declared?"
+# Only the approved plan's own provides/requires graph is consulted - never
+# a guess, never free text, never an LLM call. See ObligationKind.
+# FUTURE_OWNER_VERIFICATION's own docstring (kriya/workflow/obligations.py)
+# for the live incident this closes: a Customer -> CustomerController.
+# details() -> Map -> CustomerControllerTest failure chain that no locator,
+# judge, or subtask-scope tier could ever attribute to CustomerController.
+# java, because nothing in the raw failure text names it and s1 (the
+# currently executing subtask) has no forward-looking depends_on edge to
+# s3 (CustomerController.java's real, not-yet-executed owner) - while the
+# already-approved plan's own s4.requires == s3.provides edge answered the
+# question exactly, deterministically, the whole time.
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FutureOwnerVerificationDeferral:
+    """One fully-resolved deferral decision - every field traced through an
+    exact plan-graph match, never inferred. verification_subtask_id: the
+    subtask whose own planned_files contains the file the failure evidence
+    located (e.g. s4, CustomerControllerTest.java). evidence_path: that
+    exact plan-declared path. required_capability: the single capability
+    string, drawn from verification_subtask's own `requires`, that resolves
+    to future_owner_id. future_owner_id: the subtask - ordered strictly
+    after the CURRENTLY executing subtask in the plan's own validated
+    topological order, and not yet executed - whose own `provides` supplies
+    required_capability."""
+
+    verification_subtask_id: str
+    evidence_path: str
+    required_capability: str
+    future_owner_id: str
+
+
+def resolve_future_owner_verification_deferral(
+    plan: EngineeringPlan,
+    current_subtask_id: str,
+    raw_failure_text: str,
+    completed_subtask_ids: FrozenSet[str],
+) -> Optional[FutureOwnerVerificationDeferral]:
+    """Fails closed on ANY ambiguity - returns None (never defer; the
+    caller falls back to the ordinary attribute_failure()/retry/plan-scope-
+    recovery path unchanged) unless every one of these links resolves
+    uniquely and deterministically:
+
+    1. The raw failure text's own file:line locator(s) (the SAME extraction
+       attribute_failure()'s own locator tier uses - no JUnit-assertion
+       exclusion applied here, deliberately: for THIS question the test
+       file's own identity is exactly the signal needed, not a mutation
+       target to avoid) resolve, by basename, to EXACTLY ONE file declared
+       in ANY subtask's planned_files across the WHOLE plan (JVM-internal
+       frames - AssertEquals.java, Method.java - are excluded for free:
+       they own nothing in the plan, so they never survive this filter).
+    2. That file has a single, unambiguous owning subtask (plan.file_owner()
+       - the "verification subtask"). Self-deferral is impossible by
+       construction below (a subtask can't be its own future owner), but a
+       verification subtask matching current_subtask_id itself returns None
+       immediately - there is no "later" owner to defer to.
+    3. The verification subtask declares at least one `requires` capability,
+       and among those that resolve to a NOT-YET-COMPLETED owner (excluding
+       the verification subtask's own id), EXACTLY ONE distinct owner
+       remains - zero means nothing pending explains this failure (don't
+       defer), more than one is genuinely ambiguous (don't defer), and any
+       required capability with zero or multiple declared providers across
+       the plan fails the whole resolution closed immediately (a provides/
+       requires authoring ambiguity is never something to guess through).
+    4. That single owner is not the currently executing subtask itself
+       (refuses self-deferral - when the actual future owner is the one
+       running RIGHT NOW, this is an ordinary regression failure for it,
+       handled by its own normal retry loop - no special routing) and is
+       strictly ordered after current_subtask_id in the plan's own
+       topological_subtask_order() (both "is this genuinely FUTURE_ORDERED"
+       and "is the dependency ordering valid" collapse into this one
+       already-computed, plan-validated ordering - no separate graph walk
+       invented for it).
+
+    No separate "recheck later" mechanism exists or is needed: this exact
+    function runs again, unchanged, on every later subtask's own full-
+    regression check. When the real future owner finally executes, step 4's
+    self-deferral refusal means ITS OWN regression check is never deferred
+    again - it either passes for real or fails for real against its own
+    ordinary retry loop, settled by the caller's own bookkeeping (see
+    kriya/workflow/workflow.py's settle call sites), not by this function."""
+    located_basenames = {b for b, _ in extract_error_source_locations(raw_failure_text)}
+    if not located_basenames:
+        return None
+    plan_paths_by_basename: Dict[str, List[str]] = {}
+    for subtask in plan.subtasks:
+        for planned_file in subtask.planned_files:
+            plan_paths_by_basename.setdefault(
+                os.path.basename(planned_file.path), [],
+            ).append(planned_file.path)
+    relevant_basenames = located_basenames & plan_paths_by_basename.keys()
+    if len(relevant_basenames) != 1:
+        return None
+    candidate_paths = plan_paths_by_basename[next(iter(relevant_basenames))]
+    if len(candidate_paths) != 1:
+        return None
+    evidence_path = candidate_paths[0]
+    verification_subtask = plan.file_owner(evidence_path)
+    if verification_subtask is None or verification_subtask.id == current_subtask_id:
+        return None
+    if not verification_subtask.requires:
+        return None
+    providers_by_capability: Dict[str, List[str]] = {}
+    for subtask in plan.subtasks:
+        for capability in subtask.provides:
+            providers_by_capability.setdefault(capability, []).append(subtask.id)
+    pending_owners: Dict[str, str] = {}
+    for capability in verification_subtask.requires:
+        owner_ids = providers_by_capability.get(capability)
+        if not owner_ids:
+            return None
+        if len(owner_ids) != 1:
+            return None
+        owner_id = owner_ids[0]
+        if owner_id != verification_subtask.id and owner_id not in completed_subtask_ids:
+            pending_owners[owner_id] = capability
+    if len(pending_owners) != 1:
+        return None
+    (future_owner_id, required_capability), = pending_owners.items()
+    if future_owner_id == current_subtask_id or future_owner_id in completed_subtask_ids:
+        return None
+    order = topological_subtask_order(plan)
+    try:
+        if order.index(future_owner_id) <= order.index(current_subtask_id):
+            return None
+    except ValueError:
+        return None
+    return FutureOwnerVerificationDeferral(
+        verification_subtask_id=verification_subtask.id,
+        evidence_path=evidence_path,
+        required_capability=required_capability,
+        future_owner_id=future_owner_id,
+    )
 
 
 def _attribute_from_existing_evidence(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
