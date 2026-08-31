@@ -86,6 +86,7 @@ from kriya.agents.contracts import (
     parse_planner_structured_output,
 )
 from kriya.analyzer.graph import DependencyGraph
+from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
 from kriya.workflow.file_resolution import is_runnable_test_file
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
 from kriya.control.decisions import (
@@ -938,32 +939,70 @@ def build_planning_structural_evidence(
     return "\n".join(lines), resolved
 
 
+def _transitive_depends_on(plan: EngineeringPlan, subtask_id: str) -> set:
+    """Every OTHER subtask id `subtask_id` depends on, directly or
+    transitively (own id never included) - the same backward BFS-over-
+    depends_on shape resolve_scope_conflict_owners() above already uses,
+    reused here rather than re-derived."""
+    upstream: set = set()
+    start = plan.subtask_by_id(subtask_id)
+    frontier = list(start.depends_on) if start is not None else []
+    while frontier:
+        dep_id = frontier.pop()
+        if dep_id in upstream:
+            continue
+        upstream.add(dep_id)
+        dep = plan.subtask_by_id(dep_id)
+        if dep is not None:
+            frontier.extend(dep.depends_on)
+    return upstream
+
+
 def find_missing_grounded_production_artifacts(
     plan: EngineeringPlan, resolved_edges: Dict[str, List[str]],
 ) -> List[Dict[str, str]]:
-    """Bounded plan-completeness check (PRV-11, 2026-08-30): a REAL,
+    """Bounded plan-completeness check (PRV-11, 2026-08-30/31): a REAL,
     grounded structural edge (see build_planning_structural_evidence's own
     docstring - an import, or a uniquely-resolved method call) from a
-    goal-relevant TEST file to a PRODUCTION file that no subtask in the
-    approved plan owns is exactly the defect this session traced three
-    separate live times - the Planner correctly plans the producer and the
-    test but omits the intermediate consumer that actually connects them
-    (or invents an unrelated substitute test file instead of the real,
-    pre-existing one - scanning EVERY candidate test file this function
-    was given evidence for, not only currently-planned ones, catches that
-    shape too). Deliberately narrow: only fires on a REAL, already-indexed
-    structural edge - never "this file is probably related," never a
-    subtask-per-touched-file rule. A file already owned by any subtask, or
-    itself test/documentation, is never flagged."""
+    goal-relevant TEST file to a PRODUCTION file is exactly the defect this
+    session traced FOUR separate live times, in two distinct shapes:
+
+    1. UNOWNED (reason="unowned"): the referenced production file isn't
+       owned by ANY subtask - the Planner correctly plans the producer and
+       the test but omits the intermediate consumer that actually connects
+       them (or invents an unrelated substitute test file instead of the
+       real, pre-existing one - scanning EVERY candidate test file this
+       function was given evidence for, not only currently-planned ones,
+       catches that shape too).
+    2. MISWIRED (reason="not_in_dependency_chain", 2026-08-31): the
+       referenced production file IS owned by a real subtask, but that
+       subtask is not in the REFERENCING subtask's own transitive
+       depends_on closure - the Planner correctly creates a subtask for
+       every file (unlike shape 1) but wires the test's own requires/
+       depends_on to skip past the real intermediate producer and point
+       directly at an earlier one instead (found live: a plan correctly
+       created s3=CustomerController.java, but s4=CustomerControllerTest.
+       java's own requires/depends_on pointed at s2=CustomerService.java,
+       never at s3 - the exact edge FUTURE_ORDERED handling and MA9
+       recovery then both, correctly, treat as authoritative).
+
+    Deliberately narrow in both shapes: only fires on a REAL, already-
+    indexed structural edge - never "this file is probably related," never
+    a subtask-per-touched-file rule, and shape 2 never second-guesses an
+    edge that IS already correctly wired (the referencing subtask's own
+    planned_files, or any subtask already in its own depends_on closure,
+    are never flagged for owning the SAME grounded target). A target
+    itself test/documentation is never flagged."""
     owned_paths = {pf.path for st in plan.subtasks for pf in st.planned_files}
+    owner_by_path = {pf.path: st.id for st in plan.subtasks for pf in st.planned_files}
+    source_subtask_by_path = {pf.path: st for st in plan.subtasks for pf in st.planned_files}
+    upstream_cache: Dict[str, set] = {}
     gaps: List[Dict[str, str]] = []
     seen = set()
     for source, targets in resolved_edges.items():
         if not is_runnable_test_file(source) and classify_file_role(source) is not FileRole.TEST:
             continue
         for target in targets:
-            if target in owned_paths:
-                continue
             if is_runnable_test_file(target) or classify_file_role(target) in (
                 FileRole.TEST, FileRole.DOCUMENTATION,
             ):
@@ -971,8 +1010,25 @@ def find_missing_grounded_production_artifacts(
             key = (source, target)
             if key in seen:
                 continue
-            seen.add(key)
-            gaps.append({"test_file": source, "missing_production_artifact": target})
+            if target not in owned_paths:
+                seen.add(key)
+                gaps.append({
+                    "test_file": source, "missing_production_artifact": target,
+                    "reason": "unowned",
+                })
+                continue
+            target_subtask_id = owner_by_path[target]
+            source_subtask = source_subtask_by_path.get(source)
+            if source_subtask is None or source_subtask.id == target_subtask_id:
+                continue
+            if source_subtask.id not in upstream_cache:
+                upstream_cache[source_subtask.id] = _transitive_depends_on(plan, source_subtask.id)
+            if target_subtask_id not in upstream_cache[source_subtask.id]:
+                seen.add(key)
+                gaps.append({
+                    "test_file": source, "missing_production_artifact": target,
+                    "owning_subtask": target_subtask_id, "reason": "not_in_dependency_chain",
+                })
     return gaps
 
 
@@ -1553,32 +1609,18 @@ def _participant_evidence_is_grounded(scope_conflict: Dict[str, Any]) -> bool:
 # Recovery obligations grounded in attribute_failure()'s own tier vocabulary
 # (kriya/workflow/attribution.py) - reused here, not re-derived, matching
 # _participant_evidence_is_grounded's own precedent of consulting existing
-# typed evidence rather than inventing a parallel signal.
-#
-# DETERMINISTIC: a structural fact or a precise, parsed locator - not a
-# guess. "architectural_owner" is included here (matching retry_strategy.
-# py's own _plan_scope_conflict_files docstring, "a deterministic
-# AuthorizedFileWriter write-scope denial always lands there") even though
-# ObligationAuthority's own class docstring uses "an architectural-owner
-# scan" as its illustrative GROUNDED example - that docstring predates this
-# fix and was never reconciled against attribute_failure()'s own tier
-# semantics; the write-scope DENIAL this tier actually represents in this
-# codebase today (AuthorizedFileWriter mechanically rejecting an out-of-
-# scope write) is a real structural fact, not an interpreted scan, so
-# DETERMINISTIC is the correct read of what this tier means as PRODUCED
-# here - not a reinterpretation of the docstring's own example.
-_DETERMINISTIC_ATTRIBUTION_TIERS = frozenset({
-    "authoritative_deterministic",  # migration.py's own parsed manifest evidence
-    "architectural_owner",  # AuthorizedFileWriter's own deterministic write-scope denial
-    "locator",  # a real compiler/test file:line reference
-    "subtask_scope", "subtask_dependency",  # the validated plan's own structural ownership
-})
-# Everything else attribute_failure() can produce - self_diagnosis (the
-# model's claim about ITS OWN prior output), judge/triage (an LLM verdict),
-# full_set (no evidence at all, the lowest-confidence fallback), or any
-# tier this function doesn't yet recognize - is real evidence at best, but
-# an LLM's own semantic read rather than a parsed/structural fact, so it is
-# classified JUDGMENT by the fallthrough below rather than enumerated here.
+# typed evidence rather than inventing a parallel signal. PRV-11 (2026-08-
+# 31): the classification itself now lives in attribution.py as
+# DETERMINISTIC_ATTRIBUTION_TIERS - the one place attribute_failure()'s own
+# tier vocabulary is defined - and is ALSO consulted by retry_strategy.py's
+# own scope_conflict_is_grounded gate (previously that gate used only
+# attribution.confidence=="high", which self_diagnosis satisfies
+# unconditionally regardless of tier - the exact live gap this closes: a
+# self-diagnosis-driven "the model named a different file as the real
+# cause" was being treated as grounded enough to trigger real plan surgery
+# BEFORE this same tier ever got classified JUDGMENT here, by which point
+# the reopening had already happened). Both consumers now read the
+# identical set, so they can never disagree about which tiers count.
 
 
 def _scope_conflict_evidence_authority(scope_conflict: Dict[str, Any]) -> ObligationAuthority:
@@ -1617,7 +1659,7 @@ def _scope_conflict_evidence_authority(scope_conflict: Dict[str, Any]) -> Obliga
     if not _participant_evidence_is_grounded(scope_conflict):
         return ObligationAuthority.JUDGMENT
     tier = scope_conflict.get("attribution_tier")
-    if tier in _DETERMINISTIC_ATTRIBUTION_TIERS:
+    if tier in DETERMINISTIC_ATTRIBUTION_TIERS:
         return ObligationAuthority.DETERMINISTIC
     return ObligationAuthority.JUDGMENT
 
@@ -3372,15 +3414,28 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     missing_artifacts = find_missing_grounded_production_artifacts(
                         plan, structural_resolved_edges,
                     )
-                    if missing_artifacts:
+                    unowned_gaps = [g for g in missing_artifacts if g["reason"] == "unowned"]
+                    miswired_gaps = [g for g in missing_artifacts if g["reason"] == "not_in_dependency_chain"]
+                    if unowned_gaps:
                         errors.append(
                             "grounded structural evidence shows test file(s) referencing a "
                             "production artifact no subtask owns: " + "; ".join(
                                 f"{gap['test_file']} references {gap['missing_production_artifact']}"
-                                for gap in missing_artifacts
+                                for gap in unowned_gaps
                             )
                         )
                         reason_codes.append("MISSING_GROUNDED_PRODUCTION_ARTIFACT")
+                    if miswired_gaps:
+                        errors.append(
+                            "grounded structural evidence shows test file(s) whose own requires/"
+                            "depends_on skip past the real intermediate producer: " + "; ".join(
+                                f"{gap['test_file']} references {gap['missing_production_artifact']} "
+                                f"(owned by subtask {gap['owning_subtask']!r}, which is not in this "
+                                "test's own depends_on chain)"
+                                for gap in miswired_gaps
+                            )
+                        )
+                        reason_codes.append("MISWIRED_GROUNDED_DEPENDENCY_EDGE")
 
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))

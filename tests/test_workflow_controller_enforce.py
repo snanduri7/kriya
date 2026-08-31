@@ -1548,6 +1548,7 @@ def test_missing_grounded_production_artifact_flags_the_exact_omitted_file(tmp_p
     assert gaps == [{
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "reason": "unowned",
     }]
 
 
@@ -1565,6 +1566,68 @@ def test_missing_grounded_production_artifact_is_silent_when_the_owner_is_planne
     )
 
     assert find_missing_grounded_production_artifacts(complete_plan, edges) == []
+
+
+def test_missing_grounded_production_artifact_flags_edge_miswiring_when_owner_exists(tmp_path):
+    """(2026-08-31) The live incident this closes: the Planner correctly
+    creates s3=CustomerController.java (unlike the "unowned" shape above),
+    but s4's own requires/depends_on skips past it and points directly at
+    s2=CustomerService.java instead - the exact shape that made
+    FUTURE_ORDERED handling correctly refuse to defer (s2 IS the declared
+    provider, and it IS the subtask currently executing) while the real
+    fix belonged in s3, which was never reachable from s4's own
+    depends_on chain at all."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    miswired_plan = EngineeringPlan(
+        plan_id="miswired", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"]),
+            # s4 exists and s3 IS a real, owned subtask - but s4 depends
+            # only on s2, never on s3.
+            _structural_customer_subtask("s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"]),
+        ],
+    )
+
+    gaps = find_missing_grounded_production_artifacts(miswired_plan, edges)
+
+    assert gaps == [{
+        "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
+        "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "owning_subtask": "s3",
+        "reason": "not_in_dependency_chain",
+    }]
+
+
+def test_missing_grounded_production_artifact_edge_check_accepts_transitive_chain(tmp_path):
+    """A correctly-wired MULTI-hop chain (s4 depends_on s3a, which itself
+    depends_on the real owner s3) must NOT be flagged - the check walks
+    the FULL transitive depends_on closure, not just the immediate edge."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    valid_transitive_plan = EngineeringPlan(
+        plan_id="transitive", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"]),
+            Subtask(
+                id="s3a", description="an intermediate verification-only hop",
+                execution_method=ExecutionMethod.MODEL, execution_role=ExecutionRole.VERIFICATION,
+                depends_on=["s3"],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, tool_name="compile",
+                    verifier_kind=VerifierKind.COMPILE, description="compile check",
+                    requires_runtime_execution=False,
+                )],
+            ),
+            _structural_customer_subtask("s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3a"]),
+        ],
+    )
+
+    assert find_missing_grounded_production_artifacts(valid_transitive_plan, edges) == []
 
 
 def test_authoritative_planner_request_includes_structural_evidence_when_present():

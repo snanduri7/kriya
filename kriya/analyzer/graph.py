@@ -42,8 +42,23 @@ class DependencyGraph:
     """SQLite-backed AST dependency knowledge graph compiler for multi-language repositories."""
 
     def __init__(self, db_path: str) -> None:
-        self.db_path = os.path.abspath(db_path)
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        # PRV-11 (2026-08-31): ":memory:" is sqlite3's own special connection
+        # string for a private, ephemeral, in-process database - never a
+        # real filesystem path. os.path.abspath(":memory:") does NOT
+        # preserve it (it resolves to a literal path ending in "/:memory:"),
+        # and the os.makedirs() below would then create real directories
+        # and, on connect, a real on-disk file with that exact name - found
+        # live: a bounded, in-memory-only planning-evidence graph (kriya/
+        # workflow/workflow_controller.py's build_planning_structural_
+        # evidence()) ended up creating and committing a real ":memory:"
+        # file into the generated workspace. Preserved verbatim, never
+        # touched by abspath/makedirs, for this one literal value only -
+        # every real filesystem path is completely unaffected.
+        if db_path == ":memory:":
+            self.db_path = db_path
+        else:
+            self.db_path = os.path.abspath(db_path)
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
     def _init_db(self) -> None:

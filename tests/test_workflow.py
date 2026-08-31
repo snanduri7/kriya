@@ -10028,6 +10028,83 @@ async def test_self_diagnosis_still_wins_for_the_attempt_that_produced_it(tmp_pa
     assert state.last_implicated_files == ["src/main/java/com/example/JsonService.java"]
 
 
+# --- PRV-11 (2026-08-31): scope_conflict_is_grounded must gate on
+# attribution TIER, not raw confidence - self_diagnosis is hardcoded
+# confidence="high" unconditionally, so a self-diagnosis-driven "the model
+# named a different file as the real cause" was being treated as grounded
+# enough to trigger real plan surgery (reopening a completed subtask) even
+# though _scope_conflict_evidence_authority() (workflow_controller.py)
+# already correctly classifies that same tier as JUDGMENT, not
+# DETERMINISTIC - just too late, after the reopening had already happened.
+# These tests exercise handle_attempt_failure() directly, the real
+# production function, not a reimplementation. ---
+
+@pytest.mark.asyncio
+async def test_self_diagnosis_attribution_no_longer_triggers_plan_scope_conflict(tmp_path):
+    """The live incident this closes: a bounded subtask (allowed to touch
+    only CustomerService.java) hits a repeat compile failure; its own
+    self-diagnosis names Customer.java (an out-of-scope, already-completed
+    file) as the real cause. Self-diagnosis still wins ATTRIBUTION (the
+    retry still targets what the model itself says, unchanged) - it must
+    no longer trigger plan_scope_conflict, which used to reopen the
+    completed upstream owner on nothing but unverified free-text guesswork."""
+    from kriya.workflow.failure_grounding import build_failure_signature
+
+    raw_output = "COMPILATION FAILURE: cannot find symbol: displayName"
+    signature = build_failure_signature("compile", raw_output)
+    state = GenerationState()
+    state.attempt_number = 3
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"CustomerService.java"}
+    state.last_self_diagnosis = (signature, ["Customer.java"], 3)
+    ctx = _minimal_attempt_ctx(
+        tmp_path, allowed_write_relpaths=["CustomerService.java"],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    exc = QualityGateFailure(Failure(
+        type="compile", message=raw_output, raw_output=raw_output,
+    ))
+
+    await handle_attempt_failure(state, ctx, exc)
+
+    # Self-diagnosis still wins ATTRIBUTION itself...
+    assert state.last_attribution.tier == "self_diagnosis"
+    assert state.last_attribution.files == ["Customer.java"]
+    # ...but the ALREADY-EXISTING, unconditional out-of-scope filter
+    # (Correctness Continuity Part B, PRV-06) still correctly drops it as
+    # a retry TARGET regardless of this fix - that defense-in-depth layer
+    # was never the gap. What this fix changes is the NEXT line: it must
+    # no longer escalate to full plan surgery on that same unverified guess.
+    assert state.last_implicated_files is None
+    assert state.plan_scope_conflict is None
+
+
+@pytest.mark.asyncio
+async def test_real_locator_outside_scope_still_triggers_plan_scope_conflict(tmp_path):
+    """Regression lock for the EXISTING, proven-working path this fix must
+    never touch: a real compiler file:line locator naming an out-of-scope
+    file is a DETERMINISTIC ("locator") tier - it must still set
+    plan_scope_conflict exactly as before."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"CustomerService.java", "Customer.java"}
+    ctx = _minimal_attempt_ctx(
+        tmp_path, allowed_write_relpaths=["CustomerService.java"],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    raw_output = "[ERROR] /work/Customer.java:[5,3] cannot find symbol"
+    exc = QualityGateFailure(Failure(
+        type="compile", message=raw_output, raw_output=raw_output,
+    ))
+
+    await handle_attempt_failure(state, ctx, exc)
+
+    assert state.last_attribution.tier == "locator"
+    assert state.plan_scope_conflict is not None
+    assert state.plan_scope_conflict["required_files"] == ["Customer.java"]
+
+
 # --- MA8 (PRV-05 run #8, 2026-08-28): SpecCompliance requirement-level
 # arbitration against authoritative deterministic obligations
 # (_spec_requirements_contradicting_authority, kriya/workflow/attempt.py) ---

@@ -25,7 +25,7 @@ from typing import Optional
 
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
-from kriya.workflow.attribution import AttributionResult, _detect_missing_build_manifest, attribute_failure, read_worktree_file
+from kriya.workflow.attribution import AttributionResult, DETERMINISTIC_ATTRIBUTION_TIERS, _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.failure import (
     Failure,
@@ -691,8 +691,28 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         failure.attribution_tier = attribution.tier
         failure.attribution_confidence = attribution.confidence
         failure.attribution_reasoning = attribution.reasoning
+        # PRV-11 (2026-08-31): tier-gated, not confidence-gated. The
+        # self_diagnosis tier is hardcoded confidence="high" unconditionally
+        # (attribute_failure()'s own docstring: ranked ABOVE locator/judge
+        # deliberately, since a repeat-confirmed self-diagnosis is real
+        # evidence) - but "real evidence worth trusting for the NEXT
+        # retry's own target" is a different bar than "reliable enough to
+        # trigger PLAN SURGERY, reopening a completed subtask." Found live:
+        # a self-diagnosis-driven "the model's own FIX ANALYSIS named a
+        # different file as the real cause" was treated as grounded enough
+        # to set plan_scope_conflict and reopen an upstream owner, even
+        # though _scope_conflict_evidence_authority() (workflow_
+        # controller.py) already correctly classifies that exact tier as
+        # JUDGMENT, not DETERMINISTIC - just too late, after the reopening
+        # had already happened. DETERMINISTIC_ATTRIBUTION_TIERS (attribution
+        # .py) is the SAME set that function already uses, so the decision
+        # to reopen and the resulting obligation's own recorded authority
+        # can never disagree again. misdirected_edit remains its own
+        # unconditional disjunct - a real, deterministic edit-safety fact
+        # (the search block for this file was found instead inside a
+        # DIFFERENT known file), not an attribution tier at all.
         scope_conflict_is_grounded = (
-            attribution.confidence == "high"
+            attribution.tier in DETERMINISTIC_ATTRIBUTION_TIERS
             or fail_type == "misdirected_edit"
         )
         # Verification-routing fix (PRV-06, 2026-08-29): a DENY_ALL context

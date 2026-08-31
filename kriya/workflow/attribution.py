@@ -193,6 +193,32 @@ class AttributionResult:
     reasoning: str
 
 
+# Which attribution tiers represent a structural fact or a precise, parsed
+# locator - not a guess - shared by retry_strategy.py's own scope_conflict_
+# is_grounded gate and workflow_controller.py's _scope_conflict_evidence_
+# authority() (PRV-11, 2026-08-31 - moved here, the one place attribute_
+# failure()'s own tier vocabulary is defined, so the two consumers can
+# never drift apart). "architectural_owner" is included even though
+# ObligationAuthority's own class docstring uses "an architectural-owner
+# scan" as its illustrative GROUNDED example - the write-scope DENIAL this
+# tier actually represents in this codebase today (AuthorizedFileWriter
+# mechanically rejecting an out-of-scope write) is a real structural fact,
+# not an interpreted scan, so DETERMINISTIC is the correct read of what
+# this tier means as PRODUCED here.
+#
+# Deliberately excludes self_diagnosis (the model's own claim about ITS
+# OWN prior output - real evidence, but an unverified free-text guess, not
+# a fact about the repository), judge/triage (an LLM's own semantic
+# verdict), full_set (no evidence at all), or any tier this set doesn't
+# yet recognize.
+DETERMINISTIC_ATTRIBUTION_TIERS = frozenset({
+    "authoritative_deterministic",  # migration.py's own parsed manifest evidence
+    "architectural_owner",  # AuthorizedFileWriter's own deterministic write-scope denial
+    "locator",  # a real compiler/test file:line reference
+    "subtask_scope", "subtask_dependency",  # the validated plan's own structural ownership
+})
+
+
 @dataclass
 class SubtaskAttributionContext:
     """Structural evidence for the subtask_scope/subtask_dependency tiers -
