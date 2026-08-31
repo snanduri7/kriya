@@ -660,15 +660,13 @@ def build_structured_plan_repair_prompt(
             "- For each production artifact the errors name as referenced by a test file but "
             "owned by no subtask (grounded structural evidence - a real import, method call, or "
             "constructor instantiation the previous draft's own repository already contains, not "
-            "a guess): ADD a new MODEL subtask with execution_role=implementation whose "
-            "planned_files contains exactly that artifact path with action=modify (it is an "
-            "existing repository file, never invent a create action for it). Give the new subtask "
-            "a provides capability describing what it now supplies, set its depends_on/requires to "
-            "the real upstream subtask(s) it actually needs, and update the REFERENCING test "
-            "subtask's own requires/depends_on to consume this new subtask's provides value "
-            "instead of stopping at an earlier, indirect producer. Do not satisfy this by adding a "
-            "comment, an acceptance criterion, or a verification entry alone - the file needs a "
-            "real owning subtask.\n"
+            "a guess): account for that grounded artifact in the planned production path. If the "
+            "authoritative goal and repository evidence show that satisfying the goal requires "
+            "changing it, assign it to a MODEL implementation subtask using its existing path and "
+            "action=modify. Ensure the downstream verification subtask's depends_on and requires "
+            "route through the responsible production owner and one of that owner's provides "
+            "capabilities. Do not infer that the artifact must be modified solely because the "
+            "structural edge exists.\n"
         )
     if "MISWIRED_GROUNDED_DEPENDENCY_EDGE" in reason_codes:
         targeted_correction += (
@@ -680,6 +678,15 @@ def build_structured_plan_repair_prompt(
             "earlier producer already in the chain merely because a dependency edge exists to it. "
             "The grounded evidence names the file the test actually references; requires/depends_on "
             "must route through whichever subtask really owns that exact file.\n"
+        )
+    if "GROUNDED_SEMANTIC_PROVIDER_MISMATCH" in reason_codes:
+        targeted_correction += (
+            "- For each grounded test-to-production relationship whose production owner is already "
+            "in the test subtask's depends_on chain, also route semantic responsibility through "
+            "that same owner: add one of the named owner's provides capabilities to the test "
+            "subtask's requires. Remove any requires value that incorrectly routes this grounded "
+            "verification through an earlier or unrelated producer. Keep depends_on and "
+            "requires -> provides aligned with the same responsible owner.\n"
         )
     if "UNKNOWN_GLOBAL_INVARIANT" in reason_codes:
         targeted_correction += (
@@ -1011,6 +1018,11 @@ def find_missing_grounded_production_artifacts(
        java's own requires/depends_on pointed at s2=CustomerService.java,
        never at s3 - the exact edge FUTURE_ORDERED handling and MA9
        recovery then both, correctly, treat as authoritative).
+    3. SEMANTICALLY MISWIRED (reason="semantic_provider_mismatch"): the
+       production owner appears in the test's dependency chain, but none of
+       that owner's provides capabilities appears in the test's requires.
+       This is invalid because FUTURE_OWNER_VERIFICATION resolves the
+       responsible owner through requires -> provides, not depends_on.
 
     Deliberately narrow in both shapes: only fires on a REAL, already-
     indexed structural edge - never "this file is probably related," never
@@ -1054,6 +1066,19 @@ def find_missing_grounded_production_artifacts(
                 gaps.append({
                     "test_file": source, "missing_production_artifact": target,
                     "owning_subtask": target_subtask_id, "reason": "not_in_dependency_chain",
+                })
+                continue
+            target_subtask = plan.subtask_by_id(target_subtask_id)
+            owner_capabilities = set(target_subtask.provides if target_subtask else [])
+            if not owner_capabilities.intersection(source_subtask.requires):
+                seen.add(key)
+                gaps.append({
+                    "test_file": source,
+                    "missing_production_artifact": target,
+                    "owning_subtask": target_subtask_id,
+                    "owner_provides": sorted(owner_capabilities),
+                    "test_requires": sorted(source_subtask.requires),
+                    "reason": "semantic_provider_mismatch",
                 })
     return gaps
 
@@ -3442,6 +3467,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     )
                     unowned_gaps = [g for g in missing_artifacts if g["reason"] == "unowned"]
                     miswired_gaps = [g for g in missing_artifacts if g["reason"] == "not_in_dependency_chain"]
+                    semantic_gaps = [
+                        g for g in missing_artifacts
+                        if g["reason"] == "semantic_provider_mismatch"
+                    ]
                     if unowned_gaps:
                         errors.append(
                             "grounded structural evidence shows test file(s) referencing a "
@@ -3462,6 +3491,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             )
                         )
                         reason_codes.append("MISWIRED_GROUNDED_DEPENDENCY_EDGE")
+                    if semantic_gaps:
+                        errors.append(
+                            "grounded structural evidence shows test file(s) whose requires do "
+                            "not resolve to the subtask owning the referenced production artifact: "
+                            + "; ".join(
+                                f"{gap['test_file']} references "
+                                f"{gap['missing_production_artifact']} (owned by subtask "
+                                f"{gap['owning_subtask']!r}, provides={gap['owner_provides']!r}, "
+                                f"test requires={gap['test_requires']!r})"
+                                for gap in semantic_gaps
+                            )
+                        )
+                        reason_codes.append("GROUNDED_SEMANTIC_PROVIDER_MISMATCH")
 
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))

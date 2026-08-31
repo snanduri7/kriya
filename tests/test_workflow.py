@@ -98,6 +98,10 @@ from kriya.workflow.state import (
     GenerationState,
     RecoveryPhaseAdvanced,
 )
+from kriya.workflow.workflow_controller import (
+    build_planning_structural_evidence,
+    find_missing_grounded_production_artifacts,
+)
 from kriya.workflow.checkpoint import (
     checkpoint_path,
     compute_config_fingerprint,
@@ -10231,6 +10235,53 @@ def test_requirement_named_in_authoritative_goal_is_still_enforced():
     assert planner_only == []
 
 
+def test_planner_only_constraint_on_authoritative_identifier_is_suppressed():
+    """The identifier itself can be authoritative while its representation is
+    not. The rule derives that distinction from section provenance, without a
+    hard-coded list of programming-language representation words."""
+    goal_text = _split_goal(
+        "Expose `resultToken` in the lookup behavior and derive it from existing data.",
+        "Add a resultToken property to the response model.",
+    )
+
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["the resultToken property is missing"], goal_text,
+    )
+
+    assert kept == []
+    assert planner_only == ["the resultToken property is missing"]
+
+
+def test_judgment_only_complaint_about_authoritative_identifier_is_not_suppressed():
+    """A complaint gets no protection merely because it names an identifier.
+    Its alleged constraint must be traceable to Planner-only text."""
+    goal_text = _split_goal(
+        "Expose `resultToken` in the lookup behavior and derive it from existing data.",
+        "Update the lookup implementation to return resultToken.",
+    )
+
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["resultToken is not derived from the existing data"], goal_text,
+    )
+
+    assert kept == ["resultToken is not derived from the existing data"]
+    assert planner_only == []
+
+
+def test_authoritative_constraint_remains_enforced_when_plan_repeats_it():
+    goal_text = _split_goal(
+        "Expose `resultToken` as a property in the lookup response.",
+        "Add a resultToken property to the response model.",
+    )
+
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["the resultToken property is missing"], goal_text,
+    )
+
+    assert kept == ["the resultToken property is missing"]
+    assert planner_only == []
+
+
 def test_planner_only_arbitration_suppresses_only_the_planner_only_requirement():
     """Partial overlap, mirroring the migration arbitration's own required
     test shape: one planner-only requirement suppressed, one genuine
@@ -10319,7 +10370,7 @@ async def test_run_attempt_does_not_fail_candidate_gates_on_planner_only_spec_re
         tmp_path, developer=developer, spec_compliance=spec_compliance,
         kernel=Kernel(config=cfg),
         goal=_split_goal(
-            "Transform the customer name to uppercase and print the result.",
+            "Add an uppercase `displayName` to the customer lookup behavior.",
             "Modify the Customer entity to add a displayName field that is "
             "derived from existing name fields and stored as uppercase.",
         ),
@@ -12594,6 +12645,7 @@ def _seed_future_owner_e2e_repo(tmp_path):
         "src/test/java/com/example/customer/CustomerControllerTest.java": (
             "package com.example.customer;\n"
             "class CustomerControllerTest {\n"
+            "    CustomerController controller = new CustomerController();\n"
             "    // detailsIncludesUppercaseDisplayName asserts displayName == JOHN SMITH\n"
             "}\n"
         ),
@@ -12612,8 +12664,16 @@ async def test_future_owner_verification_end_to_end_through_real_run_generation_
     -> the SAME regression genuinely passes -> obligation settles
     SATISFIED, terminal-obligation safety net sees nothing unresolved."""
     _seed_future_owner_e2e_repo(tmp_path)
-    _init_git_repo(tmp_path)
     plan = _future_owner_e2e_plan()
+    candidates = [
+        pf.path for subtask in plan.subtasks for pf in subtask.planned_files
+    ]
+    _, grounded_edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    assert grounded_edges[
+        "src/test/java/com/example/customer/CustomerControllerTest.java"
+    ] == ["src/main/java/com/example/customer/CustomerController.java"]
+    assert find_missing_grounded_production_artifacts(plan, grounded_edges) == []
+    _init_git_repo(tmp_path)
 
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"

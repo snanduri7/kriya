@@ -96,6 +96,40 @@ def planning_diagnostics_path(workspace_path: str, run_id: str) -> str:
     )
 
 
+def approved_plan_diagnostic(
+    plan: Optional[EngineeringPlan], *, validation_errors: Iterable[str],
+) -> Optional[Dict[str, Any]]:
+    """Compact, explicit dump of the execution graph that was approved.
+
+    ``parsed_plan`` preserves the complete Planner payload for every attempt.
+    This projection has a different purpose: make the final runtime ownership
+    contract directly observable without reconstructing it from execution logs
+    or guessing which planning attempt was accepted.
+    """
+    errors = list(validation_errors)
+    if plan is None or errors:
+        return None
+    return {
+        "plan_id": plan.plan_id,
+        "subtasks": [
+            {
+                "id": subtask.id,
+                "planned_files": [
+                    {
+                        "path": planned_file.path,
+                        "action": planned_file.action.value,
+                    }
+                    for planned_file in subtask.planned_files
+                ],
+                "depends_on": list(subtask.depends_on),
+                "requires": list(subtask.requires),
+                "provides": list(subtask.provides),
+            }
+            for subtask in plan.subtasks
+        ],
+    }
+
+
 def persist_planning_attempt_diagnostic(
     workspace_path: str,
     run_id: str,
@@ -112,8 +146,9 @@ def persist_planning_attempt_diagnostic(
 ) -> str:
     """Atomically append one bounded attempt record under the local workspace."""
     path = planning_diagnostics_path(workspace_path, run_id)
+    validation_errors = list(validation_errors)
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": workspace_identity(workspace_path),
         "run_id": run_id,
         "attempt": attempt,
@@ -121,7 +156,10 @@ def persist_planning_attempt_diagnostic(
         "planner_system_prompt": _bounded_text(planner_system_prompt),
         "raw_plan_response": _bounded_text(raw_plan_response),
         "parsed_plan": plan.model_dump(mode="json") if plan is not None else None,
-        "validation_errors": list(validation_errors),
+        "approved_plan": approved_plan_diagnostic(
+            plan, validation_errors=validation_errors,
+        ),
+        "validation_errors": validation_errors,
         "reason_codes": list(reason_codes),
         "ownership_validation": normalized_ownership_validation_records(
             plan, workspace_path=workspace_path,

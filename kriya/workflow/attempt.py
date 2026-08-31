@@ -1960,6 +1960,43 @@ def _extract_requirement_identifier_tokens(requirement: str) -> List[str]:
     return tokens
 
 
+_REQUIREMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+_REQUIREMENT_PROVENANCE_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "does",
+    "for", "from", "has", "have", "in", "instead", "is", "it", "must",
+    "named", "not", "of", "on", "or", "requires", "require", "required",
+    "should", "that", "the", "this", "to", "uses", "using", "with",
+}
+
+
+def _identifier_local_terms(text: str, identifier: str, radius: int = 3) -> set[str]:
+    """Return meaningful lexical terms close to ``identifier`` in ``text``.
+
+    This is deliberately a provenance primitive, not a vocabulary of code
+    shapes.  It knows nothing about fields, methods, routes, schemas, UI
+    controls, or any particular programming language.  A term matters only
+    because the Planner and the later judgment both placed it next to the
+    same concrete identifier while the authoritative goal did not.
+    """
+    words = _REQUIREMENT_WORD_RE.findall(text)
+    lowered_identifier = identifier.lower()
+    terms: set[str] = set()
+    for index, word in enumerate(words):
+        if word.lower() != lowered_identifier:
+            continue
+        start = max(0, index - radius)
+        end = min(len(words), index + radius + 1)
+        for nearby in words[start:end]:
+            normalized = nearby.lower()
+            if (
+                normalized != lowered_identifier
+                and normalized not in _REQUIREMENT_PROVENANCE_STOPWORDS
+                and len(normalized) >= 3
+            ):
+                terms.add(normalized)
+    return terms
+
+
 def _spec_requirements_naming_planner_only_identifiers(
     missing_requirements: List[str], goal_text: str,
 ) -> Tuple[List[str], List[str]]:
@@ -1978,16 +2015,21 @@ def _spec_requirements_naming_planner_only_identifiers(
     the Planned Implementation Strategy section of the exact goal text it was
     given, never in the Authoritative Goal section.
 
-    Splits missing_requirements into (kept, planner_only): an entry is
-    planner_only when it names at least one concrete identifier token that
-    appears in the Planned Implementation Strategy section, and NONE of its
-    identifier tokens appear anywhere in the Authoritative Goal section. An
-    entry naming no extractable identifier token at all, or naming one that
-    DOES appear in the Authoritative Goal section (a real user requirement,
-    still enforced exactly as before), is always kept - this only ever
-    suppresses a requirement with positive, text-grounded evidence it is the
-    Planner's own word choice, never a vague/behavioral requirement this
-    function has no way to evaluate.
+    Splits missing_requirements into (kept, planner_only). An entry is
+    planner_only in either of two text-grounded cases:
+
+    * it names a concrete identifier found only in Planned Implementation; or
+    * the identifier is authoritative, but the judgment attaches a nearby
+      constraining term that is also attached to it in Planned Implementation
+      and absent from Authoritative Goal.
+
+    The second case closes a more subtle authority leak: a Planner can preserve
+    the user's identifier while silently narrowing its representation. The
+    implementation is intentionally language- and use-case-agnostic: it has no
+    catalog of representation words. It correlates lexical provenance around
+    the same identifier instead. Requirements with no identifier, behavioral
+    terms grounded in the authoritative section, and judgment-only terms with
+    no Planner provenance are always kept.
 
     A no-op (everything kept) when goal_text doesn't carry both section
     headers - every pre-MA6 caller, and every subtask goal without a real
@@ -2009,13 +2051,26 @@ def _spec_requirements_naming_planner_only_identifiers(
         if not tokens:
             kept.append(requirement)
             continue
-        in_authoritative = any(
-            re.search(rf"\b{re.escape(tok)}\b", authoritative_text) for tok in tokens
+        authoritative_tokens = [
+            tok for tok in tokens
+            if re.search(rf"\b{re.escape(tok)}\b", authoritative_text)
+        ]
+        planned_tokens = [
+            tok for tok in tokens
+            if re.search(rf"\b{re.escape(tok)}\b", planned_text)
+        ]
+        planner_only_identifier = bool(planned_tokens) and not authoritative_tokens
+        planner_only_constraint = False
+        for token in set(authoritative_tokens) & set(planned_tokens):
+            requirement_terms = _identifier_local_terms(requirement, token)
+            planned_terms = _identifier_local_terms(planned_text, token)
+            authoritative_terms = _identifier_local_terms(authoritative_text, token)
+            if (requirement_terms & planned_terms) - authoritative_terms:
+                planner_only_constraint = True
+                break
+        (planner_only if planner_only_identifier or planner_only_constraint else kept).append(
+            requirement
         )
-        in_planned = any(
-            re.search(rf"\b{re.escape(tok)}\b", planned_text) for tok in tokens
-        )
-        (planner_only if (not in_authoritative and in_planned) else kept).append(requirement)
     return kept, planner_only
 
 
