@@ -57,7 +57,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ObligationKind(str, Enum):
@@ -385,46 +385,35 @@ class ObligationLedger:
                 result.append(rec)
         return result
 
-    @staticmethod
-    def _domain(obligation_id: str) -> str:
-        parts = obligation_id.split(".")
-        return ".".join(parts[:2])
+    def relevant_for_preservation(self, kind: ObligationKind) -> List[ObligationRecord]:
+        """Every currently-SATISFIED obligation of `kind`, worth telling a
+        repair prompt to preserve (spec §20).
 
-    def relevant_for_preservation(
-        self, kind: ObligationKind, violated_ids: Iterable[str],
-    ) -> List[ObligationRecord]:
-        """SATISFIED obligations of `kind` worth telling a repair prompt to
-        preserve (spec §20) - deliberately NOT every currently-satisfied
-        obligation, to keep the repair prompt bounded as a plan grows.
-        Included when any of:
-          - it just became SATISFIED on its own immediately-previous
-            record (a repair that fixed it last time - the one most at
-            risk of being silently regressed again this time);
-          - it has already regressed at least once this run;
-          - it shares an owner_subtask_id with a currently-violated
-            obligation of the same kind;
-          - it shares the same id "domain" (the id's first two
-            dot-separated segments, e.g. "plan.file"/"plan.subtask") with a
-            currently-violated obligation - a proxy for "same plan
-            field/constraint family as what's currently broken"."""
-        violated_records = [
-            rec for rec in (self.current(oid) for oid in violated_ids) if rec is not None
-        ]
-        violated_owners = {
-            rec.owner_subtask_id for rec in violated_records if rec.owner_subtask_id
-        }
-        violated_domains = {self._domain(rec.id) for rec in violated_records}
-        regressed_ids = {reg.obligation_id for reg in self.regressions}
+        Deliberately unconditional rather than correlated to what else is
+        currently violated. An earlier version only included a SATISFIED
+        record when it had just transitioned from non-satisfied, had
+        regressed before, or shared an owner/id-domain with something
+        currently VIOLATED *in this same ledger*. A live incident (PRV-11,
+        2026-08-31) showed that was a no-op for the exact shape it needed
+        to protect: `plan.extension_points.non_empty` was correctly
+        recorded SATISFIED on attempt 0, but that attempt's two real
+        failures (a grounded missing-production-artifact check and a
+        semantic-dependency-edge check) are plain errors/reason_codes, not
+        ObligationLedger records - so nothing was ever "currently violated"
+        for it to correlate against, must_preserve came back empty, and
+        the very next repair attempt silently regressed extension_points.
+        The single call site (workflow_controller.py's structured-plan
+        repair loop) only ever asks this while already mid-repair, for ANY
+        reason at all, including reasons that live entirely outside the
+        ledger - so "protect everything of this kind that's currently
+        fine" is the right invariant regardless of what specifically
+        triggered this round. `kind` stays a small, bounded family by
+        construction (see validate_plan()'s own obligation-recording call
+        sites), so returning all of it is still a bounded prompt addition,
+        not "every obligation ever tracked.\""""
         result: List[ObligationRecord] = []
         for oid in self.ids_by_kind(kind):
             rec = self.current(oid)
-            if rec is None or rec.status != ObligationStatus.SATISFIED:
-                continue
-            hist = self.history(oid)
-            just_became_satisfied = len(hist) >= 2 and hist[-2].status != ObligationStatus.SATISFIED
-            already_regressed = oid in regressed_ids
-            same_owner = rec.owner_subtask_id is not None and rec.owner_subtask_id in violated_owners
-            same_domain = self._domain(rec.id) in violated_domains
-            if just_became_satisfied or already_regressed or same_owner or same_domain:
+            if rec is not None and rec.status == ObligationStatus.SATISFIED:
                 result.append(rec)
         return result

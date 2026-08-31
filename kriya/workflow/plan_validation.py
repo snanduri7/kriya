@@ -579,15 +579,36 @@ async def validate_plan(
     # loosening of MA3's own physical-topology-preservation intent.
     if (
         plan.kind in (ChangeKind.ENHANCEMENT, ChangeKind.MILESTONE)
-        and not plan.extension_points
         and not _workspace_appears_empty(workspace_path)
         and not resuming_own_established_progress
     ):
-        errors.append(
-            f"plan kind={plan.kind.value} requires at least one extension_points entry "
-            "(a real insertion point the new capability attaches to) but none were given"
-        )
-        reason_codes.append("EXTENSION_POINT_REQUIRED")
+        extension_points_missing = not plan.extension_points
+        if extension_points_missing:
+            errors.append(
+                f"plan kind={plan.kind.value} requires at least one extension_points entry "
+                "(a real insertion point the new capability attaches to) but none were given"
+            )
+            reason_codes.append("EXTENSION_POINT_REQUIRED")
+        if obligation_ledger is not None:
+            # PRV-11 (2026-08-31): was previously never recorded at all, so a
+            # repair round satisfying THIS check (or, more precisely,
+            # already satisfying it and getting distracted fixing something
+            # else) had no must_preserve protection against a LATER repair
+            # attempt silently dropping extension_points again - found live,
+            # the exact same "fixes one thing, regresses another already-
+            # satisfied constraint" shape refactor_baseline's own recording
+            # below was built to prevent, just never extended to this check.
+            obligation_ledger.record(ObligationRecord(
+                id="plan.extension_points.non_empty", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+                status=ObligationStatus.VIOLATED if extension_points_missing else ObligationStatus.SATISFIED,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=f"a {plan.kind.value}-kind plan against a non-empty brownfield "
+                            "workspace must set at least one extension_points entry (a real "
+                            "existing insertion point the new capability attaches to)",
+                source="plan_validation.validate_plan", revision=revision,
+                evidence={"extension_points": list(plan.extension_points)},
+                terminal_required=True,
+            ))
 
     if plan.kind == ChangeKind.REFACTOR:
         refactor_baseline_missing = not (plan.refactor_baseline or "").strip()

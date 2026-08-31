@@ -222,15 +222,16 @@ def test_unresolved_terminal_obligations_empty_when_all_satisfied():
 def test_relevant_for_preservation_includes_just_fixed_obligation():
     """Reproduces PRV-05 run 8's own shape: A=refactor_baseline invalid,
     B=planned-file action invalid. Repair 1 fixes B; ahead of repair 2, B
-    (just satisfied) must appear in the preserve set even though A (still
-    violated) is the only thing currently failing."""
+    (just satisfied) must appear in the preserve set even though A is
+    still violated."""
     ledger = ObligationLedger()
     ledger.record(_rec("A", ObligationStatus.VIOLATED, revision=0, terminal_required=True))
     ledger.record(_rec("B", ObligationStatus.VIOLATED, revision=0, terminal_required=True, owner_subtask_id="s4"))
     ledger.record(_rec("A", ObligationStatus.VIOLATED, revision=1, terminal_required=True))
     ledger.record(_rec("B", ObligationStatus.SATISFIED, revision=1, terminal_required=True, owner_subtask_id="s4"))
-    preserve_ids = [r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY, ["A"])]
+    preserve_ids = [r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)]
     assert "B" in preserve_ids
+    assert "A" not in preserve_ids
 
 
 def test_relevant_for_preservation_includes_previously_regressed_obligation():
@@ -239,47 +240,34 @@ def test_relevant_for_preservation_includes_previously_regressed_obligation():
     ledger.record(_rec("B", ObligationStatus.VIOLATED, revision=1, owner_subtask_id="s4"))
     ledger.record(_rec("B", ObligationStatus.SATISFIED, revision=2, owner_subtask_id="s4"))
     ledger.record(_rec("C", ObligationStatus.VIOLATED, revision=2, owner_subtask_id="unrelated"))
-    preserve_ids = [r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY, ["C"])]
+    preserve_ids = [r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)]
     assert "B" in preserve_ids
 
 
-def test_relevant_for_preservation_excludes_unrelated_stale_satisfied_obligation():
-    """A satisfied obligation that never regressed, didn't just change, and
-    shares neither owner nor id-domain with a currently-violated one should
-    NOT be dumped into the prompt - the whole point of §20's filter."""
+def test_relevant_for_preservation_includes_unrelated_satisfied_obligation():
+    """The PRV-11 (2026-08-31) gap this closes: a satisfied obligation
+    that never regressed, didn't just change, and shares neither owner
+    nor id-domain with anything violated - or with nothing violated of
+    this kind at all - still belongs in the preserve set. The repair
+    round that is about to run may be fixing a failure this ledger never
+    tracked in the first place (e.g. a grounded missing-production-
+    artifact check, which is a plain reason_code, not an ObligationRecord)
+    - so preservation can't be conditioned on "something of this kind is
+    currently violated" without going silent for exactly that case, which
+    is what happened live: plan.extension_points.non_empty was correctly
+    SATISFIED on attempt 0, must_preserve came back empty because nothing
+    ObligationLedger-tracked was violated, and the next repair attempt
+    silently regressed it."""
     ledger = ObligationLedger()
     ledger.record(_rec("plan.subtask.s1.model_subtask_scope", ObligationStatus.SATISFIED, revision=0, owner_subtask_id="s1"))
     ledger.record(_rec("plan.subtask.s1.model_subtask_scope", ObligationStatus.SATISFIED, revision=1, owner_subtask_id="s1"))
-    ledger.record(_rec("plan.file.pom.xml.action_consistency", ObligationStatus.VIOLATED, revision=1, owner_subtask_id="s4"))
-    preserve_ids = [
-        r.id for r in ledger.relevant_for_preservation(
-            ObligationKind.PLAN_STRUCTURAL_VALIDITY, ["plan.file.pom.xml.action_consistency"],
-        )
-    ]
-    assert "plan.subtask.s1.model_subtask_scope" not in preserve_ids
+    preserve_ids = [r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)]
+    assert "plan.subtask.s1.model_subtask_scope" in preserve_ids
 
 
-def test_relevant_for_preservation_includes_same_owner_as_violation():
+def test_relevant_for_preservation_scoped_to_kind():
     ledger = ObligationLedger()
-    ledger.record(_rec("plan.file.a.ownership", ObligationStatus.SATISFIED, revision=0, owner_subtask_id="s4"))
-    ledger.record(_rec("plan.file.a.ownership", ObligationStatus.SATISFIED, revision=1, owner_subtask_id="s4"))
-    ledger.record(_rec("plan.file.b.action_consistency", ObligationStatus.VIOLATED, revision=1, owner_subtask_id="s4"))
-    preserve_ids = [
-        r.id for r in ledger.relevant_for_preservation(
-            ObligationKind.PLAN_STRUCTURAL_VALIDITY, ["plan.file.b.action_consistency"],
-        )
-    ]
-    assert "plan.file.a.ownership" in preserve_ids
-
-
-def test_relevant_for_preservation_includes_same_domain_as_violation():
-    ledger = ObligationLedger()
-    ledger.record(_rec("plan.file.a.ownership", ObligationStatus.SATISFIED, revision=0))
-    ledger.record(_rec("plan.file.a.ownership", ObligationStatus.SATISFIED, revision=1))
-    ledger.record(_rec("plan.file.b.action_consistency", ObligationStatus.VIOLATED, revision=1))
-    preserve_ids = [
-        r.id for r in ledger.relevant_for_preservation(
-            ObligationKind.PLAN_STRUCTURAL_VALIDITY, ["plan.file.b.action_consistency"],
-        )
-    ]
-    assert "plan.file.a.ownership" in preserve_ids
+    ledger.record(_rec("A", ObligationStatus.SATISFIED, revision=0, kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY))
+    ledger.record(_rec("M", ObligationStatus.SATISFIED, revision=0, kind=ObligationKind.MIGRATION_COMPLETION))
+    preserve_ids = [r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)]
+    assert preserve_ids == ["A"]

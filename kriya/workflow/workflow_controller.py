@@ -655,6 +655,32 @@ def build_structured_plan_repair_prompt(
             "tool_name=test/verifier_kind=test instead. Do not just restate the same "
             "judgment-only shape.\n"
         )
+    if "MISSING_GROUNDED_PRODUCTION_ARTIFACT" in reason_codes:
+        targeted_correction += (
+            "- For each production artifact the errors name as referenced by a test file but "
+            "owned by no subtask (grounded structural evidence - a real import, method call, or "
+            "constructor instantiation the previous draft's own repository already contains, not "
+            "a guess): ADD a new MODEL subtask with execution_role=implementation whose "
+            "planned_files contains exactly that artifact path with action=modify (it is an "
+            "existing repository file, never invent a create action for it). Give the new subtask "
+            "a provides capability describing what it now supplies, set its depends_on/requires to "
+            "the real upstream subtask(s) it actually needs, and update the REFERENCING test "
+            "subtask's own requires/depends_on to consume this new subtask's provides value "
+            "instead of stopping at an earlier, indirect producer. Do not satisfy this by adding a "
+            "comment, an acceptance criterion, or a verification entry alone - the file needs a "
+            "real owning subtask.\n"
+        )
+    if "MISWIRED_GROUNDED_DEPENDENCY_EDGE" in reason_codes:
+        targeted_correction += (
+            "- For each test file the errors name as referencing a production artifact owned by a "
+            "specific subtask that is outside its own dependency chain (the owning subtask id is "
+            "given in the error text itself): change that test subtask's own requires to the exact "
+            "provides value the NAMED owning subtask exports, and add that owning subtask's id to "
+            "the test subtask's own depends_on - do not leave requires/depends_on pointing at an "
+            "earlier producer already in the chain merely because a dependency edge exists to it. "
+            "The grounded evidence names the file the test actually references; requires/depends_on "
+            "must route through whichever subtask really owns that exact file.\n"
+        )
     if "UNKNOWN_GLOBAL_INVARIANT" in reason_codes:
         targeted_correction += (
             "- For each subtask the errors name as referencing an unknown global invariant id: "
@@ -3469,15 +3495,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # MA8: everything PLAN_STRUCTURAL_VALIDITY currently reports
                 # SATISFIED (as of the validate_plan() call just above) must
                 # survive the next draft - see build_structured_plan_repair_
-                # prompt's own docstring for the run #8 incident this closes.
-                currently_violated_ids = [
-                    rec.id for rec in obligation_ledger.current_by_kind(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
-                    if rec.status == ObligationStatus.VIOLATED
-                ]
+                # prompt's own docstring for the run #8 incident this closes,
+                # and relevant_for_preservation's own docstring for why this
+                # is unconditional on `kind` rather than correlated to what
+                # else is currently violated (PRV-11, 2026-08-31).
                 must_preserve = [
                     f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
                     for rec in obligation_ledger.relevant_for_preservation(
-                        ObligationKind.PLAN_STRUCTURAL_VALIDITY, currently_violated_ids,
+                        ObligationKind.PLAN_STRUCTURAL_VALIDITY,
                     )
                 ]
                 repair_prompt = build_structured_plan_repair_prompt(

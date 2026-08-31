@@ -384,10 +384,13 @@ async def test_invariant_reference_obligation_recorded_violated_then_satisfied(t
     """MA8 binding for global invariant references (PRV-06, 2026-08-28):
     an unknown-id reference is recorded VIOLATED with the subtask as owner;
     once the repair swaps in a declared id, the SAME obligation id flips to
-    SATISFIED and - because it just transitioned - relevant_for_preservation
-    surfaces it, so the next repair prompt is told to keep it. This is the
-    same regression-prevention mechanism already proven for planned-file
-    metadata (run #8), now covering invariant references too."""
+    SATISFIED and relevant_for_preservation surfaces it (unconditionally,
+    per its PRV-11 2026-08-31 update - every currently-SATISFIED
+    PLAN_STRUCTURAL_VALIDITY obligation is preserve-worthy, not just ones
+    correlated to something still violated), so the next repair prompt is
+    told to keep it. This is the same regression-prevention mechanism
+    already proven for planned-file metadata (run #8), now covering
+    invariant references too."""
     gi = GlobalInvariant(id="gi1", statement="a real invariant")
     bad = _model_subtask(
         id="s1", planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
@@ -413,19 +416,11 @@ async def test_invariant_reference_obligation_recorded_violated_then_satisfied(t
     assert satisfied.status == ObligationStatus.SATISFIED
 
     # Same must_preserve computation workflow_controller.py's real repair
-    # loop uses: currently-violated PLAN_STRUCTURAL_VALIDITY ids feed
-    # relevant_for_preservation. Revision 0's now-abandoned "gi_ghost"
-    # reference is still on record as VIOLATED (nothing re-visits an id no
-    # longer referenced) and shares this record's owner_subtask_id="s1",
-    # which is what actually surfaces the newly-satisfied "gi1" reference
-    # for preservation - not a global truth, an owner-scoped one.
-    currently_violated_ids = [
-        rec.id for rec in ledger.current_by_kind(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
-        if rec.status == ObligationStatus.VIOLATED
-    ]
-    preserved = ledger.relevant_for_preservation(
-        ObligationKind.PLAN_STRUCTURAL_VALIDITY, currently_violated_ids,
-    )
+    # loop uses - unconditional on `kind` since PRV-11 (2026-08-31): every
+    # currently-SATISFIED PLAN_STRUCTURAL_VALIDITY obligation is
+    # preserve-worthy, so the newly-satisfied "gi1" reference surfaces
+    # regardless of what else is (or isn't) currently violated.
+    preserved = ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
     assert satisfied.id in {rec.id for rec in preserved}
 
 
@@ -935,7 +930,9 @@ async def test_must_preserve_includes_just_fixed_obligation_ahead_of_next_repair
     input WorkflowController would compute (relevant_for_preservation),
     not just the raw ledger state - confirms the just-fixed action-
     consistency obligation would be told to a repair-2 prompt even though
-    only refactor_baseline is currently violated."""
+    only refactor_baseline is currently violated (unconditional on `kind`
+    since PRV-11, 2026-08-31 - see relevant_for_preservation's own
+    docstring)."""
     _run8_workspace(tmp_path)
     ledger = ObligationLedger()
     await validate_plan(
@@ -952,7 +949,7 @@ async def test_must_preserve_includes_just_fixed_obligation_ahead_of_next_repair
     ]
     assert violated_ids == ["plan.refactor_baseline.non_blank"]
     preserve_ids = [
-        r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY, violated_ids)
+        r.id for r in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
     ]
     assert "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency" in preserve_ids
 

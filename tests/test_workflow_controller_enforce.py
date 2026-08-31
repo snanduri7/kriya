@@ -627,7 +627,127 @@ def test_plan_repair_prompt_resolves_duplicate_file_ownership_without_weakening_
     assert "REMOVE any separate MODEL" in prompt
     assert "sole purpose is to analyze, inspect, research, or explain" in prompt
     assert "src/CustomerDisplayNameFormatter.java" in prompt
-    assert "For modify/delete, use an exact relevant existing path" in prompt
+
+
+# --- PRV-11 (2026-08-31): the repair prompt gives every OTHER structural
+# reason code an explicit, targeted correction - these two (added §11.23)
+# previously had none, leaving the model with only the generic error text
+# and no instruction on the actual corrective action. Live incident this
+# closes: across two real repair attempts, the model saw the exact same
+# MISSING_GROUNDED_PRODUCTION_ARTIFACT error twice, never once added the
+# missing subtask, and instead regressed an unrelated field while trying
+# to fix something else. ---
+
+def test_plan_repair_prompt_gives_targeted_correction_for_missing_production_artifact():
+    prompt = build_structured_plan_repair_prompt(
+        "Add uppercase displayName to the customer lookup response",
+        "previous response",
+        [
+            "grounded structural evidence shows test file(s) referencing a production artifact "
+            "no subtask owns: src/test/.../CustomerControllerTest.java references "
+            "src/main/.../CustomerController.java"
+        ],
+        ["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+        1,
+    )
+
+    assert "ADD a new MODEL subtask" in prompt
+    assert "action=modify" in prompt
+    assert "never invent a create action" in prompt
+    assert "update the REFERENCING test subtask's own requires/depends_on" in prompt
+    assert "Do not satisfy this by adding a comment" in prompt
+
+
+def test_plan_repair_prompt_gives_targeted_correction_for_miswired_dependency_edge():
+    prompt = build_structured_plan_repair_prompt(
+        "Add uppercase displayName to the customer lookup response",
+        "previous response",
+        [
+            "grounded structural evidence shows test file(s) whose own requires/depends_on skip "
+            "past the real intermediate producer: CustomerControllerTest.java references "
+            "CustomerController.java (owned by subtask 's3', which is not in this test's own "
+            "depends_on chain)"
+        ],
+        ["MISWIRED_GROUNDED_DEPENDENCY_EDGE"],
+        1,
+    )
+
+    assert "change that test subtask's own requires to the exact provides value" in prompt
+    assert "add that owning subtask's id to the test subtask's own depends_on" in prompt
+    assert "requires/depends_on must route through whichever subtask really owns" in prompt
+
+
+# --- PRV-11 (2026-08-31): extension_points was never wired into the
+# must_preserve/PLAN_STRUCTURAL_VALIDITY protection at all - only 4 checks
+# were ever covered when that mechanism was built (§11.14). Live incident
+# this closes: a repair attempt satisfied MISSING_GROUNDED_PRODUCTION_
+# ARTIFACT's own instruction (added above) while, unprotected, silently
+# dropping an already-valid extension_points - nothing caught it until the
+# very next validation pass, one repair attempt too late. ---
+
+def _enhancement_plan_with_extension_points(extension_points):
+    return EngineeringPlan(
+        plan_id="p1", kind=ChangeKind.ENHANCEMENT,
+        extension_points=list(extension_points),
+        subtasks=[Subtask(
+            id="s1", description="d", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.MODIFY)],
+        )],
+    )
+
+
+def test_extension_points_obligation_recorded_satisfied_when_present(tmp_path):
+    (tmp_path / "a.py").write_text("x = 1\n")
+    plan = _enhancement_plan_with_extension_points(["a.py"])
+    ledger = ObligationLedger()
+
+    import asyncio
+    asyncio.run(validate_plan(plan, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0))
+
+    rec = ledger.current("plan.extension_points.non_empty")
+    assert rec is not None
+    assert rec.status == ObligationStatus.SATISFIED
+    assert rec.kind == ObligationKind.PLAN_STRUCTURAL_VALIDITY
+    assert rec.terminal_required is True
+
+
+def test_extension_points_obligation_recorded_violated_when_missing(tmp_path):
+    (tmp_path / "a.py").write_text("x = 1\n")
+    plan = _enhancement_plan_with_extension_points([])
+    ledger = ObligationLedger()
+
+    import asyncio
+    asyncio.run(validate_plan(plan, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0))
+
+    rec = ledger.current("plan.extension_points.non_empty")
+    assert rec is not None
+    assert rec.status == ObligationStatus.VIOLATED
+
+
+def test_extension_points_satisfied_state_now_flows_into_must_preserve(tmp_path):
+    """The actual live gap: a SATISFIED extension_points obligation from an
+    earlier validate_plan() call must now survive into the NEXT repair
+    round's own must_preserve list - exactly the same protection
+    refactor_baseline/planned-file-action/ownership/model-scope already
+    had, extended to this one, using the SAME ObligationLedger.
+    relevant_for_preservation() call site workflow_controller.py's own
+    repair loop already uses (not reimplemented here). Unconditional on
+    `kind` since PRV-11 (2026-08-31) - see relevant_for_preservation's own
+    docstring for why a single, never-violated, freshly-satisfied
+    obligation like this one (nothing to correlate it against) still had
+    to be included."""
+    (tmp_path / "a.py").write_text("x = 1\n")
+    plan = _enhancement_plan_with_extension_points(["a.py"])
+    ledger = ObligationLedger()
+
+    import asyncio
+    asyncio.run(validate_plan(plan, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0))
+
+    must_preserve = [
+        rec.description for rec in
+        ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
+    ]
+    assert any("extension_points" in description for description in must_preserve)
 
 
 def test_plan_repair_prompt_directs_unknown_global_invariant_to_declared_ids(tmp_path):
