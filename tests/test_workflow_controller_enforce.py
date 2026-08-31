@@ -59,6 +59,8 @@ from kriya.workflow.workflow_controller import (
     _scope_conflict_evidence_authority,
     _transitive_upstream_ids,
     build_authoritative_planner_request,
+    build_planning_structural_evidence,
+    find_missing_grounded_production_artifacts,
     build_recovery_execution_plan,
     build_subtask_constraint_context,
     build_subtask_goal_text,
@@ -1424,6 +1426,224 @@ async def test_enforce_plan_repair_exhaustion_fails_closed_without_legacy_execut
     assert diagnostics[0]["repair_prompt"] is not None
     assert diagnostics[1]["repair_prompt"] is not None
     assert diagnostics[2]["repair_prompt"] is None
+
+
+# --- Grounded plan-completeness: missing production artifact (PRV-11,
+# 2026-08-30). Traced live: the Planner produced Customer -> CustomerService
+# -> CustomerControllerTest directly, omitting CustomerController.java (the
+# real intermediate consumer/producer) entirely - nothing available to
+# planning ever named the relationship. build_planning_structural_evidence()
+# derives real, grounded import/call/constructor-instantiation relationships
+# from a bounded, in-memory DependencyGraph; find_missing_grounded_
+# production_artifacts() flags a test file's own grounded reference to a
+# production file no subtask owns. ---
+
+_STRUCTURAL_CUSTOMER_JAVA = (
+    "package com.example.customer;\n"
+    "public record Customer(long id, String firstName, String lastName) {\n"
+    "    public String displayName() { return (firstName + \" \" + lastName).toUpperCase(); }\n"
+    "}\n"
+)
+_STRUCTURAL_CUSTOMER_SERVICE_JAVA = (
+    "package com.example.customer;\n"
+    "public class CustomerService {\n"
+    "    public Customer find(long id) { return new Customer(id, \"John\", \"Smith\"); }\n"
+    "}\n"
+)
+_STRUCTURAL_CUSTOMER_CONTROLLER_JAVA = (
+    "package com.example.customer;\n"
+    "import java.util.*;\n"
+    "public class CustomerController {\n"
+    " private final CustomerService service=new CustomerService();\n"
+    " public Map<String,Object> details(long id){\n"
+    "   Customer c=service.find(id); Map<String,Object> m=new LinkedHashMap<>();\n"
+    "   m.put(\"displayName\",c.displayName()); return m;\n"
+    " }\n"
+    "}\n"
+)
+_STRUCTURAL_CUSTOMER_CONTROLLER_TEST_JAVA = (
+    "package com.example.customer;\n"
+    "import static org.junit.jupiter.api.Assertions.*;\n"
+    "import org.junit.jupiter.api.Test;\n"
+    "class CustomerControllerTest {\n"
+    " @Test void detailsIncludesUppercaseDisplayName() {\n"
+    "   CustomerController controller = new CustomerController();\n"
+    "   Object displayName = controller.details(1L).get(\"displayName\");\n"
+    "   assertEquals(\"JOHN SMITH\", displayName);\n"
+    " }\n"
+    "}\n"
+)
+
+_CUSTOMER_PATH = "src/main/java/com/example/customer/Customer.java"
+_CUSTOMER_SERVICE_PATH = "src/main/java/com/example/customer/CustomerService.java"
+_CUSTOMER_CONTROLLER_PATH = "src/main/java/com/example/customer/CustomerController.java"
+_CUSTOMER_CONTROLLER_TEST_PATH = "src/test/java/com/example/customer/CustomerControllerTest.java"
+
+
+def _seed_structural_customer_repo(tmp_path):
+    files = {
+        _CUSTOMER_PATH: _STRUCTURAL_CUSTOMER_JAVA,
+        _CUSTOMER_SERVICE_PATH: _STRUCTURAL_CUSTOMER_SERVICE_JAVA,
+        _CUSTOMER_CONTROLLER_PATH: _STRUCTURAL_CUSTOMER_CONTROLLER_JAVA,
+        _CUSTOMER_CONTROLLER_TEST_PATH: _STRUCTURAL_CUSTOMER_CONTROLLER_TEST_JAVA,
+    }
+    for relpath, content in files.items():
+        full = tmp_path / relpath
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    return list(files.keys())
+
+
+def _structural_customer_subtask(sid, path, *, depends_on=()):
+    return Subtask(
+        id=sid, description=f"work on {path}", execution_method=ExecutionMethod.MODEL,
+        depends_on=list(depends_on),
+        planned_files=[PlannedFile(path=path, action=FileAction.MODIFY)],
+    )
+
+
+def test_structural_evidence_resolves_imports_calls_and_constructor_instantiation(tmp_path):
+    """Real repository content, real (in-memory, ephemeral) DependencyGraph -
+    proves all three resolution paths this fix needs: an explicit import
+    (java.util.* doesn't resolve to anything IN the candidate set, correctly
+    producing nothing for it), a uniquely-resolved method call (service.find
+    -> CustomerService.java), and constructor instantiation ("new
+    CustomerController()") resolving the test -> controller edge that a bare
+    method-name lookup alone would miss (CustomerController.details()'s own
+    Map<String,Object> return type breaks _parse_java()'s method regex -
+    found live tracing the exact PRV-11 fixture, not assumed)."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+
+    text, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+
+    assert _CUSTOMER_SERVICE_PATH in edges[_CUSTOMER_CONTROLLER_PATH]
+    assert _CUSTOMER_CONTROLLER_PATH in edges[_CUSTOMER_CONTROLLER_TEST_PATH]
+    assert f"{_CUSTOMER_CONTROLLER_TEST_PATH} references -> {_CUSTOMER_CONTROLLER_PATH}" in text
+    # Never raw source content - only compact "A references -> B" lines.
+    assert "public class" not in text
+    assert "displayName" not in text
+
+
+def test_structural_evidence_is_empty_for_candidates_with_no_real_relationship():
+    """No false positives: an unrelated file never produces an edge."""
+    text, edges = build_planning_structural_evidence("/nonexistent-path-xyz", ["a.java", "b.java"])
+    assert text == ""
+    assert edges == {}
+
+
+def test_missing_grounded_production_artifact_flags_the_exact_omitted_file(tmp_path):
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    incomplete_plan = EngineeringPlan(
+        plan_id="incomplete", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"]),
+        ],
+    )
+
+    gaps = find_missing_grounded_production_artifacts(incomplete_plan, edges)
+
+    assert gaps == [{
+        "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
+        "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+    }]
+
+
+def test_missing_grounded_production_artifact_is_silent_when_the_owner_is_planned(tmp_path):
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    complete_plan = EngineeringPlan(
+        plan_id="complete", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"]),
+            _structural_customer_subtask("s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3"]),
+        ],
+    )
+
+    assert find_missing_grounded_production_artifacts(complete_plan, edges) == []
+
+
+def test_authoritative_planner_request_includes_structural_evidence_when_present():
+    with_evidence = build_authoritative_planner_request(
+        "goal", structural_evidence="a.java references -> b.java",
+    )
+    without_evidence = build_authoritative_planner_request("goal")
+
+    assert "a.java references -> b.java" in with_evidence
+    assert "Grounded structural evidence" in with_evidence
+    assert "Grounded structural evidence" not in without_evidence
+
+
+@pytest.mark.asyncio
+async def test_enforce_flags_missing_grounded_production_artifact_and_exhausts_on_repair(tmp_path):
+    """Integration proof this fires through the REAL enforce loop, not just
+    the isolated functions: validate_plan() itself is mocked valid=True (the
+    _patched() default) - this check must independently block regardless,
+    proving it is a genuinely additive gate, not dependent on validate_plan
+    somehow already covering it."""
+    _seed_structural_customer_repo(tmp_path)
+    incomplete_plan = EngineeringPlan(
+        plan_id="incomplete", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"]),
+        ],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock()
+    p1, p2, p3 = _patched(incomplete_plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "Add an uppercase displayName to the customer lookup response.",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "needs_review"
+    assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in result.legacy_result["reason_codes"]
+    assert "MISSING_GROUNDED_PRODUCTION_ARTIFACT" in result.legacy_result["reason_codes"]
+    we.run_generation_workflow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_enforce_complete_plan_is_not_blocked_by_structural_completeness_check(tmp_path):
+    """The positive case: when every grounded relationship IS covered by
+    some subtask's own planned_files, this check contributes nothing and
+    the run proceeds to subtask execution normally on the first attempt."""
+    _seed_structural_customer_repo(tmp_path)
+    complete_plan = EngineeringPlan(
+        plan_id="complete", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"]),
+            _structural_customer_subtask("s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3"]),
+        ],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+    p1, p2, p3 = _patched(complete_plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "Add an uppercase displayName to the customer lookup response.",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    diagnostics = [
+        json.loads(line)
+        for line in open(
+            planning_diagnostics_path(str(tmp_path), result.run_id), encoding="utf-8",
+        )
+    ]
+    assert len(diagnostics) == 1
+    assert "MISSING_GROUNDED_PRODUCTION_ARTIFACT" not in diagnostics[0]["reason_codes"]
+    assert we.planner.run.await_count == 1
 
 
 @pytest.mark.asyncio

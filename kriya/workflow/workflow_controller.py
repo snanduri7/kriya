@@ -85,6 +85,9 @@ from kriya.agents.contracts import (
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
     parse_planner_structured_output,
 )
+from kriya.analyzer.graph import DependencyGraph
+from kriya.workflow.file_resolution import is_runnable_test_file
+from kriya.workflow.generation_manifest import FileRole, classify_file_role
 from kriya.control.decisions import (
     Decision,
     DecisionLedger,
@@ -724,8 +727,15 @@ def build_authoritative_planner_request(
     route_kind: Optional[ChangeKind] = None,
     extension_candidates: Optional[List[str]] = None,
     repository_candidates: Optional[List[str]] = None,
+    structural_evidence: str = "",
 ) -> str:
-    """Add enforce-only protocol constraints without changing the product goal."""
+    """Add enforce-only protocol constraints without changing the product goal.
+
+    structural_evidence (PRV-11, 2026-08-30 - see build_planning_structural_
+    evidence()'s own docstring): a compact block of REAL, grounded import/
+    call relationships among the bounded candidate set - never raw source
+    content, never a mandate. Empty string (the default) reproduces the
+    exact prior prompt, unchanged, for every caller that doesn't supply it."""
     route_guidance = ""
     if route_kind in {ChangeKind.ENHANCEMENT, ChangeKind.MILESTONE}:
         candidates = extension_candidates or []
@@ -798,7 +808,172 @@ def build_authoritative_planner_request(
         "logic that returns a result instead) - applies to any process-termination mechanism, no "
         "specific method name or file structure required.\n"
         + route_guidance
+        + (
+            "- Grounded structural evidence (real import/call relationships already discovered "
+            "among the repository candidates above - not a mandate, but every planned_files "
+            "selection and every requires/provides/depends_on edge must be consistent with it "
+            "where it names a relationship relevant to this change):\n"
+            f"{structural_evidence}\n"
+            if structural_evidence else ""
+        )
     )
+
+
+_JAVA_CONSTRUCTOR_INSTANTIATION_RE = re.compile(r"\bnew\s+(\w+)\s*\(")
+
+
+def build_planning_structural_evidence(
+    workspace_path: str, candidate_paths: List[str],
+) -> Tuple[str, Dict[str, List[str]]]:
+    """Bounded, grounded structural evidence for authoritative planning
+    (PRV-11, 2026-08-30) - the missing-wiring half of a live incident where
+    the Planner produced a plan connecting Customer -> CustomerService ->
+    CustomerControllerTest directly, omitting CustomerController.java (the
+    real intermediate consumer/producer) entirely: nothing available to
+    planning ever told it CustomerController.java existed in a load-bearing
+    relationship to the goal, only that a file by that name existed
+    somewhere among a hundred bare candidate paths (_authoritative_planner_
+    extension_candidates() is deliberately content-free).
+
+    Builds a PURELY EPHEMERAL, in-memory DependencyGraph (kriya/analyzer/
+    graph.py) scoped to ONLY the bounded candidate_paths already ranked for
+    this goal - never the persisted dependency_graph.db `kriya analyze`
+    owns (that command's own contract, and MA-era's "opt-in, explicit"
+    indexing convention, are both left completely untouched), never a
+    whole-repository walk. Derives two kinds of real, already-implemented
+    relations from kriya/analyzer/graph.py's own existing parser - never a
+    new graph, never raw source content:
+
+    1. imports: exact, regex-parsed `import` statements, resolved to an
+       owning candidate file via get_class_symbol_locations() (the same
+       simple-name index the duplicate-type Quality Gate already trusts).
+    2. calls: bare method-name invocations, resolved to an owning candidate
+       file ONLY when that method name is uniquely declared by exactly one
+       OTHER candidate in this bounded set - deliberately conservative
+       (ambiguous/duplicate method names resolve to nothing) to avoid a
+       false relationship in a small-candidate-set name collision. Needed
+       because Java same-package references (the common brownfield shape -
+       Customer/CustomerService/CustomerController/CustomerControllerTest
+       all in one package) never produce an `import` statement at all;
+       imports alone would see nothing between them.
+
+    Returns (evidence_text, resolved_edges) - resolved_edges maps each
+    candidate file to the OTHER candidate files it references, the single
+    source of truth BOTH the Planner-prompt text above AND find_missing_
+    grounded_production_artifacts() below are built from, so a prompt hint
+    and a validation error can never disagree about what the graph says."""
+    resolved: Dict[str, List[str]] = {}
+    graph = DependencyGraph(":memory:")
+    try:
+        indexed_paths: List[str] = []
+        contents: Dict[str, str] = {}
+        for rel_path in candidate_paths:
+            full_path = os.path.join(workspace_path, rel_path)
+            if not os.path.isfile(full_path):
+                continue
+            try:
+                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    content = fh.read()
+                mtime = os.path.getmtime(full_path)
+            except OSError:
+                continue
+            graph.index_file(rel_path, content, mtime)
+            indexed_paths.append(rel_path)
+            contents[rel_path] = content
+
+        class_locations = graph.get_class_symbol_locations()
+        method_owners: Dict[str, List[str]] = {}
+        for rel_path in indexed_paths:
+            for symbol_name in graph.get_symbols_for_file(rel_path):
+                method_owners.setdefault(symbol_name, [])
+                if rel_path not in method_owners[symbol_name]:
+                    method_owners[symbol_name].append(rel_path)
+
+        for rel_path in indexed_paths:
+            ext = os.path.splitext(rel_path)[1].lower()
+            targets: List[str] = []
+            for imp in graph.get_imports(rel_path):
+                simple = imp.rsplit(".", 1)[-1]
+                if simple == "*":
+                    continue
+                for owner in class_locations.get(f"{ext}:{simple}", []):
+                    if owner != rel_path and owner not in targets:
+                        targets.append(owner)
+            for callee in graph.get_callees(rel_path):
+                owners = method_owners.get(callee["target"], [])
+                unique_owners = [o for o in owners if o != rel_path]
+                if len(unique_owners) == 1 and unique_owners[0] not in targets:
+                    targets.append(unique_owners[0])
+            # Constructor instantiation ("new ClassName(") - deliberately a
+            # SEPARATE, narrow regex scan here, not a _parse_java()/"calls"
+            # relation (that regex requires a preceding "." and never
+            # matches "new X(" at all) and NOT resolved through method_
+            # owners (a class's own declared-method symbols can silently
+            # fail to extract at all when a return type has a multi-param
+            # generic containing a comma, e.g. "Map<String,Object>" -
+            # _parse_java()'s own JAVA_METHOD_SIGNATURE_CORE regex doesn't
+            # match that shape - found live tracing the exact PRV-11
+            # fixture's own CustomerController.details() signature; not
+            # touched here, a shared parser used elsewhere, out of this
+            # fix's scope). Resolved through class_locations instead - the
+            # SAME reliable class-name index imports already use, since
+            # class declarations don't have this gap. Close to universal in
+            # Java test conventions ("ClassUnderTest x = new ClassUnderTest()")
+            # and far more robust for "this test exercises that class" than
+            # depending on a single uniquely-named method resolving cleanly.
+            for class_name in _JAVA_CONSTRUCTOR_INSTANTIATION_RE.findall(contents.get(rel_path, "")):
+                for owner in class_locations.get(f"{ext}:{class_name}", []):
+                    if owner != rel_path and owner not in targets:
+                        targets.append(owner)
+            if targets:
+                resolved[rel_path] = sorted(targets)
+    finally:
+        graph.close()
+
+    lines = [
+        f"{source} references -> {target}"
+        for source, targets in sorted(resolved.items())
+        for target in targets
+    ]
+    return "\n".join(lines), resolved
+
+
+def find_missing_grounded_production_artifacts(
+    plan: EngineeringPlan, resolved_edges: Dict[str, List[str]],
+) -> List[Dict[str, str]]:
+    """Bounded plan-completeness check (PRV-11, 2026-08-30): a REAL,
+    grounded structural edge (see build_planning_structural_evidence's own
+    docstring - an import, or a uniquely-resolved method call) from a
+    goal-relevant TEST file to a PRODUCTION file that no subtask in the
+    approved plan owns is exactly the defect this session traced three
+    separate live times - the Planner correctly plans the producer and the
+    test but omits the intermediate consumer that actually connects them
+    (or invents an unrelated substitute test file instead of the real,
+    pre-existing one - scanning EVERY candidate test file this function
+    was given evidence for, not only currently-planned ones, catches that
+    shape too). Deliberately narrow: only fires on a REAL, already-indexed
+    structural edge - never "this file is probably related," never a
+    subtask-per-touched-file rule. A file already owned by any subtask, or
+    itself test/documentation, is never flagged."""
+    owned_paths = {pf.path for st in plan.subtasks for pf in st.planned_files}
+    gaps: List[Dict[str, str]] = []
+    seen = set()
+    for source, targets in resolved_edges.items():
+        if not is_runnable_test_file(source) and classify_file_role(source) is not FileRole.TEST:
+            continue
+        for target in targets:
+            if target in owned_paths:
+                continue
+            if is_runnable_test_file(target) or classify_file_role(target) in (
+                FileRole.TEST, FileRole.DOCUMENTATION,
+            ):
+                continue
+            key = (source, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            gaps.append({"test_file": source, "missing_production_artifact": target})
+    return gaps
 
 
 def build_approved_plan_document(
@@ -3076,11 +3251,24 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         planning_repository_candidates = _authoritative_planner_extension_candidates(
             workspace_path, goal=goal,
         )
+        # PRV-11 (2026-08-30): built ONCE, before any Planner call, from the
+        # SAME bounded candidate set - never recomputed per repair attempt
+        # (the candidate file set doesn't change across repair rounds, only
+        # the plan does). Feeds BOTH the Planner's own prompt (below) and
+        # find_missing_grounded_production_artifacts() (in the validation
+        # loop below) from the identical resolved_edges, so a prompt hint
+        # and a validation error can never disagree about what the graph
+        # says. See build_planning_structural_evidence's own docstring for
+        # the live incident this closes.
+        structural_evidence_text, structural_resolved_edges = build_planning_structural_evidence(
+            workspace_path, planning_repository_candidates,
+        )
         authoritative_planner_request = build_authoritative_planner_request(
             goal,
             route_kind=route.kind,
             extension_candidates=planning_repository_candidates,
             repository_candidates=planning_repository_candidates,
+            structural_evidence=structural_evidence_text,
         )
         planning_repository_evidence = bounded_repository_evidence(
             workspace_path, planning_repository_candidates,
@@ -3174,6 +3362,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             f"MODEL subtask(s) {unbounded_model_subtasks!r} declare no planned_files"
                         )
                         reason_codes.append("MODEL_SUBTASK_MISSING_PLANNED_FILES")
+
+                    # PRV-11 (2026-08-30): bounded plan-completeness check -
+                    # see find_missing_grounded_production_artifacts's own
+                    # docstring for the live incident. Uses the SAME
+                    # resolved_edges the Planner's own prompt was already
+                    # built from above - never recomputed, never a second,
+                    # possibly-disagreeing source of truth.
+                    missing_artifacts = find_missing_grounded_production_artifacts(
+                        plan, structural_resolved_edges,
+                    )
+                    if missing_artifacts:
+                        errors.append(
+                            "grounded structural evidence shows test file(s) referencing a "
+                            "production artifact no subtask owns: " + "; ".join(
+                                f"{gap['test_file']} references {gap['missing_production_artifact']}"
+                                for gap in missing_artifacts
+                            )
+                        )
+                        reason_codes.append("MISSING_GROUNDED_PRODUCTION_ARTIFACT")
 
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
