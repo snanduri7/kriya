@@ -1,7 +1,7 @@
 """Deterministic acceptance assertions above compiler/test exit codes."""
 
 import re
-from typing import TYPE_CHECKING, Optional
+from typing import Any, Dict, TYPE_CHECKING, Optional
 
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
 
@@ -173,3 +173,38 @@ def run_command_targets_missing_entrypoint(output: str) -> bool:
     when this fires, so the NEXT attempt re-infers a fresh command against
     the CURRENT file layout instead of repeating the same broken one."""
     return any(pattern.search(output or "") for pattern in _MISSING_ENTRYPOINT_PATTERNS)
+
+
+def runtime_verification_infrastructure_reason(result: Dict[str, Any]) -> Optional[str]:
+    """Identify a verifier launch failure before behavioral grading.
+
+    These signals describe Kriya's command/execution environment, not the
+    candidate's behavior. They must never be localized to an application
+    source file or sent to the Developer repair loop.
+    """
+    output = result.get("output") or ""
+    if run_command_targets_missing_entrypoint(output):
+        return "runtime command could not load its configured application entrypoint"
+    for step in result.get("steps") or []:
+        if step.get("exit_code") is None and not step.get("timed_out"):
+            return "runtime verification command could not be executed"
+    return None
+
+
+def runtime_application_step_started(result: Dict[str, Any]) -> bool:
+    """Whether a nonzero final application result is behavioral evidence.
+
+    Every setup command must have succeeded, the final process must have
+    launched and exited normally (rather than timing out), and its output
+    must not carry a known entrypoint/classpath launch failure. Only then may
+    semantic grading recognize an expected invalid-input rejection.
+    """
+    if runtime_verification_infrastructure_reason(result) is not None:
+        return False
+    steps = result.get("steps") or []
+    if not steps:
+        return False
+    if any(step.get("exit_code") != 0 or step.get("timed_out") for step in steps[:-1]):
+        return False
+    final = steps[-1]
+    return final.get("exit_code") is not None and not final.get("timed_out")

@@ -63,6 +63,7 @@ from kriya.workflow.workflow_controller import (
     build_planning_structural_evidence,
     find_missing_grounded_production_artifacts,
     build_recovery_execution_plan,
+    revise_plan_for_planned_prerequisite,
     build_subtask_constraint_context,
     build_subtask_goal_text,
     build_subtask_semantic_context,
@@ -891,14 +892,22 @@ def test_approved_plan_diagnostic_dumps_runtime_ownership_contract():
         "subtasks": [
             {
                 "id": "s3",
-                "planned_files": [{"path": "Controller.java", "action": "modify"}],
+                "planned_files": [{
+                    "path": "Controller.java", "action": "modify",
+                    "environment_requirements": [],
+                    "requires_capabilities": [],
+                }],
                 "depends_on": ["s2"],
                 "requires": ["service_cap"],
                 "provides": ["controller_cap"],
             },
             {
                 "id": "s4",
-                "planned_files": [{"path": "ControllerTest.java", "action": "modify"}],
+                "planned_files": [{
+                    "path": "ControllerTest.java", "action": "modify",
+                    "environment_requirements": [],
+                    "requires_capabilities": [],
+                }],
                 "depends_on": ["s3"],
                 "requires": ["controller_cap"],
                 "provides": [],
@@ -906,6 +915,38 @@ def test_approved_plan_diagnostic_dumps_runtime_ownership_contract():
         ],
     }
     assert approved_plan_diagnostic(plan, validation_errors=["invalid"]) is None
+
+
+def test_planned_prerequisite_revision_wires_owner_upstream_without_moving_ownership():
+    plan = EngineeringPlan(
+        plan_id="prerequisite", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s2", description="create framework-backed test",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="checks/behavior.spec", action=FileAction.CREATE,
+                )],
+            ),
+            Subtask(
+                id="s4", description="provide test tooling",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)],
+                provides=["test_tooling"],
+            ),
+        ],
+    )
+
+    revised = revise_plan_for_planned_prerequisite(
+        plan, consumer_subtask_id="s2", owner_subtask_id="s4",
+        capability="test_tooling", consumer_artifacts=["checks/behavior.spec"],
+    )
+
+    assert revised.subtask_by_id("s2").depends_on == ["s4"]
+    assert revised.subtask_by_id("s2").requires == ["test_tooling"]
+    assert revised.subtask_by_id("s2").planned_files[0].requires_capabilities == ["test_tooling"]
+    assert [pf.path for pf in revised.subtask_by_id("s4").planned_files] == ["build.config"]
+    assert plan.subtask_by_id("s2").depends_on == []
 
 
 def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():
@@ -945,6 +986,27 @@ def test_authoritative_planner_request_carries_testability_and_tooling_dag_guida
     assert "keep the process-terminating call separate from the" in request
     assert "System.exit" not in request  # generic across languages, not Java-specific
     assert "run()" not in request  # no required method name/shape
+
+
+def test_plan_repair_prompt_contains_exact_prerequisite_correction_tuple():
+    prompt = build_structured_plan_repair_prompt(
+        "Build app", "{}", ["missing prerequisite"],
+        ["PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s3",
+            "consumer_file": "src/test/java/AppTest.java",
+            "prerequisite_capability": "maven_test_dependencies",
+            "provider_subtask": "s2",
+            "provider_file": "pom.xml",
+            "missing_requires_edge": True,
+            "missing_depends_on_edge": True,
+        }],
+    )
+    assert "Consumer: subtask=s3 file=src/test/java/AppTest.java" in prompt
+    assert "Required planned capability: maven_test_dependencies" in prompt
+    assert "Provider: subtask=s2 file=pom.xml" in prompt
+    assert "add maven_test_dependencies to s3.requires" in prompt
+    assert "add s2 to s3.depends_on" in prompt
 
 
 def test_authoritative_planner_system_prompt_carries_testability_and_tooling_dag_guidance():
@@ -1985,22 +2047,34 @@ async def test_enforce_complete_plan_is_not_blocked_by_structural_completeness_c
         "plan_id": "complete",
         "subtasks": [
             {
-                "id": "s1", "planned_files": [{"path": _CUSTOMER_PATH, "action": "modify"}],
+                "id": "s1", "planned_files": [{
+                    "path": _CUSTOMER_PATH, "action": "modify",
+                    "environment_requirements": [], "requires_capabilities": [],
+                }],
                 "depends_on": [], "requires": [], "provides": [],
             },
             {
                 "id": "s2",
-                "planned_files": [{"path": _CUSTOMER_SERVICE_PATH, "action": "modify"}],
+                "planned_files": [{
+                    "path": _CUSTOMER_SERVICE_PATH, "action": "modify",
+                    "environment_requirements": [], "requires_capabilities": [],
+                }],
                 "depends_on": ["s1"], "requires": [], "provides": [],
             },
             {
                 "id": "s3",
-                "planned_files": [{"path": _CUSTOMER_CONTROLLER_PATH, "action": "modify"}],
+                "planned_files": [{
+                    "path": _CUSTOMER_CONTROLLER_PATH, "action": "modify",
+                    "environment_requirements": [], "requires_capabilities": [],
+                }],
                 "depends_on": ["s2"], "requires": [], "provides": ["controller_cap"],
             },
             {
                 "id": "s4",
-                "planned_files": [{"path": _CUSTOMER_CONTROLLER_TEST_PATH, "action": "modify"}],
+                "planned_files": [{
+                    "path": _CUSTOMER_CONTROLLER_TEST_PATH, "action": "modify",
+                    "environment_requirements": [], "requires_capabilities": [],
+                }],
                 "depends_on": ["s3"], "requires": ["controller_cap"], "provides": [],
             },
         ],

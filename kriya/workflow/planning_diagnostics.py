@@ -118,6 +118,8 @@ def approved_plan_diagnostic(
                     {
                         "path": planned_file.path,
                         "action": planned_file.action.value,
+                        "environment_requirements": list(planned_file.environment_requirements),
+                        "requires_capabilities": list(planned_file.requires_capabilities),
                     }
                     for planned_file in subtask.planned_files
                 ],

@@ -435,7 +435,8 @@ class PlannerAgent(BaseAgent):
             "subtasks, used for tooling, in ADDITION TO (never instead of) the Markdown plan above:\n"
             '{"global_invariants": [{"id": "gi1", "statement": "one concise goal-wide invariant"}], '
             '"subtasks": [{"id": "s1", "description": "...", "execution_method": "model", '
-            '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete"}], '
+            '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete", '
+            '"environment_requirements": ["..."], "requires_capabilities": ["..."]}], '
             '"provides": ["capability.stable.name"], "requires": [], '
             '"relevant_global_invariant_ids": ["gi1"], '
             '"acceptance_criteria_ids": ["ac1"]}], '
@@ -453,6 +454,13 @@ class PlannerAgent(BaseAgent):
             "or other output from another subtask MUST declare that producer in depends_on. Keep all "
             "semantic producer/consumer relationships explicit with stable provides/requires names; "
             "a requires entry MUST have exactly one provider and that provider MUST be in depends_on. "
+            "When a planned artifact uses tooling/framework capability supplied by another subtask, "
+            "put that provider's exact provides value in the artifact's requires_capabilities and "
+            "in the enclosing subtask's requires; leave requires_capabilities empty when no such "
+            "grounded prerequisite exists. "
+            "Put ambient runtimes and tools such as java, maven, python, node, and pytest in "
+            "environment_requirements instead; never put ambient tools in subtask "
+            "requires/provides. "
             "Derive concise global_invariants from the original request (runtime, platform, architecture, "
             "integration, entrypoint, and packaging constraints), each with a short stable id and a "
             "statement, and reference the relevant ones by id in each subtask's "
@@ -2298,9 +2306,9 @@ class RunVerifierAgent(BaseAgent):
             "\"Files Generated\" that the entrypoint actually depends on (not just the "
             "entrypoint file alone - a multi-file program needs every file it references "
             "compiled together in the SAME javac invocation, or compilation fails to find "
-            "them), then a second command [\"java\", \"<MainClassName>\"] naming the class that "
-            "has the public static void main method (the bare class name only, no path or "
-            ".java/.class extension).\n"
+            "them). Compile with -d to an isolated class-output directory, then run with java "
+            "-cp pointing at that same directory and the fully-qualified main class name "
+            "(including its declared package; never a source path or .java/.class extension).\n"
             "If there is no runnable, self-terminating "
             "entrypoint at all (a library, a config file, a long-running service, or the goal doesn't "
             "describe observable behavior), set should_run to false, run_commands to null, and "

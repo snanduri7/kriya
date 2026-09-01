@@ -45,6 +45,95 @@ async def test_valid_single_subtask_plan_passes(tmp_path):
     assert result.errors == []
 
 
+def _planned_prerequisite_plan(*, artifact_requires, consumer_requires, consumer_depends_on):
+    provider = _model_subtask(
+        id="s1", description="provide test tooling", provides=["test_tooling"],
+        planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)],
+    )
+    consumer = _model_subtask(
+        id="s2", description="create a framework-backed verification artifact",
+        depends_on=consumer_depends_on, requires=consumer_requires,
+        planned_files=[PlannedFile(
+            path="checks/behavior.spec", action=FileAction.CREATE,
+            requires_capabilities=artifact_requires,
+        )],
+    )
+    return _plan([consumer, provider])
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_correctly_upstream_passes(tmp_path):
+    plan = _planned_prerequisite_plan(
+        artifact_requires=["test_tooling"],
+        consumer_requires=["test_tooling"],
+        consumer_depends_on=["s1"],
+    )
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_not_declared_by_consumer_is_rejected(tmp_path):
+    plan = _planned_prerequisite_plan(
+        artifact_requires=["test_tooling"], consumer_requires=[], consumer_depends_on=["s1"],
+    )
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_provider_not_upstream_is_rejected(tmp_path):
+    plan = _planned_prerequisite_plan(
+        artifact_requires=["test_tooling"],
+        consumer_requires=["test_tooling"],
+        consumer_depends_on=[],
+    )
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert "SEMANTIC_DEPENDENCY_EDGE_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_ambient_java_and_maven_requirements_are_not_subtask_capabilities(tmp_path):
+    plan = _plan([_model_subtask(
+        planned_files=[PlannedFile(
+            path="src/App.java", action=FileAction.CREATE,
+            environment_requirements=["java", "maven"],
+        )],
+    )])
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+    assert "SUBTASK_REQUIREMENT_UNPROVIDED" not in result.reason_codes
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_maven_manifest_owner_is_resolved_into_structured_prerequisite_evidence(tmp_path):
+    provider = _model_subtask(
+        id="s1", provides=["maven_test_dependencies", "app_main_class", "app_test_class"],
+        planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+    )
+    consumer = _model_subtask(
+        id="s2", depends_on=[], requires=[],
+        planned_files=[PlannedFile(
+            path="src/test/AppTest.java", action=FileAction.CREATE,
+            environment_requirements=["java", "maven"],
+        )],
+    )
+    result = await validate_plan(_plan([provider, consumer]), workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert result.evidence == [{
+        "consumer_subtask": "s2",
+        "consumer_file": "src/test/AppTest.java",
+        "prerequisite_capability": "maven_test_dependencies",
+        "provider_subtask": "s1",
+        "provider_file": "pom.xml",
+        "missing_requires_edge": True,
+        "missing_depends_on_edge": True,
+    }]
+
+
 @pytest.mark.asyncio
 async def test_authoritative_validation_rejects_model_subtask_without_planned_files(tmp_path):
     plan = _plan([_model_subtask()])

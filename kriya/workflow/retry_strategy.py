@@ -653,6 +653,23 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                     "required_files": [],
                     "allowed_files": sorted(ctx.allowed_write_relpaths),
                 }
+        elif fail_type in (
+            "verification_strategy_incompatible",
+            "process_terminating_behavior_tested_in_process",
+        ):
+            attribution = AttributionResult(
+                tier="deterministic",
+                files=[
+                    path for path in failure.likely_files
+                    if is_runnable_test_file(path)
+                ],
+                confidence="high",
+                reasoning=(
+                    "Deterministic verification-safety evidence identified the test "
+                    "artifact whose in-process strategy is incompatible with required "
+                    "process termination; production behavior is not a repair target."
+                ),
+            )
         else:
             attribution = await attribute_failure(
                 failure,
@@ -791,9 +808,72 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         # that would actually fix it.
         missing_manifest = (
             _detect_missing_build_manifest(ctx.worktree_path, raw_error_context)
-            if fail_type == "compile" else None
+            if fail_type in ("compile", "test", "targeted_test", "regression_test") else None
         )
-        if missing_manifest:
+        planned_prerequisite_owner = None
+        if missing_manifest and ctx.structured_plan is not None and ctx.current_subtask_id:
+            owners = [
+                subtask.id
+                for subtask in ctx.structured_plan.subtasks
+                if any(pf.path == missing_manifest for pf in subtask.planned_files)
+            ]
+            if len(owners) == 1 and owners[0] != ctx.current_subtask_id:
+                planned_prerequisite_owner = owners[0]
+
+        if (
+            missing_manifest
+            and planned_prerequisite_owner
+            and missing_manifest not in set(ctx.allowed_write_relpaths)
+        ):
+            # PRV-12: the compiler has established a missing dependency and
+            # the approved plan already names its unique, different owner.
+            # Retrying the consumer cannot create that out-of-scope artifact.
+            # Surface directly through the existing PLAN_SCOPE_DEFECT
+            # controller transition; MA8 authorization remains unchanged.
+            reasoning = (
+                f"Deterministic compile evidence requires planned prerequisite artifact "
+                f"{missing_manifest!r}, owned by subtask {planned_prerequisite_owner!r}, "
+                f"outside consumer {ctx.current_subtask_id!r}'s authorized scope."
+            )
+            owner_subtask = ctx.structured_plan.subtask_by_id(planned_prerequisite_owner)
+            owner_capability = (
+                owner_subtask.provides[0]
+                if owner_subtask is not None and len(owner_subtask.provides) == 1
+                else None
+            )
+            consumer_artifacts = sorted(
+                path for path in failure.likely_files
+                if path in set(ctx.allowed_write_relpaths)
+            )
+            attribution_kind = FailureAttributionKind.PLAN_SCOPE_DEFECT
+            failure.attribution_kind = attribution_kind.value
+            failure.likely_files = [missing_manifest]
+            failure.attribution_tier = "authoritative_deterministic"
+            failure.attribution_confidence = "high"
+            failure.attribution_reasoning = reasoning
+            state.last_attribution = AttributionResult(
+                tier="authoritative_deterministic",
+                files=[missing_manifest],
+                confidence="high",
+                reasoning=reasoning,
+            )
+            state.plan_scope_conflict = {
+                "classification": FailureAttributionKind.PLAN_SCOPE_DEFECT.value,
+                "reason_code": "PLANNED_PREREQUISITE_OWNER_REQUIRED",
+                "failure_type": fail_type,
+                "reason": reasoning,
+                "required_files": [missing_manifest],
+                "allowed_files": sorted(ctx.allowed_write_relpaths),
+                "attribution_tier": "authoritative_deterministic",
+                "grounded_owner_files": [missing_manifest],
+                "required_owner_subtask_id": planned_prerequisite_owner,
+                "required_capability": owner_capability,
+                "consumer_artifacts": consumer_artifacts,
+                "raw_evidence": (failure.raw_output or "")[:2000],
+            }
+            state.last_missing_files = None
+            state.last_implicated_files = None
+        elif missing_manifest:
             state.last_missing_files = [missing_manifest]
             state.last_implicated_files = None
         else:

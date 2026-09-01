@@ -159,6 +159,53 @@ _SCOPED_SNAPSHOT_SENTINEL = ".kriya-scoped-snapshot"
 _SCOPED_SNAPSHOT_IGNORED = {".git", ".kriya"}
 
 
+def _bootstrap_greenfield_repository(workspace_path: str) -> None:
+    """Initialize a truly non-Git workspace before any model-originated write.
+
+    Nested workspaces never reach this helper: Git discovery succeeds for
+    them and create_git_worktree keeps using its scoped-snapshot boundary.
+    Command-local identity avoids mutating repository/global configuration.
+    Any failure propagates so sandboxed generation fails closed.
+    """
+    init_command = ["git", "init"]
+    _audit_git_write(init_command, workspace_path)
+    initialized = subprocess.run(
+        init_command, cwd=workspace_path, capture_output=True, text=True,
+    )
+    if initialized.returncode != 0:
+        raise RuntimeError(
+            f"greenfield Git initialization failed: {initialized.stderr.strip() or initialized.stdout.strip()}"
+        )
+
+    info_dir = os.path.join(workspace_path, ".git", "info")
+    os.makedirs(info_dir, exist_ok=True)
+    exclude_path = os.path.join(info_dir, "exclude")
+    existing_excludes = ""
+    try:
+        with open(exclude_path, "r", encoding="utf-8") as handle:
+            existing_excludes = handle.read()
+    except FileNotFoundError:
+        pass
+    if ".kriya/" not in existing_excludes.splitlines():
+        with open(exclude_path, "a", encoding="utf-8") as handle:
+            if existing_excludes and not existing_excludes.endswith("\n"):
+                handle.write("\n")
+            handle.write(".kriya/\n")
+
+    commit_command = [
+        "git", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
+        "commit", "--allow-empty", "-m", "Kriya: initial commit to enable isolation",
+    ]
+    _audit_git_write(commit_command, workspace_path)
+    committed = subprocess.run(
+        commit_command, cwd=workspace_path, capture_output=True, text=True,
+    )
+    if committed.returncode != 0:
+        raise RuntimeError(
+            f"greenfield Git bootstrap commit failed: {committed.stderr.strip() or committed.stdout.strip()}"
+        )
+
+
 def _resolved_git_toplevel(workspace_path: str) -> Optional[str]:
     """Return Git's owning worktree root for ``workspace_path``, if any."""
     try:
@@ -235,18 +282,14 @@ def create_git_worktree(repo_path: str) -> str:
         res = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo_path, capture_output=True, text=True)
         if res.returncode != 0:
             logger.info(
-                "Workspace '%s' is not a Git repository; using an isolated "
-                "workspace-scoped snapshot sandbox.", repo_path,
+                "Workspace '%s' is not a Git repository; initializing the "
+                "greenfield repository before creating its isolated worktree.", repo_path,
             )
-            return _create_scoped_snapshot_sandbox(os.path.realpath(repo_path))
+            _bootstrap_greenfield_repository(os.path.realpath(repo_path))
     except Exception as e:
         if not os.path.isdir(repo_path):
             raise ValueError(f"Workspace directory is unavailable: {e}") from e
-        logger.info(
-            "Git repository detection failed for '%s'; using an isolated "
-            "workspace-scoped snapshot sandbox: %s", repo_path, e,
-        )
-        return _create_scoped_snapshot_sandbox(os.path.realpath(repo_path))
+        raise RuntimeError(f"Git repository detection/bootstrap failed for {repo_path!r}: {e}") from e
 
     # `git rev-parse --is-inside-work-tree` is true for every ordinary
     # directory nested below a repository. That does not make the directory
@@ -279,7 +322,8 @@ def create_git_worktree(repo_path: str) -> str:
     if _resolve_repo_head(repo_path) is None:
         try:
             bootstrap_commit_command = [
-                "git", "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation",
+                "git", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
+                "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation",
             ]
             _audit_git_write(bootstrap_commit_command, repo_path)
             subprocess.run(

@@ -991,6 +991,22 @@ class PolymorphicValidator:
         any_timed_out = False
         last_returncode = None
         for i, command in enumerate(commands, 1):
+            # Raw Java runtime verification compiles into an isolated class
+            # root. javac requires the -d destination to exist; create only
+            # that explicitly named workspace-relative directory here rather
+            # than adding a shell-specific `mkdir` command to the portable
+            # argv sequence.
+            if command and os.path.basename(command[0]) == "javac" and "-d" in command:
+                destination_index = command.index("-d") + 1
+                if destination_index < len(command):
+                    destination = command[destination_index]
+                    if not os.path.isabs(destination):
+                        destination_path = os.path.abspath(
+                            os.path.join(self.workspace_path, destination)
+                        )
+                        workspace_root = os.path.abspath(self.workspace_path)
+                        if os.path.commonpath([workspace_root, destination_path]) == workspace_root:
+                            os.makedirs(destination_path, exist_ok=True)
             step_label = f"=== Step {i}/{len(commands)}: {' '.join(command)} ==="
             try:
                 res = self._run_cmd_with_timeout(

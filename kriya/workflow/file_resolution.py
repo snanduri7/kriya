@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1324,6 +1325,8 @@ def ground_java_entrypoint_in_no_build_file_projects(
     java_main_classes: Dict[str, str],
     jvm_module_flags: List[str],
     build_file_content: Optional[str],
+    *,
+    prefer_grounded_runtime: bool = False,
 ) -> Optional[List[List[str]]]:
     """Deterministically replaces RunVerifierAgent.judge()'s command-
     construction guess with a real compile+run sequence for a Java project
@@ -1356,7 +1359,10 @@ def ground_java_entrypoint_in_no_build_file_projects(
     degrade posture - never a wrong override:
     - build_file_content given (a real pom.xml exists - Maven already has
       full deterministic grounding via PolymorphicValidator + this module's
-      own exec:exec/exec:java/mainClass corrections; untouched).
+      own exec:exec/exec:java/mainClass corrections; untouched), unless the
+      caller explicitly sets prefer_grounded_runtime for a verification-only
+      subtask. That path already has grounded source/main-class evidence and
+      must not let an inferred build-plugin command outrank it.
     - command_source == "goal_explicit" - a goal-stated command is
       authoritative and must never be silently replaced.
     - len(java_main_classes) > 1 - a genuinely ambiguous case, e.g. a later
@@ -1391,7 +1397,10 @@ def ground_java_entrypoint_in_no_build_file_projects(
     unambiguous, refuse-to-run when provably nonexistent, only ever fall back
     to the model's own guess in the genuinely ambiguous middle (len > 1).
 
-    When it DOES activate: compiles every .java file in files_written
+    When it DOES activate: compiles every .java file in files_written;
+    verification-only build-file override excludes test-source trees and
+    recognized test files, whose framework dependencies do not belong on raw
+    javac's classpath,
     together (not just the entrypoint - a multi-file program needs its real
     dependencies compiled in the SAME javac invocation), preserves any CLI
     ARGUMENTS judge()'s own guess already appended after its (possibly
@@ -1402,7 +1411,7 @@ def ground_java_entrypoint_in_no_build_file_projects(
     between "java" and the class name on every invocation, since a flag a
     library's skill documents as mandatory is required regardless of which
     arguments follow it."""
-    if build_file_content or command_source == "goal_explicit":
+    if (build_file_content and not prefer_grounded_runtime) or command_source == "goal_explicit":
         return run_commands
     if len(java_main_classes) == 0:
         if any(cmd and cmd[0] == "java" for cmd in (run_commands or [])):
@@ -1416,9 +1425,39 @@ def ground_java_entrypoint_in_no_build_file_projects(
         # DID choose can still be QUALIFICATION-corrected deterministically:
         # see _correct_java_entrypoint_qualification()'s own docstring for
         # the real live bug this closes.
-        return _correct_java_entrypoint_qualification(run_commands, java_main_classes)
+        corrected = _correct_java_entrypoint_qualification(run_commands, java_main_classes)
+        runtime_classes_dir = ".kriya/runtime-verification/classes"
+        compile_files = sorted(f for f in files_written if f.endswith(".java"))
+        known_fqcns = set(java_main_classes.values())
+        invocations: List[List[str]] = []
+        for command in corrected or []:
+            if not command or command[0] != "java":
+                continue
+            for index, token in enumerate(command[1:], start=1):
+                if token in known_fqcns:
+                    invocations.append(
+                        ["java", "-cp", runtime_classes_dir]
+                        + jvm_module_flags + [token] + list(command[index + 1:])
+                    )
+                    break
+        if compile_files and invocations:
+            return [["javac", "-d", runtime_classes_dir] + compile_files] + invocations
+        return corrected
     entrypoint_class = next(iter(java_main_classes.values()))
-    compile_files = sorted(f for f in files_written if f.endswith(".java"))
+    def _verification_production_java_file(filepath: str) -> bool:
+        normalized = filepath.replace("\\", "/").lstrip("./")
+        return not (
+            normalized.startswith(("src/test/", "test/", "tests/"))
+            or "/src/test/" in normalized
+            or is_runnable_test_file(filepath)
+        )
+
+    compile_files = sorted(
+        f for f in files_written
+        if f.endswith(".java") and not (
+            prefer_grounded_runtime and not _verification_production_java_file(f)
+        )
+    )
     if not compile_files:
         return run_commands
 
@@ -1443,11 +1482,23 @@ def ground_java_entrypoint_in_no_build_file_projects(
                     extra_args = list(cmd[i + 1:])
                     break
             invocations.append(extra_args)
+        elif prefer_grounded_runtime and cmd and cmd[0] in ("mvn", "mvnw", "./mvnw"):
+            for token in cmd[1:]:
+                if token.startswith("-Dexec.args="):
+                    try:
+                        invocations.append(shlex.split(token.split("=", 1)[1]))
+                    except ValueError:
+                        # A malformed model-inferred argument string is not safe
+                        # evidence to reconstruct. The runtime contract can still
+                        # supply its grounded input below.
+                        pass
+                    break
     if not invocations:
         invocations = [[]]
 
-    return [["javac"] + compile_files] + [
-        ["java"] + jvm_module_flags + [entrypoint_class] + extra_args
+    runtime_classes_dir = ".kriya/runtime-verification/classes"
+    return [["javac", "-d", runtime_classes_dir] + compile_files] + [
+        ["java", "-cp", runtime_classes_dir] + jvm_module_flags + [entrypoint_class] + extra_args
         for extra_args in invocations
     ]
 

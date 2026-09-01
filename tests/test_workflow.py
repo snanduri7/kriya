@@ -30,6 +30,7 @@ from kriya.workflow.attempt import (
     _directly_executable_verifiers,
     _goal_spec_evidence_fingerprint,
     _goal_spec_requirement_obligation_id,
+    _initial_test_process_boundary_constraint,
     _materialize_candidate_content,
     _operation_map,
     _process_boundary_obligation_id,
@@ -38,6 +39,7 @@ from kriya.workflow.attempt import (
     _required_runtime_verification_missing_message,
     _run_coordinated_repair_generation,
     _extract_requirement_identifier_tokens,
+    find_in_process_terminating_test_invocations,
     _run_verification_basis_hash,
     _spec_requirements_contradicting_authority,
     _spec_requirements_naming_planner_only_identifiers,
@@ -2667,6 +2669,149 @@ async def test_run_attempt_application_runtime_verification_only_never_calls_dev
     assert ctx.write_scope_mode == WriteScopeMode.DENY_ALL
 
 
+def test_verification_only_java_grounding_outranks_inferred_maven_exec():
+    """A build descriptor must not force verification-only runtime through
+    an LLM-selected plugin when Kriya has an unambiguous packaged main."""
+    commands = ground_java_entrypoint_in_no_build_file_projects(
+        [["mvn", "-e", "exec:java", "-Dexec.mainClass=com.example.App", "-Dexec.args=21"]],
+        "inferred",
+        ["pom.xml", "src/main/java/com/example/App.java", "src/test/java/com/example/AppTest.java"],
+        {"src/main/java/com/example/App.java": "com.example.App"},
+        [],
+        "<project/>",
+        prefer_grounded_runtime=True,
+    )
+
+    assert commands == [
+        ["javac", "-d", ".kriya/runtime-verification/classes", "src/main/java/com/example/App.java"],
+        ["java", "-cp", ".kriya/runtime-verification/classes", "com.example.App", "21"],
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("argument", "returncode", "output", "expected_pass"),
+    [
+        ("21", 0, "RESULT=42", True),
+        ("invalid", 1, "INVALID_INPUT", True),
+    ],
+)
+async def test_verification_only_packaged_java_uses_grounded_runtime_and_launches_application(
+    tmp_path, argument, returncode, output, expected_pass,
+):
+    source = tmp_path / "src/main/java/com/example/App.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "package com.example;\n"
+        "public class App {\n"
+        "  public static void main(String[] args) {}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    test_source = tmp_path / "src/test/java/com/example/AppTest.java"
+    test_source.parent.mkdir(parents=True)
+    test_source.write_text("package com.example; class AppTest {}", encoding="utf-8")
+    (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("verification infrastructure must not invoke Developer repair"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[
+            "mvn", "-e", "exec:java", "-Dexec.mainClass=com.example.App",
+            f"-Dexec.args={argument}",
+        ]],
+        "command_source": "inferred", "input_channel": "argv",
+        "success_criteria": "valid input prints RESULT=42; invalid input prints INVALID_INPUT and exits nonzero",
+    })
+    run_verifier.grade = AsyncMock(return_value={
+        "passed": expected_pass, "reasoning": "observed required application behavior", "likely_files": [],
+    })
+    ctx = _runtime_verifier_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        established_files=[
+            "pom.xml", "src/main/java/com/example/App.java", "src/test/java/com/example/AppTest.java",
+        ],
+    )
+    captured = {}
+
+    def fake_run_app_sequence(commands, timeout=90, stdin_payload=None):
+        captured["commands"] = commands
+        return {
+            "success": returncode == 0, "timed_out": False, "returncode": returncode,
+            "output": output,
+            "steps": [
+                {"command": commands[0], "exit_code": 0, "timed_out": False},
+                {"command": commands[1], "exit_code": returncode, "timed_out": False},
+            ],
+        }
+
+    state = GenerationState()
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence", side_effect=fake_run_app_sequence,
+    ):
+        await run_attempt(state, ctx)
+
+    assert captured["commands"] == [
+        ["javac", "-d", ".kriya/runtime-verification/classes", "src/main/java/com/example/App.java"],
+        ["java", "-cp", ".kriya/runtime-verification/classes", "com.example.App", argument],
+    ]
+    assert not developer.run_generation.called
+    assert any(o["type"] == "run_verification" and o["success"] for o in state.gate_outcomes)
+
+
+@pytest.mark.asyncio
+async def test_verification_only_java_entrypoint_launch_failure_remains_infrastructure(tmp_path):
+    source = tmp_path / "src/main/java/com/example/App.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "package com.example;\npublic class App {\n"
+        "  public static void main(String[] args) {}\n}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("entrypoint launch failure must not enter product repair"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["mvn", "exec:java", "-Dexec.mainClass=com.example.App", "-Dexec.args=21"]],
+        "command_source": "inferred", "input_channel": "argv",
+        "success_criteria": "prints RESULT=42",
+    })
+    run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("infrastructure failure must not be semantically graded"),
+    )
+    ctx = _runtime_verifier_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        established_files=["pom.xml", "src/main/java/com/example/App.java"],
+    )
+    state = GenerationState()
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={
+            "success": False, "timed_out": False, "returncode": 1,
+            "output": "Error: Could not find or load main class com.example.App\nClassNotFoundException: com.example.App",
+            "steps": [
+                {"command": ["javac"], "exit_code": 0, "timed_out": False},
+                {"command": ["java"], "exit_code": 1, "timed_out": False},
+            ],
+        },
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
+    assert not developer.run_generation.called
+    run_verifier.grade.assert_not_awaited()
+
+
 def test_apply_runtime_verification_contract_shapes():
     """Runtime Verification Contract (PRV-06, 2026-08-29) - pure-function
     coverage of every recognized/unrecognized invocation shape, mirrors the
@@ -2687,6 +2832,15 @@ def test_apply_runtime_verification_contract_shapes():
         assert cmds == [[interpreter, target, _RUNTIME_VERIFICATION_SYNTHETIC_INPUT]]
         assert reason is None
 
+    cmds, stdin, reason = _apply_runtime_verification_contract(
+        [["java", "-cp", ".kriya/runtime-verification/classes", "com.example.App"]], "argv",
+    )
+    assert cmds == [[
+        "java", "-cp", ".kriya/runtime-verification/classes", "com.example.App",
+        _RUNTIME_VERIFICATION_SYNTHETIC_INPUT,
+    ]]
+    assert stdin is None and reason is None
+
     # Already supplied - never double-inject.
     cmds, stdin, reason = _apply_runtime_verification_contract(
         [["mvn", "exec:java", "-Dexec.mainClass=X", "-Dexec.args=already"]], "argv",
@@ -2694,6 +2848,16 @@ def test_apply_runtime_verification_contract_shapes():
     assert cmds == [["mvn", "exec:java", "-Dexec.mainClass=X", "-Dexec.args=already"]]
     cmds, stdin, reason = _apply_runtime_verification_contract([["python", "app.py", "already"]], "argv")
     assert cmds == [["python", "app.py", "already"]]
+
+    # Build/test commands are not application-runtime commands. The existing
+    # deterministic command classifier makes the argv contract inapplicable.
+    for build_or_test in (
+        ["mvn", "test"], ["mvn", "package"], ["gradle", "test"],
+        ["pytest"], ["npm", "test"],
+    ):
+        cmds, stdin, reason = _apply_runtime_verification_contract([build_or_test], "argv")
+        assert cmds == [build_or_test]
+        assert stdin is None and reason is None
 
     # exec:exec (and any other mvn/gradle shape) - never guessed at, a bare
     # trailing token there is parsed as a lifecycle phase, not an argument.
@@ -2718,6 +2882,237 @@ def test_apply_runtime_verification_contract_shapes():
     )
     assert cmds[0] == ["javac", "App.java"]
     assert cmds[1] == ["java", "App", _RUNTIME_VERIFICATION_SYNTHETIC_INPUT]
+
+
+@pytest.mark.asyncio
+async def test_initial_test_developer_prompt_receives_nonzero_process_boundary_constraint(tmp_path):
+    """The prevention guidance must reach attempt one's actual Developer
+    request, before an incompatible in-process test can be generated."""
+    captured = {}
+
+    async def capture_generation(state, ctx, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("captured initial Developer prompt")
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        architect_files=["src/test/java/com/example/AppTest.java"],
+        expected_files_upfront=["src/test/java/com/example/AppTest.java"],
+        architect_basename_to_path={"AppTest.java": "src/test/java/com/example/AppTest.java"},
+        required_verification=[{
+            "type": "judgment", "description": "Invalid input launches the application and exits non-zero.",
+            "tool_name": None, "verifier_kind": "application_runtime",
+            "requires_runtime_execution": True,
+        }],
+    )
+    state = GenerationState()
+
+    with patch("kriya.workflow.attempt._run_developer_generation", side_effect=capture_generation):
+        with pytest.raises(RuntimeError, match="captured initial Developer prompt"):
+            await run_attempt(state, ctx)
+
+    prompt = captured["task_description"]
+    assert "must not invoke a process-terminating application path" in prompt
+    assert "Do not use SecurityManager or System.setSecurityManager" in prompt
+    assert "Preserve the required System.exit behavior" in prompt
+    assert "child process" in prompt and "application_runtime" in prompt
+    assert "do not invent additional product behavior" in prompt
+    assert "overflow handling" in prompt
+
+
+def test_initial_process_boundary_constraint_requires_explicit_runtime_semantics():
+    requirement = [{
+        "description": "Verify RESULT=42.", "verifier_kind": "application_runtime",
+        "requires_runtime_execution": True,
+    }]
+    assert _initial_test_process_boundary_constraint(requirement, ["AppTest.java"]) == ""
+    requirement[0]["description"] = "Invalid input must return a nonzero process exit."
+    assert "SecurityManager" in _initial_test_process_boundary_constraint(requirement, ["AppTest.java"])
+    assert _initial_test_process_boundary_constraint(requirement, ["App.java"]) == ""
+
+
+def _terminating_runtime_requirement():
+    return [{
+        "description": "Invalid input must launch the application and exit non-zero.",
+        "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+    }]
+
+
+@pytest.mark.parametrize(
+    ("source", "rejected"),
+    [
+        (
+            "class MainTest {\n void validInput() { Main.main(new String[]{\"21\"}); }\n}",
+            False,
+        ),
+        (
+            "class MainTest {\n void invalidInput() { Main.main(new String[]{\"invalid\"}); }\n}",
+            True,
+        ),
+        (
+            "class MainTest {\n void invalidInput() throws Exception { "
+            "new ProcessBuilder(\"java\", \"Main\", \"invalid\").start(); }\n}",
+            False,
+        ),
+        (
+            "class MainTest {\n void invalidInput() { System.setSecurityManager(null); "
+            "Main.main(new String[]{\"invalid\"}); }\n}",
+            True,
+        ),
+    ],
+)
+def test_process_terminating_test_candidate_detection(tmp_path, source, rejected):
+    test_path = "src/test/java/MainTest.java"
+    (tmp_path / test_path).parent.mkdir(parents=True)
+    (tmp_path / test_path).write_text(source, encoding="utf-8")
+
+    findings = find_in_process_terminating_test_invocations(
+        _terminating_runtime_requirement(), str(tmp_path), [test_path], ["Main"],
+    )
+
+    assert bool(findings) is rejected
+    if rejected:
+        assert findings[0]["test_file"] == test_path
+        assert findings[0]["test_method"] == "invalidInput"
+
+
+@pytest.mark.asyncio
+async def test_unsafe_process_terminating_test_is_rejected_before_test_runner_and_targets_test_only(tmp_path):
+    app_path = "src/main/java/Main.java"
+    test_path = "src/test/java/MainTest.java"
+    (tmp_path / app_path).parent.mkdir(parents=True)
+    (tmp_path / app_path).write_text(
+        "public class Main {\n  public static void main(String[] args) {}\n}\n",
+        encoding="utf-8",
+    )
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": test_path,
+        "content": (
+            "public class MainTest {\n"
+            "  void invalidInput() { Main.main(new String[]{\"invalid\"}); }\n"
+            "}\n"
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[test_path], expected_files_upfront=[test_path],
+        architect_basename_to_path={"MainTest.java": test_path},
+        established_files=[app_path], allowed_write_relpaths=[test_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+        required_verification=_terminating_runtime_requirement(),
+    )
+    state = GenerationState()
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled"},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        side_effect=AssertionError("unsafe candidate must be rejected before the test runner"),
+    ) as run_tests:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    failure = exc_info.value.failure
+    assert failure.type == "process_terminating_behavior_tested_in_process"
+    assert failure.diagnostics["reason_code"] == "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS"
+    assert failure.likely_files == [test_path]
+    assert app_path not in failure.likely_files
+    assert "Repair the TEST only" in failure.message
+    run_tests.assert_not_called()
+
+    should_break = await handle_attempt_failure(state, ctx, exc_info.value)
+    assert should_break is False
+    assert state.last_implicated_files == [test_path]
+    assert state.plan_scope_conflict is None
+
+
+@pytest.mark.asyncio
+async def test_prv12_production_candidate_path_uses_relevant_process_boundary_invariant_before_surefire(tmp_path):
+    """Production-path regression for the real bypass: s3 owns only a test
+    verifier while the nonzero fact is available through its relevant gi2.
+    The safety gate must consume that approved-plan fact before run_tests."""
+    app_path = "src/main/java/App.java"
+    test_path = "src/test/java/AppTest.java"
+    (tmp_path / app_path).parent.mkdir(parents=True)
+    (tmp_path / app_path).write_text(
+        "public class App {\n  public static void main(String[] args) {}\n}\n",
+        encoding="utf-8",
+    )
+    plan = EngineeringPlan.model_validate({
+        "plan_id": "prv12-production-path", "kind": "milestone",
+        "global_invariants": [{
+            "id": "gi2",
+            "statement": "Invalid input must result in a non-zero exit status with a clear error message.",
+        }],
+        "subtasks": [
+            {
+                "id": "s1", "description": "Create App", "execution_method": "model",
+                "planned_files": [{"path": app_path, "action": "create"}],
+                "provides": ["app_main_class"],
+            },
+            {
+                "id": "s3", "description": "Create App tests", "execution_method": "model",
+                "depends_on": ["s1"],
+                "planned_files": [{"path": test_path, "action": "create"}],
+                "requires": ["app_main_class"], "relevant_global_invariant_ids": ["gi2"],
+                "verification": [{
+                    "type": "tool", "tool_name": "test", "verifier_kind": "test",
+                    "requires_runtime_execution": False,
+                    "description": "Run unit tests for valid and invalid inputs.",
+                }],
+            },
+            {
+                "id": "s5", "description": "Verify invalid input exits non-zero",
+                "execution_method": "model", "execution_role": "verification",
+                "depends_on": ["s1"], "planned_files": [], "requires": ["app_main_class"],
+                "relevant_global_invariant_ids": ["gi2"],
+                "verification": [{
+                    "type": "tool", "tool_name": "compile", "verifier_kind": "compile",
+                    "requires_runtime_execution": False,
+                    "description": "Execute invalid input and verify exit status is non-zero.",
+                }],
+            },
+        ],
+    })
+    s3_verification = [item.model_dump(mode="json") for item in plan.subtask_by_id("s3").verification]
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": test_path,
+        "content": (
+            "public class AppTest {\n"
+            "  void testInvalidInputNotANumber() {\n"
+            "    String[] args = {\"not-a-number\"};\n"
+            "    App.main(args);\n"
+            "  }\n"
+            "}\n"
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[test_path], expected_files_upfront=[test_path],
+        architect_basename_to_path={"AppTest.java": test_path},
+        established_files=[app_path], allowed_write_relpaths=[test_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s3",
+        required_verification=s3_verification,
+    )
+    state = GenerationState()
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled"},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        side_effect=AssertionError("Maven/Surefire must not execute before process-boundary safety"),
+    ) as run_tests:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS" in exc_info.value.failure.message
+    assert exc_info.value.failure.likely_files == [test_path]
+    run_tests.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -6715,20 +7110,10 @@ async def test_semantic_grade_cannot_override_failed_required_sequence_step(tmp_
 
 
 @pytest.mark.asyncio
-async def test_workflow_self_correction_resolves_run_verification_infrastructure_failure(tmp_path):
-    """End-to-end regression test for the real live incident, 2026-08-22
-    (ignite_qpid_protocol milestone 3/4): a Maven project's sourceDirectory
-    didn't cover its actual .java files, so `mvn clean compile` silently
-    "succeeded" on zero source files and the real failure only surfaced at
-    runtime as "Could not find or load main class App" - a plain nonzero
-    exit, no hang. Confirms the WIDENED self-correction loop (2026-08-22,
-    kriya/workflow/self_correction.py) can resolve this generic
-    infrastructure-shaped run-verification failure and that attempt.py
-    correctly re-runs the real application afterward to confirm - the
-    general mechanism this session's architecture pivot exists for,
-    independent of the specific deterministic
-    ensure_maven_covers_nonconventional_java_files() fix built the same
-    day."""
+async def test_workflow_missing_runtime_entrypoint_stops_without_source_repair(tmp_path):
+    """A verifier command that cannot load its configured main class is
+    infrastructure failure: stop before grading, self-correction, or another
+    Developer generation attempt."""
     cfg = AppConfig()
     cfg.autonomy.self_correction_loop_enabled = True
     cfg.autonomy.mode = "guardrails"
@@ -6795,14 +7180,11 @@ async def test_workflow_self_correction_resolves_run_verification_infrastructure
             goal="Start an embedded Ignite node and verify", workspace_path=str(tmp_path),
         )
 
-    assert res["quality_gates_passed"] is True
-    mock_self_correction.assert_called_once()
-    assert mock_self_correction.call_args.kwargs["failure_type"] == "run_verification"
-    assert we.run_verifier.grade.call_count == 2
-    # Pillar 3: a resolved self-correction (with neither a fallback-model
-    # escalation nor 2+ full-set retries - this resolved within attempt 1)
-    # must still trigger lesson extraction on its own.
-    assert llm.complete.call_count == 4
+    assert res["quality_gates_passed"] is False
+    assert we.developer.run_generation.await_count == 1
+    mock_self_correction.assert_not_awaited()
+    we.run_verifier.grade.assert_not_awaited()
+    assert res["environment_failure"].startswith("VERIFICATION_INFRASTRUCTURE_FAILURE")
 
 
 def test_progress_gate_stops_failure_family_churn_without_content_change():
@@ -7709,8 +8091,8 @@ async def test_run_attempt_deterministically_corrects_java_entrypoint_end_to_end
         await run_attempt(state, ctx)
 
     assert captured_commands["commands"] == [
-        ["javac", "App.java", "Protocol.java", "ProtocolParser.java"],
-        ["java", "--add-opens=java.base/java.lang=ALL-UNNAMED", "App"],
+        ["javac", "-d", ".kriya/runtime-verification/classes", "App.java", "Protocol.java", "ProtocolParser.java"],
+        ["java", "-cp", ".kriya/runtime-verification/classes", "--add-opens=java.base/java.lang=ALL-UNNAMED", "App"],
     ]
 
 
@@ -7775,8 +8157,8 @@ def test_ground_java_entrypoint_qualifies_bare_class_name_when_ambiguous_between
         build_file_content=None,
     )
     assert result == [
-        ["javac", "Protocol.java", "ProtocolMain.java"],
-        ["java", "com.example.protocol.ProtocolMain"],
+        ["javac", "-d", ".kriya/runtime-verification/classes", "Protocol.java", "ProtocolMain.java"],
+        ["java", "-cp", ".kriya/runtime-verification/classes", "com.example.protocol.ProtocolMain"],
     ]
 
 
@@ -7799,8 +8181,8 @@ def test_ground_java_entrypoint_leaves_program_arguments_after_class_name_untouc
         build_file_content=None,
     )
     assert result == [
-        ["javac", "Protocol.java", "ProtocolMain.java"],
-        ["java", "com.example.protocol.ProtocolMain", "Protocol"],
+        ["javac", "-d", ".kriya/runtime-verification/classes", "Protocol.java", "ProtocolMain.java"],
+        ["java", "-cp", ".kriya/runtime-verification/classes", "com.example.protocol.ProtocolMain", "Protocol"],
     ]
 
 
@@ -9643,6 +10025,55 @@ async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure
     assert "[Grader reasoning]" in run_verification_outcome["output"]
     assert "crashed instead of printing hi" in run_verification_outcome["output"]
 
+
+@pytest.mark.asyncio
+async def test_run_attempt_accepts_expected_nonzero_only_after_application_started(tmp_path):
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py", "content": "raise SystemExit(2)\n",
+    }])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["python3", "app.py", "invalid"]],
+        "command_source": "inferred",
+        "success_criteria": "Invalid input is rejected with INVALID_INPUT and a nonzero exit.",
+    })
+    run_verifier.grade = AsyncMock(return_value={
+        "passed": True,
+        "reasoning": "The application emitted INVALID_INPUT and rejected the input as required.",
+        "likely_files": [],
+    })
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        architect_files=["app.py"], expected_files_upfront=["app.py"],
+    )
+    run_result = {
+        "success": False, "timed_out": False, "returncode": 2,
+        "output": "INVALID_INPUT",
+        "steps": [{
+            "command": ["python3", "app.py", "invalid"], "exit_code": 2,
+            "stdout": "", "stderr": "INVALID_INPUT", "timed_out": False,
+        }],
+    }
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled fine"},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value=run_result,
+    ):
+        await run_attempt(state, ctx)
+
+    outcome = next(g for g in state.gate_outcomes if g["type"] == "run_verification")
+    assert outcome["success"] is True
+    assert "INVALID_INPUT" in outcome["output"]
+
 @pytest.mark.asyncio
 async def test_handle_attempt_failure_increments_retry_count_and_continues(tmp_path):
     """The Slice 3 payoff: retry-decision logic (budget accounting, the
@@ -9665,6 +10096,38 @@ async def test_handle_attempt_failure_increments_retry_count_and_continues(tmp_p
     assert state.environment_failure is None
     assert state.gate_outcomes[-1]["type"] == "compile"
     assert state.gate_outcomes[-1]["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_incompatible_process_boundary_test_never_authorizes_product_repair(tmp_path):
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        architect_files=["src/main/java/com/example/App.java", "src/test/java/com/example/AppTest.java"],
+        allowed_write_relpaths=["src/test/java/com/example/AppTest.java"],
+    )
+    failure = Failure(
+        type="verification_strategy_incompatible",
+        message="VERIFICATION_STRATEGY_INCOMPATIBLE: Surefire was terminated by System.exit",
+        raw_output="Crashed tests:\n[ERROR] com.example.AppTest",
+        likely_files=["src/test/java/com/example/AppTest.java"],
+        diagnostics={
+            "reason_code": "VERIFICATION_STRATEGY_INCOMPATIBLE",
+            "crashed_test_artifacts": ["src/test/java/com/example/AppTest.java"],
+        },
+    )
+
+    should_break = await handle_attempt_failure(
+        state, ctx, QualityGateFailure(failure),
+    )
+
+    assert should_break is False
+    assert state.last_attribution.files == ["src/test/java/com/example/AppTest.java"]
+    assert state.last_attribution.confidence == "high"
+    assert state.last_failure.attribution_kind == "TEST_DEFECT"
+    assert state.plan_scope_conflict is None
 
 @pytest.mark.asyncio
 async def test_handle_attempt_failure_stops_immediately_on_environment_failure(tmp_path):
@@ -9743,6 +10206,55 @@ async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_auth
     assert state.plan_scope_conflict["attribution_tier"] == "judge"
     assert state.plan_scope_conflict["grounded_owner_files"] == []
     assert state.plan_scope_conflict["reason"]
+
+
+@pytest.mark.asyncio
+async def test_missing_planned_prerequisite_outside_scope_immediately_routes_to_plan_scope_defect(tmp_path):
+    """A compiler-grounded missing prerequisite owned by another planned
+    stage exits to controller recovery without an ordinary consumer retry."""
+    provider = Subtask(
+        id="s4", description="provide test tooling", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+        provides=["junit_tooling"],
+    )
+    consumer = Subtask(
+        id="s2", description="create framework-backed test", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="src/test/java/AppTest.java", action=FileAction.CREATE)],
+        depends_on=["s1"],
+    )
+    source = Subtask(
+        id="s1", description="create app", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="src/main/java/App.java", action=FileAction.CREATE)],
+    )
+    plan = EngineeringPlan(plan_id="prv12", kind=ChangeKind.TASK, subtasks=[source, consumer, provider])
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        architect_files=["src/test/java/AppTest.java"],
+        allowed_write_relpaths=["src/test/java/AppTest.java"],
+        structured_plan=plan,
+        current_subtask_id="s2",
+    )
+    failure = Failure(
+        type="compile",
+        message="Java compilation failed: package org.junit.jupiter.api does not exist",
+        raw_output="AppTest.java:1: error: package org.junit.jupiter.api does not exist",
+        likely_files=["src/test/java/AppTest.java"],
+    )
+
+    should_break = await handle_attempt_failure(state, ctx, QualityGateFailure(failure))
+
+    assert should_break is True
+    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_DEFECT"
+    assert state.plan_scope_conflict["reason_code"] == "PLANNED_PREREQUISITE_OWNER_REQUIRED"
+    assert state.plan_scope_conflict["required_files"] == ["pom.xml"]
+    assert state.plan_scope_conflict["required_owner_subtask_id"] == "s4"
+    assert state.plan_scope_conflict["required_capability"] == "junit_tooling"
+    assert state.plan_scope_conflict["consumer_artifacts"] == ["src/test/java/AppTest.java"]
+    assert state.last_missing_files is None
+    assert state.budgets.retry_count == 0
 
 
 @pytest.mark.asyncio
@@ -10733,21 +11245,9 @@ async def test_workflow_run_verification_judgment_cached_across_retry_attempts(t
 
 
 @pytest.mark.asyncio
-async def test_workflow_run_verification_judgment_reinferred_after_missing_entrypoint(tmp_path):
-    """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
-    milestone 2/4): the caching fix above is correct for the common case (the
-    judgment doesn't change between retries) but wrong once the inferred
-    command's own target stops existing - RunVerifierAgent.judge() inferred a
-    test class that was never generated, and that broken judgment stayed
-    cached for the rest of the run (SME review finding #8, already documented
-    as NOT YET FIXED), unchanged even after a later attempt changed the file
-    layout specifically to try to satisfy it - 6 attempts straight, identical
-    failure, budget exhausted. Confirms the fix: a "missing entrypoint" shaped
-    failure (kriya/workflow/acceptance.py's run_command_targets_missing_
-    entrypoint()) must invalidate state.cached_run_verification_judgment, so
-    judge() is called AGAIN on the next attempt - the mirror image of the
-    "called exactly once" test above, proving re-invocation happens when, and
-    only when, it's actually warranted."""
+async def test_workflow_missing_entrypoint_stops_as_verification_infrastructure(tmp_path):
+    """A missing verifier target is not candidate evidence. Stop once without
+    grading it or sending unchanged application source back to Developer."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
@@ -10760,11 +11260,8 @@ async def test_workflow_run_verification_judgment_reinferred_after_missing_entry
     ])
 
     we = WorkflowEngine(kernel, llm)
-    # Developer mocked directly (not via raw completions) so this test doesn't
-    # need to predict exactly which retry mode (targeted vs full-set) the
-    # attribution ladder picks for an unlocatable "module not found" failure -
-    # the content itself doesn't matter here, only that runtime verification
-    # runs twice and judge() gets called again for the second attempt.
+    # Developer is mocked directly so the test can prove verifier failure does
+    # not cause a second source-generation attempt.
     we.developer.run_generation = AsyncMock(
         return_value=[{"filepath": "app.py", "content": "print('[SUCCESS] it worked')\n"}]
     )
@@ -10774,31 +11271,25 @@ async def test_workflow_run_verification_judgment_reinferred_after_missing_entry
         "command_source": "goal_explicit",
         "success_criteria": "Output contains [SUCCESS]",
     })
-    we.run_verifier.grade = AsyncMock(side_effect=[
-        {"passed": False, "reasoning": "The run command's target module doesn't exist."},
-        {"passed": True, "reasoning": "Output contains the expected [SUCCESS] line."},
-    ])
+    we.run_verifier.grade = AsyncMock()
 
     with patch(
         "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
-        side_effect=[
-            {
-                "success": False, "timed_out": False, "returncode": 1,
-                "output": "ModuleNotFoundError: No module named 'nonexistent_entrypoint'",
-            },
-            {
-                "success": True, "timed_out": False, "returncode": 0,
-                "output": "[SUCCESS] it worked",
-            },
-        ],
+        return_value={
+            "success": False, "timed_out": False, "returncode": 1,
+            "output": "ModuleNotFoundError: No module named 'nonexistent_entrypoint'",
+        },
     ):
         res = await we.run_generation_workflow(
             goal="Run with python app.py; it should print [SUCCESS]",
             workspace_path=str(tmp_path),
         )
 
-    assert res["quality_gates_passed"] is True
-    assert we.run_verifier.judge.call_count == 2
+    assert res["quality_gates_passed"] is False
+    assert we.run_verifier.judge.call_count == 1
+    we.run_verifier.grade.assert_not_awaited()
+    assert we.developer.run_generation.await_count == 1
+    assert res["environment_failure"].startswith("VERIFICATION_INFRASTRUCTURE_FAILURE")
 
 
 @pytest.mark.asyncio
@@ -14284,38 +14775,26 @@ async def test_workflow_applies_java_home_override_to_maven_subprocess(tmp_path)
     ])
     with patch(
         "kriya.workflow.attempt._resolve_java_home_override", return_value="/opt/jdk-17",
-    ), patch("subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("BUILD SUCCESS", "")
-        mock_popen.return_value = mock_process
+    ), patch("kriya.tools.validate.ProcessController.run") as mock_run:
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {
+            "returncode": 0, "stdout": "BUILD SUCCESS", "stderr": "",
+            "timed_out": False,
+        }
+        mock_run.return_value = mock_result
         res = await we.run_generation_workflow(
             goal="Create a Java app using Maven, targeting Java 17", workspace_path=str(tmp_path)
         )
 
     assert res["quality_gates_passed"] is True
-    # subprocess.Popen is patched process-wide, so this also catches several
-    # OTHER real internal subprocess calls beyond the one this test actually
-    # cares about: create_git_worktree()'s own git commands (why the worktree
-    # gracefully falls back to workspace_path in this test's log output - its
-    # real output never matches this mock's generic response, a known-fine
-    # degrade-not-crash path), and check_java_toolchain()'s own unmocked
-    # `subprocess.run(["mvn", "-version"], ...)` preflight check (which never
-    # explicitly passes env=, unlike _run_cmd_with_timeout's real compile-check
-    # call, so it has no "env" key in its kwargs at all - filtering on cmd[0]
-    # == "mvn" alone isn't enough to land on the right call), and (2026-08-16,
-    # PolymorphicValidator.run_pom_validate()) an earlier "mvn validate"
-    # pre-check that ALSO goes through _run_cmd_with_timeout (so it ALSO has
-    # "env" in its kwargs) but deliberately does NOT apply java_home_override -
-    # that check never invokes javac, so it doesn't need the goal-specific JDK
-    # targeting real compilation does (see that method's own docstring). Filter
-    # to specifically the REAL compile invocation, not just "any mvn call that
-    # passed env=".
+    # Capture the validator's command-controller boundary, not process-wide
+    # Popen (which would also intercept Git and asyncio child management).
+    # Filter to the real compile invocation rather than the earlier validate.
     mvn_calls = [
-        c for c in mock_popen.call_args_list
-        if c.args and c.args[0] and c.args[0][0] == "mvn" and "env" in c.kwargs and "compile" in c.args[0]
+        c for c in mock_run.call_args_list
+        if c.args and c.args[0] and c.args[0][0] == "mvn" and "compile" in c.args[0]
     ]
-    assert mvn_calls, mock_popen.call_args_list
+    assert mvn_calls, mock_run.call_args_list
     _, kwargs = mvn_calls[0]
     assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
 
@@ -17905,6 +18384,85 @@ def test_create_git_worktree_scopes_nested_workspace_without_enclosing_repo_mark
 
     remove_git_worktree(str(nested_workspace), worktree_path)
     assert not os.path.exists(worktree_path)
+
+
+def test_create_git_worktree_bootstraps_true_greenfield_before_isolation(tmp_path):
+    from kriya.workflow.workflow import create_git_worktree, remove_git_worktree
+
+    assert not (tmp_path / ".git").exists()
+    worktree_path = create_git_worktree(str(tmp_path))
+
+    assert (tmp_path / ".git").is_dir()
+    assert os.path.realpath(worktree_path) != os.path.realpath(tmp_path)
+    assert subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"], cwd=tmp_path,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip() == "true"
+    assert subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"], cwd=tmp_path,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip() == "1"
+    assert ".kriya/" in (tmp_path / ".git" / "info" / "exclude").read_text().splitlines()
+
+    # A failed/unaccepted candidate remains sandbox-only. Bootstrap existence
+    # is not mistaken for successful application state.
+    candidate = os.path.join(worktree_path, "rejected.py")
+    with open(candidate, "w", encoding="utf-8") as handle:
+        handle.write("raise RuntimeError('rejected')\n")
+    remove_git_worktree(str(tmp_path), worktree_path)
+    assert not (tmp_path / "rejected.py").exists()
+    tree = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=tmp_path,
+        capture_output=True, text=True, check=True,
+    )
+    assert tree.stdout.strip() == ""
+
+
+def test_greenfield_bootstrap_failure_fails_closed_before_candidate_writes(tmp_path):
+    from kriya.workflow.workflow import create_git_worktree
+
+    with patch("kriya.workflow.worktree.subprocess.run", side_effect=[
+        MagicMock(returncode=128, stdout="", stderr="not a repository"),
+        MagicMock(returncode=1, stdout="", stderr="git init denied"),
+    ]):
+        with pytest.raises(RuntimeError, match="Git repository detection/bootstrap failed"):
+            create_git_worktree(str(tmp_path))
+
+    assert not (tmp_path / ".git").exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_successful_greenfield_workflow_retains_generated_files_and_git_repository(tmp_path):
+    assert not (tmp_path / ".git").exists()
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        'Design.\n```json\n{"files": ["app.py"]}\n```',
+        "Review: Approved",
+    ])
+    workflow = WorkflowEngine(kernel, llm)
+    workflow.developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py", "content": "print('greenfield')\n",
+    }])
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        result = await workflow.run_generation_workflow(
+            goal="Create app.py", workspace_path=str(tmp_path),
+        )
+
+    assert result["quality_gates_passed"] is True
+    assert (tmp_path / ".git").is_dir()
+    assert (tmp_path / "app.py").read_text() == "print('greenfield')\n"
 
 
 def test_create_git_worktree_carries_over_a_wholly_untracked_directory(tmp_path):

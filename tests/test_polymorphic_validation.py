@@ -1,8 +1,11 @@
 import os
+import shutil
 import subprocess
 import sys
 import time
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from kriya.config import AppConfig
 from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies, get_pom_own_coordinate
@@ -10,6 +13,11 @@ from kriya.workflow.verification_authority import (
     deterministic_sequence_kind,
     deterministic_verification_kind,
 )
+from kriya.workflow.acceptance import (
+    runtime_application_step_started,
+    runtime_verification_infrastructure_reason,
+)
+from kriya.workflow.file_resolution import ground_java_entrypoint_in_no_build_file_projects
 
 
 def test_polymorphic_stack_detection(tmp_path):
@@ -286,6 +294,60 @@ def test_run_app_sequence_multi_step_success(tmp_path):
     assert "Task 1" in res["output"]
     assert "Step 1/2" in res["output"]
     assert "Step 2/2" in res["output"]
+
+
+def test_packaged_raw_java_runtime_uses_isolated_classes_and_distinguishes_invalid_input(tmp_path):
+    if not shutil.which("javac") or not shutil.which("java"):
+        pytest.skip("JDK is not available")
+    source = tmp_path / "src/main/java/com/example/App.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "package com.example;\n"
+        "public class App {\n"
+        "  public static void main(String[] args) {\n"
+        "    try { int value = Integer.parseInt(args[0]); "
+        "System.out.println(\"RESULT=\" + (value * 2)); }\n"
+        "    catch (Exception e) { System.err.println(\"INVALID_INPUT\"); System.exit(2); }\n"
+        "  }\n"
+        "}\n"
+    )
+    commands = ground_java_entrypoint_in_no_build_file_projects(
+        run_commands=[["java", "App", "21"], ["java", "App", "bad"]],
+        command_source="inferred",
+        files_written=["src/main/java/com/example/App.java"],
+        java_main_classes={"src/main/java/com/example/App.java": "com.example.App"},
+        jvm_module_flags=[], build_file_content=None,
+    )
+
+    result = PolymorphicValidator(str(tmp_path)).run_app_sequence(commands, timeout=10)
+
+    assert commands == [
+        ["javac", "-d", ".kriya/runtime-verification/classes", "src/main/java/com/example/App.java"],
+        ["java", "-cp", ".kriya/runtime-verification/classes", "com.example.App", "21"],
+        ["java", "-cp", ".kriya/runtime-verification/classes", "com.example.App", "bad"],
+    ]
+    assert result["steps"][0]["exit_code"] == 0
+    assert result["steps"][1]["exit_code"] == 0
+    assert "RESULT=42" in result["steps"][1]["stdout"]
+    assert result["steps"][2]["exit_code"] == 2
+    assert "INVALID_INPUT" in result["steps"][2]["stderr"]
+    assert runtime_verification_infrastructure_reason(result) is None
+    assert runtime_application_step_started(result) is True
+
+
+def test_jvm_launch_failure_is_not_valid_invalid_input_evidence():
+    result = {
+        "success": False, "timed_out": False, "returncode": 1,
+        "output": "Error: Could not find or load main class com.example.App",
+        "steps": [{
+            "command": ["java", "-cp", "missing", "com.example.App", "bad"],
+            "exit_code": 1, "stdout": "",
+            "stderr": "Could not find or load main class com.example.App",
+            "timed_out": False,
+        }],
+    }
+    assert runtime_verification_infrastructure_reason(result) is not None
+    assert runtime_application_step_started(result) is False
 
 def test_run_app_sequence_continues_after_step_failure_and_reports_it(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
