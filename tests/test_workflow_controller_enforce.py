@@ -568,6 +568,36 @@ def test_subtask_semantic_context_projects_invariants_upstream_and_downstream_co
     assert '"runtime_execution_required": true' in consumer_context
 
 
+def test_test_subtask_context_assigns_process_evidence_only_to_runtime_owner():
+    tests = Subtask(
+        id="tests", description="write safe unit tests", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="src/test/java/AppTest.java", action=FileAction.CREATE)],
+        provides=["tests.ready"],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.TOOL, tool_name="test",
+            verifier_kind=VerifierKind.TEST, description="run ordinary unit tests",
+        )],
+    )
+    runtime = Subtask(
+        id="runtime", description="verify process behavior", execution_method=ExecutionMethod.MODEL,
+        execution_role=ExecutionRole.VERIFICATION, planned_files=[],
+        depends_on=["tests"], requires=["tests.ready"],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.JUDGMENT,
+            verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+            requires_runtime_execution=True,
+            description="observe application stdout and exit status",
+        )],
+    )
+    plan = EngineeringPlan(plan_id="runtime-owner", kind=ChangeKind.TASK, subtasks=[tests, runtime])
+
+    context = build_subtask_semantic_context(plan, tests)
+
+    assert '"application_runtime_owners": [\n    "runtime"\n  ]' in context
+    assert "unit-test artifacts do not own process-exit" in context
+    assert "owned exclusively by the declared application_runtime verifier" in context
+
+
 def test_plan_repair_prompt_is_json_only_and_gives_exact_unscoped_check_correction():
     prompt = build_structured_plan_repair_prompt(
         "build the requested application",

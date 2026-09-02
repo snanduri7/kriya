@@ -74,6 +74,7 @@ def classify_failure_attribution(type_: str, message: str = "") -> FailureAttrib
         # production behavior is not implicated by this classification.
         "verification_strategy_incompatible",
         "process_terminating_behavior_tested_in_process",
+        "test_verification_infrastructure_failure",
         # PRV-06 (2026-08-28): a process/fork-termination failure still needs
         # the SAME repair-owner routing as an ordinary test failure (the
         # existing scope-widening/PLAN_SCOPE_DEFECT path already reaches a

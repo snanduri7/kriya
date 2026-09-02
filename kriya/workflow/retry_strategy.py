@@ -656,6 +656,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         elif fail_type in (
             "verification_strategy_incompatible",
             "process_terminating_behavior_tested_in_process",
+            "test_verification_infrastructure_failure",
         ):
             attribution = AttributionResult(
                 tier="deterministic",

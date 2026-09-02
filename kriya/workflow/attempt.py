@@ -43,7 +43,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -994,6 +994,108 @@ def _enclosing_test_method(source: str, offset: int) -> Optional[str]:
     return matches[-1].group(1) if matches else None
 
 
+def _enclosing_test_method_source(source: str, offset: int) -> str:
+    """Return the enclosing Java-like method body using bounded brace matching.
+
+    This is deliberately a small source-shape helper, not a Java parser.  It is
+    used only to resolve a local argv variable feeding a grounded main(...) call.
+    """
+    prefix = source[:offset]
+    matches = list(re.finditer(
+        r"(?m)^\s*(?:public\s+|protected\s+|private\s+)?(?:static\s+)?"
+        r"(?:void|[A-Za-z_$][\w.$<>\[\], ?]*)\s+[A-Za-z_$][\w$]*\s*\([^;{}]*\)\s*\{",
+        prefix,
+    ))
+    if not matches:
+        return source
+    start = matches[-1].start()
+    open_brace = source.find("{", matches[-1].start(), offset + 1)
+    if open_brace < 0:
+        return source[start:]
+    depth = 0
+    for index in range(open_brace, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:index + 1]
+    return source[start:]
+
+
+def _resolve_java_main_argv_expression(method_source: str, call_expression: str) -> str:
+    """Resolve a direct main(...) argument or a simple local String[] variable.
+
+    Generated tests commonly use:
+      String[] value = {"not-a-number"};
+      App.main(value);
+    The old gate inspected the method name, so this neutral-name form escaped.
+    Resolve the local initializer instead; unresolved expressions remain as-is.
+    """
+    expression = call_expression.strip()
+    if not re.fullmatch(r"[A-Za-z_$][\w$]*", expression):
+        return expression
+    variable = re.escape(expression)
+    assignments = list(re.finditer(
+        rf"(?:String\s*\[\s*\]|String\s+\[\s*\])\s*{variable}\s*=\s*"
+        r"(?P<value>new\s+String\s*\[\s*\]\s*\{[^;]*\}|\{[^;]*\})\s*;",
+        method_source,
+        re.DOTALL,
+    ))
+    return assignments[-1].group("value").strip() if assignments else expression
+
+
+def _runtime_contract_expects_numeric_input(
+    required_verification: List[Dict[str, Any]],
+) -> bool:
+    """Whether authoritative runtime text explicitly identifies numeric input."""
+    for requirement in required_verification:
+        runtime_verifier = (
+            requirement.get("verifier_kind") == "application_runtime"
+            and requirement.get("requires_runtime_execution") is True
+        )
+        relevant_global_invariant = (
+            requirement.get("process_boundary_authority") == "relevant_global_invariant"
+        )
+        if not (runtime_verifier or relevant_global_invariant):
+            continue
+        description = str(requirement.get("description") or "").lower()
+        if re.search(r"\b(?:integer|numeric|number)\b", description):
+            return True
+    return False
+
+
+def _terminating_case_from_argv_expression(
+    cases: List[str], argv_expression: str, *, numeric_input: bool,
+) -> Optional[str]:
+    """Classify only from the actual argv expression, never the test method name."""
+    compact = re.sub(r"\s+", "", argv_expression)
+    if "missing" in cases and (
+        re.fullmatch(r"newString\[0\]", compact)
+        or re.fullmatch(r"newString\[\]\{\}", compact)
+        or re.fullmatch(r"\{\}", compact)
+    ):
+        return "missing input"
+
+    string_literals = re.findall(r'"((?:\\.|[^"\\])*)"', argv_expression)
+    if "invalid" in cases and string_literals:
+        lowered_literals = [literal.lower() for literal in string_literals]
+        if any(
+            marker in literal
+            for literal in lowered_literals
+            for marker in ("invalid", "malformed", "not-a-number", "not_a_number", "nonnumeric", "non-numeric")
+        ):
+            return "invalid input"
+        if numeric_input:
+            for literal in string_literals:
+                try:
+                    int(literal, 10)
+                except ValueError:
+                    return "invalid input"
+    return None
+
+
 def find_in_process_terminating_test_invocations(
     required_verification: List[Dict[str, Any]],
     worktree_path: str,
@@ -1017,8 +1119,9 @@ def find_in_process_terminating_test_invocations(
     }, key=len, reverse=True)
     call_re = re.compile(
         r"\b(?:" + "|".join(re.escape(name) for name in entrypoint_names)
-        + r")\s*\.\s*main\s*\([^;\n]*\)",
+        + r")\s*\.\s*main\s*\((?P<argv>[^;\n]*)\)",
     )
+    numeric_input = _runtime_contract_expects_numeric_input(required_verification)
     findings: List[Dict[str, Any]] = []
     for filepath in sorted(test_files):
         full_path = os.path.join(worktree_path, filepath)
@@ -1029,18 +1132,13 @@ def find_in_process_terminating_test_invocations(
             continue
         for match in call_re.finditer(source):
             method = _enclosing_test_method(source, match.start())
-            evidence = f"{method or ''} {match.group(0)}".lower()
-            matched_case = None
-            if "invalid" in cases and any(
-                marker in evidence for marker in ("invalid", "malformed", "nonnumeric", "non-numeric")
-            ):
-                matched_case = "invalid input"
-            elif "missing" in cases and (
-                any(marker in evidence for marker in ("missing", "noinput", "no_input"))
-                or re.search(r"new\s+String\s*\[\s*0\s*\]", match.group(0))
-                or re.search(r"new\s+String\s*\[\s*\]\s*\{\s*\}", match.group(0))
-            ):
-                matched_case = "missing input"
+            method_source = _enclosing_test_method_source(source, match.start())
+            argv_expression = _resolve_java_main_argv_expression(
+                method_source, match.group("argv"),
+            )
+            matched_case = _terminating_case_from_argv_expression(
+                cases, argv_expression, numeric_input=numeric_input,
+            )
             if matched_case is None:
                 continue
             findings.append({
@@ -1097,6 +1195,109 @@ def _raise_unsafe_process_boundary_test_candidate(
             "findings": findings,
         },
         attempt=state.attempt_number,
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def find_ungrounded_java_child_process_tests(
+    required_verification: List[Dict[str, Any]],
+    worktree_path: str,
+    test_files: List[str],
+    java_main_classes: Dict[str, str],
+    known_files: List[str],
+) -> List[Dict[str, Any]]:
+    """Find invented Java child launch mechanics for a process-exit contract.
+
+    This does not duplicate the in-process safety gate above: that gate decides
+    whether a test crossed a process boundary at all.  This check verifies that
+    an elected boundary uses the entrypoint and classpath Kriya can ground.
+    """
+    if not _required_process_terminating_cases(required_verification):
+        return []
+    if len(java_main_classes) != 1:
+        return []
+    entrypoint = next(iter(java_main_classes.values()))
+    simple_name = entrypoint.rsplit(".", 1)[-1]
+    if "pom.xml" in known_files:
+        classes_dir = "target/classes"
+    elif any(path.endswith(("build.gradle", "build.gradle.kts")) for path in known_files):
+        classes_dir = "build/classes/java/main"
+    else:
+        classes_dir = ".kriya/runtime-verification/classes"
+    expected = build_grounded_java_launch_command(entrypoint, ["<args>"], classes_dir)
+    findings: List[Dict[str, Any]] = []
+    for filepath in sorted(test_files):
+        try:
+            with open(
+                os.path.join(worktree_path, filepath),
+                encoding="utf-8", errors="replace",
+            ) as handle:
+                source = handle.read()
+        except OSError:
+            continue
+        if "ProcessBuilder" not in source or ".start()" not in source:
+            continue
+        mentions_entrypoint = (
+            f'"{entrypoint}"' in source or f'"{simple_name}"' in source
+        )
+        reasons = []
+        if not mentions_entrypoint:
+            reasons.append(f"does not launch grounded main class {entrypoint}")
+        if 'System.getProperty("java.class.path")' in source:
+            reasons.append("reuses the test-runner/Surefire classpath")
+        if classes_dir not in source:
+            reasons.append(f"does not use grounded application classpath {classes_dir}")
+        if "waitFor()" not in source:
+            reasons.append("does not capture the child exit code")
+        if "getInputStream()" not in source and "getErrorStream()" not in source:
+            reasons.append("does not capture child stdout/stderr")
+        if reasons:
+            findings.append({
+                "test_file": filepath,
+                "reasons": reasons,
+                "entrypoint": entrypoint,
+                "classes_dir": classes_dir,
+                "expected_command": expected,
+            })
+    return findings
+
+
+def _raise_ungrounded_child_process_test_candidate(
+    state: GenerationState, ctx: "AttemptContext", test_files: List[str],
+) -> None:
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    java_files = [path for path in known_files if path.endswith(".java")]
+    findings = find_ungrounded_java_child_process_tests(
+        _runtime_contract_requirements(ctx), ctx.worktree_path, test_files,
+        _build_java_main_class_map(java_files, ctx), known_files,
+    )
+    if not findings:
+        return
+    offending = sorted({item["test_file"] for item in findings})
+    details = "\n".join(
+        f"- {item['test_file']}: " + "; ".join(item["reasons"])
+        for item in findings
+    )
+    exemplar = findings[0]
+    message = (
+        "VERIFICATION_INFRASTRUCTURE_FAILURE: generated child-process verification "
+        "does not use Kriya's grounded application launch.\n" + details
+        + "\nRepair the TEST/verification mechanism only; preserve application behavior. "
+        f"Use main class {exemplar['entrypoint']} with classpath "
+        f"{exemplar['classes_dir']}, launch a distinct child, wait for it, and capture "
+        "stdout/stderr/exit code. A child launch/setup failure is not evidence against "
+        "the application source."
+    )
+    failure = Failure(
+        type="test_verification_infrastructure_failure",
+        message=message, raw_output=message,
+        likely_files=offending, attempt=state.attempt_number,
+        diagnostics={
+            "reason_code": "UNGROUNDED_CHILD_PROCESS_LAUNCH",
+            "grounded_entrypoint": exemplar["entrypoint"],
+            "grounded_classpath": exemplar["classes_dir"],
+        },
     )
     state.gate_outcomes.append(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
@@ -4592,6 +4793,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         accepted_test_output: Optional[str] = None
         runnable_test_files = find_runnable_test_files(state.all_files_written)
         _raise_unsafe_process_boundary_test_candidate(
+            state, ctx, runnable_test_files,
+        )
+        _raise_ungrounded_child_process_test_candidate(
             state, ctx, runnable_test_files,
         )
         target_test = extract_target_test(state.error_context, list(state.all_files_written))

@@ -36,10 +36,13 @@ from kriya.workflow.attempt import (
     _process_boundary_obligation_id,
     _record_process_boundary_obligation,
     _record_self_correction_scope_conflict,
+    _required_process_terminating_cases,
     _required_runtime_verification_missing_message,
+    _runtime_contract_requirements,
     _run_coordinated_repair_generation,
     _extract_requirement_identifier_tokens,
     find_in_process_terminating_test_invocations,
+    find_ungrounded_java_child_process_tests,
     _run_verification_basis_hash,
     _spec_requirements_contradicting_authority,
     _spec_requirements_naming_planner_only_identifiers,
@@ -2976,6 +2979,122 @@ def test_process_terminating_test_candidate_detection(tmp_path, source, rejected
         assert findings[0]["test_method"] == "invalidInput"
 
 
+def test_grounded_child_process_launch_captures_application_result(tmp_path):
+    test_path = "src/test/java/com/example/AppTest.java"
+    (tmp_path / test_path).parent.mkdir(parents=True)
+    (tmp_path / test_path).write_text(
+        'class AppTest { void invalidInput() throws Exception {\n'
+        ' Process p = new ProcessBuilder("java", "-cp", "target/classes", '
+        '"com.example.App", "invalid").start();\n'
+        ' int exit = p.waitFor();\n'
+        ' String stdout = new String(p.getInputStream().readAllBytes());\n'
+        ' String stderr = new String(p.getErrorStream().readAllBytes());\n'
+        ' assert exit == 1;\n'
+        '} }',
+        encoding="utf-8",
+    )
+    findings = find_ungrounded_java_child_process_tests(
+        _terminating_runtime_requirement(), str(tmp_path), [test_path],
+        {"src/main/java/com/example/App.java": "com.example.App"},
+        ["pom.xml", "src/main/java/com/example/App.java", test_path],
+    )
+    assert findings == []
+
+
+def test_surefire_booter_classpath_is_not_a_grounded_child_application_launch(tmp_path):
+    test_path = "src/test/java/com/example/AppTest.java"
+    (tmp_path / test_path).parent.mkdir(parents=True)
+    (tmp_path / test_path).write_text(
+        'class AppTest { void invalidInput() throws Exception {\n'
+        ' Process p = new ProcessBuilder("java", "-cp", '
+        'System.getProperty("java.class.path"), "com.example.App", "abc").start();\n'
+        ' int exit = p.waitFor(); String stderr = '
+        'new String(p.getErrorStream().readAllBytes());\n'
+        '} }',
+        encoding="utf-8",
+    )
+    findings = find_ungrounded_java_child_process_tests(
+        _terminating_runtime_requirement(), str(tmp_path), [test_path],
+        {"src/main/java/com/example/App.java": "com.example.App"},
+        ["pom.xml", "src/main/java/com/example/App.java", test_path],
+    )
+    assert len(findings) == 1
+    assert "reuses the test-runner/Surefire classpath" in findings[0]["reasons"]
+
+
+@pytest.mark.asyncio
+async def test_ungrounded_child_launch_is_rejected_before_surefire_and_targets_test(tmp_path):
+    app_path = "src/main/java/com/example/App.java"
+    test_path = "src/test/java/com/example/AppTest.java"
+    (tmp_path / app_path).parent.mkdir(parents=True)
+    (tmp_path / app_path).write_text(
+        "package com.example;\npublic class App {\n"
+        "  public static void main(String[] args) {}\n}\n",
+        encoding="utf-8",
+    )
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": test_path,
+        "content": (
+            'package com.example; class AppTest { void invalidInput() throws Exception {'
+            ' Process p = new ProcessBuilder("java", "-cp", '
+            'System.getProperty("java.class.path"), "com.example.App", "abc").start();'
+            ' int exit = p.waitFor(); String err = new String(p.getErrorStream().readAllBytes());'
+            '} }'
+        ),
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[test_path], expected_files_upfront=[test_path],
+        architect_basename_to_path={"AppTest.java": test_path},
+        established_files=["pom.xml", app_path], allowed_write_relpaths=[test_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+        required_verification=_terminating_runtime_requirement(),
+    )
+    state = GenerationState()
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled"},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        side_effect=AssertionError("Surefire must not run for an ungrounded child launcher"),
+    ) as run_tests:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    failure = exc_info.value.failure
+    assert failure.type == "test_verification_infrastructure_failure"
+    assert failure.diagnostics["reason_code"] == "UNGROUNDED_CHILD_PROCESS_LAUNCH"
+    assert failure.likely_files == [test_path]
+    assert app_path not in failure.likely_files
+    run_tests.assert_not_called()
+
+    assert await handle_attempt_failure(state, ctx, exc_info.value) is False
+    assert state.last_implicated_files == [test_path]
+
+
+def test_process_boundary_detection_uses_resolved_argv_not_test_method_name(tmp_path):
+    test_path = "src/test/java/MainTest.java"
+    (tmp_path / test_path).parent.mkdir(parents=True)
+    (tmp_path / test_path).write_text(
+        "class MainTest {\n"
+        " void rejectsBadArgument() {\n"
+        "   String[] value = {\"not-a-number\"};\n"
+        "   Main.main(value);\n"
+        " }\n"
+        "}",
+        encoding="utf-8",
+    )
+
+    findings = find_in_process_terminating_test_invocations(
+        _terminating_runtime_requirement(), str(tmp_path), [test_path], ["Main"],
+    )
+
+    assert len(findings) == 1
+    assert findings[0]["test_method"] == "rejectsBadArgument"
+    assert findings[0]["terminating_case"] == "invalid input"
+
+
 @pytest.mark.asyncio
 async def test_unsafe_process_terminating_test_is_rejected_before_test_runner_and_targets_test_only(tmp_path):
     app_path = "src/main/java/Main.java"
@@ -3082,9 +3201,9 @@ async def test_prv12_production_candidate_path_uses_relevant_process_boundary_in
         "filepath": test_path,
         "content": (
             "public class AppTest {\n"
-            "  void testInvalidInputNotANumber() {\n"
-            "    String[] args = {\"not-a-number\"};\n"
-            "    App.main(args);\n"
+            "  void rejectsBadArgument() {\n"
+            "    String[] value = {\"not-a-number\"};\n"
+            "    App.main(value);\n"
             "  }\n"
             "}\n"
         ),
@@ -3112,6 +3231,176 @@ async def test_prv12_production_candidate_path_uses_relevant_process_boundary_in
 
     assert "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS" in exc_info.value.failure.message
     assert exc_info.value.failure.likely_files == [test_path]
+    run_tests.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prv12_share10_s1_candidate_uses_authoritative_goal_before_surefire(tmp_path):
+    """Exact initial AppTest shape from PRV-12-share(10).
+
+    The approved plan lost the invalid-input exit requirement from gi1 and
+    gave s1 only compile verification.  The original request must therefore
+    remain available to the existing pre-test process-boundary detector.
+    """
+    app_path = "src/main/java/com/example/App.java"
+    test_path = "src/test/java/com/example/AppTest.java"
+    (tmp_path / app_path).parent.mkdir(parents=True)
+    (tmp_path / app_path).write_text(
+        "package com.example;\npublic class App {\n"
+        " public static void main(String[] args) { System.exit(1); }\n}\n",
+        encoding="utf-8",
+    )
+    app_test = """package com.example;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+
+public class AppTest {
+    @Test
+    public void testValidInput() {
+        ByteArrayOutputStream outContent = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        System.setOut(new PrintStream(outContent));
+        try {
+            String[] args = {"21"};
+            App.main(args);
+            assertEquals("RESULT=42\\n", outContent.toString());
+        } finally {
+            System.setOut(originalOut);
+        }
+    }
+
+    @Test
+    public void testInvalidInput() {
+        ByteArrayOutputStream errContent = new ByteArrayOutputStream();
+        PrintStream originalErr = System.err;
+        System.setErr(new PrintStream(errContent));
+        try {
+            String[] args = {"abc"};
+            App.main(args);
+            assertTrue(errContent.toString().contains("Error: Input must be a valid integer"));
+        } finally {
+            System.setErr(originalErr);
+        }
+    }
+
+    @Test
+    public void testNoInput() {
+        ByteArrayOutputStream errContent = new ByteArrayOutputStream();
+        PrintStream originalErr = System.err;
+        System.setErr(new PrintStream(errContent));
+        try {
+            String[] args = {};
+            App.main(args);
+            assertTrue(errContent.toString().contains("Usage: java -jar <jar-file> <integer>"));
+        } finally {
+            System.setErr(originalErr);
+        }
+    }
+
+    @Test
+    public void testMultipleInput() {
+        ByteArrayOutputStream errContent = new ByteArrayOutputStream();
+        PrintStream originalErr = System.err;
+        System.setErr(new PrintStream(errContent));
+        try {
+            String[] args = {"1", "2"};
+            App.main(args);
+            assertTrue(errContent.toString().contains("Usage: java -jar <jar-file> <integer>"));
+        } finally {
+            System.setErr(originalErr);
+        }
+    }
+}
+"""
+    compile_verification = [{
+        "type": "tool", "tool_name": "compile", "verifier_kind": "compile",
+        "requires_runtime_execution": False,
+        "description": "Verify that the Maven project builds successfully.",
+    }]
+    plan = EngineeringPlan.model_validate({
+        "plan_id": "prv12-share10", "kind": "milestone",
+        "global_invariants": [{
+            "id": "gi1",
+            "statement": "The application must accept exactly one integer argument and produce exactly the specified output format.",
+        }],
+        "subtasks": [
+            {
+                "id": "s1", "description": "Create Maven project", "execution_method": "model",
+                "execution_role": "implementation", "depends_on": [],
+                "planned_files": [
+                    {"path": "pom.xml", "action": "create"},
+                    {"path": app_path, "action": "create"},
+                    {"path": test_path, "action": "create"},
+                ],
+                "provides": ["maven_project_structure"], "requires": [],
+                "relevant_global_invariant_ids": ["gi1"],
+                "verification": compile_verification,
+            },
+            {
+                "id": "s2", "description": "Verify application process behavior",
+                "execution_method": "model", "execution_role": "verification",
+                "depends_on": ["s1"], "planned_files": [],
+                "provides": [], "requires": ["maven_project_structure"],
+                "relevant_global_invariant_ids": ["gi1"],
+                "verification": [{
+                    "type": "judgment", "verifier_kind": "application_runtime",
+                    "requires_runtime_execution": True,
+                    "description": "Invalid non-numeric input exits non-zero with a clear error message.",
+                }],
+            },
+        ],
+    })
+    goal = (
+        "Create a Java 17 Maven command-line application. The application must accept one "
+        "integer argument. Input 21 must print RESULT=42. Invalid non-numeric input must "
+        "exit non-zero with a clear error message. Include automated tests."
+    )
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": test_path, "content": app_test,
+    }])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, goal=goal,
+        architect_files=[test_path], expected_files_upfront=[test_path],
+        architect_basename_to_path={"AppTest.java": test_path},
+        established_files=[app_path], allowed_write_relpaths=[test_path],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s1",
+        required_verification=compile_verification,
+    )
+
+    # Record the exact production return values that were empty in share(10).
+    requirements = _runtime_contract_requirements(ctx)
+    assert _required_process_terminating_cases(requirements) == ["invalid"]
+    (tmp_path / test_path).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / test_path).write_text(app_test, encoding="utf-8")
+    findings = find_in_process_terminating_test_invocations(
+        requirements, str(tmp_path), [test_path], ["com.example.App"],
+    )
+    assert [(item["test_method"], item["terminating_case"]) for item in findings] == [
+        ("testInvalidInput", "invalid input"),
+    ]
+
+    state = GenerationState()
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": "compiled"},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        side_effect=AssertionError("Surefire must not execute this exact unsafe candidate"),
+    ) as run_tests:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    failure = exc_info.value.failure
+    assert failure.type == "process_terminating_behavior_tested_in_process"
+    assert failure.likely_files == [test_path]
+    assert app_path not in failure.likely_files
+    assert "Preserve the product's required process-terminating behavior" in failure.message
+    assert "System.exit(1)" in (tmp_path / app_path).read_text(encoding="utf-8")
     run_tests.assert_not_called()
 
 

@@ -45,6 +45,58 @@ async def test_valid_single_subtask_plan_passes(tmp_path):
     assert result.errors == []
 
 
+@pytest.mark.asyncio
+async def test_runtime_behavior_requires_an_application_runtime_owner(tmp_path):
+    tests = _model_subtask(
+        id="s1", description="write ordinary tests",
+        planned_files=[PlannedFile(path="test_app.py", action=FileAction.CREATE)],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.TOOL, tool_name="test",
+            verifier_kind=VerifierKind.TEST, description="run safe unit tests",
+        )],
+    )
+
+    result = await validate_plan(
+        _plan([tests]), workspace_path=str(tmp_path),
+        runtime_verification_required=True,
+    )
+
+    assert result.valid is False
+    assert "APPLICATION_RUNTIME_OWNER_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_runtime_and_test_verifiers_have_distinct_owners(tmp_path):
+    tests = _model_subtask(
+        id="s1", description="write safe unit tests", provides=["test_suite"],
+        planned_files=[PlannedFile(path="test_app.py", action=FileAction.CREATE)],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.TOOL, tool_name="test",
+            verifier_kind=VerifierKind.TEST, description="run ordinary unit tests",
+        )],
+    )
+    runtime = _model_subtask(
+        id="s2", description="verify application process behavior",
+        execution_role=ExecutionRole.VERIFICATION, planned_files=[],
+        depends_on=["s1"], requires=["test_suite"],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.JUDGMENT,
+            verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+            requires_runtime_execution=True,
+            description="observe stdout and process exit status",
+        )],
+    )
+
+    result = await validate_plan(
+        _plan([tests, runtime]), workspace_path=str(tmp_path),
+        runtime_verification_required=True,
+    )
+
+    assert result.valid is True
+    assert tests.verification[0].verifier_kind is VerifierKind.TEST
+    assert runtime.verification[0].requires_application_runtime is True
+
+
 def _planned_prerequisite_plan(*, artifact_requires, consumer_requires, consumer_depends_on):
     provider = _model_subtask(
         id="s1", description="provide test tooling", provides=["test_tooling"],

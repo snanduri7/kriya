@@ -1435,10 +1435,10 @@ def ground_java_entrypoint_in_no_build_file_projects(
                 continue
             for index, token in enumerate(command[1:], start=1):
                 if token in known_fqcns:
-                    invocations.append(
-                        ["java", "-cp", runtime_classes_dir]
-                        + jvm_module_flags + [token] + list(command[index + 1:])
-                    )
+                    invocations.append(build_grounded_java_launch_command(
+                        token, list(command[index + 1:]), runtime_classes_dir,
+                        jvm_module_flags,
+                    ))
                     break
         if compile_files and invocations:
             return [["javac", "-d", runtime_classes_dir] + compile_files] + invocations
@@ -1498,8 +1498,28 @@ def ground_java_entrypoint_in_no_build_file_projects(
 
     runtime_classes_dir = ".kriya/runtime-verification/classes"
     return [["javac", "-d", runtime_classes_dir] + compile_files] + [
-        ["java", "-cp", runtime_classes_dir] + jvm_module_flags + [entrypoint_class] + extra_args
+        build_grounded_java_launch_command(
+            entrypoint_class, extra_args, runtime_classes_dir, jvm_module_flags,
+        )
         for extra_args in invocations
+    ]
+
+
+def build_grounded_java_launch_command(
+    entrypoint_class: str,
+    argv: List[str],
+    classes_dir: str = ".kriya/runtime-verification/classes",
+    jvm_module_flags: Optional[List[str]] = None,
+) -> List[str]:
+    """Build the canonical Java application launch used by every verifier.
+
+    Keeping this tiny constructor beside the entrypoint resolver prevents a
+    generated test from defining a second, unrelated classpath policy.  The
+    caller remains responsible for compiling into ``classes_dir``.
+    """
+    return [
+        "java", "-cp", classes_dir,
+        *(jvm_module_flags or []), entrypoint_class, *argv,
     ]
 
 

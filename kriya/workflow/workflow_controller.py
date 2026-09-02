@@ -167,6 +167,7 @@ from kriya.workflow.edit_safety import (
     read_file_revision,
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
+from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.planning_diagnostics import (
     bounded_repository_evidence,
     persist_planning_attempt_diagnostic,
@@ -410,6 +411,14 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
         if requirement in subtask.provides
     ]
     invariant_statements = {gi.id: gi.statement for gi in plan.global_invariants}
+    runtime_owner_ids = sorted({
+        candidate.id for candidate in plan.subtasks
+        if any(vm.requires_application_runtime for vm in candidate.verification)
+    })
+    owns_test_artifact = any(
+        classify_file_role(planned.path) is FileRole.TEST
+        for planned in subtask.planned_files
+    )
     payload = {
         "local_description": subtask.description,
         "planned_files": [pf.path for pf in subtask.planned_files],
@@ -421,6 +430,14 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
         "verification_targets": [vm.description for vm in subtask.verification],
         "runtime_execution_required": any(
             vm.requires_application_runtime for vm in subtask.verification
+        ),
+        "application_runtime_owners": runtime_owner_ids,
+        "verification_ownership": (
+            "This subtask's unit-test artifacts do not own process-exit, process-termination, "
+            "or termination-associated stdout/stderr obligations. Those are owned exclusively "
+            "by the declared application_runtime verifier. Unit tests may cover only safe "
+            "in-process behavior and must not independently reproduce the process obligation."
+            if owns_test_artifact and runtime_owner_ids else None
         ),
     }
     return "--- bounded subtask semantic context ---\n" + json.dumps(payload, indent=2, sort_keys=True)
@@ -3139,6 +3156,7 @@ class WorkflowController:
         validation = await validate_plan(
             plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
             route=route, triage_service=self.workflow_engine.engineering_triage,
+            runtime_verification_required=goal_requires_runtime_behavior(goal),
         )
         if not validation.valid:
             notes.append(f"plan failed validation: {validation.errors}")
@@ -3506,6 +3524,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         resuming_own_established_progress=has_own_established_progress,
                         require_model_planned_files=True,
                         require_semantic_contracts=True,
+                        runtime_verification_required=goal_requires_runtime_behavior(goal),
                         obligation_ledger=obligation_ledger, revision=repair_attempts,
                     )
                     errors.extend(validation.errors)
@@ -4074,6 +4093,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         resuming_own_established_progress=True,
                         require_model_planned_files=True,
                         require_semantic_contracts=True,
+                        runtime_verification_required=goal_requires_runtime_behavior(goal),
                     )
                     if prerequisite_validation.valid:
                         prior_hash = current_plan_hash
@@ -4233,6 +4253,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     resuming_own_established_progress=True,
                     require_model_planned_files=True,
                     require_semantic_contracts=True,
+                    runtime_verification_required=goal_requires_runtime_behavior(goal),
                 )
                 if revision_validation.valid:
                     prior_hash = current_plan_hash

@@ -294,6 +294,7 @@ async def validate_plan(
     resuming_own_established_progress: bool = False,
     require_model_planned_files: bool = False,
     require_semantic_contracts: bool = False,
+    runtime_verification_required: bool = False,
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
 ) -> PlanValidationResult:
@@ -361,6 +362,19 @@ async def validate_plan(
                 f"subtask(s) {missing_invariant_projection!r} receive no relevant_global_invariants"
             )
             reason_codes.append("SUBTASK_GLOBAL_INVARIANTS_MISSING")
+
+    if runtime_verification_required:
+        runtime_owner_ids = sorted({
+            st.id for st in plan.subtasks
+            if any(vm.requires_application_runtime for vm in st.verification)
+        })
+        if not runtime_owner_ids:
+            errors.append(
+                "the authoritative request requires observable application-runtime evidence, "
+                "but no subtask owns an application_runtime verifier; compile/test verifiers "
+                "cannot own process exit, process termination, or process stdout/stderr evidence"
+            )
+            reason_codes.append("APPLICATION_RUNTIME_OWNER_MISSING")
 
     ids = [st.id for st in plan.subtasks]
     duplicate_ids = sorted({sid for sid in ids if ids.count(sid) > 1})
