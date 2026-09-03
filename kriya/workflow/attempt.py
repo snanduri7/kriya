@@ -2168,7 +2168,7 @@ def _validate_and_convert_probe(raw: Any) -> Tuple[Optional[ProbeSpec], Optional
 
 
 def _validate_and_convert_managed_service_contract(
-    managed_service: Any, worktree_path: str,
+    managed_service: Any, worktree_path: str, validator: "PolymorphicValidator",
 ) -> Tuple[Optional[ManagedServiceVerificationSpec], Optional[str]]:
     """Managed Runtime Verification (2026-09-03) - the deterministic
     admission check a MANAGED_SERVICE judgment must pass BEFORE any
@@ -2184,7 +2184,24 @@ def _validate_and_convert_managed_service_contract(
     direction stays agent/workflow representation -> this conversion ->
     kriya.tools.service_runtime's own execution spec, never the reverse
     (kriya/tools/service_runtime.py imports nothing from kriya.workflow or
-    kriya.agents)."""
+    kriya.agents, and stays completely unaware of interpreter/dependency
+    resolution - that grounding happens here, once, before the spec is
+    ever built).
+
+    Environment-grounding fix (2026-09-03, external review): a live PRV-17
+    run proved this service_command reached ProcessController.start_managed()
+    completely ungrounded - a bare "python" token resolves via whatever
+    PATH/environment Kriya's own process happens to inherit, which is NOT
+    the project-local, dependency-installed interpreter run_tests()/
+    run_app_sequence() already resolve for this same workspace
+    (PolymorphicValidator._resolve_python_interpreter()/_substitute_python_
+    interpreter()) - a Django app's managed-service verification failed
+    with ModuleNotFoundError even though the identical dependency had
+    already been correctly installed for the test gate one step earlier.
+    Reuses that EXISTING primitive (the same one run_app()/run_app_sequence()
+    already call) rather than inventing a second resolver - a no-op for
+    every non-Python stack or a Python workspace with no real dependency
+    manifest, exactly like its two existing call sites."""
     if not isinstance(managed_service, dict):
         return None, "managed_service object is missing or not a JSON object"
 
@@ -2200,6 +2217,11 @@ def _validate_and_convert_managed_service_contract(
             "invocation (&&, ;, &, nohup, sleep, or a shell -c wrapper) - the service and its "
             "probe must be represented as separate structured fields, not one shell command"
         )
+
+    grounded_commands, install_error = validator._substitute_python_interpreter([service_command])
+    if install_error:
+        return None, f"managed_service.service_command dependency resolution failed: {install_error}"
+    service_command = grounded_commands[0]
 
     readiness, readiness_error = _validate_and_convert_readiness(managed_service.get("readiness"))
     if readiness_error:
@@ -2227,6 +2249,7 @@ def _validate_and_convert_managed_service_contract(
 
 async def _execute_managed_service_verification(
     state: GenerationState, ctx: "AttemptContext", judgment: Dict[str, Any], known_files: List[str],
+    validator: "PolymorphicValidator",
 ) -> None:
     """Managed Runtime Verification (2026-09-03) - the ONE place both
     runtime-verification call sites route a MANAGED_SERVICE judgment
@@ -2244,7 +2267,7 @@ async def _execute_managed_service_verification(
     ctx.runtime_verification_required) before this function is ever
     called."""
     spec, invalid_reason = _validate_and_convert_managed_service_contract(
-        judgment.get("managed_service"), ctx.worktree_path,
+        judgment.get("managed_service"), ctx.worktree_path, validator,
     )
     if invalid_reason:
         message = f"MANAGED_SERVICE_CONTRACT_INVALID: {invalid_reason}"
@@ -2462,7 +2485,7 @@ async def _execute_runtime_verification_directly(
         state.gate_outcomes.append(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if execution_mode == "managed_service":
-        await _execute_managed_service_verification(state, ctx, judgment, known_files)
+        await _execute_managed_service_verification(state, ctx, judgment, known_files, validator)
         return
     if deterministic_sequence_kind(judgment.get("run_commands") or []) == "build":
         message = (
@@ -5661,6 +5684,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 await _execute_managed_service_verification(
                     state, ctx, judgment,
                     sorted(set(state.all_files_written) | set(ctx.established_files)),
+                    validator,
                 )
                 return
             if (

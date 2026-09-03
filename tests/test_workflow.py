@@ -3096,7 +3096,12 @@ async def test_current_managed_service_judgment_reaches_execution_primitive_with
     service command / readiness / probe stay on their own structurally
     separate fields - service_command carries ONLY the server-start argv
     (no "curl", no "&&"), while the probe's method/path/expected_status
-    live on spec.probe, never merged into service_command."""
+    live on spec.probe, never merged into service_command. The model's own
+    literal "python" is expected to be grounded to the resolved project
+    interpreter (environment-grounding fix, 2026-09-03) - this fixture's
+    workspace has no requirements.txt/pyproject.toml, so that resolves to
+    sys.executable (Kriya's own interpreter, the documented fallback), not
+    left as a bare "python" token."""
     plan = _managed_service_plan()
     views_py = "customers/views.py"
     developer = AsyncMock()
@@ -3131,13 +3136,177 @@ async def test_current_managed_service_judgment_reaches_execution_primitive_with
 
     mock_run_managed_service.assert_called_once()
     (spec,), _kwargs = mock_run_managed_service.call_args
-    assert spec.service_command == ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    assert spec.service_command == [sys.executable, "manage.py", "runserver", "0.0.0.0:8000"]
     assert not any("&&" in tok or "curl" in tok for tok in spec.service_command)
     assert spec.readiness.kind == "http" and spec.readiness.port == 8000
     assert spec.readiness.path == "/customers/health"
     assert spec.probe.method == "GET"
     assert spec.probe.path == "/customers/health"
     assert spec.probe.expected_status == 200
+
+
+# --- Environment-grounding wiring (2026-09-03, PRV-17 Run 11): managed-
+# service's service_command now goes through the SAME PolymorphicValidator.
+# _substitute_python_interpreter() the finite path (run_app/run_app_sequence)
+# already uses, instead of launching a bare "python" token via whatever
+# environment Kriya's own process happens to inherit.
+
+def _managed_service_ctx_for_grounding(tmp_path, *, service_command):
+    """Shared fixture for the grounding tests below - a CURRENT-owned,
+    terminal (s4) managed_service subtask, varying only service_command."""
+    plan = _managed_service_plan()
+    views_py = "customers/views.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
+    judgment = _managed_service_judgment()
+    judgment["managed_service"]["service_command"] = service_command
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=judgment)
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Create a Python 3.12 Django application.",
+        architect_files=[views_py], expected_files_upfront=[views_py],
+        architect_basename_to_path={"views.py": views_py},
+        allowed_write_relpaths=[views_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+        required_verification=[{
+            "type": "judgment", "description": "GET /customers/health returns 200",
+            "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+    return ctx, developer, run_verifier, judgment
+
+
+@pytest.mark.asyncio
+async def test_managed_service_python_command_is_rewritten_when_wiring_calls_through(tmp_path):
+    """(1) Proves the WIRING itself: _validate_and_convert_managed_service_
+    contract calls PolymorphicValidator._substitute_python_interpreter and
+    uses ITS result, regardless of how that method internally decides to
+    substitute - mocked here to a recognizable, unambiguous value so this
+    test is about the wiring, not re-proving _substitute_python_interpreter's
+    own already-tested internal correctness."""
+    ctx, developer, run_verifier, _judgment = _managed_service_ctx_for_grounding(
+        tmp_path, service_command=["python", "manage.py", "runserver"],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {"manage.py"}
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator._substitute_python_interpreter",
+        return_value=([["/fake/project/.kriya/venv/bin/python", "manage.py", "runserver"]], None),
+    ) as mock_substitute, patch(
+        "kriya.workflow.attempt.run_managed_service_verification",
+        return_value=_managed_service_probe_result(),
+    ) as mock_run_managed_service:
+        await run_attempt(state, ctx)
+
+    mock_substitute.assert_called_once_with([["python", "manage.py", "runserver"]])
+    mock_run_managed_service.assert_called_once()
+    (spec,), _kwargs = mock_run_managed_service.call_args
+    assert spec.service_command == ["/fake/project/.kriya/venv/bin/python", "manage.py", "runserver"]
+
+
+def test_managed_service_non_python_command_is_unchanged(tmp_path):
+    """(2) A non-Python workspace (a real pom.xml on disk, so PolymorphicValidator
+    genuinely detects stack="java", no mocking needed) leaves service_command
+    completely untouched - _substitute_python_interpreter is a real no-op for
+    any stack other than "python", and this proves it through the actual
+    wiring, not just the method in isolation."""
+    (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.attempt import _validate_and_convert_managed_service_contract
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "java"
+
+    managed_service = {
+        "service_command": ["python", "manage.py", "runserver"],
+        "readiness": {"kind": "http", "host": "127.0.0.1", "port": 8000, "path": "/health"},
+        "probe": {"kind": "http", "method": "GET", "host": "127.0.0.1", "port": 8000, "path": "/health", "expected_status": 200},
+    }
+    spec, invalid_reason = _validate_and_convert_managed_service_contract(managed_service, str(tmp_path), validator)
+
+    assert invalid_reason is None
+    assert spec.service_command == ["python", "manage.py", "runserver"]
+
+
+def test_managed_service_python_command_falls_back_to_kriyas_own_interpreter_without_a_manifest(tmp_path):
+    """(3) A real Python workspace (a bare .py file on disk, no requirements.txt/
+    pyproject.toml) retains the EXISTING fallback behavior _resolve_python_
+    interpreter() already documents: sys.executable, not a venv, and no
+    install_error - exercised through the real (unmocked) substitution path."""
+    (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.attempt import _validate_and_convert_managed_service_contract
+
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "python"
+
+    managed_service = {
+        "service_command": ["python", "manage.py", "runserver"],
+        "readiness": {"kind": "http", "host": "127.0.0.1", "port": 8000, "path": "/health"},
+        "probe": {"kind": "http", "method": "GET", "host": "127.0.0.1", "port": 8000, "path": "/health", "expected_status": 200},
+    }
+    spec, invalid_reason = _validate_and_convert_managed_service_contract(managed_service, str(tmp_path), validator)
+
+    assert invalid_reason is None
+    assert spec.service_command == [sys.executable, "manage.py", "runserver"]
+
+
+def test_managed_service_uses_the_identical_interpreter_the_finite_test_path_resolves(tmp_path):
+    """(4) Managed-service grounding and the finite/test path's own
+    _resolve_python_interpreter() must agree on the SAME resolved
+    interpreter for the SAME workspace - proven by calling both through the
+    real (unmocked) PolymorphicValidator against an identical fixture,
+    rather than asserting a hardcoded value that could drift out of sync
+    with the actual finite-path behavior."""
+    (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.attempt import _validate_and_convert_managed_service_contract
+
+    validator = PolymorphicValidator(str(tmp_path))
+    expected_interpreter, install_error = validator._resolve_python_interpreter()
+    assert install_error is None
+
+    managed_service = {
+        "service_command": ["python", "manage.py", "runserver"],
+        "readiness": {"kind": "http", "host": "127.0.0.1", "port": 8000, "path": "/health"},
+        "probe": {"kind": "http", "method": "GET", "host": "127.0.0.1", "port": 8000, "path": "/health", "expected_status": 200},
+    }
+    spec, invalid_reason = _validate_and_convert_managed_service_contract(managed_service, str(tmp_path), validator)
+
+    assert invalid_reason is None
+    assert spec.service_command[0] == expected_interpreter
+
+
+def test_managed_service_grounding_does_not_mutate_the_original_judgment_command(tmp_path):
+    """(5) The model-provided managed_service.service_command list object
+    itself must not be mutated in place, even though the resolved spec
+    carries a different (grounded) value - _substitute_python_interpreter
+    builds a NEW list via concatenation, never edits the input in place;
+    this locks that property in from the caller's own perspective."""
+    (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.attempt import _validate_and_convert_managed_service_contract
+
+    validator = PolymorphicValidator(str(tmp_path))
+    original_command = ["python", "manage.py", "runserver"]
+    managed_service = {
+        "service_command": original_command,
+        "readiness": {"kind": "http", "host": "127.0.0.1", "port": 8000, "path": "/health"},
+        "probe": {"kind": "http", "method": "GET", "host": "127.0.0.1", "port": 8000, "path": "/health", "expected_status": 200},
+    }
+
+    spec, invalid_reason = _validate_and_convert_managed_service_contract(managed_service, str(tmp_path), validator)
+
+    assert invalid_reason is None
+    assert original_command == ["python", "manage.py", "runserver"]
+    assert managed_service["service_command"] == ["python", "manage.py", "runserver"]
 
 
 @pytest.mark.asyncio
@@ -3607,7 +3776,10 @@ async def test_prv17_managed_service_semantic_shape_never_constructs_compound_co
 
     mock_run_managed_service.assert_called_once()
     (spec,), _kwargs = mock_run_managed_service.call_args
-    assert spec.service_command == ["python", "manage.py", "runserver"]
+    # "python" is grounded to the resolved project interpreter (environment-
+    # grounding fix, 2026-09-03) - this fixture's workspace has no
+    # requirements.txt/pyproject.toml, so that resolves to sys.executable.
+    assert spec.service_command == [sys.executable, "manage.py", "runserver"]
     assert spec.probe.method == "GET"
     assert spec.probe.path == "/customers/health"
     assert spec.probe.expected_status == 200
