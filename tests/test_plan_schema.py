@@ -246,6 +246,42 @@ def test_has_evidence_producer_true_after_application_runtime_self_heal():
     assert vm.has_evidence_producer is True
 
 
+def test_has_evidence_producer_false_for_type_tool_application_runtime():
+    """Repair-contract audit (2026-09-03, PRV-17 Run 10): the exact shape a
+    live repair attempt actually produced when the old repair instruction
+    named verifier_kind/requires_runtime_execution but never said type must
+    be judgment - the model reused the compile/test clause's own
+    type=tool+tool_name template, setting tool_name to the literal string
+    "application_runtime" (a plausible-looking but unregistered tool name).
+    type=tool is schema-valid here (tool_name is present), but has no real
+    evidence producer: it isn't in BUILTIN_QUALITY_GATE_VERIFIERS and isn't
+    type=judgment, so neither producer branch matches."""
+    vm = VerificationMethod(
+        type=VerificationMethodType.TOOL,
+        description="Start the application and verify /customers/health returns ok",
+        tool_name="application_runtime",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+        requires_runtime_execution=True,
+    )
+    assert vm.has_evidence_producer is False
+
+
+def test_judgment_verification_with_tool_name_is_rejected_at_construction():
+    """type=judgment must not carry a tool_name at all - nothing deterministic
+    ever runs it, so a tool_name there is meaningless, not just redundant.
+    Enforced by the model_validator itself (a schema-level rejection, not a
+    plan_validation.py-level has_evidence_producer check) - this shape can
+    never even be constructed, let alone reach validate_plan()."""
+    with pytest.raises(Exception):
+        VerificationMethod(
+            type=VerificationMethodType.JUDGMENT,
+            description="run the application and verify output",
+            tool_name="application_runtime",
+            verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+            requires_runtime_execution=True,
+        )
+
+
 # --- AcceptanceCriterion ---
 
 def test_acceptance_criterion_blank_id_rejected():

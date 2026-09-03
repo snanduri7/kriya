@@ -1311,6 +1311,53 @@ def test_authoritative_planner_system_prompt_pairs_application_runtime_with_requ
     assert "never set one without the other" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
 
 
+def test_authoritative_planner_system_prompt_states_complete_application_runtime_four_field_relationship():
+    """Repair-contract audit (2026-09-03, PRV-17 Run 10): a live repair
+    attempt proved the prompt naming only verifier_kind/requires_runtime_
+    execution (without also saying type=judgment/tool_name omitted) lets
+    the model reuse the compile/test clause's own type=tool+tool_name
+    template for application_runtime too, producing an unregistered
+    tool_name that copies the verifier_kind's own value. The initial
+    planning prompt must state the complete four-field relationship as one
+    connected instruction, not separate sentences the model has to infer a
+    connection between."""
+    assert "type=judgment, omit tool_name entirely" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "verifier_kind=application_runtime and requires_runtime_execution=true TOGETHER" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "never set type=tool or any tool_name for this verifier" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+
+
+def test_repair_prompt_states_the_identical_application_runtime_four_field_relationship():
+    """The VERIFICATION_EVIDENCE_PATH_MISSING targeted-correction block
+    must state the SAME complete relationship as the initial planning
+    prompt above - initial generation and repair are the same contract,
+    not two independently-maintained descriptions of it."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}",
+        ["subtask 's3' verification requirement '...' has no executable or deterministic evidence producer"],
+        ["VERIFICATION_EVIDENCE_PATH_MISSING"], 1,
+    )
+    assert "set type=judgment, omit tool_name entirely" in prompt
+    assert "verifier_kind=application_runtime and requires_runtime_execution=true TOGETHER" in prompt
+    assert "never set type=tool or any tool_name for this case" in prompt
+
+
+def test_application_runtime_repair_correction_does_not_disturb_compile_and_test_instructions():
+    """Existing test/compile verification instructions remain unchanged -
+    this fix only closes the application_runtime gap, it doesn't touch the
+    already-explicit compile/test pairing in either prompt."""
+    assert "tool_name=compile/verifier_kind=compile for compilation" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "tool_name=test/verifier_kind=test for tests" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["some evidence-producer error"],
+        ["VERIFICATION_EVIDENCE_PATH_MISSING"], 1,
+    )
+    assert (
+        "set type=tool with tool_name=compile/verifier_kind=compile or "
+        "tool_name=test/verifier_kind=test instead"
+    ) in prompt
+
+
 def test_authoritative_planner_system_prompt_carries_integration_relationship_guidance():
     """Correctness Continuity Part C completion (PRV-06, 2026-08-29) - the
     field/obligation/validation machinery was implemented but stayed
