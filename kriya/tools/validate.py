@@ -90,6 +90,43 @@ def _has_real_requirements(requirements_path: str) -> bool:
     return False
 
 
+def _pyproject_dependencies(pyproject_path: str) -> List[str]:
+    """Extracts PEP 621's [project.dependencies] array - plain requirement
+    strings, the same shape a requirements.txt line already is - so a
+    Python goal using "Python packaging conventions" (pyproject.toml, no
+    requirements.txt) gets the same isolated, dependency-installed
+    interpreter _resolve_python_interpreter() already gives a requirements.
+    txt project. PRV-17 (2026-09-03) root cause: this project-marker was
+    already recognized for STACK DETECTION (_detect_stack below already
+    treats pyproject.toml as a Python marker) but never consulted for
+    DEPENDENCY INSTALLATION - a goal declaring Django only in pyproject.toml
+    got a bare interpreter with nothing installed, so `python -m pytest`
+    failed with `ModuleNotFoundError: No module named 'django'` on every
+    attempt regardless of how many times the Developer regenerated source.
+
+    Degrades to an empty list (never raises) on any parse failure or a
+    missing/malformed [project.dependencies] - matching _has_real_
+    requirements' own "not worth the cost" posture and _ensure_project_venv's
+    "infrastructure problem, not a code retry's job" posture for venv
+    resolution: a caller that gets [] here falls through to sys.executable
+    exactly as it did before this function existed, never a hard failure.
+    tomllib is stdlib-only from Python 3.11 - on an older interpreter this
+    always returns [], the same as no pyproject.toml existing at all."""
+    try:
+        import tomllib
+    except ImportError:
+        return []
+    try:
+        with open(pyproject_path, "rb") as fh:
+            data = tomllib.load(fh)
+    except Exception:
+        return []
+    dependencies = data.get("project", {}).get("dependencies")
+    if not isinstance(dependencies, list):
+        return []
+    return [dep for dep in dependencies if isinstance(dep, str) and dep.strip()]
+
+
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
@@ -142,15 +179,21 @@ class PolymorphicValidator:
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
 
-    def _ensure_project_venv(self, requirements_path: str) -> Tuple[Optional[str], Optional[str]]:
+    def _ensure_project_venv(self, install_args: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """Creates (if not already present) a project-local virtual environment
-        under .kriya/venv and installs requirements.txt into it, so a Python
+        under .kriya/venv and pip-installs `install_args` into it, so a Python
         goal needing a real third-party package can actually be tested -
         PolymorphicValidator otherwise runs tests via sys.executable (KRIYA'S
         OWN interpreter), which only has whatever Kriya itself depends on
         installed. The same class of gap Ruby's `bundle install` fix closed for
         that stack (2026-08-04) - a structurally unwinnable quality gate the
         model's own code correctness can never fix.
+
+        `install_args` is whatever should follow `pip install -q` - either
+        `["-r", requirements_path]` (requirements.txt) or a flat list of PEP
+        621 dependency specifiers (pyproject.toml, see _pyproject_dependencies)
+        - both are just argv fragments to the SAME pip invocation, so this
+        method doesn't need to know or care which manifest shape produced them.
 
         Deliberately installs into an ISOLATED venv, not sys.executable
         directly: pip-installing an arbitrary generated project's dependencies
@@ -191,15 +234,15 @@ class PolymorphicValidator:
                 return None, None
 
         # Re-run on every call, even when the venv already existed - a retry
-        # may have just edited requirements.txt, and pip itself is a fast
-        # no-op when nothing actually changed since the last install.
+        # may have just edited requirements.txt/pyproject.toml, and pip itself
+        # is a fast no-op when nothing actually changed since the last install.
         install_res = self._run_cmd_with_timeout(
-            [venv_python, "-m", "pip", "install", "-q", "-r", requirements_path, "pytest"],
+            [venv_python, "-m", "pip", "install", "-q", *install_args, "pytest"],
             cwd=self.workspace_path, timeout=300,
         )
         if install_res["returncode"] != 0:
             return None, (
-                f"'pip install -r requirements.txt' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
+                f"'pip install {' '.join(install_args)}' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
             )
         return venv_python, None
 
@@ -217,22 +260,43 @@ class PolymorphicValidator:
         'No module named django' failure one gate later.
 
         Returns (interpreter_path, install_error). interpreter_path is
-        sys.executable when there's no requirements.txt, or when venv
-        CREATION itself failed (an infrastructure problem, not something a
-        retry can fix - degrades silently, same reasoning as
-        _ensure_project_venv()'s own docstring). install_error is set ONLY
-        when `pip install` of THIS project's own requirements.txt genuinely
-        failed (a real, potentially code-fixable dependency problem, e.g. a
-        bad package pin) - the caller should treat that as a hard failure
-        rather than silently proceeding with an interpreter missing the
-        dependencies the goal actually needs."""
+        sys.executable when there's no requirements.txt/pyproject.toml
+        dependency declaration, or when venv CREATION itself failed (an
+        infrastructure problem, not something a retry can fix - degrades
+        silently, same reasoning as _ensure_project_venv()'s own docstring).
+        install_error is set ONLY when `pip install` of THIS project's own
+        declared dependencies genuinely failed (a real, potentially
+        code-fixable dependency problem, e.g. a bad package pin) - the
+        caller should treat that as a hard failure rather than silently
+        proceeding with an interpreter missing the dependencies the goal
+        actually needs.
+
+        requirements.txt takes priority when both exist (today's
+        pre-existing behavior, unchanged); pyproject.toml (PRV-17,
+        2026-09-03) is the fallback for a "Python packaging conventions"
+        goal that declares dependencies there instead - see
+        _pyproject_dependencies' own docstring for the live incident this
+        closes: a goal declaring Django only in pyproject.toml got a bare
+        sys.executable with nothing installed, so every attempt's test gate
+        failed with `ModuleNotFoundError: No module named 'django'`
+        regardless of source-file correctness."""
         requirements_path = os.path.join(self.workspace_path, "requirements.txt")
         if os.path.exists(requirements_path) and _has_real_requirements(requirements_path):
-            venv_python, install_error = self._ensure_project_venv(requirements_path)
+            venv_python, install_error = self._ensure_project_venv(["-r", requirements_path])
             if install_error:
                 return sys.executable, install_error
             if venv_python:
                 return venv_python, None
+            return sys.executable, None
+        pyproject_path = os.path.join(self.workspace_path, "pyproject.toml")
+        if os.path.exists(pyproject_path):
+            dependencies = _pyproject_dependencies(pyproject_path)
+            if dependencies:
+                venv_python, install_error = self._ensure_project_venv(dependencies)
+                if install_error:
+                    return sys.executable, install_error
+                if venv_python:
+                    return venv_python, None
         return sys.executable, None
 
     def _detect_stack(self) -> str:

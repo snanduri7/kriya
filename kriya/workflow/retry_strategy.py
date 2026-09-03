@@ -435,7 +435,11 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # traceback.
             "internal_framework_error",
         }
-        else classify_environment_failure(raw_error_context)
+        else classify_environment_failure(
+            raw_error_context,
+            worktree_path=ctx.worktree_path,
+            known_files=set(state.all_files_written) | set(ctx.established_files) | set(ctx.expected_files_upfront),
+        )
     )
     if is_unrecoverable_scope_denial and state.unrecoverable_scope_denial_count >= 1:
         # PRV-17 preflight correction (2026-09-03): stop on the FIRST
@@ -998,6 +1002,59 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 narrowed_implicated = []
             state.last_implicated_files = narrowed_implicated if narrowed_implicated else None
             state.last_missing_files = None
+            # Recovery admission (PRV-17, 2026-09-03): a GROUNDED failure
+            # (attribution actually implicated real file(s), not a blind
+            # guess) whose implication is ENTIRELY outside this subtask's
+            # ALLOWLIST scope must not fall through to an ordinary FULL_SET
+            # retry - decide_retry_action() (kriya/workflow/retry_policy.py)
+            # has no visibility into WHY has_implicated_files became False
+            # here, so without this it silently re-derives "attribution
+            # found nothing" and asks the Developer to regenerate this
+            # subtask's own (already-correct, irrelevant) authorized files
+            # anyway - a full generation cycle that cannot possibly address
+            # a failure whose real cause lives in a file this subtask can
+            # never legally write. Distinct from "attribution found nothing
+            # at all" (implicated empty from the start), which still
+            # legitimately deserves an ordinary FULL_SET attempt. Reuses
+            # state.environment_failure/STOP_ENVIRONMENT purely as the stop
+            # MECHANISM, the same reuse already established (and reviewed)
+            # for the write-time unrecoverable-scope-denial case above in
+            # this same function - never overwrites an already-decided
+            # classification.
+            #
+            # ALLOWLIST-only, deliberately NOT DENY_ALL: a DENY_ALL subtask
+            # never calls the Developer for real generation regardless of
+            # this retry decision (see run_attempt's own verification-only
+            # branch/its dedicated test) - continuing its loop just retries
+            # verification itself, never an unwinnable FULL_SET generation
+            # cycle, so this admission gate has nothing to prevent there and
+            # must not change its existing should_break=False behavior
+            # (test_handle_attempt_failure_never_offers_a_deny_all_target_
+            # even_at_low_confidence).
+            #
+            # state.plan_scope_conflict is None: mutually exclusive with the
+            # EXISTING architectural-owner escalation above in this same
+            # function (a DETERMINISTIC_ATTRIBUTION_TIERS-grounded implication
+            # naming a real, existing file already routes there - owner-
+            # recovery, not a stop) - never layer this admission gate on top
+            # of a conflict that's already correctly routing to a real owner
+            # (test_handle_attempt_failure_scope_denial_with_real_existing_
+            # owner_is_unaffected).
+            if (
+                implicated and not narrowed_implicated
+                and getattr(ctx, "write_scope_mode", None) == WriteScopeMode.ALLOWLIST
+                and state.environment_failure is None
+                and state.plan_scope_conflict is None
+            ):
+                state.environment_failure = (
+                    f"NO_AUTHORIZED_REPAIR_TARGET: this failure is grounded to "
+                    f"{sorted(set(implicated))!r}, entirely outside this subtask's "
+                    f"authorized write scope ({sorted(set(ctx.allowed_write_relpaths))!r}) - "
+                    "no generation against this subtask's own authorized files can fix a "
+                    "failure whose real cause lives elsewhere; stopping before another "
+                    "Developer call rather than paying for a full-set retry that cannot "
+                    "possibly address it."
+                )
 
     # MA9 (2026-08-29): the ONE place attribution's own output ordinarily
     # already narrows to "which file(s) does THIS failure implicate" - reused

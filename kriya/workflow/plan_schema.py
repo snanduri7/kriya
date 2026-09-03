@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -120,6 +120,46 @@ class FileOwnershipRelation(str, Enum):
     can never legitimately become PENDING (nothing in the plan will ever
     "reach" it), while an UNRELATED one is a real plan-scope conflict, not a
     timing question."""
+
+    CURRENT = "current"
+    FUTURE_ORDERED = "future_ordered"
+    PAST_ORDERED = "past_ordered"
+    UNRELATED = "unrelated"
+    UNOWNED = "unowned"
+
+
+class RequirementOwnershipRelation(str, Enum):
+    """Where a text-described requirement (an AcceptanceCriterion or
+    GlobalInvariant id) sits relative to a given subtask in the validated
+    plan's dependency DAG - PRV-17 (2026-09-03)'s answer to "is this
+    requirement due for the CURRENTLY executing subtask, or does the plan
+    itself still schedule it for a later one." The same reasoning
+    FileOwnershipRelation/classify_file_ownership() above already apply to
+    planned_files, generalized here because neither AcceptanceCriterion
+    nor GlobalInvariant carries a file path to check ownership through -
+    only the reverse claim lists already on the plan (Subtask.
+    acceptance_criteria_ids/relevant_global_invariant_ids).
+
+    Deliberately NOT "does some other pending subtask also claim this id" -
+    a live incident showed that bare duplicate-claim signal is not proof of
+    FUTURE ownership at all (an accidental/lazy Planner assignment onto an
+    UNRELATED sibling subtask duplicates the SAME false signal a genuine
+    future owner would produce). This classification instead asks the
+    plan's own dependency DAG directly: CURRENT when the current subtask
+    itself claims it (and no other claimant is strictly downstream of it -
+    a real, not-yet-run later owner always outranks an earlier claim, the
+    same "the plan still schedules this - trust the schedule" reasoning
+    FUTURE_ORDERED file ownership already uses); FUTURE_ORDERED when every
+    claimant is strictly downstream of the subtask asking (current doesn't
+    claim it at all, but the DAG proves it will be reached later);
+    PAST_ORDERED when every claimant already ran before the subtask
+    asking; UNRELATED when claimants exist with no provable dependency-
+    ordering relationship to the subtask asking (a genuinely ambiguous,
+    Planner-authored shape this classification deliberately does NOT
+    resolve via a new heuristic - the caller falls back to its own
+    pre-existing behavior for this case, same as file ownership's own
+    UNRELATED meaning "a real plan-scope conflict, not a timing
+    question"); UNOWNED when nothing in the plan claims it at all."""
 
     CURRENT = "current"
     FUTURE_ORDERED = "future_ordered"
@@ -668,6 +708,43 @@ class EngineeringPlan(BaseModel):
         if all(current_subtask_id in self._transitive_dependency_ids(owner) for owner in owners):
             return FileOwnershipRelation.FUTURE_ORDERED
         return FileOwnershipRelation.UNRELATED
+
+    def classify_requirement_ownership(
+        self, current_subtask_id: str, claimant_subtask_ids: "Iterable[str]",
+    ) -> "RequirementOwnershipRelation":
+        """classify_file_ownership()'s exact DAG reasoning, generalized to
+        any set of claimant subtask ids the CALLER already resolved (from
+        Subtask.acceptance_criteria_ids or .relevant_global_invariant_ids -
+        an AcceptanceCriterion/GlobalInvariant carries no file path to
+        derive `owners` from directly, unlike classify_file_ownership's
+        own planned_files scan).
+
+        Differs from classify_file_ownership in exactly one place, for a
+        real semantic reason: a file's FUTURE_ORDERED verdict requires
+        ALL owners to be downstream (a file with even one upstream/current
+        co-owner may already have real content NOW, the "validated
+        sequential ownership chain" case that method's own docstring
+        describes). A requirement instead defers as soon as ANY claimant
+        is provably downstream of current - a real, not-yet-run LATER
+        owner is proof the plan itself still schedules re-confirmation, so
+        an earlier claim (even current's own) must not treat it as already
+        settled. This is checked BEFORE the "current claims it" check for
+        exactly that reason: a later real owner always outranks current's
+        own claim, never the other way around."""
+        owners = list(claimant_subtask_ids)
+        if not owners:
+            return RequirementOwnershipRelation.UNOWNED
+        other_owners = [o for o in owners if o != current_subtask_id]
+        if any(current_subtask_id in self._transitive_dependency_ids(o) for o in other_owners):
+            return RequirementOwnershipRelation.FUTURE_ORDERED
+        if current_subtask_id in owners:
+            return RequirementOwnershipRelation.CURRENT
+        current_deps = self._transitive_dependency_ids(current_subtask_id)
+        if all(o in current_deps for o in owners):
+            return RequirementOwnershipRelation.PAST_ORDERED
+        if all(current_subtask_id in self._transitive_dependency_ids(o) for o in owners):
+            return RequirementOwnershipRelation.FUTURE_ORDERED
+        return RequirementOwnershipRelation.UNRELATED
 
     def content_hash(self) -> str:
         """Stable sha256 over the plan's full validated content - MA6.7's

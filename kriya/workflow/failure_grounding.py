@@ -123,7 +123,72 @@ _MISSING_EXECUTABLE_PATTERN = re.compile(
 )
 
 
-def classify_environment_failure(error_text: str) -> Optional[str]:
+# PRV-17 (2026-09-03): Python's own "package genuinely missing from the
+# verification interpreter" shape - the interpreter-resolution analogue of
+# _MISSING_EXECUTABLE_PATTERN above. Matches either the modern
+# `ModuleNotFoundError: No module named 'x'` form or the bare `No module
+# named 'x'`/`No module named x` text a caught ImportError's str() can
+# also produce. Deliberately NOT itself a verdict that this is unfixable -
+# `customers_project.settings` matches this exact shape just as easily as
+# `django` does, and the former is ordinary project code the Developer
+# must still write; _classify_missing_module_environment_failure below is
+# what tells the two apart, using the SAME "does a legal repair path
+# already exist" question _detect_missing_build_manifest (this module's
+# Java/Maven sibling) already answers for a missing pom.xml/build.gradle.
+_MISSING_MODULE_PATTERN = re.compile(
+    r"ModuleNotFoundError:\s*No module named ['\"]([\w.]+)['\"]"
+    r"|No module named ['\"]?([\w.]+)['\"]?"
+)
+
+
+def _classify_missing_module_environment_failure(
+    error_text: str, *, worktree_path: str, known_files: Iterable[str],
+) -> Optional[str]:
+    """Returns a human-readable environment/dependency-failure description
+    when error_text names a Python module that (a) is not project-local
+    code this same candidate is supposed to write, AND (b) has no legal
+    manifest (requirements.txt or pyproject.toml) this candidate could add
+    it to - the two conditions together mean no amount of source-file
+    repair can ever make the import succeed, mirroring
+    _detect_missing_build_manifest's exact "manifest exists -> legally
+    repairable, stay in the ordinary retry loop; manifest genuinely absent
+    -> nothing to route to" reasoning for Java/Maven, generalized to
+    Python's two real manifest shapes. None (never an environment failure)
+    whenever either condition doesn't hold - in particular, a manifest
+    merely not YET declaring the missing package is still a legal repair
+    path (the Developer can add a line to it), not a reason to stop."""
+    match = _MISSING_MODULE_PATTERN.search(error_text)
+    if not match:
+        return None
+    module_name = match.group(1) or match.group(2)
+    if not module_name:
+        return None
+    top_level = module_name.split(".")[0]
+    known = list(known_files)
+    known_module_names = {os.path.splitext(os.path.basename(f))[0] for f in known}
+    known_package_dirs = {f.split("/", 1)[0] for f in known if "/" in f}
+    if top_level in known_module_names or top_level in known_package_dirs:
+        # Project-local (e.g. 'customers_project.settings' resolving to
+        # customers_project/settings.py, or a Django app package this
+        # candidate itself owns) - ordinary code-repair territory, not an
+        # environment problem.
+        return None
+    if os.path.exists(os.path.join(worktree_path, "requirements.txt")):
+        return None
+    if os.path.exists(os.path.join(worktree_path, "pyproject.toml")):
+        return None
+    return (
+        f"Python module '{module_name}' is not available to the verification "
+        "environment and no dependency manifest (requirements.txt or "
+        "pyproject.toml) exists for this candidate to declare it in - not a "
+        "code defect regeneration can fix; the interpreter running Quality "
+        "Gates genuinely cannot import this package."
+    )
+
+
+def classify_environment_failure(
+    error_text: str, *, worktree_path: Optional[str] = None, known_files: Iterable[str] = (),
+) -> Optional[str]:
     """Returns a short, human-readable description if error_text shows a failure
     class no amount of code regeneration can ever fix - a JVM crashing during its
     own startup (before any generated code runs, e.g. a startup flag unsupported
@@ -134,7 +199,13 @@ def classify_environment_failure(error_text: str) -> Optional[str]:
     during golden-use-case validation: the same JVM-startup crash (a flag correct
     for JDK 17.0.10 became fatal under JDK 26, which removed the Security Manager
     entirely) recurred identically across 3 real retry attempts before a human
-    had to intervene, and Kriya had no way to recognize it wasn't a code bug."""
+    had to intervene, and Kriya had no way to recognize it wasn't a code bug.
+
+    worktree_path/known_files (PRV-17, 2026-09-03) are optional and used only
+    by the Python missing-external-package check below - every other check in
+    this function is pure text matching and ignores them. Omitting worktree_path
+    (the default) skips that one check entirely rather than guessing, matching
+    every existing caller's behavior unchanged."""
     for marker in _JVM_STARTUP_FAILURE_MARKERS:
         if marker in error_text:
             return (
@@ -159,6 +230,12 @@ def classify_environment_failure(error_text: str) -> Optional[str]:
             f"Required build/run tool '{m.group(1)}' was not found on PATH - "
             "not a code defect, the toolchain itself is missing or misconfigured."
         )
+    if worktree_path is not None:
+        missing_module_failure = _classify_missing_module_environment_failure(
+            error_text, worktree_path=worktree_path, known_files=known_files,
+        )
+        if missing_module_failure:
+            return missing_module_failure
     return None
 
 

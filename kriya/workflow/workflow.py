@@ -3201,18 +3201,28 @@ class WorkflowEngine:
         # log their own failure_category directly at their own return site.
         failure_category: Optional[str] = None
         if not quality_passed:
+            # PRV-17 preflight correction (2026-09-03), extended for recovery
+            # admission (2026-09-03): checked BEFORE the generic
+            # "environment_failure" branch below, even though both cases also
+            # set state.environment_failure to reuse its STOP_ENVIRONMENT
+            # mechanism (see retry_strategy.py's own comments on that reuse) -
+            # an unauthorized/unrecoverable generation target, or a grounded
+            # failure with no authorized repair target, is a plan/scope
+            # defect, never a real machine/toolchain problem, and must not be
+            # reported or traced as one (kriya/cli.py prints the generic
+            # branch below as "[ENVIRONMENT/TOOLCHAIN ISSUE]" with
+            # toolchain-fix advice). Checked by message prefix, not a single
+            # counter, since two distinct retry_strategy.py call sites now
+            # produce this same category (state.unrecoverable_scope_
+            # denial_count's write-time PolicyDeniedError case, and the
+            # pre-call "NO_AUTHORIZED_REPAIR_TARGET" recovery-admission case)
+            # - both are scope defects, never environment ones.
+            is_scope_defect_stop = bool(state.environment_failure) and state.environment_failure.startswith((
+                "UNAUTHORIZED_GENERATION_TARGET:", "NO_AUTHORIZED_REPAIR_TARGET:",
+            ))
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
-                # PRV-17 preflight correction (2026-09-03): checked BEFORE the
-                # generic "environment_failure" branch below, even though this
-                # case also sets state.environment_failure to reuse its STOP_
-                # ENVIRONMENT mechanism (see retry_strategy.py's own comment on
-                # that reuse) - an unauthorized/unrecoverable generation target
-                # is a plan/scope defect the Developer proposed, never a real
-                # machine/toolchain problem, and must not be reported or traced
-                # as one (kriya/cli.py prints the generic branch below as
-                # "[ENVIRONMENT/TOOLCHAIN ISSUE]" with toolchain-fix advice).
-                else "unauthorized_generation_target" if state.unrecoverable_scope_denial_count
+                else "unauthorized_generation_target" if is_scope_defect_stop
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )

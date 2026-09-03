@@ -91,6 +91,7 @@ from kriya.workflow.verification_contract import extract_contract_verdict, pass_
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
 from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationLedger, ObligationRecord, ObligationStatus
+from kriya.workflow.plan_schema import RequirementOwnershipRelation
 from kriya.workflow.repair_contract import RepairContractStatus, build_repair_contract, derive_process_boundary_participants
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
@@ -2099,6 +2100,40 @@ async def _execute_runtime_verification_directly(
         )
         state.gate_outcomes.append(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
+    if (
+        ctx.structured_plan is not None and ctx.current_subtask_id
+        and not ctx.runtime_verification_required
+        and judgment.get("should_run")
+    ):
+        # Stage-scoped verification (PRV-17, 2026-09-03): ctx.goal for a
+        # bounded MA6 subtask always includes the full, unmediated
+        # "Authoritative Goal" section (build_subtask_goal_text(), the
+        # authority-isolation fix, PRV-11) - deliberately, so this SAME
+        # judge() call can still recognize a goal-explicit run command.
+        # judge() itself has no per-subtask stage-scoping equivalent to
+        # SpecComplianceAgent's own _stage_scoped_spec_compliance_goal()
+        # (that fix's own docstring: "this gate's own prompt below is the
+        # other half of that fix" - judge() was never given the other
+        # half). ctx.runtime_verification_required IS already computed
+        # correctly per-subtask (workflow_controller.py, from this
+        # subtask's own target.verification) - an inferred should_run=True
+        # here, from a subtask whose OWN approved plan declares no runtime
+        # obligation, is judge()'s best-effort guess against the full goal
+        # text, not evidence THIS subtask must satisfy runtime behavior
+        # right now. Treated as advisory only: never executed or graded as
+        # a real gate - a later subtask whose plan DOES declare the
+        # obligation still runs this exact check for real, unaffected (this
+        # branch is a no-op whenever ctx.runtime_verification_required is
+        # True). Unstructured/legacy callers (ctx.structured_plan is None)
+        # are completely unaffected - runtime_verification_required there
+        # is already derived from the WHOLE goal, matching today's behavior.
+        logger.info(
+            "Run-verification judge inferred should_run=True, but this subtask's own "
+            "approved plan declares no runtime-verification obligation - treating as "
+            "advisory only, not executing (a later subtask that DOES own this "
+            "obligation still runs it for real)."
+        )
+        return
     if not judgment.get("should_run"):
         return
     if deterministic_sequence_kind(judgment.get("run_commands") or []) == "build":
@@ -2436,30 +2471,6 @@ def _spec_requirements_contradicting_authority(
     return kept, contradicted
 
 
-_REQUIREMENT_IDENTIFIER_TOKEN_RE = re.compile(
-    r"`([A-Za-z_][A-Za-z0-9_]*)`"
-    r"|'([A-Za-z_][A-Za-z0-9_]*)'"
-    r"|\"([A-Za-z_][A-Za-z0-9_]*)\""
-    r"|\b([a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+)\b"
-)
-
-
-def _extract_requirement_identifier_tokens(requirement: str) -> List[str]:
-    """Pulls concrete, code-shaped identifier tokens out of a SpecCompliance
-    missing_requirement string (e.g. "displayName field" -> ["displayName"])
-    - backtick/quote-wrapped names and camelCase names only, deliberately
-    NOT every capitalized/plain word (a bare "Customer" or "The" would be a
-    false positive). Used only by _spec_requirements_naming_planner_only_
-    identifiers below to decide whether THIS specific identifier is the
-    Planner's own word choice - never to guess a requirement's meaning."""
-    tokens: List[str] = []
-    for match in _REQUIREMENT_IDENTIFIER_TOKEN_RE.finditer(requirement):
-        token = next((g for g in match.groups() if g), None)
-        if token and len(token) >= 3 and token not in tokens:
-            tokens.append(token)
-    return tokens
-
-
 _REQUIREMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 _REQUIREMENT_PROVENANCE_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "does",
@@ -2495,6 +2506,44 @@ def _identifier_local_terms(text: str, identifier: str, radius: int = 3) -> set[
             ):
                 terms.add(normalized)
     return terms
+
+
+def _extract_requirement_identifier_tokens(requirement: str) -> List[str]:
+    """Pulls candidate provenance-check terms out of a SpecCompliance
+    missing_requirement string - reuses the SAME general word/stopword
+    primitives _identifier_local_terms above already uses for nearby-term
+    provenance, rather than a syntax-specific shape (camelCase, backtick/
+    quote-wrapped, a dotted manifest filename, a version specifier, ...).
+
+    PRV-17 (2026-09-03): an earlier version of this function matched only
+    code-shaped identifiers via a hand-written regex, extended twice live
+    to also catch a dotted manifest filename ("requirements.txt") and a
+    PEP 508 version specifier ("python>=3.12") after each shape was found,
+    separately, to slip through with zero extracted tokens. A THIRD shape
+    ("requires-python = \">=3.12\"") and a fourth, pure-prose one ("minimum
+    Python version 3.12") immediately proved this was an open-ended list,
+    not a closed one - correctness must not depend on anticipating every
+    way a Planner (or SpecComplianceAgent's own judgment) can phrase an
+    invented detail. General word extraction needs no such list: _spec_
+    requirements_naming_planner_only_identifiers' own section-provenance
+    comparison (does this word, or its nearby context, appear only in
+    Planned Implementation, never Authoritative Goal) already does the
+    real work for ANY word shape, once given real candidate words to
+    check - producing those candidates is this function's only job.
+    Excludes short/stopword-only words the same way _identifier_local_
+    terms already does, so a bare "Customer" or "The" isn't itself proof
+    of anything (matched or not, the actual provenance decision is
+    _spec_requirements_naming_planner_only_identifiers' own nearby-context
+    comparison, not this function's word list)."""
+    tokens: List[str] = []
+    for word in _REQUIREMENT_WORD_RE.findall(requirement):
+        if (
+            len(word) >= 3
+            and word.lower() not in _REQUIREMENT_PROVENANCE_STOPWORDS
+            and word not in tokens
+        ):
+            tokens.append(word)
+    return tokens
 
 
 def _spec_requirements_naming_planner_only_identifiers(
@@ -2587,6 +2636,27 @@ def _stage_scoped_spec_compliance_goal(ctx: "AttemptContext") -> tuple[str, List
     Feeding the whole final goal to every intermediate candidate gate made a
     project-scaffold stage fail for an endpoint explicitly owned by a later
     application stage.  Unstructured callers retain the historical behavior.
+
+    Stage-projection ownership (PRV-17, 2026-09-03): `current`'s own
+    acceptance_criteria_ids/relevant_global_invariant_ids are Planner-
+    authored data this function used to trust in isolation. An earlier
+    version of this fix deferred an id whenever ANY other pending subtask
+    also claimed it - but bare duplicate occurrence is not proof of FUTURE
+    ownership: an accidental/lazy Planner assignment onto an UNRELATED
+    sibling subtask produces the exact same "also claimed elsewhere"
+    signal a genuine future owner would, and silently deferring on that
+    signal alone would just as easily hide a real, currently-due
+    violation. This now asks the plan's own validated dependency DAG
+    directly via EngineeringPlan.classify_requirement_ownership() (mirrors
+    classify_file_ownership()'s existing PAST_ORDERED/CURRENT/
+    FUTURE_ORDERED/UNRELATED reasoning, generalized to a claimant-id list
+    since a criterion/invariant carries no file path to derive ownership
+    from) - a FUTURE_ORDERED verdict requires a REAL, structurally later
+    (not-yet-run, provably downstream) claimant, not just another mention.
+    A genuinely stage-spanning claim with no provable DAG relationship
+    (UNRELATED) falls back to this function's own pre-existing behavior
+    (trust current's claim, evaluate now) rather than inventing a new
+    resolution for an ambiguity the plan's own structure can't settle.
     """
     plan = ctx.structured_plan
     current_id = ctx.current_subtask_id
@@ -2596,18 +2666,42 @@ def _stage_scoped_spec_compliance_goal(ctx: "AttemptContext") -> tuple[str, List
     if current is None:
         return ctx.goal, []
 
+    def _claimants(cid: str, field: str) -> List[str]:
+        return [st.id for st in plan.subtasks if cid in getattr(st, field)]
+
     criteria = {criterion.id: criterion.description for criterion in plan.acceptance_criteria}
-    due = [criteria[cid] for cid in current.acceptance_criteria_ids if cid in criteria]
+    due_acceptance_ids = [
+        cid for cid in current.acceptance_criteria_ids
+        if cid in criteria
+        and plan.classify_requirement_ownership(current_id, _claimants(cid, "acceptance_criteria_ids"))
+        != RequirementOwnershipRelation.FUTURE_ORDERED
+    ]
+    due = [criteria[cid] for cid in due_acceptance_ids]
     invariants = {invariant.id: invariant.statement for invariant in plan.global_invariants}
-    due.extend(
-        invariants[iid] for iid in current.relevant_global_invariant_ids if iid in invariants
+    due_invariant_ids = [
+        iid for iid in current.relevant_global_invariant_ids
+        if iid in invariants
+        and plan.classify_requirement_ownership(current_id, _claimants(iid, "relevant_global_invariant_ids"))
+        != RequirementOwnershipRelation.FUTURE_ORDERED
+    ]
+    due.extend(invariants[iid] for iid in due_invariant_ids)
+    # Genuinely still-pending work only (claimed by a not-yet-completed
+    # OTHER subtask) - pure observability, matching this field's own
+    # pre-existing contract; an id only a COMPLETED subtask ever claimed is
+    # done, not "future", regardless of whether current also excluded it.
+    pending_subtask_ids = {
+        st.id for st in plan.subtasks if st.id != current_id and st.id not in ctx.completed_subtask_ids
+    }
+    pending_acceptance_ids = {
+        cid for st in plan.subtasks if st.id in pending_subtask_ids for cid in st.acceptance_criteria_ids
+    }
+    pending_invariant_ids = {
+        iid for st in plan.subtasks if st.id in pending_subtask_ids for iid in st.relevant_global_invariant_ids
+    }
+    future_ids = sorted(
+        (pending_acceptance_ids - set(due_acceptance_ids))
+        | (pending_invariant_ids - set(due_invariant_ids))
     )
-    future_ids = sorted({
-        cid
-        for subtask in plan.subtasks
-        if subtask.id != current_id and subtask.id not in ctx.completed_subtask_ids
-        for cid in subtask.acceptance_criteria_ids
-    })
     scoped = (
         f"Current approved subtask: {current.id}\n"
         f"Current implementation obligation: {current.description}\n"

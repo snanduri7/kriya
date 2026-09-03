@@ -62,6 +62,7 @@ from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
     FileAction,
+    GlobalInvariant,
     PlannedFile,
     Subtask,
 )
@@ -2723,6 +2724,99 @@ async def test_run_attempt_application_runtime_verification_only_never_calls_dev
     assert not developer.run_generation.called
     run_verifier.judge.assert_awaited_once()
     assert ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_intermediate_subtask_treats_inferred_runtime_verification_as_advisory(tmp_path):
+    """PRV-17 (2026-09-03) stage-scoped verification: an intermediate
+    subtask (s1, scaffolding a Django project) whose own approved plan
+    declares NO runtime-verification obligation (ctx.runtime_verification_
+    required=False) must not have judge()'s own inferred should_run=True
+    executed and graded as a real gate. RunVerifierAgent.judge() has no
+    stage-scoping equivalent to SpecComplianceAgent's own _stage_scoped_
+    spec_compliance_goal() (it always receives the full, unmediated
+    'Authoritative Goal' text, PRV-11's own authority-isolation fix) - so it
+    can easily infer a run command (here: `python manage.py runserver`,
+    checking a /customers/health endpoint) expecting artifacts only a LATER
+    subtask (s4) will ever create. Neither the run command nor a grade
+    call may happen - both mocks raise if invoked."""
+    plan = EngineeringPlan(
+        plan_id="prv17-stage-verification", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="scaffold the Django project", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)]),
+            Subtask(id="s4", description="implement the health endpoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"], planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)]),
+        ],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for this DENY_ALL verification shape"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["python", "manage.py", "runserver"]],
+        "command_source": "inferred", "success_criteria": "GET /customers/health returns status ok",
+    })
+    run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("must never grade an advisory-only inferred runtime check"),
+    )
+    ctx = _runtime_verifier_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        structured_plan=plan, current_subtask_id="s1", runtime_verification_required=False,
+    )
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence") as mock_run_app:
+        await run_attempt(state, ctx)  # must NOT raise
+
+    mock_run_app.assert_not_called()
+    run_verifier.judge.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_terminal_subtask_still_executes_declared_runtime_verification(tmp_path):
+    """Positive control for the test above, through the identical
+    structured-plan context: when THIS subtask's own approved plan DOES
+    declare the runtime obligation (runtime_verification_required=True -
+    e.g. s4, the terminal integration subtask), the exact same inferred
+    judge() verdict is executed and graded for real, completely unaffected
+    by the new advisory-only suppression."""
+    plan = EngineeringPlan(
+        plan_id="prv17-stage-verification", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="scaffold the Django project", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)]),
+            Subtask(id="s4", description="implement the health endpoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"], planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)]),
+        ],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["python", "manage.py", "runserver"]],
+        "command_source": "inferred", "success_criteria": "GET /customers/health returns status ok",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "returned status ok", "likely_files": []})
+    ctx = _runtime_verifier_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "ok", "steps": []},
+    ):
+        await run_attempt(state, ctx)  # must not raise
+
+    run_verifier.judge.assert_awaited_once()
 
 
 def test_verification_only_java_grounding_outranks_inferred_maven_exec():
@@ -8109,6 +8203,126 @@ def test_stage_scoped_goal_marks_later_acceptance_pending():
     assert pending == ["later"]
 
 
+def test_stage_scoped_goal_excludes_invariant_a_pending_peer_also_claims():
+    """PRV-17 (2026-09-03) stage-projection cross-check: a global invariant
+    the Planner marks 'relevant' to BOTH the current, earlier subtask AND a
+    later, not-yet-completed one must still be treated as pending for the
+    earlier one - trusting the current subtask's own relevant_global_
+    invariant_ids in isolation (the pre-fix behavior) would let a Planner
+    assignment decision, not an unmet CURRENT obligation, fail this gate."""
+    plan = EngineeringPlan(
+        plan_id="p", kind=ChangeKind.TASK,
+        global_invariants=[
+            GlobalInvariant(id="gi1", statement="The app exposes /customers/health returning status ok"),
+        ],
+        subtasks=[
+            Subtask(id="s1", description="scaffold the Django project", execution_method=ExecutionMethod.MODEL,
+                    relevant_global_invariant_ids=["gi1"]),
+            Subtask(id="s4", description="implement the health endpoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"], relevant_global_invariant_ids=["gi1"]),
+        ],
+    )
+    ctx = MagicMock(
+        structured_plan=plan, current_subtask_id="s1", completed_subtask_ids=frozenset(),
+        goal="whole final goal",
+    )
+    scoped, pending = _stage_scoped_spec_compliance_goal(ctx)
+    assert "/customers/health" not in scoped
+    assert "None beyond the current implementation obligation" in scoped
+    assert pending == ["gi1"]
+
+
+def test_stage_scoped_goal_still_due_for_the_sole_remaining_owner():
+    """Positive control for the test above: once s1 is the only claimant
+    left (s4 hasn't ALSO claimed it, or s4 has already completed), the
+    invariant is genuinely due - this isn't a blanket suppression."""
+    plan = EngineeringPlan(
+        plan_id="p", kind=ChangeKind.TASK,
+        global_invariants=[
+            GlobalInvariant(id="gi1", statement="The app exposes /customers/health returning status ok"),
+        ],
+        subtasks=[
+            Subtask(id="s1", description="scaffold", execution_method=ExecutionMethod.MODEL),
+            Subtask(id="s4", description="implement the health endpoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"], relevant_global_invariant_ids=["gi1"]),
+        ],
+    )
+    ctx = MagicMock(
+        structured_plan=plan, current_subtask_id="s4", completed_subtask_ids=frozenset(["s1"]),
+        goal="whole final goal",
+    )
+    scoped, pending = _stage_scoped_spec_compliance_goal(ctx)
+    assert "/customers/health" in scoped
+    assert pending == []
+
+
+def test_stage_scoped_goal_accidental_duplicate_on_unrelated_sibling_does_not_defer():
+    """PRV-17 (2026-09-03), final architecture closure: an earlier version
+    of this fix deferred an invariant whenever ANY other pending subtask
+    also claimed it - but bare duplicate occurrence is not proof of FUTURE
+    ownership. s5 here has NO dependency-ordering relationship to s1 (an
+    independent, unrelated branch of the same plan) - an accidental/lazy
+    Planner assignment duplicating the id onto s5 must not silently defer
+    a requirement that is, in fact, due for s1 right now."""
+    plan = EngineeringPlan(
+        plan_id="p", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="Some invariant text due now")],
+        subtasks=[
+            Subtask(id="s1", description="task one", execution_method=ExecutionMethod.MODEL,
+                    relevant_global_invariant_ids=["gi1"]),
+            Subtask(id="s5", description="unrelated independent task", execution_method=ExecutionMethod.MODEL,
+                    relevant_global_invariant_ids=["gi1"]),
+        ],
+    )
+    ctx = MagicMock(
+        structured_plan=plan, current_subtask_id="s1", completed_subtask_ids=frozenset(),
+        goal="whole final goal",
+    )
+    scoped, pending = _stage_scoped_spec_compliance_goal(ctx)
+    assert "Some invariant text due now" in scoped
+    assert pending == []
+
+
+def test_planner_only_dependency_manifest_version_requirement_is_suppressed():
+    """PRV-17 (2026-09-03) Planner-authority isolation: 'Python 3.12' in the
+    authoritative goal must never become 'requirements.txt must contain
+    python>=3.12' - a Python/language RUNTIME version is never actually
+    satisfied by pip dependency-specifier syntax (there is no real 'python'
+    package to pin), so a missing_requirement phrased this way is
+    definitionally the Planner's own implementation detail. Regression test
+    for a real gap: _extract_requirement_identifier_tokens' original three
+    shapes (backtick/quoted/camelCase) cannot match a dotted manifest
+    filename or a version specifier at all, so this exact requirement text
+    used to return zero tokens and get UNCONDITIONALLY KEPT (never
+    suppressed) - confirmed via direct call before this fix."""
+    goal_text = _split_goal(
+        "Create a Python 3.12 Django application with a customers app and a health endpoint.",
+        "Use Python packaging conventions: declare dependencies in a requirements.txt file, "
+        "pinning python>=3.12.",
+    )
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["requirements.txt must contain python>=3.12"], goal_text,
+    )
+    assert kept == []
+    assert planner_only == ["requirements.txt must contain python>=3.12"]
+
+
+def test_planner_only_manifest_filename_named_in_authoritative_goal_is_still_enforced():
+    """Positive control: when the AUTHORITATIVE goal itself names the exact
+    manifest file, that IS a real requirement and must still be enforced -
+    the new dotted-filename token shape must not blanket-suppress every
+    requirement naming a manifest, only ones the Planner alone introduced."""
+    goal_text = _split_goal(
+        "Declare the Django dependency in requirements.txt.",
+        "Use Python packaging conventions and pin exact versions.",
+    )
+    kept, planner_only = _spec_requirements_naming_planner_only_identifiers(
+        ["requirements.txt must declare django"], goal_text,
+    )
+    assert kept == ["requirements.txt must declare django"]
+    assert planner_only == []
+
+
 def test_settled_goal_spec_requirement_pure_function():
     """Correctness Continuity Part A unit test - the fingerprint/settled
     lookup in isolation, no run_attempt() machinery needed."""
@@ -10672,6 +10886,61 @@ async def test_handle_attempt_failure_stops_immediately_on_environment_failure(t
 
 
 @pytest.mark.asyncio
+async def test_handle_attempt_failure_stops_immediately_on_missing_external_dependency(tmp_path):
+    """PRV-17 (2026-09-03): a deterministically missing external Python
+    package (`ModuleNotFoundError: No module named 'django'`) with NO legal
+    manifest in the worktree to declare it in must stop the retry loop on
+    the very first attempt, exactly like the JVM-startup-crash case above -
+    11 real attempts were burned live routing this to ordinary Developer
+    source-file repair before this fix, none of which could ever succeed
+    (no candidate content change makes an uninstalled package importable)."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = QualityGateFailure(Failure(
+        type="test",
+        message="ModuleNotFoundError: No module named 'django'",
+        raw_output=(
+            "customers_app/tests.py:1: in <module>\n"
+            "    import django\n"
+            "ModuleNotFoundError: No module named 'django'"
+        ),
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.environment_failure is not None
+    assert "django" in state.environment_failure
+    assert state.budgets.retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_missing_external_dependency_with_manifest_stays_repairable(tmp_path):
+    """Positive control for the test above, through the same integration
+    path: the SAME missing-django failure, but this time a real
+    requirements.txt exists in the worktree for the Developer to legally
+    add the dependency to - the retry loop must NOT stop early, preserving
+    today's ordinary code-repair path."""
+    (tmp_path / "requirements.txt").write_text("Flask\n")
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = QualityGateFailure(Failure(
+        type="test",
+        message="ModuleNotFoundError: No module named 'django'",
+        raw_output="ModuleNotFoundError: No module named 'django'",
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is False
+    assert state.environment_failure is None
+
+
+@pytest.mark.asyncio
 async def test_handle_attempt_failure_classifies_internal_exception_and_stops_immediately(tmp_path):
     """PRV-06 completion (2026-08-29, 'MA8.1 <-> MA9 composition and
     AttemptContext correctness'): a bare, non-QualityGateFailure exception -
@@ -10911,6 +11180,98 @@ async def test_handle_attempt_failure_narrows_implicated_files_to_authorized_sco
     # ...but the unauthorized file must never become a generation target.
     assert state.last_implicated_files == ["App.java"]
     assert "InMemoryService.java" in state.rejected_generation_targets
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_stops_before_developer_call_when_no_authorized_repair_target_exists(tmp_path):
+    """PRV-17 (2026-09-03) recovery admission: a GROUNDED failure (real
+    attribution, not a blind guess) whose implicated files are ENTIRELY
+    outside this subtask's authorized scope must stop BEFORE another
+    Developer call - not fall through to an ordinary FULL_SET retry, which
+    would ask the Developer to regenerate its own (already-correct,
+    irrelevant) authorized files and burn a full generation cycle that
+    cannot possibly address a failure whose real cause (settings.py/
+    urls.py, owned by a LATER subtask) lives entirely outside this
+    subtask's own scope (manage.py, requirements.txt). Distinct from
+    'attribution found nothing at all', which still legitimately falls
+    back to FULL_SET (see the positive control below).
+
+    Uses a JUDGMENT-tier (not DETERMINISTIC_ATTRIBUTION_TIERS) attribution
+    deliberately - a deterministic/locator-tier out-of-scope grounding
+    already routes through the EXISTING, separate plan_scope_conflict/
+    owner-recovery escalation above this code path (unaffected by this
+    fix); this test targets the specific residual gap fork investigation
+    confirmed: a real, non-deterministic-tier grounded implication that
+    still ends up with zero authorized targets after narrowing, which
+    previously fell through to an unwinnable FULL_SET retry instead of
+    stopping."""
+    from kriya.workflow.attribution import AttributionResult
+
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    state.all_files_written = {"manage.py"}
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    ctx.allowed_write_relpaths = ["manage.py", "requirements.txt"]
+    ctx.write_scope_mode = WriteScopeMode.ALLOWLIST
+    exc = QualityGateFailure(Failure(
+        type="test",
+        message="ImproperlyConfigured: DJANGO_SETTINGS_MODULE points at a module that "
+                "doesn't define ROOT_URLCONF",
+        likely_files=["customers_project/settings.py", "customers_project/urls.py"],
+    ))
+
+    grounded_out_of_scope_attribution = AttributionResult(
+        tier="judge", files=["customers_project/settings.py", "customers_project/urls.py"],
+        confidence="medium", reasoning="both files plausibly relate to the settings misconfiguration",
+    )
+    with patch(
+        "kriya.workflow.retry_strategy.attribute_failure",
+        AsyncMock(return_value=grounded_out_of_scope_attribution),
+    ):
+        should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.environment_failure is not None
+    assert "NO_AUTHORIZED_REPAIR_TARGET" in state.environment_failure
+    assert state.last_implicated_files is None
+    assert state.plan_scope_conflict is None
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_current_violation_with_authorized_target_still_recovers_normally(tmp_path):
+    """Regression/positive control for the test above: a genuine CURRENT
+    semantic violation whose grounded attribution names an AUTHORIZED
+    target must keep invoking ordinary recovery exactly as before - the
+    new admission check must never suppress a real, fixable failure."""
+    from kriya.workflow.attribution import AttributionResult
+
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    state.all_files_written = {"manage.py"}
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    ctx.allowed_write_relpaths = ["manage.py", "requirements.txt"]
+    ctx.write_scope_mode = WriteScopeMode.ALLOWLIST
+    exc = QualityGateFailure(Failure(
+        type="test",
+        message="SyntaxError: invalid syntax in manage.py",
+        likely_files=["manage.py"],
+    ))
+
+    grounded_in_scope_attribution = AttributionResult(
+        tier="locator", files=["manage.py"], confidence="high",
+        reasoning="the traceback names this file directly",
+    )
+    with patch(
+        "kriya.workflow.retry_strategy.attribute_failure",
+        AsyncMock(return_value=grounded_in_scope_attribution),
+    ):
+        should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is False
+    assert state.environment_failure is None
+    assert state.last_implicated_files == ["manage.py"]
 
 
 @pytest.mark.asyncio
@@ -11308,12 +11669,24 @@ def _split_goal(authoritative: str, planned: str) -> str:
     )
 
 
-def test_extract_requirement_identifier_tokens_finds_camel_case_and_quoted_names():
-    assert _extract_requirement_identifier_tokens("displayName field") == ["displayName"]
-    assert _extract_requirement_identifier_tokens("a `protocolVersion` value") == ["protocolVersion"]
-    assert _extract_requirement_identifier_tokens("a 'stored' name") == ["stored"]
-    # No code-shaped identifier at all - a vague/behavioral requirement.
-    assert _extract_requirement_identifier_tokens("the response must be sorted") == []
+def test_extract_requirement_identifier_tokens_extracts_any_meaningful_word():
+    """PRV-17 (2026-09-03): generalized from a syntax-specific (camelCase/
+    backtick/quoted-only) extractor to ANY meaningful word - the real
+    provenance decision lives in _spec_requirements_naming_planner_only_
+    identifiers' own section-comparison, not in this function pre-judging
+    which words could possibly matter. A code-shaped word like
+    "displayName" or "protocolVersion" is still extracted (it's a
+    perfectly good word), just no longer the ONLY shape recognized -
+    ordinary words (backtick/quote-wrapping is irrelevant, since
+    punctuation already isn't a word character) and even a fully prose
+    requirement now yield real candidates too."""
+    assert _extract_requirement_identifier_tokens("displayName field") == ["displayName", "field"]
+    assert _extract_requirement_identifier_tokens("a `protocolVersion` value") == ["protocolVersion", "value"]
+    assert _extract_requirement_identifier_tokens("a 'stored' name") == ["stored", "name"]
+    # Still filters short words and the shared stopword list (matching
+    # _identifier_local_terms' own filtering) - "the"/"must"/"be" are
+    # excluded, "response"/"sorted" are real candidate words now.
+    assert _extract_requirement_identifier_tokens("the response must be sorted") == ["response", "sorted"]
 
 
 def test_planner_only_requirement_is_suppressed_reproducing_the_live_incident():
@@ -14876,6 +15249,93 @@ def test_classify_environment_failure_ignores_filenotfound_not_from_the_toolchai
         "FileNotFoundError: [Errno 2] No such file or directory: 'config.json'"
     )
     assert classify_environment_failure(error) is None
+
+# --- PRV-17 (2026-09-03): a deterministically missing EXTERNAL Python
+# package in the verification environment (e.g. `ModuleNotFoundError: No
+# module named 'django'`) must stop the retry loop immediately, the same
+# way a missing build tool or a JVM startup crash already does - but ONLY
+# when the current candidate has no legal way to make that package
+# available (no requirements.txt/pyproject.toml to declare it in). A
+# project-local module (an app package this same candidate is supposed to
+# write) must never be misclassified this way - that stays ordinary,
+# code-repairable territory. ---
+
+def test_classify_environment_failure_detects_missing_external_package_with_no_manifest(tmp_path):
+    error = (
+        "Traceback (most recent call last):\n"
+        '  File "customers_project/urls.py", line 3, in <module>\n'
+        "    import django\n"
+        "ModuleNotFoundError: No module named 'django'"
+    )
+    result = classify_environment_failure(error, worktree_path=str(tmp_path), known_files=["manage.py"])
+    assert result is not None
+    assert "django" in result
+    assert "requirements.txt" in result or "pyproject.toml" in result
+
+
+def test_classify_environment_failure_missing_project_local_module_stays_code_repairable(tmp_path):
+    """The module named in the error IS a file this candidate itself owns
+    (customers/__init__.py, matching top-level package 'customers') - a
+    genuine incomplete-generation defect, not an environment problem, even
+    though the error text has the identical 'No module named' shape."""
+    error = "ModuleNotFoundError: No module named 'customers'"
+    result = classify_environment_failure(
+        error, worktree_path=str(tmp_path),
+        known_files=["manage.py", "customers/__init__.py", "customers/views.py"],
+    )
+    assert result is None
+
+
+def test_classify_environment_failure_missing_external_package_with_requirements_txt_stays_repairable(tmp_path):
+    (tmp_path / "requirements.txt").write_text("Django>=5.0\n")
+    error = "ModuleNotFoundError: No module named 'django'"
+    result = classify_environment_failure(error, worktree_path=str(tmp_path), known_files=["manage.py"])
+    assert result is None
+
+
+def test_classify_environment_failure_missing_external_package_with_pyproject_toml_stays_repairable(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.1"\n')
+    error = "ModuleNotFoundError: No module named 'django'"
+    result = classify_environment_failure(error, worktree_path=str(tmp_path), known_files=["manage.py"])
+    assert result is None
+
+
+def test_classify_environment_failure_django_settings_module_error_never_matches():
+    """A real DJANGO_SETTINGS_MODULE misconfiguration error contains neither
+    'ModuleNotFoundError' nor 'No module named' - must never be confused
+    with (or accidentally trip) the missing-external-package check."""
+    error = (
+        "django.core.exceptions.ImproperlyConfigured: Requested setting "
+        "INSTALLED_APPS, but settings are not configured. You must either "
+        "define the environment variable DJANGO_SETTINGS_MODULE or call "
+        "settings.configure() before accessing settings."
+    )
+    assert classify_environment_failure(error) is None
+
+
+def test_classify_environment_failure_dotted_settings_module_path_is_project_local(tmp_path):
+    """A misconfigured DJANGO_SETTINGS_MODULE pointing at a real, dotted
+    project-local path ('customers_project.settings') DOES match the same
+    'No module named' shape 'django' itself would - the top-level package
+    (customers_project) resolving to a known planned file
+    (customers_project/settings.py) is what correctly keeps this
+    code-repairable rather than misclassifying it as an unfixable missing
+    external package."""
+    error = "ModuleNotFoundError: No module named 'customers_project.settings'"
+    result = classify_environment_failure(
+        error, worktree_path=str(tmp_path),
+        known_files=["manage.py", "customers_project/settings.py", "customers_project/__init__.py"],
+    )
+    assert result is None
+
+
+def test_classify_environment_failure_without_worktree_path_skips_module_check():
+    """Every caller before this fix passed only error_text - omitting
+    worktree_path (the default) must keep behaving exactly as before,
+    never guessing at project-local vs. external without real context."""
+    error = "ModuleNotFoundError: No module named 'django'"
+    assert classify_environment_failure(error) is None
+
 
 def test_check_java_toolchain_mismatch_skips_non_java_stack():
     # A Python/Ruby goal must never pay for (or trigger) this check at all.
