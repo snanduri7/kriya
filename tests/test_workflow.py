@@ -1585,6 +1585,51 @@ async def test_run_attempt_accepts_single_authorized_target_under_allowlist(tmp_
     assert (tmp_path / other_path).read_text() == _PRV18_OTHER_ORIGINAL
 
 
+@pytest.mark.asyncio
+async def test_run_attempt_accepts_trailing_slash_allowlist_entry_matching_bare_developer_target(tmp_path):
+    """PRV-17 (2026-09-03) end-to-end regression: even with the plan-schema
+    fix (PlannedFile now rejects a bare directory path outright, see
+    test_plan_schema.py), the write gate itself must independently
+    canonicalize - defense in depth, not a single point of failure.
+    Reproduces the live incident's exact shape directly at
+    ctx.allowed_write_relpaths (as it would have looked before plan
+    validation ran): the authorized scope names "customers_project/"
+    (trailing slash, as the Planner wrote it) while the Developer reports
+    the same target as "customers_project" (no trailing slash, as any real
+    file report would) - the write must be ACCEPTED, not rejected as
+    outside scope."""
+    target_path = "customers_project"
+    (tmp_path / target_path).write_text("")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": target_path, "content": "# generated\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        goal="Create the customers_project entry point.",
+        architect_files=[target_path], expected_files_upfront=[target_path],
+        architect_basename_to_path={"customers_project": target_path},
+        allowed_write_relpaths=[f"{target_path}/"],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise
+
+    assert (tmp_path / target_path).read_text() == "# generated\n"
+
+
 # --- process-boundary/testability obligation (PRV-06, 2026-08-28) ---
 
 def test_record_process_boundary_obligation_violated_then_satisfied():
@@ -6115,6 +6160,58 @@ async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_workflow_stops_retrying_immediately_on_unrecoverable_scope_denial(tmp_path):
+    """PRV-17 (2026-09-03) end-to-end regression: a Developer-proposed write
+    outside the validated write scope, naming a target that doesn't exist on
+    disk (so no real owner exists to hand recovery off to), must stop the
+    retry loop on its very first occurrence - not be retried - and must not
+    be reported or traced as a machine/toolchain problem even though it
+    reuses the same environment_failure/STOP_ENVIRONMENT stop mechanism
+    internally (see retry_strategy.py's own comment on that reuse, and the
+    failure_category ternary in this module). The design text names the SAME
+    file the Developer's own JSON response returns (customers/views.py) -
+    deliberately, so the Architect's own heuristic file-list extraction (no
+    JSON file-list block in "Design: ...", so it falls back to regex over
+    the design prose) agrees with the Developer about WHAT to write; the
+    only mismatch under test is that target against allowed_write_relpaths,
+    not an unrelated architect/developer file-list disagreement."""
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    # Exactly one Developer generation call is provided - if the retry loop
+    # incorrectly kept going after the unrecoverable scope denial, a second
+    # Developer call would hit StopIteration and fail this test outright.
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write customers/views.py",
+        '[{"filepath": "customers/views.py", "content": "print(1)"}]',
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+
+    res = await we.run_generation_workflow(
+        goal="Create app",
+        workspace_path=str(tmp_path),
+        allowed_write_relpaths=["manage.py"],
+        write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    assert res["quality_gates_passed"] is False
+    assert res["files"] == []
+    assert res["environment_failure"] is not None
+    assert "UNAUTHORIZED_GENERATION_TARGET" in res["environment_failure"]
+    assert res["failure_category"] == "unauthorized_generation_target"
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    assert trace_row["status"] == "failure"
+    assert trace_row["failure_category"] == "unauthorized_generation_target"
+
+
+@pytest.mark.asyncio
 async def test_workflow_failure_report_wires_real_failures_through_categorize_failure(tmp_path):
     """MA7.6's categorize_failure()/build_failure_report_entry() were built
     (28 tests) but had zero real callers anywhere - genuinely dead code as
@@ -10629,6 +10726,91 @@ async def test_handle_attempt_failure_stops_when_grounded_repair_is_outside_auth
     assert state.plan_scope_conflict["attribution_tier"] == "judge"
     assert state.plan_scope_conflict["grounded_owner_files"] == []
     assert state.plan_scope_conflict["reason"]
+
+
+def _hallucinated_target_scope_denial(tmp_path, relpath: str) -> PolicyDeniedError:
+    """A PolicyDeniedError shaped exactly like the one attempt.py's write
+    gate raises for a Developer-generated target outside ALLOWLIST scope
+    (kriya/workflow/attempt.py, reason_code=FILE_OUTSIDE_VALIDATED_SUBTASK_
+    SCOPE) - `relpath` deliberately never exists on disk, so
+    _failure_from_validated_scope_denial() (kriya/workflow/retry_strategy.py)
+    cannot ground it into a plan_scope_conflict (no real existing production
+    owner to hand recovery off to): it names no legitimate repair target at
+    all, which is exactly the "unrecoverable" shape PRV-17's fix targets."""
+    target = os.path.join(str(tmp_path), relpath)
+    return PolicyDeniedError(
+        request=ActionRequest(action_type=ActionType.WRITE_FILE, target=target),
+        result=PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE",
+            explanation=f"'{target}' is outside the validated subtask's allowed modification scope.",
+            matched_rule="filesystem.authorized_writer.validated_subtask_scope",
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_stops_immediately_on_first_unrecoverable_scope_denial(tmp_path):
+    """PRV-17 (2026-09-03): a live run burned 4 full generation cycles
+    because every out-of-scope target the Developer proposed was a
+    brand-new, never-written path - _failure_from_validated_scope_denial()
+    could never ground any of them into a plan_scope_conflict (no real
+    existing owner to hand recovery off to), so each one fell through to
+    ordinary general_error retry handling and the Developer proposed a
+    DIFFERENT illegal target on the next attempt instead of converging.
+    Once this is established (no legal repair target exists), no further
+    Developer/LLM call is warranted - stop on the very FIRST occurrence,
+    not after paying for a second wasted cycle first."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(
+        tmp_path, max_retries=4,
+        allowed_write_relpaths=["manage.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    should_break = await handle_attempt_failure(
+        state, ctx, _hallucinated_target_scope_denial(tmp_path, "customers_project/pyproject.toml"),
+    )
+
+    assert should_break is True
+    assert state.unrecoverable_scope_denial_count == 1
+    assert state.environment_failure is not None
+    assert "UNAUTHORIZED_GENERATION_TARGET" in state.environment_failure
+    # Never a real toolchain/environment problem - must not be classified or
+    # reported (kriya/cli.py) as one. See kriya/workflow/workflow.py's
+    # failure_category ternary and its comment for why this branch is
+    # checked ahead of the generic "environment_failure" one.
+    assert state.plan_scope_conflict is None
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_scope_denial_with_real_existing_owner_is_unaffected(tmp_path):
+    """The new circuit breaker must only fire for a denial with NO real
+    owner to recover through - a scope denial that names a real, existing
+    production file (the shape _failure_from_validated_scope_denial()
+    already handles via ordinary owner-recovery) must keep behaving exactly
+    as before: should_break True on the very FIRST occurrence, via
+    plan_scope_conflict, never the new counter."""
+    owner = "src/App.java"
+    (tmp_path / "src").mkdir()
+    (tmp_path / owner).write_text("class App {}\n")
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(
+        tmp_path, max_retries=4,
+        allowed_write_relpaths=["manage.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    should_break = await handle_attempt_failure(
+        state, ctx, _hallucinated_target_scope_denial(tmp_path, owner),
+    )
+
+    assert should_break is True
+    assert state.unrecoverable_scope_denial_count == 0
+    assert state.environment_failure is None
+    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_DEFECT"
 
 
 @pytest.mark.asyncio

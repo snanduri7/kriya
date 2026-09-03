@@ -173,6 +173,58 @@ def test_authorize_allows_file_inside_validated_subtask_scope(workspace):
     assert result.decision != PolicyDecision.DENY
 
 
+# --- Path canonicalization (PRV-17, 2026-09-03): a live run planned
+# "customers_project/" (trailing slash) as an allowed relpath, then the
+# Developer's own generated target for the same directory came back as
+# "customers_project" (no trailing slash, as any real file report would) -
+# a raw string comparison treated the two as different targets and denied a
+# write that was, in fact, authorized. normalize_workspace_relpath() (kriya/
+# policy/filesystem.py) is the fix; these prove AuthorizedFileWriter's own
+# comparison (already normpath-based before this fix) holds for every shape
+# named in the incident, without accidentally loosening real containment. ---
+
+def test_authorize_treats_trailing_slash_allowlist_entry_as_same_identity_as_bare_name(workspace):
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["customers_project/"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "customers_project"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_authorize_trailing_slash_allowlist_entry_does_not_grant_directory_containment(workspace):
+    """The trailing-slash normalization above is pure STRING identity, not a
+    directory-prefix grant - "customers_project/" in the allowlist still only
+    authorizes the literal "customers_project" path, never every file nested
+    under it. Confirms the fix didn't widen ALLOWLIST semantics from
+    exact-match to directory containment."""
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["customers_project/"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "customers_project", "manage.py"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+
+
+def test_authorize_dot_slash_prefixed_allowlist_entry_normalizes_safely(workspace):
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["./customers_project/manage.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "customers_project", "manage.py"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_authorize_relative_traversal_target_cannot_collide_with_an_unrelated_allowlisted_file(workspace):
+    """Normalization must never let a target spelled with a traversal
+    segment ("a/../b.py") resolve to, and thereby collide with, a
+    completely different allowlisted path ("a.py") living beside it."""
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["a.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "a", "..", "b.py"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+
+
 def test_commit_batch_raises_and_writes_nothing_when_the_goal_source_file_is_targeted(workspace):
     writer = AuthorizedFileWriter(workspace, protected_relpaths=["goal.md"])
     target = os.path.join(workspace, "goal.md")

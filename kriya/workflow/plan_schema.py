@@ -38,6 +38,23 @@ def _non_blank_relative_path(path: str, *, label: str) -> str:
         raise ValueError(f"{label} must be workspace-relative, not absolute: {cleaned!r}")
     if ".." in cleaned.replace("\\", "/").split("/"):
         raise ValueError(f"{label} must not contain '..' path-traversal segments: {cleaned!r}")
+    # PRV-17 (2026-09-03): the Planner returned "customers_project/" (a
+    # directory, trailing slash) as a planned_files[].path alongside real
+    # files like "customers_project/manage.py" underneath it. Nothing here
+    # rejected it, so it flowed straight into allowed_write_relpaths as a
+    # literal generation target - the Developer was then asked to "write" a
+    # directory, produced no real content for it, and the later authorized-
+    # write comparison (kriya/workflow/attempt.py) rejected the Developer's
+    # own (correctly file-shaped, no trailing slash) target as outside
+    # scope, since the plan's entry and the generated entry were never the
+    # same string. A PlannedFile names exactly ONE concrete file (see the
+    # wildcard rejection below, same reasoning); parent directories are
+    # created deterministically as a side effect of writing the files under
+    # them and must never themselves be a generation target.
+    if cleaned.replace("\\", "/").endswith("/"):
+        raise ValueError(
+            f"{label} must name one concrete file, not a directory: {cleaned!r}"
+        )
     # Found live, PRV-05 (2026-08-28): the Planner returned
     # "src/main/java/**/*.java" as a planned_files[].path - a glob pattern,
     # not a real file. Nothing here rejected it, so every downstream

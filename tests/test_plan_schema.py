@@ -81,6 +81,36 @@ def test_planned_file_rejects_bracket_glob_path():
         PlannedFile(path="src/main/[A-Z]*.java", action=FileAction.MODIFY)
 
 
+def test_planned_file_rejects_directory_path():
+    """Regression test for a real live bug, PRV-17 (2026-09-03): the Planner
+    returned "customers_project/" (a directory, trailing slash) as a
+    planned_files[].path alongside real files nested under it. Nothing
+    rejected it, so it flowed straight into allowed_write_relpaths as a
+    literal generation target the Developer was asked to "write" - it never
+    produced real content for a directory, and the later authorized-write
+    comparison then rejected the Developer's own (correctly file-shaped)
+    target as outside scope, since the plan's entry and the generated entry
+    were never the same string. A PlannedFile names exactly ONE concrete
+    file, the same reasoning as the glob-wildcard rejection above; parent
+    directories are created deterministically as a side effect of writing
+    the files under them."""
+    with pytest.raises(ValidationError):
+        PlannedFile(path="customers_project/", action=FileAction.CREATE)
+
+
+def test_planned_file_rejects_directory_path_with_backslash_separator():
+    with pytest.raises(ValidationError):
+        PlannedFile(path="customers_project\\", action=FileAction.CREATE)
+
+
+def test_planned_file_accepts_a_real_file_nested_under_a_would_be_directory_name():
+    """The directory rejection above must not reject an ordinary file just
+    because a sibling planned_files entry names its parent directory - only
+    the bare, trailing-slash directory entry itself is a shape defect."""
+    pf = PlannedFile(path="customers_project/manage.py", action=FileAction.CREATE)
+    assert pf.path == "customers_project/manage.py"
+
+
 # --- VerificationMethod ---
 
 def test_verification_method_tool_requires_tool_name():

@@ -113,6 +113,28 @@ def _canonical(path: str) -> str:
     return os.path.realpath(os.path.expanduser(path))
 
 
+def normalize_workspace_relpath(path: str) -> str:
+    """Canonical STRING identity for a workspace-relative path, independent
+    of trailing-slash/'./' formatting - 'customers_project',
+    'customers_project/', and './customers_project' must all compare equal
+    wherever a planned/authorized relpath is checked against a Developer-
+    generated target. Pure `os.path.normpath` string normalization, never
+    touches the filesystem or resolves symlinks (unlike `_canonical` above,
+    which is only for a real, already-on-disk path) - safe to call on a
+    CREATE target that doesn't exist yet.
+
+    PRV-17 (2026-09-03): this exact mismatch (plan-declared
+    'customers_project/' vs. Developer-reported 'customers_project')
+    tripped FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE even though both names the
+    same directory - AuthorizedFileWriter.__init__/.authorize() below
+    already normalized both sides via a bare inline `os.path.normpath`, but
+    kriya/workflow/attempt.py's EARLIER raw-string pre-write gate did not.
+    Both call sites now share this one helper so the two enforcement layers
+    can never disagree about path identity again."""
+
+    return os.path.normpath(path) if path else path
+
+
 @dataclass(frozen=True)
 class FilesystemScope:
     """The explicit, closed set of canonical roots a write may land under.
@@ -182,10 +204,10 @@ class AuthorizedFileWriter:
         # path is only known at call time, from the actual CLI invocation.
         self._workspace_root = _canonical(workspace_root)
         self._protected_relpaths = tuple(
-            os.path.normpath(p) for p in protected_relpaths if p
+            normalize_workspace_relpath(p) for p in protected_relpaths if p
         )
         self._allowed_relpaths = frozenset(
-            os.path.normpath(p) for p in allowed_relpaths if p
+            normalize_workspace_relpath(p) for p in allowed_relpaths if p
         )
         # Backward-compatible inference when the caller doesn't pass
         # write_scope_mode explicitly: every call site written before this

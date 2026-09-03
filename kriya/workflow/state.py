@@ -317,6 +317,22 @@ class GenerationState:
     # whole run - never read or branched on by the retry loop itself, same
     # posture as planner_reuse_used_attempt1 above.
     rejected_generation_targets: List[str] = field(default_factory=list)
+    # PRV-17 (2026-09-03): counts attempts aborted by a PolicyDeniedError
+    # (FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE) that
+    # _failure_from_validated_scope_denial() (kriya/workflow/retry_strategy.py)
+    # could NOT convert into a plan_scope_conflict, because the target names
+    # no real existing production owner to hand recovery off to (a
+    # hallucinated new path, or a test file) - unlike
+    # rejected_generation_targets above, this one IS read and branched on:
+    # a live incident burned 4 full generation cycles because each such
+    # denial was treated as an ordinary retryable failure and the Developer
+    # was simply asked to try again, proposing a DIFFERENT illegal target
+    # each time. handle_attempt_failure() gives the first occurrence a
+    # normal retry chance, then stops the subtask deterministically
+    # (state.environment_failure) the second time - there is no legitimate
+    # owner for retrying to discover, so continuing cannot produce a
+    # different, legal outcome.
+    unrecoverable_scope_denial_count: int = 0
     # The file(s) the completeness check (extract_expected_files vs. what got
     # written) found missing after the MOST RECENT attempt. Mutually exclusive
     # with last_implicated_files - an IncompleteGenerationError sets this and

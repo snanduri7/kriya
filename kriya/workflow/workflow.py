@@ -3203,6 +3203,16 @@ class WorkflowEngine:
         if not quality_passed:
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
+                # PRV-17 preflight correction (2026-09-03): checked BEFORE the
+                # generic "environment_failure" branch below, even though this
+                # case also sets state.environment_failure to reuse its STOP_
+                # ENVIRONMENT mechanism (see retry_strategy.py's own comment on
+                # that reuse) - an unauthorized/unrecoverable generation target
+                # is a plan/scope defect the Developer proposed, never a real
+                # machine/toolchain problem, and must not be reported or traced
+                # as one (kriya/cli.py prints the generic branch below as
+                # "[ENVIRONMENT/TOOLCHAIN ISSUE]" with toolchain-fix advice).
+                else "unauthorized_generation_target" if state.unrecoverable_scope_denial_count
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )

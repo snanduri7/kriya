@@ -28,7 +28,7 @@ from kriya.agents.contracts import (
 )
 from kriya.core.kernel import Kernel
 from kriya.policy.errors import PolicyDeniedError
-from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
+from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode, normalize_workspace_relpath
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.tools.validate import get_pom_dependencies
 from kriya.workflow.edit_safety import (
@@ -3785,6 +3785,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # own docstring. Updated in place below as each new file is accepted, so two
     # files in the SAME batch that collide with each other are caught too.
     workspace_type_index = _build_workspace_type_index(state, ctx)
+    # PRV-17 (2026-09-03): normalized ONCE per attempt, not per file - the
+    # plan-declared allowlist doesn't change mid-attempt. Canonicalizes
+    # trailing-slash/'./' formatting so 'customers_project/' (as the Planner
+    # wrote it) and 'customers_project' (as the Developer reported it) are
+    # recognized as the same target - see normalize_workspace_relpath's own
+    # docstring for the live incident this closes.
+    normalized_allowed_write_relpaths = {
+        normalize_workspace_relpath(p) for p in ctx.allowed_write_relpaths
+    }
     for file_obj in files:
         filepath = file_obj.get("filepath", "")
         content = file_obj.get("content", "")
@@ -3797,7 +3806,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if (
             ctx.write_scope_mode == WriteScopeMode.ALLOWLIST
             and ctx.allowed_write_relpaths
-            and filepath not in ctx.allowed_write_relpaths
+            and normalize_workspace_relpath(filepath) not in normalized_allowed_write_relpaths
         ):
             # Correctness Continuity Part B4 (PRV-06, 2026-08-29): rejected
             # HERE, before apply_anchored_edits or any write is attempted -

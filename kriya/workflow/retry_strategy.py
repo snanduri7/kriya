@@ -291,6 +291,23 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # §11.3's own "Future hardening note" for the fuller rationale.
     attached_failure = getattr(e, "failure", None)
     scope_denial_failure = attached_failure is None and _failure_from_validated_scope_denial(e, ctx)
+    # PRV-17 (2026-09-03): a PolicyDeniedError whose target
+    # _failure_from_validated_scope_denial() could NOT ground into a
+    # plan_scope_conflict (no real existing production owner to hand
+    # recovery off to - see that function's own "hallucinated new path"
+    # comment) used to fall straight through to ordinary general_error
+    # retry handling: the Developer was simply asked to try again, and
+    # live evidence shows it proposes a DIFFERENT illegal target each time
+    # rather than converging. See GenerationState.unrecoverable_scope_
+    # denial_count's own docstring for the full incident this closes.
+    is_unrecoverable_scope_denial = (
+        attached_failure is None
+        and not scope_denial_failure
+        and isinstance(e, PolicyDeniedError)
+        and e.result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+    )
+    if is_unrecoverable_scope_denial:
+        state.unrecoverable_scope_denial_count += 1
     is_internal_framework_bug = (
         attached_failure is None
         and not scope_denial_failure
@@ -420,6 +437,42 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         }
         else classify_environment_failure(raw_error_context)
     )
+    if is_unrecoverable_scope_denial and state.unrecoverable_scope_denial_count >= 1:
+        # PRV-17 preflight correction (2026-09-03): stop on the FIRST
+        # deterministically unrecoverable denial, not the second - once
+        # _failure_from_validated_scope_denial() has already established
+        # there is no real existing file to hand recovery off to, a retry
+        # cannot discover a legal target that doesn't exist. No further
+        # Developer/LLM call is made for this subtask after this point.
+        #
+        # Reuses state.environment_failure/RetryAction.STOP_ENVIRONMENT
+        # purely as the STOP MECHANISM - decide_retry_action() itself
+        # (kriya/workflow/retry_policy.py) only checks whether this field
+        # is truthy, never its content, so that part genuinely is a
+        # generic deterministic stop. Verified before reusing it, per
+        # this fix's own review requirement, that its two DOWNSTREAM
+        # consumers (kriya/cli.py's user-facing message, kriya/workflow/
+        # workflow.py's failure_category trace classification) hard-code
+        # an environment/toolchain-specific MEANING onto it - both are
+        # updated alongside this change so this case is never reported to
+        # a user or trace as a JVM/toolchain problem it is not.
+        #
+        # The one existing "scope/plan" terminal classification
+        # (state.plan_scope_conflict) was considered and rejected: it
+        # feeds workflow_controller.py's revise_plan_for_grounded_scope_
+        # owner(), which unconditionally raises ValueError for any
+        # grounded path that isn't a real file already on disk
+        # (kriya/workflow/workflow_controller.py ~line 2326) - exactly
+        # this case's target. Reusing it here would trade one confirmed
+        # incident for a new, worse one (an uncaught crash), and would
+        # pull an unowned/hallucinated path into MA8 owner-recovery
+        # machinery designed for a real, discoverable owner. Not reused.
+        state.environment_failure = (
+            "UNAUTHORIZED_GENERATION_TARGET: the Developer proposed a write outside "
+            "this subtask's validated scope, and the target names no existing file "
+            "with a real owner to hand recovery off to - retrying cannot discover a "
+            "legal target that doesn't exist."
+        )
 
     # Read fresh from the worktree's CURRENT pom.xml each attempt,
     # not cached once before the loop - the project's own

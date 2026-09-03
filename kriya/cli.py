@@ -1640,7 +1640,15 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 )
                 if res.get("failure_category"):
                     click.echo(f"Failure category: {res['failure_category']}")
-                if res.get("environment_failure"):
+                # PRV-17 preflight correction (2026-09-03): an unauthorized/
+                # unrecoverable generation target reuses environment_failure
+                # purely as its STOP mechanism (see retry_strategy.py's own
+                # comment) but is a plan/scope defect, not a machine/toolchain
+                # problem - failure_category already distinguishes the two
+                # (set in kriya/workflow/workflow.py), so this toolchain-
+                # specific message and its "check your Java/Maven toolchain"
+                # advice must not fire for it.
+                if res.get("environment_failure") and res.get("failure_category") != "unauthorized_generation_target":
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                         "Kriya stopped retrying early rather than burning its retry budget "
@@ -2274,7 +2282,12 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
             if res.get("failure_category"):
                 click.echo(f"Failure category: {res['failure_category']}")
-            if res.get("environment_failure"):
+            # PRV-17 preflight correction (2026-09-03): see the matching guard
+            # above in this file's other quality-gates-failure branch - an
+            # unauthorized/unrecoverable generation target reuses environment_
+            # failure purely as its STOP mechanism, not as a real toolchain
+            # problem, and must not print this Java/Maven-specific advice.
+            if res.get("environment_failure") and res.get("failure_category") != "unauthorized_generation_target":
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                     "Kriya stopped retrying early rather than burning its retry budget "
