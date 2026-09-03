@@ -61,8 +61,10 @@ from kriya.workflow.plan_schema import (
     ExecutionMethod,
     ExecutionRole,
     FileAction,
+    FileOwnershipRelation,
     Subtask,
     VerificationMethodType,
+    VerifierKind,
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
 from kriya.workflow.static_checks import StackContract, validate_stack_contract_artifacts
@@ -151,6 +153,83 @@ def _planned_artifact_prerequisite_evidence(subtasks: List[Subtask]) -> List[Dic
                     "missing_requires_edge": capability not in consumer.requires,
                     "missing_depends_on_edge": owner.id not in consumer.depends_on,
                 })
+    return records
+
+
+def _stack_dependent_verification_prerequisite_evidence(
+    plan: EngineeringPlan, workspace_path: str, stack_contract: Optional[StackContract],
+) -> List[Dict[str, Any]]:
+    """Reuses this module's own _AMBIENT_TOOL_REQUIREMENTS/_TOOL_MANIFEST_
+    BASENAMES tables and EngineeringPlan.classify_file_ownership() - the
+    SAME machinery _planned_artifact_prerequisite_evidence() above already
+    uses for a PlannedFile's own environment_requirements - to close the
+    one case that machinery cannot reach: PRV-17 (2026-09-03), a live
+    incident where a validated plan scheduled `python manage.py test
+    customers.tests` (a TEST-kind VerificationMethod, an action, not a
+    generated file) with NO current/past-ordered subtask planning a Python
+    dependency manifest - because _planned_artifact_prerequisite_evidence()
+    only ever fires when a PLANNED FILE explicitly declares environment_
+    requirements, and nothing here forces (or even prompts) a Planner to
+    attach that declaration to a VERIFICATION action rather than a file.
+    The Planner's own system prompt already tells it to name ambient tools
+    in environment_requirements (kriya/agents/agent.py) - this is a
+    deterministic backstop for when that declaration doesn't happen,
+    mirroring VerificationMethod's own existing self-heal precedent
+    (requires_runtime_execution auto-corrects from verifier_kind=
+    APPLICATION_RUNTIME rather than trusting the prompt alone).
+
+    Fires only when stack_contract names a real, external FRAMEWORK
+    (stack_contract.frameworks non-empty - a bare language with no named
+    framework, e.g. "write a Python script", never needs an external
+    dependency manifest at all) whose language resolves to a known ambient
+    tool with known manifest basenames. Java is deliberately excluded by
+    construction here (not a _TOOL_MANIFEST_BASENAMES key under the bare
+    "java" language name - only "maven"/"mvn"/"gradle" are) - Java's own
+    build-manifest gap already has a separate, established mechanism
+    (_detect_missing_build_manifest, kriya/workflow/attribution.py); this
+    function must never duplicate or race that one.
+
+    A prerequisite counts as satisfied when the manifest either already
+    exists in the real workspace (an established, brownfield environment -
+    requirement 1 of the invariant) or is planned by a subtask CURRENT or
+    PAST_ORDERED relative to the verification-owning consumer (requirement
+    2 - "provided by the current/past ordered plan"), via classify_file_
+    ownership()'s existing DAG reasoning. A manifest planned only by a
+    FUTURE_ORDERED or UNRELATED subtask does not satisfy it - the Planner
+    must establish the manifest before the verification consumer, or order
+    its owner ahead of it, exactly the invariant's own required behavior."""
+    if stack_contract is None or not stack_contract.frameworks or not stack_contract.languages:
+        return []
+    tool = stack_contract.languages[0].lower()
+    manifests = _TOOL_MANIFEST_BASENAMES.get(tool, set())
+    if not manifests:
+        return []
+    if any(os.path.exists(os.path.join(workspace_path, m)) for m in manifests):
+        return []
+    manifest_paths = [
+        pf.path for st in plan.subtasks for pf in st.planned_files
+        if os.path.basename(pf.path).lower() in manifests
+    ]
+    records: List[Dict[str, Any]] = []
+    for consumer in plan.subtasks:
+        needs_stack_runtime = any(
+            vm.verifier_kind in (VerifierKind.TEST, VerifierKind.APPLICATION_RUNTIME)
+            for vm in consumer.verification
+        )
+        if not needs_stack_runtime:
+            continue
+        satisfied = any(
+            plan.classify_file_ownership(consumer.id, manifest_path)
+            in (FileOwnershipRelation.CURRENT, FileOwnershipRelation.PAST_ORDERED)
+            for manifest_path in manifest_paths
+        )
+        if satisfied:
+            continue
+        records.append({
+            "consumer_subtask": consumer.id,
+            "required_tool": tool,
+            "candidate_manifests": sorted(manifests),
+        })
     return records
 
 
@@ -547,6 +626,28 @@ async def validate_plan(
                 f"from {record['provider_file']!r}"
             )
             reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
+
+    # PRV-17 (2026-09-03): a stack-dependent (Django/Spring/... - any named
+    # framework, never language/ecosystem-specific by construction) TEST or
+    # APPLICATION_RUNTIME verification consumer needs its language's real
+    # dependency manifest established or ordered ahead of it - the same
+    # "planned prerequisite" question _planned_artifact_prerequisite_
+    # evidence() above answers for a PlannedFile's own declared environment_
+    # requirements, generalized to a VERIFICATION action, which structurally
+    # cannot declare environment_requirements today (that field lives on
+    # PlannedFile, not VerificationMethod) and so had no deterministic
+    # backstop at all before this fix.
+    for record in _stack_dependent_verification_prerequisite_evidence(
+        plan, workspace_path, stack_contract,
+    ):
+        evidence.append(record)
+        errors.append(
+            f"subtask {record['consumer_subtask']!r} runs {record['required_tool']!r}-dependent "
+            f"verification, but no current/past-ordered subtask plans (or the workspace already "
+            f"establishes) a dependency manifest ({'/'.join(record['candidate_manifests'])}) to "
+            "provision it"
+        )
+        reason_codes.append("VERIFICATION_PREREQUISITE_MANIFEST_MISSING")
 
     # Correctness Continuity Part C (PRV-06, 2026-08-29) - see
     # IntegrationRelationship's own docstring (plan_schema.py). Checked by

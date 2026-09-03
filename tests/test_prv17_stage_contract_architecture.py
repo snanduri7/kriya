@@ -56,11 +56,27 @@ from kriya.workflow.plan_schema import (
     GlobalInvariant,
     PlannedFile,
     Subtask,
+    VerificationMethod,
+    VerificationMethodType,
 )
+from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.state import GenerationState
 from kriya.workflow.static_checks import derive_stack_contract
 from kriya.workflow.triage import ChangeKind
+
+# The real scenarios/PRV-17/goal.md text, verbatim - not a paraphrase.
+_ACTUAL_PRV17_GOAL = (
+    "Create a Python 3.12 Django application.\n\n"
+    "Requirements:\n"
+    "- Use Django.\n"
+    "- Use Python packaging conventions.\n"
+    "- Provide one Django project and one application named `customers`.\n"
+    "- Expose a `/customers/health` HTTP endpoint returning JSON:\n"
+    '  {"status": "ok"}\n'
+    "- Add an automated test for the endpoint.\n"
+    "- Do not use Java, Spring, Maven, Gradle, Node.js, or another web framework.\n"
+)
 
 _HEALTH_INVARIANT_ID = "gi_health_endpoint"
 _HEALTH_INVARIANT_TEXT = "The application exposes GET /customers/health returning {\"status\": \"ok\"}"
@@ -372,3 +388,137 @@ async def test_prv17_stage_contract_architecture(tmp_path):
     assert contract is not None
     assert contract.languages == ("python",)
     assert contract.frameworks == ("django",)
+
+
+def _health_test_verification() -> VerificationMethod:
+    return VerificationMethod(
+        type=VerificationMethodType.TOOL, description="run customers.tests", tool_name="test",
+    )
+
+
+@pytest.mark.asyncio
+async def test_prv17_verification_prerequisite_closure(tmp_path):
+    """PRV-17 Verification Prerequisite Closure (2026-09-03): Run 6's exact
+    shape - a validated plan scheduled `python manage.py test
+    customers.tests` (a TEST-kind verification) with no current/past-
+    ordered subtask planning a Python dependency manifest capable of
+    provisioning Django, and the plan passed validate_plan() anyway. Uses
+    the REAL scenarios/PRV-17/goal.md text (_ACTUAL_PRV17_GOAL, not a
+    paraphrase) to derive the StackContract validate_plan() is actually
+    called with in production (workflow_controller.py passes derive_stack_
+    contract(goal) at every real call site)."""
+    contract = derive_stack_contract(_ACTUAL_PRV17_GOAL)
+    assert contract is not None
+    assert contract.languages == ("python",)
+    assert contract.frameworks == ("django",)
+
+    # --- Negative plan: source files -> Django-dependent verification ->
+    # no dependency-manifest/provider anywhere - must be rejected before
+    # Developer execution ever starts. ---
+    negative_scaffold = Subtask(
+        id="s1", description="scaffold the Django project", execution_method=ExecutionMethod.MODEL,
+        planned_files=[
+            PlannedFile(path="manage.py", action=FileAction.CREATE),
+            PlannedFile(path="customers/views.py", action=FileAction.CREATE),
+        ],
+    )
+    negative_tests = Subtask(
+        id="s2", description="test the customers app", execution_method=ExecutionMethod.MODEL,
+        depends_on=["s1"],
+        planned_files=[PlannedFile(path="customers/tests.py", action=FileAction.CREATE)],
+        verification=[_health_test_verification()],
+    )
+    negative_plan = EngineeringPlan(
+        plan_id="prv17-verification-negative", kind=ChangeKind.TASK,
+        subtasks=[negative_scaffold, negative_tests],
+    )
+    negative_result = await validate_plan(
+        negative_plan, workspace_path=str(tmp_path), stack_contract=contract,
+    )
+    assert negative_result.valid is False
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in negative_result.reason_codes
+
+    # --- Positive plan: dependency manifest/provider -> source files ->
+    # Django-dependent verification - the manifest-planning subtask is
+    # ordered ahead of the verification consumer. Must pass. ---
+    positive_scaffold = Subtask(
+        id="s1", description="scaffold and declare dependencies", execution_method=ExecutionMethod.MODEL,
+        planned_files=[
+            PlannedFile(path="manage.py", action=FileAction.CREATE),
+            PlannedFile(path="requirements.txt", action=FileAction.CREATE),
+        ],
+        provides=["project_scaffold"],
+    )
+    positive_app = Subtask(
+        id="s2", description="implement the customers app", execution_method=ExecutionMethod.MODEL,
+        depends_on=["s1"], requires=["project_scaffold"],
+        planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)],
+    )
+    positive_tests = Subtask(
+        id="s3", description="test the customers app", execution_method=ExecutionMethod.MODEL,
+        depends_on=["s2"],
+        planned_files=[PlannedFile(path="customers/tests.py", action=FileAction.CREATE)],
+        verification=[_health_test_verification()],
+    )
+    positive_plan = EngineeringPlan(
+        plan_id="prv17-verification-positive", kind=ChangeKind.TASK,
+        subtasks=[positive_scaffold, positive_app, positive_tests],
+    )
+    positive_result = await validate_plan(
+        positive_plan, workspace_path=str(tmp_path), stack_contract=contract,
+    )
+    assert positive_result.valid is True
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in positive_result.reason_codes
+
+    # --- An already-established environment dependency (a real
+    # requirements.txt already present in the workspace) satisfies the
+    # invariant without any NEW planned manifest at all. ---
+    established_workspace = tmp_path / "established"
+    established_workspace.mkdir()
+    (established_workspace / "requirements.txt").write_text("Django>=5.0\n")
+    established_plan = EngineeringPlan(
+        plan_id="prv17-verification-established", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="test the customers app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[
+                    PlannedFile(path="customers/views.py", action=FileAction.CREATE),
+                    PlannedFile(path="customers/tests.py", action=FileAction.CREATE),
+                ],
+                verification=[_health_test_verification()],
+            ),
+        ],
+    )
+    established_result = await validate_plan(
+        established_plan, workspace_path=str(established_workspace), stack_contract=contract,
+    )
+    assert established_result.valid is True
+
+    # --- Ordinary verification with no external dependency (the goal names
+    # no framework) remains completely unaffected. ---
+    plain_contract = derive_stack_contract("Write a Python calculator module with unit tests.")
+    assert plain_contract is not None and plain_contract.frameworks == ()
+    plain_plan = EngineeringPlan(
+        plan_id="prv17-verification-plain", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="write and test a calculator", execution_method=ExecutionMethod.MODEL,
+                planned_files=[
+                    PlannedFile(path="calculator.py", action=FileAction.CREATE),
+                    PlannedFile(path="test_calculator.py", action=FileAction.CREATE),
+                ],
+                verification=[_health_test_verification()],
+            ),
+        ],
+    )
+    plain_result = await validate_plan(
+        plain_plan, workspace_path=str(tmp_path), stack_contract=plain_contract,
+    )
+    assert plain_result.valid is True
+
+    # --- Existing requires -> provides ordering behavior remains green:
+    # the positive plan above already exercises a real requires/provides
+    # edge (s2 requires "project_scaffold", provided by s1, in depends_on) -
+    # confirm it was actually checked, not merely absent from errors. ---
+    assert "project_scaffold" in positive_app.requires
+    assert "s1" in positive_app.depends_on

@@ -150,6 +150,143 @@ async def test_plan_validation_enforces_authoritative_stack_contract(tmp_path):
     assert "AUTHORITATIVE_STACK_SUBSTITUTION" in rejected.reason_codes
 
 
+# --- Verification prerequisite closure (PRV-17, 2026-09-03): a stack-
+# dependent TEST/APPLICATION_RUNTIME verification consumer needs its
+# language's dependency manifest established or ordered ahead of it. ---
+
+_DJANGO_CONTRACT = derive_stack_contract(
+    "Create a Python 3.12 Django application with a customers app and a /customers/health endpoint."
+)
+
+
+def _test_verification() -> VerificationMethod:
+    return VerificationMethod(type=VerificationMethodType.TOOL, description="run tests", tool_name="test")
+
+
+@pytest.mark.asyncio
+async def test_stack_dependent_verification_without_any_manifest_is_rejected(tmp_path):
+    """Negative plan: source files -> Django-dependent verification -> no
+    dependency-manifest/provider anywhere in the plan or the real
+    workspace - the exact live PRV-17 (Run 6) shape."""
+    scaffold = _model_subtask(
+        id="s1", description="scaffold",
+        planned_files=[
+            PlannedFile(path="manage.py", action=FileAction.CREATE),
+            PlannedFile(path="customers/views.py", action=FileAction.CREATE),
+        ],
+    )
+    tests = _model_subtask(
+        id="s2", description="test the customers app", depends_on=["s1"],
+        planned_files=[PlannedFile(path="customers/tests.py", action=FileAction.CREATE)],
+        verification=[_test_verification()],
+    )
+    result = await validate_plan(
+        _plan([scaffold, tests]), workspace_path=str(tmp_path), stack_contract=_DJANGO_CONTRACT,
+    )
+    assert result.valid is False
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in result.reason_codes
+    assert "s2" in result.errors[0]
+
+
+@pytest.mark.asyncio
+async def test_stack_dependent_verification_with_prior_manifest_provider_passes(tmp_path):
+    """Positive plan: dependency manifest/provider -> source files ->
+    Django-dependent verification - the manifest-planning subtask is
+    ordered (via depends_on) strictly before the verification consumer."""
+    scaffold = _model_subtask(
+        id="s1", description="scaffold and declare dependencies",
+        planned_files=[
+            PlannedFile(path="manage.py", action=FileAction.CREATE),
+            PlannedFile(path="requirements.txt", action=FileAction.CREATE),
+        ],
+        provides=["project_scaffold"],
+    )
+    app = _model_subtask(
+        id="s2", description="implement the customers app", depends_on=["s1"], requires=["project_scaffold"],
+        planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)],
+    )
+    tests = _model_subtask(
+        id="s3", description="test the customers app", depends_on=["s2"],
+        planned_files=[PlannedFile(path="customers/tests.py", action=FileAction.CREATE)],
+        verification=[_test_verification()],
+    )
+    result = await validate_plan(
+        _plan([scaffold, app, tests]), workspace_path=str(tmp_path), stack_contract=_DJANGO_CONTRACT,
+    )
+    assert result.valid is True
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_stack_dependent_verification_manifest_only_after_consumer_is_still_rejected(tmp_path):
+    """The Planner establishing the manifest is not enough on its own - it
+    must be CURRENT or PAST-ORDERED relative to the verification consumer.
+    A manifest planned by a subtask that only runs AFTER the test
+    consumer (FUTURE_ORDERED) does not satisfy the invariant - the
+    Planner must reorder it ahead, not merely include it somewhere."""
+    tests = _model_subtask(
+        id="s1", description="test the customers app",
+        planned_files=[
+            PlannedFile(path="manage.py", action=FileAction.CREATE),
+            PlannedFile(path="customers/tests.py", action=FileAction.CREATE),
+        ],
+        verification=[_test_verification()],
+    )
+    late_manifest = _model_subtask(
+        id="s2", description="declare dependencies too late", depends_on=["s1"],
+        planned_files=[PlannedFile(path="requirements.txt", action=FileAction.CREATE)],
+    )
+    result = await validate_plan(
+        _plan([tests, late_manifest]), workspace_path=str(tmp_path), stack_contract=_DJANGO_CONTRACT,
+    )
+    assert result.valid is False
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_stack_dependent_verification_satisfied_by_already_established_environment(tmp_path):
+    """An already-established environment dependency (a real requirements.txt
+    already present in the workspace - a brownfield project) satisfies the
+    invariant without any NEW planned manifest at all."""
+    (tmp_path / "requirements.txt").write_text("Django>=5.0\n")
+    tests = _model_subtask(
+        id="s1", description="test the customers app",
+        planned_files=[
+            PlannedFile(path="customers/views.py", action=FileAction.CREATE),
+            PlannedFile(path="customers/tests.py", action=FileAction.CREATE),
+        ],
+        verification=[_test_verification()],
+    )
+    result = await validate_plan(
+        _plan([tests]), workspace_path=str(tmp_path), stack_contract=_DJANGO_CONTRACT,
+    )
+    assert result.valid is True
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_ordinary_verification_with_no_named_framework_is_unaffected(tmp_path):
+    """A goal naming no external framework (StackContract.frameworks empty,
+    or no stack_contract supplied at all) never triggers this check -
+    ordinary tests for a plain script need no dependency manifest."""
+    plain_contract = derive_stack_contract("Write a Python calculator module with unit tests.")
+    assert plain_contract is not None and plain_contract.frameworks == ()
+    calc = _model_subtask(
+        id="s1", description="write and test a calculator",
+        planned_files=[
+            PlannedFile(path="calculator.py", action=FileAction.CREATE),
+            PlannedFile(path="test_calculator.py", action=FileAction.CREATE),
+        ],
+        verification=[_test_verification()],
+    )
+    with_contract = await validate_plan(
+        _plan([calc]), workspace_path=str(tmp_path), stack_contract=plain_contract,
+    )
+    assert with_contract.valid is True
+    without_contract = await validate_plan(_plan([calc]), workspace_path=str(tmp_path))
+    assert without_contract.valid is True
+
+
 def _planned_prerequisite_plan(*, artifact_requires, consumer_requires, consumer_depends_on):
     provider = _model_subtask(
         id="s1", description="provide test tooling", provides=["test_tooling"],
