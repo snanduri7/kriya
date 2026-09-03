@@ -68,8 +68,16 @@ def deterministic_verification_kind(command: List[str]) -> Optional[str]:
 
     if executable in {"pytest", "py.test"}:
         return "test"
-    if executable in {"python", "python3"} and len(command) >= 3 and command[1:3] == ["-m", "pytest"]:
-        return "test"
+    if executable in {"python", "python3"} and len(command) >= 3 and command[1] == "-m":
+        module = command[2].lower()
+        if module in {"pytest", "unittest"}:
+            return "test"
+        # ``python -m django test`` delegates to Django's test runner.  The
+        # semantic discriminator is the module subcommand, not the framework
+        # name alone: runserver and other Django commands remain application
+        # or unknown process execution.
+        if module == "django" and len(command) >= 4 and command[3].lower() == "test":
+            return "test"
     if executable in {"npm", "yarn", "pnpm"} and tokens and tokens[0] == "test":
         return "test"
     if executable == "go" and tokens and tokens[0] == "test":

@@ -167,6 +167,8 @@ from kriya.workflow.edit_safety import (
     read_file_revision,
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
+from kriya.workflow.acceptance import goal_requires_runtime_behavior
+from kriya.workflow.static_checks import derive_stack_contract, log_stack_contract_boundary, validate_stack_contract_artifacts
 from kriya.workflow.planning_diagnostics import (
     bounded_repository_evidence,
     persist_planning_attempt_diagnostic,
@@ -410,6 +412,14 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
         if requirement in subtask.provides
     ]
     invariant_statements = {gi.id: gi.statement for gi in plan.global_invariants}
+    runtime_owner_ids = sorted({
+        candidate.id for candidate in plan.subtasks
+        if any(vm.requires_application_runtime for vm in candidate.verification)
+    })
+    owns_test_artifact = any(
+        classify_file_role(planned.path) is FileRole.TEST
+        for planned in subtask.planned_files
+    )
     payload = {
         "local_description": subtask.description,
         "planned_files": [pf.path for pf in subtask.planned_files],
@@ -421,6 +431,14 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
         "verification_targets": [vm.description for vm in subtask.verification],
         "runtime_execution_required": any(
             vm.requires_application_runtime for vm in subtask.verification
+        ),
+        "application_runtime_owners": runtime_owner_ids,
+        "verification_ownership": (
+            "This subtask's unit-test artifacts do not own process-exit, process-termination, "
+            "or termination-associated stdout/stderr obligations. Those are owned exclusively "
+            "by the declared application_runtime verifier. Unit tests may cover only safe "
+            "in-process behavior and must not independently reproduce the process obligation."
+            if owns_test_artifact and runtime_owner_ids else None
         ),
     }
     return "--- bounded subtask semantic context ---\n" + json.dumps(payload, indent=2, sort_keys=True)
@@ -447,7 +465,8 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "smallest safe set of bounded implementation subtasks. Use this top-level shape: "
     '{"global_invariants": [{"id": "gi1", "statement": "..."}], "subtasks": [{"id": "s1", '
     '"description": "...", "execution_method": "model", "execution_role": "implementation", '
-    '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete"}], '
+    '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete", '
+    '"environment_requirements": ["..."], "requires_capabilities": ["..."]}], '
     '"provides": ["..."], "requires": [], "relevant_global_invariant_ids": ["gi1"], "verification": '
     '[{"type": "tool", "description": "...", "tool_name": "compile", '
     '"verifier_kind": "compile", '
@@ -486,8 +505,13 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "declared dependency. Preserve goal-derived invariants without inventing unspecified choices. "
     "A stage whose tests need build/test tooling (a Maven/Gradle/npm/pip manifest, a test "
     "framework dependency) that another stage's planned_files owns must declare that manifest "
-    "stage's provides value in its own requires and depends_on - execution order is not "
+    "stage's provides value in the artifact's requires_capabilities and in the stage's own "
+    "requires and depends_on - execution order is not "
     "guaranteed by planned_files or list position alone, only by depends_on. "
+    "Put ambient runtimes and tools such as java, maven, python, node, and pytest in "
+    "planned_files[].environment_requirements, never in subtask requires/provides. "
+    "planned_files[].requires_capabilities names only an exact capability supplied by another "
+    "planned subtask. "
     "If a stage's entrypoint may terminate the running process (an explicit exit/return-code "
     "path, not just falling off the end of a function) and another stage's tests are expected to "
     "exercise that entrypoint directly, plan them so the process-terminating behavior stays "
@@ -563,6 +587,7 @@ def build_structured_plan_repair_prompt(
     extension_candidates: Optional[List[str]] = None,
     repository_candidates: Optional[List[str]] = None,
     must_preserve: Optional[List[str]] = None,
+    validation_evidence: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Build a bounded local-only correction request for the complete plan.
 
@@ -579,6 +604,30 @@ def build_structured_plan_repair_prompt(
     PLAN_REPAIR_OSCILLATION/PLAN_REPAIR_NON_CONVERGENCE) is what actually
     catches it if the model ignores this anyway."""
     targeted_correction = ""
+    prerequisite_evidence = [
+        item for item in (validation_evidence or [])
+        if item.get("consumer_subtask") and item.get("provider_subtask")
+        and (item.get("missing_requires_edge") or item.get("missing_depends_on_edge"))
+    ]
+    if prerequisite_evidence:
+        targeted_correction += "- Apply these exact planned-prerequisite corrections:\n"
+        for item in prerequisite_evidence:
+            targeted_correction += (
+                f"  Consumer: subtask={item['consumer_subtask']} file={item['consumer_file']}\n"
+                f"  Required planned capability: {item['prerequisite_capability']}\n"
+                f"  Provider: subtask={item['provider_subtask']} file={item['provider_file']}\n"
+            )
+            if item.get("missing_requires_edge"):
+                targeted_correction += (
+                    f"  Required repair: add {item['prerequisite_capability']} to "
+                    f"{item['consumer_subtask']}.requires\n"
+                )
+            if item.get("missing_depends_on_edge"):
+                targeted_correction += (
+                    f"  Required repair: add {item['provider_subtask']} to "
+                    f"{item['consumer_subtask']}.depends_on\n"
+                )
+            targeted_correction += "  Preserve unrelated valid plan edges.\n"
     if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes:
         targeted_correction += (
             "- A TOOL subtask with no tool_name is not executable. If it is a non-editing check, "
@@ -660,15 +709,13 @@ def build_structured_plan_repair_prompt(
             "- For each production artifact the errors name as referenced by a test file but "
             "owned by no subtask (grounded structural evidence - a real import, method call, or "
             "constructor instantiation the previous draft's own repository already contains, not "
-            "a guess): ADD a new MODEL subtask with execution_role=implementation whose "
-            "planned_files contains exactly that artifact path with action=modify (it is an "
-            "existing repository file, never invent a create action for it). Give the new subtask "
-            "a provides capability describing what it now supplies, set its depends_on/requires to "
-            "the real upstream subtask(s) it actually needs, and update the REFERENCING test "
-            "subtask's own requires/depends_on to consume this new subtask's provides value "
-            "instead of stopping at an earlier, indirect producer. Do not satisfy this by adding a "
-            "comment, an acceptance criterion, or a verification entry alone - the file needs a "
-            "real owning subtask.\n"
+            "a guess): account for that grounded artifact in the planned production path. If the "
+            "authoritative goal and repository evidence show that satisfying the goal requires "
+            "changing it, assign it to a MODEL implementation subtask using its existing path and "
+            "action=modify. Ensure the downstream verification subtask's depends_on and requires "
+            "route through the responsible production owner and one of that owner's provides "
+            "capabilities. Do not infer that the artifact must be modified solely because the "
+            "structural edge exists.\n"
         )
     if "MISWIRED_GROUNDED_DEPENDENCY_EDGE" in reason_codes:
         targeted_correction += (
@@ -680,6 +727,15 @@ def build_structured_plan_repair_prompt(
             "earlier producer already in the chain merely because a dependency edge exists to it. "
             "The grounded evidence names the file the test actually references; requires/depends_on "
             "must route through whichever subtask really owns that exact file.\n"
+        )
+    if "GROUNDED_SEMANTIC_PROVIDER_MISMATCH" in reason_codes:
+        targeted_correction += (
+            "- For each grounded test-to-production relationship whose production owner is already "
+            "in the test subtask's depends_on chain, also route semantic responsibility through "
+            "that same owner: add one of the named owner's provides capabilities to the test "
+            "subtask's requires. Remove any requires value that incorrectly routes this grounded "
+            "verification through an earlier or unrelated producer. Keep depends_on and "
+            "requires -> provides aligned with the same responsible owner.\n"
         )
     if "UNKNOWN_GLOBAL_INVARIANT" in reason_codes:
         targeted_correction += (
@@ -827,8 +883,13 @@ def build_authoritative_planner_request(
         "original product request above. Do not invent unspecified implementation choices.\n"
         "- A stage whose tests need build/test tooling (a manifest, a test framework dependency) "
         "owned by another stage's planned_files must declare that stage's provides value in its "
-        "own requires and depends_on - do not rely on planned_files or list position to imply "
+        "own requires and depends_on, and in the artifact's requires_capabilities - do not rely "
+        "on planned_files or list position to imply "
         "execution order.\n"
+        "- Put ambient runtimes and tools such as java, maven, python, node, and pytest in "
+        "planned_files[].environment_requirements, never in subtask requires/provides. "
+        "planned_files[].requires_capabilities names only exact capabilities supplied by another "
+        "planned subtask.\n"
         "- If a stage's entrypoint may terminate the process and another stage's tests are "
         "expected to exercise it directly, keep the process-terminating call separate from the "
         "directly-tested logic (a thin wrapper performs termination, tests target the underlying "
@@ -1011,6 +1072,11 @@ def find_missing_grounded_production_artifacts(
        java's own requires/depends_on pointed at s2=CustomerService.java,
        never at s3 - the exact edge FUTURE_ORDERED handling and MA9
        recovery then both, correctly, treat as authoritative).
+    3. SEMANTICALLY MISWIRED (reason="semantic_provider_mismatch"): the
+       production owner appears in the test's dependency chain, but none of
+       that owner's provides capabilities appears in the test's requires.
+       This is invalid because FUTURE_OWNER_VERIFICATION resolves the
+       responsible owner through requires -> provides, not depends_on.
 
     Deliberately narrow in both shapes: only fires on a REAL, already-
     indexed structural edge - never "this file is probably related," never
@@ -1026,7 +1092,11 @@ def find_missing_grounded_production_artifacts(
     gaps: List[Dict[str, str]] = []
     seen = set()
     for source, targets in resolved_edges.items():
-        if not is_runnable_test_file(source) and classify_file_role(source) is not FileRole.TEST:
+        # Grounded import/reference evidence is an execution prerequisite for
+        # any planned code consumer, not only a test.  PRV-17 exposed the
+        # production form: urls.py imported a view owned by a later stage and
+        # was nevertheless required to compile first.
+        if source not in source_subtask_by_path:
             continue
         for target in targets:
             if is_runnable_test_file(target) or classify_file_role(target) in (
@@ -1054,6 +1124,28 @@ def find_missing_grounded_production_artifacts(
                 gaps.append({
                     "test_file": source, "missing_production_artifact": target,
                     "owning_subtask": target_subtask_id, "reason": "not_in_dependency_chain",
+                })
+                continue
+            if not (
+                is_runnable_test_file(source)
+                or classify_file_role(source) is FileRole.TEST
+            ):
+                # For an ordinary production import, grounded provider-before-
+                # consumer ordering is the required intermediate-workspace
+                # invariant. Capability-name matching remains the stronger
+                # verification/FUTURE_OWNER rule for tests only.
+                continue
+            target_subtask = plan.subtask_by_id(target_subtask_id)
+            owner_capabilities = set(target_subtask.provides if target_subtask else [])
+            if not owner_capabilities.intersection(source_subtask.requires):
+                seen.add(key)
+                gaps.append({
+                    "test_file": source,
+                    "missing_production_artifact": target,
+                    "owning_subtask": target_subtask_id,
+                    "owner_provides": sorted(owner_capabilities),
+                    "test_requires": sorted(source_subtask.requires),
+                    "reason": "semantic_provider_mismatch",
                 })
     return gaps
 
@@ -2366,6 +2458,38 @@ def revise_plan_for_grounded_scope_owner(
     return EngineeringPlan.model_validate(revised.model_dump(mode="json"))
 
 
+def revise_plan_for_planned_prerequisite(
+    plan: EngineeringPlan,
+    *,
+    consumer_subtask_id: str,
+    owner_subtask_id: str,
+    capability: str,
+    consumer_artifacts: Iterable[str] = (),
+) -> EngineeringPlan:
+    """Wire a discovered prerequisite upstream without moving ownership."""
+    revised = plan.model_copy(deep=True)
+    consumer = revised.subtask_by_id(consumer_subtask_id)
+    owner = revised.subtask_by_id(owner_subtask_id)
+    if consumer is None or owner is None:
+        raise ValueError("planned prerequisite revision references an unknown subtask")
+    if not capability or capability not in owner.provides:
+        raise ValueError(
+            f"planned prerequisite capability {capability!r} is not provided by {owner_subtask_id!r}"
+        )
+    if consumer.id == owner.id:
+        raise ValueError("planned prerequisite owner and consumer must be different subtasks")
+
+    consumer.depends_on = list(dict.fromkeys(consumer.depends_on + [owner.id]))
+    consumer.requires = list(dict.fromkeys(consumer.requires + [capability]))
+    artifact_paths = set(consumer_artifacts)
+    for planned_file in consumer.planned_files:
+        if planned_file.path in artifact_paths:
+            planned_file.requires_capabilities = list(dict.fromkeys(
+                planned_file.requires_capabilities + [capability]
+            ))
+    return EngineeringPlan.model_validate(revised.model_dump(mode="json"))
+
+
 def compute_abandoned_plan_files(
     prior_subtask_states: Dict[str, str],
     prior_subtask_written_files: Dict[str, List[str]],
@@ -3043,9 +3167,15 @@ class WorkflowController:
             except Exception as e:
                 logger.debug(f"WorkflowController shadow run {run_id!r}: could not list registered tools: {e}")
 
+        shadow_stack_contract = derive_stack_contract(goal)
         validation = await validate_plan(
             plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
             route=route, triage_service=self.workflow_engine.engineering_triage,
+            runtime_verification_required=goal_requires_runtime_behavior(goal),
+            stack_contract=shadow_stack_contract,
+        )
+        log_stack_contract_boundary(
+            "plan", shadow_stack_contract, None if validation.valid else "REJECT",
         )
         if not validation.valid:
             notes.append(f"plan failed validation: {validation.errors}")
@@ -3373,6 +3503,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         while True:
             errors: List[str] = []
             reason_codes: List[str] = []
+            validation_evidence: List[Dict[str, Any]] = []
             invalid_subtask_ids: List[str] = []
             plan: Optional[EngineeringPlan] = None
 
@@ -3412,10 +3543,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         resuming_own_established_progress=has_own_established_progress,
                         require_model_planned_files=True,
                         require_semantic_contracts=True,
+                        runtime_verification_required=goal_requires_runtime_behavior(goal),
+                        stack_contract=derive_stack_contract(goal),
                         obligation_ledger=obligation_ledger, revision=repair_attempts,
                     )
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
+                    validation_evidence.extend(validation.evidence)
                     unbounded_model_subtasks = [
                         st.id for st in plan.subtasks
                         if st.execution_method == ExecutionMethod.MODEL
@@ -3442,6 +3576,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     )
                     unowned_gaps = [g for g in missing_artifacts if g["reason"] == "unowned"]
                     miswired_gaps = [g for g in missing_artifacts if g["reason"] == "not_in_dependency_chain"]
+                    semantic_gaps = [
+                        g for g in missing_artifacts
+                        if g["reason"] == "semantic_provider_mismatch"
+                    ]
                     if unowned_gaps:
                         errors.append(
                             "grounded structural evidence shows test file(s) referencing a "
@@ -3462,10 +3600,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             )
                         )
                         reason_codes.append("MISWIRED_GROUNDED_DEPENDENCY_EDGE")
+                    if semantic_gaps:
+                        errors.append(
+                            "grounded structural evidence shows test file(s) whose requires do "
+                            "not resolve to the subtask owning the referenced production artifact: "
+                            + "; ".join(
+                                f"{gap['test_file']} references "
+                                f"{gap['missing_production_artifact']} (owned by subtask "
+                                f"{gap['owning_subtask']!r}, provides={gap['owner_provides']!r}, "
+                                f"test requires={gap['test_requires']!r})"
+                                for gap in semantic_gaps
+                            )
+                        )
+                        reason_codes.append("GROUNDED_SEMANTIC_PROVIDER_MISMATCH")
 
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
             if plan is not None and not errors:
+                approved_stack_contract = derive_stack_contract(goal)
+                log_stack_contract_boundary("plan", approved_stack_contract, None)
                 try:
                     persist_planning_attempt_diagnostic(
                         workspace_path, run_id,
@@ -3511,6 +3664,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     extension_candidates=planning_repository_candidates,
                     repository_candidates=planning_repository_candidates,
                     must_preserve=must_preserve,
+                    validation_evidence=validation_evidence,
                 )
             try:
                 persist_planning_attempt_diagnostic(
@@ -3708,7 +3862,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             path: read_file_revision(os.path.join(workspace_path, path))
             for path in planned_paths
         }
-        plan_workspace_path = create_git_worktree(workspace_path)
+        # Happens before any subtask has run - zero real side effects exist
+        # yet, so a bootstrap failure here (git missing, read-only FS, disk
+        # quota) fits _StructuredPlanUnavailable's own established "pre-
+        # execution, safe to fail closed" contract exactly (see that class's
+        # docstring) - reused here rather than letting create_git_worktree's
+        # RuntimeError/ValueError propagate uncaught and crash the whole
+        # enforce run; the caller already converts it into a clean
+        # needs_review WorkflowResult.
+        try:
+            plan_workspace_path = create_git_worktree(workspace_path)
+        except Exception as e:
+            raise _StructuredPlanUnavailable(
+                f"failed to create isolated plan-level worktree sandbox: {e}"
+            ) from e
         # Resolved ONCE, here, against workspace_path - the real, immutable
         # PRE-mutation baseline, before plan_workspace_path accumulates any
         # subtask's committed writes - and reused unchanged by every bounded
@@ -3941,6 +4108,68 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             predetermined_files = [pf.path for pf in subtask.planned_files]
             call_result = await _invoke_bounded_subtask(subtask, position)
             scope_conflict = call_result.get("plan_scope_conflict") or {}
+            if scope_conflict.get("reason_code") == "PLANNED_PREREQUISITE_OWNER_REQUIRED":
+                owner_id = scope_conflict.get("required_owner_subtask_id")
+                capability = scope_conflict.get("required_capability")
+                if isinstance(owner_id, str) and isinstance(capability, str) and capability:
+                    prerequisite_revision = revise_plan_for_planned_prerequisite(
+                        plan,
+                        consumer_subtask_id=subtask.id,
+                        owner_subtask_id=owner_id,
+                        capability=capability,
+                        consumer_artifacts=scope_conflict.get("consumer_artifacts") or (),
+                    )
+                    prerequisite_validation = await validate_plan(
+                        prerequisite_revision,
+                        workspace_path=plan_workspace_path,
+                        available_tool_names=available_tool_names,
+                        route=route,
+                        triage_service=self.workflow_engine.engineering_triage,
+                        resuming_own_established_progress=True,
+                        require_model_planned_files=True,
+                        require_semantic_contracts=True,
+                        runtime_verification_required=goal_requires_runtime_behavior(goal),
+                        stack_contract=derive_stack_contract(goal),
+                    )
+                    if prerequisite_validation.valid:
+                        prior_hash = current_plan_hash
+                        plan = prerequisite_revision
+                        current_plan_hash = plan.content_hash()
+                        order = topological_subtask_order(plan)
+                        execution_context = await self._build_context(
+                            goal, plan, plan_workspace_path, route, control_context, control_state,
+                        )
+                        subtask = plan.subtask_by_id(subtask_id)
+                        assert subtask is not None
+                        save_approved_plan(
+                            workspace_path, plan.plan_id,
+                            build_approved_plan_document(
+                                plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                                stage_states=approved_stage_states,
+                                lifecycle_state="prerequisite_revised",
+                            ),
+                        )
+                        plan_recovery_events.append({
+                            "failed_subtask": subtask.id,
+                            "classification": "PLAN_SCOPE_DEFECT",
+                            "reason_code": "PLANNED_PREREQUISITE_OWNER_REQUIRED",
+                            "prerequisite_owner": owner_id,
+                            "required_capability": capability,
+                            "prior_plan_hash": prior_hash,
+                            "revised_plan_hash": current_plan_hash,
+                            "ownership_preserved": True,
+                        })
+                        logger.warning(
+                            "PLANNED_PREREQUISITE_WIRED consumer=%s owner=%s capability=%s "
+                            "- owner remains responsible for its artifact and now executes upstream.",
+                            subtask.id, owner_id, capability,
+                        )
+                    else:
+                        scope_conflict = {
+                            **scope_conflict,
+                            "reason": "planned prerequisite wiring failed revalidation: "
+                            + "; ".join(prerequisite_validation.errors),
+                        }
             grounded_scope_files = _plan_scope_conflict_files(scope_conflict)
             # MA8 (spec §30): a DETERMINISTIC-authority obligation
             # (currently only the migration gate's authoritative_files,
@@ -4060,6 +4289,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     resuming_own_established_progress=True,
                     require_model_planned_files=True,
                     require_semantic_contracts=True,
+                    runtime_verification_required=goal_requires_runtime_behavior(goal),
+                    stack_contract=derive_stack_contract(goal),
                 )
                 if revision_validation.valid:
                     prior_hash = current_plan_hash
@@ -5033,6 +5264,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 all_completed = False
 
+        global_stack_contract_gap: Optional[str] = None
+        if all_completed:
+            terminal_stack_contract = derive_stack_contract(goal)
+            global_stack_contract_gap = validate_stack_contract_artifacts(
+                terminal_stack_contract,
+                (pf.path for st in plan.subtasks for pf in st.planned_files),
+            )
+            log_stack_contract_boundary("terminal", terminal_stack_contract, global_stack_contract_gap)
+            if global_stack_contract_gap:
+                all_completed = False
+
         # MA8 (spec §42/43) - a generic backstop layered ALONGSIDE the
         # migration-specific gate above, not a replacement for it (§43's
         # own explicit interim model: existing gates AND terminal MA8
@@ -5083,6 +5325,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["global_terminal_obligation_gap"] = global_terminal_obligation_gap
             logger.error(
                 f"WorkflowController enforce run {run_id!r}: {global_terminal_obligation_gap}"
+            )
+        if global_stack_contract_gap:
+            aggregated["global_stack_contract_gap"] = global_stack_contract_gap
+            logger.error(
+                f"WorkflowController enforce run {run_id!r}: {global_stack_contract_gap}"
             )
         if knowledge_gap_break is not None:
             # Overrides status/run_id above (not quality_gates_passed/subtask_

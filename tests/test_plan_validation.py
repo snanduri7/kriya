@@ -23,6 +23,7 @@ from kriya.workflow.plan_schema import (
 from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.triage import ChangeKind
+from kriya.workflow.static_checks import derive_stack_contract
 
 
 def _plan(subtasks, **overrides):
@@ -43,6 +44,199 @@ async def test_valid_single_subtask_plan_passes(tmp_path):
     result = await validate_plan(plan, workspace_path=str(tmp_path))
     assert result.valid is True
     assert result.errors == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_behavior_requires_an_application_runtime_owner(tmp_path):
+    tests = _model_subtask(
+        id="s1", description="write ordinary tests",
+        planned_files=[PlannedFile(path="test_app.py", action=FileAction.CREATE)],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.TOOL, tool_name="test",
+            verifier_kind=VerifierKind.TEST, description="run safe unit tests",
+        )],
+    )
+
+    result = await validate_plan(
+        _plan([tests]), workspace_path=str(tmp_path),
+        runtime_verification_required=True,
+    )
+
+    assert result.valid is False
+    assert "APPLICATION_RUNTIME_OWNER_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_runtime_and_test_verifiers_have_distinct_owners(tmp_path):
+    tests = _model_subtask(
+        id="s1", description="write safe unit tests", provides=["test_suite"],
+        planned_files=[PlannedFile(path="test_app.py", action=FileAction.CREATE)],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.TOOL, tool_name="test",
+            verifier_kind=VerifierKind.TEST, description="run ordinary unit tests",
+        )],
+    )
+    runtime = _model_subtask(
+        id="s2", description="verify application process behavior",
+        execution_role=ExecutionRole.VERIFICATION, planned_files=[],
+        depends_on=["s1"], requires=["test_suite"],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.JUDGMENT,
+            verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+            requires_runtime_execution=True,
+            description="observe stdout and process exit status",
+        )],
+    )
+
+    result = await validate_plan(
+        _plan([tests, runtime]), workspace_path=str(tmp_path),
+        runtime_verification_required=True,
+    )
+
+    assert result.valid is True
+    assert tests.verification[0].verifier_kind is VerifierKind.TEST
+    assert runtime.verification[0].requires_application_runtime is True
+
+
+@pytest.mark.asyncio
+async def test_integration_provider_must_be_upstream_of_consumer(tmp_path):
+    provider = _model_subtask(
+        id="views", description="create views",
+        planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)],
+    )
+    early_consumer = _model_subtask(
+        id="urls", description="wire urls",
+        planned_files=[PlannedFile(path="customers_project/urls.py", action=FileAction.CREATE)],
+    )
+    relationship = IntegrationRelationship(
+        id="urls-import-views", kind=IntegrationRelationshipKind.USES,
+        producer_subtask_ids=["views"], consumer_subtask_ids=["urls"],
+        participating_artifacts=["customers/views.py", "customers_project/urls.py"],
+        relationship_statement="urls imports customers.views",
+    )
+
+    rejected = await validate_plan(
+        _plan([early_consumer, provider], integration_relationships=[relationship]),
+        workspace_path=str(tmp_path),
+    )
+    assert rejected.valid is False
+    assert "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM" in rejected.reason_codes
+
+    late_consumer = early_consumer.model_copy(update={"depends_on": ["views"]})
+    accepted = await validate_plan(
+        _plan([provider, late_consumer], integration_relationships=[relationship]),
+        workspace_path=str(tmp_path),
+    )
+    assert accepted.valid is True
+
+
+@pytest.mark.asyncio
+async def test_plan_validation_enforces_authoritative_stack_contract(tmp_path):
+    contract = derive_stack_contract("Build a Python Django application")
+    django = _plan([_model_subtask(
+        planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)],
+    )])
+    spring = _plan([_model_subtask(
+        planned_files=[PlannedFile(path="src/main/java/App.java", action=FileAction.CREATE)],
+    )])
+
+    assert (await validate_plan(
+        django, workspace_path=str(tmp_path), stack_contract=contract,
+    )).valid is True
+    rejected = await validate_plan(
+        spring, workspace_path=str(tmp_path), stack_contract=contract,
+    )
+    assert rejected.valid is False
+    assert "AUTHORITATIVE_STACK_SUBSTITUTION" in rejected.reason_codes
+
+
+def _planned_prerequisite_plan(*, artifact_requires, consumer_requires, consumer_depends_on):
+    provider = _model_subtask(
+        id="s1", description="provide test tooling", provides=["test_tooling"],
+        planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)],
+    )
+    consumer = _model_subtask(
+        id="s2", description="create a framework-backed verification artifact",
+        depends_on=consumer_depends_on, requires=consumer_requires,
+        planned_files=[PlannedFile(
+            path="checks/behavior.spec", action=FileAction.CREATE,
+            requires_capabilities=artifact_requires,
+        )],
+    )
+    return _plan([consumer, provider])
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_correctly_upstream_passes(tmp_path):
+    plan = _planned_prerequisite_plan(
+        artifact_requires=["test_tooling"],
+        consumer_requires=["test_tooling"],
+        consumer_depends_on=["s1"],
+    )
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_not_declared_by_consumer_is_rejected(tmp_path):
+    plan = _planned_prerequisite_plan(
+        artifact_requires=["test_tooling"], consumer_requires=[], consumer_depends_on=["s1"],
+    )
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_provider_not_upstream_is_rejected(tmp_path):
+    plan = _planned_prerequisite_plan(
+        artifact_requires=["test_tooling"],
+        consumer_requires=["test_tooling"],
+        consumer_depends_on=[],
+    )
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert "SEMANTIC_DEPENDENCY_EDGE_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_ambient_java_and_maven_requirements_are_not_subtask_capabilities(tmp_path):
+    plan = _plan([_model_subtask(
+        planned_files=[PlannedFile(
+            path="src/App.java", action=FileAction.CREATE,
+            environment_requirements=["java", "maven"],
+        )],
+    )])
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+    assert "SUBTASK_REQUIREMENT_UNPROVIDED" not in result.reason_codes
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_maven_manifest_owner_is_resolved_into_structured_prerequisite_evidence(tmp_path):
+    provider = _model_subtask(
+        id="s1", provides=["maven_test_dependencies", "app_main_class", "app_test_class"],
+        planned_files=[PlannedFile(path="pom.xml", action=FileAction.CREATE)],
+    )
+    consumer = _model_subtask(
+        id="s2", depends_on=[], requires=[],
+        planned_files=[PlannedFile(
+            path="src/test/AppTest.java", action=FileAction.CREATE,
+            environment_requirements=["java", "maven"],
+        )],
+    )
+    result = await validate_plan(_plan([provider, consumer]), workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert result.evidence == [{
+        "consumer_subtask": "s2",
+        "consumer_file": "src/test/AppTest.java",
+        "prerequisite_capability": "maven_test_dependencies",
+        "provider_subtask": "s1",
+        "provider_file": "pom.xml",
+        "missing_requires_edge": True,
+        "missing_depends_on_edge": True,
+    }]
 
 
 @pytest.mark.asyncio
@@ -991,7 +1185,10 @@ async def test_integration_relationship_unknown_subtask_id_is_an_error(tmp_path)
 
 @pytest.mark.asyncio
 async def test_valid_integration_relationship_seeds_pending_terminal_obligation(tmp_path):
-    s2 = _model_subtask(id="s2", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)])
+    s2 = _model_subtask(
+        id="s2", depends_on=["s3"],
+        planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
+    )
     s3 = _model_subtask(id="s3", planned_files=[PlannedFile(path="InMemoryService.java", action=FileAction.CREATE)])
     plan = _plan([s2, s3]).model_copy(update={
         "integration_relationships": [IntegrationRelationship(

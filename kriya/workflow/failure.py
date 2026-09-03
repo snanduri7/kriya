@@ -68,6 +68,13 @@ def classify_failure_attribution(type_: str, message: str = "") -> FailureAttrib
         return FailureAttributionKind.PLAN_SCOPE_DEFECT
     if type_ in (
         "test", "targeted_test", "regression_test", "test_acceptance",
+        # The test artifact chose an execution boundary incompatible with
+        # the behavior it verifies (for example invoking a System.exit()-
+        # calling CLI main inside Surefire). Repair the verifier/test only;
+        # production behavior is not implicated by this classification.
+        "verification_strategy_incompatible",
+        "process_terminating_behavior_tested_in_process",
+        "test_verification_infrastructure_failure",
         # PRV-06 (2026-08-28): a process/fork-termination failure still needs
         # the SAME repair-owner routing as an ordinary test failure (the
         # existing scope-widening/PLAN_SCOPE_DEFECT path already reaches a

@@ -150,11 +150,25 @@ class PlannedFile(BaseModel):
     path: str
     action: FileAction
     reason: str = ""
+    # Ambient runtime/tooling needed to build or execute this artifact.
+    # These are environment facts, never subtask ownership edges.
+    environment_requirements: List[str] = Field(default_factory=list)
+    # Explicit artifact semantics, not a filename/framework heuristic. When
+    # producing this artifact requires tooling supplied by another planned
+    # owner (a test framework, code generator, compiler plugin, schema, ...),
+    # the Planner names that owner's exact capability here. Plan validation
+    # then proves the enclosing subtask declares and orders the prerequisite.
+    requires_capabilities: List[str] = Field(default_factory=list)
 
     @field_validator("path")
     @classmethod
     def _validate_path(cls, v: str) -> str:
         return _non_blank_relative_path(v, label="planned file path")
+
+    @field_validator("requires_capabilities", "environment_requirements")
+    @classmethod
+    def _normalize_required_capabilities(cls, values: List[str]) -> List[str]:
+        return [(value or "").strip() for value in values]
 
 
 class VerificationMethod(BaseModel):

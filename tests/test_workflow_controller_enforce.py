@@ -31,6 +31,7 @@ from kriya.workflow.plan_schema import (
 )
 from kriya.workflow.plan_validation import PlanValidationResult, validate_plan
 from kriya.workflow.planning_diagnostics import (
+    approved_plan_diagnostic,
     normalized_ownership_validation_records,
     persist_planning_attempt_diagnostic,
     planning_diagnostics_path,
@@ -62,6 +63,7 @@ from kriya.workflow.workflow_controller import (
     build_planning_structural_evidence,
     find_missing_grounded_production_artifacts,
     build_recovery_execution_plan,
+    revise_plan_for_planned_prerequisite,
     build_subtask_constraint_context,
     build_subtask_goal_text,
     build_subtask_semantic_context,
@@ -566,6 +568,36 @@ def test_subtask_semantic_context_projects_invariants_upstream_and_downstream_co
     assert '"runtime_execution_required": true' in consumer_context
 
 
+def test_test_subtask_context_assigns_process_evidence_only_to_runtime_owner():
+    tests = Subtask(
+        id="tests", description="write safe unit tests", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="src/test/java/AppTest.java", action=FileAction.CREATE)],
+        provides=["tests.ready"],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.TOOL, tool_name="test",
+            verifier_kind=VerifierKind.TEST, description="run ordinary unit tests",
+        )],
+    )
+    runtime = Subtask(
+        id="runtime", description="verify process behavior", execution_method=ExecutionMethod.MODEL,
+        execution_role=ExecutionRole.VERIFICATION, planned_files=[],
+        depends_on=["tests"], requires=["tests.ready"],
+        verification=[VerificationMethod(
+            type=VerificationMethodType.JUDGMENT,
+            verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+            requires_runtime_execution=True,
+            description="observe application stdout and exit status",
+        )],
+    )
+    plan = EngineeringPlan(plan_id="runtime-owner", kind=ChangeKind.TASK, subtasks=[tests, runtime])
+
+    context = build_subtask_semantic_context(plan, tests)
+
+    assert '"application_runtime_owners": [\n    "runtime"\n  ]' in context
+    assert "unit-test artifacts do not own process-exit" in context
+    assert "owned exclusively by the declared application_runtime verifier" in context
+
+
 def test_plan_repair_prompt_is_json_only_and_gives_exact_unscoped_check_correction():
     prompt = build_structured_plan_repair_prompt(
         "build the requested application",
@@ -651,11 +683,11 @@ def test_plan_repair_prompt_gives_targeted_correction_for_missing_production_art
         1,
     )
 
-    assert "ADD a new MODEL subtask" in prompt
+    assert "account for that grounded artifact in the planned production path" in prompt
+    assert "If the authoritative goal and repository evidence show" in prompt
     assert "action=modify" in prompt
-    assert "never invent a create action" in prompt
-    assert "update the REFERENCING test subtask's own requires/depends_on" in prompt
-    assert "Do not satisfy this by adding a comment" in prompt
+    assert "depends_on and requires" in prompt
+    assert "Do not infer that the artifact must be modified solely" in prompt
 
 
 def test_plan_repair_prompt_gives_targeted_correction_for_miswired_dependency_edge():
@@ -675,6 +707,22 @@ def test_plan_repair_prompt_gives_targeted_correction_for_miswired_dependency_ed
     assert "change that test subtask's own requires to the exact provides value" in prompt
     assert "add that owning subtask's id to the test subtask's own depends_on" in prompt
     assert "requires/depends_on must route through whichever subtask really owns" in prompt
+
+
+def test_plan_repair_prompt_aligns_semantic_provider_with_grounded_owner():
+    prompt = build_structured_plan_repair_prompt(
+        "Change lookup behavior and verify it",
+        "previous response",
+        [
+            "Test.java references Controller.java (owned by subtask 's3', "
+            "provides=['controller_cap'], test requires=['service_cap'])"
+        ],
+        ["GROUNDED_SEMANTIC_PROVIDER_MISMATCH"],
+        1,
+    )
+
+    assert "add one of the named owner's provides capabilities" in prompt
+    assert "requires -> provides aligned with the same responsible owner" in prompt
 
 
 # --- PRV-11 (2026-08-31): extension_points was never wired into the
@@ -846,7 +894,89 @@ def test_planning_diagnostics_append_bounded_local_attempt_records(tmp_path):
     assert records[1]["repair_prompt"] == "repair"
     assert records[2]["repair_prompt"] is None
     assert records[0]["repository_evidence"] == [{"path": "app.py", "exists": False}]
+    assert records[0]["approved_plan"] is None
     assert path.endswith("/.kriya/control/planning-diagnostics/run_unsafe_id.jsonl")
+
+
+def test_approved_plan_diagnostic_dumps_runtime_ownership_contract():
+    plan = EngineeringPlan(
+        plan_id="approved", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            Subtask(
+                id="s3", description="change controller",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="Controller.java", action=FileAction.MODIFY)],
+                depends_on=["s2"], requires=["service_cap"], provides=["controller_cap"],
+            ),
+            Subtask(
+                id="s4", description="verify controller",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="ControllerTest.java", action=FileAction.MODIFY)],
+                depends_on=["s3"], requires=["controller_cap"], provides=[],
+            ),
+        ],
+    )
+
+    assert approved_plan_diagnostic(plan, validation_errors=[]) == {
+        "plan_id": "approved",
+        "subtasks": [
+            {
+                "id": "s3",
+                "planned_files": [{
+                    "path": "Controller.java", "action": "modify",
+                    "environment_requirements": [],
+                    "requires_capabilities": [],
+                }],
+                "depends_on": ["s2"],
+                "requires": ["service_cap"],
+                "provides": ["controller_cap"],
+            },
+            {
+                "id": "s4",
+                "planned_files": [{
+                    "path": "ControllerTest.java", "action": "modify",
+                    "environment_requirements": [],
+                    "requires_capabilities": [],
+                }],
+                "depends_on": ["s3"],
+                "requires": ["controller_cap"],
+                "provides": [],
+            },
+        ],
+    }
+    assert approved_plan_diagnostic(plan, validation_errors=["invalid"]) is None
+
+
+def test_planned_prerequisite_revision_wires_owner_upstream_without_moving_ownership():
+    plan = EngineeringPlan(
+        plan_id="prerequisite", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s2", description="create framework-backed test",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="checks/behavior.spec", action=FileAction.CREATE,
+                )],
+            ),
+            Subtask(
+                id="s4", description="provide test tooling",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="build.config", action=FileAction.CREATE)],
+                provides=["test_tooling"],
+            ),
+        ],
+    )
+
+    revised = revise_plan_for_planned_prerequisite(
+        plan, consumer_subtask_id="s2", owner_subtask_id="s4",
+        capability="test_tooling", consumer_artifacts=["checks/behavior.spec"],
+    )
+
+    assert revised.subtask_by_id("s2").depends_on == ["s4"]
+    assert revised.subtask_by_id("s2").requires == ["test_tooling"]
+    assert revised.subtask_by_id("s2").planned_files[0].requires_capabilities == ["test_tooling"]
+    assert [pf.path for pf in revised.subtask_by_id("s4").planned_files] == ["build.config"]
+    assert plan.subtask_by_id("s2").depends_on == []
 
 
 def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():
@@ -886,6 +1016,27 @@ def test_authoritative_planner_request_carries_testability_and_tooling_dag_guida
     assert "keep the process-terminating call separate from the" in request
     assert "System.exit" not in request  # generic across languages, not Java-specific
     assert "run()" not in request  # no required method name/shape
+
+
+def test_plan_repair_prompt_contains_exact_prerequisite_correction_tuple():
+    prompt = build_structured_plan_repair_prompt(
+        "Build app", "{}", ["missing prerequisite"],
+        ["PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s3",
+            "consumer_file": "src/test/java/AppTest.java",
+            "prerequisite_capability": "maven_test_dependencies",
+            "provider_subtask": "s2",
+            "provider_file": "pom.xml",
+            "missing_requires_edge": True,
+            "missing_depends_on_edge": True,
+        }],
+    )
+    assert "Consumer: subtask=s3 file=src/test/java/AppTest.java" in prompt
+    assert "Required planned capability: maven_test_dependencies" in prompt
+    assert "Provider: subtask=s2 file=pom.xml" in prompt
+    assert "add maven_test_dependencies to s3.requires" in prompt
+    assert "add s2 to s3.depends_on" in prompt
 
 
 def test_authoritative_planner_system_prompt_carries_testability_and_tooling_dag_guidance():
@@ -1614,10 +1765,13 @@ def _seed_structural_customer_repo(tmp_path):
     return list(files.keys())
 
 
-def _structural_customer_subtask(sid, path, *, depends_on=()):
+def _structural_customer_subtask(
+    sid, path, *, depends_on=(), requires=(), provides=(),
+):
     return Subtask(
         id=sid, description=f"work on {path}", execution_method=ExecutionMethod.MODEL,
         depends_on=list(depends_on),
+        requires=list(requires), provides=list(provides),
         planned_files=[PlannedFile(path=path, action=FileAction.MODIFY)],
     )
 
@@ -1680,8 +1834,14 @@ def test_missing_grounded_production_artifact_is_silent_when_the_owner_is_planne
         subtasks=[
             _structural_customer_subtask("s1", _CUSTOMER_PATH),
             _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
-            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"]),
-            _structural_customer_subtask("s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"],
+                provides=["controller_cap"],
+            ),
+            _structural_customer_subtask(
+                "s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3"],
+                requires=["controller_cap"],
+            ),
         ],
     )
 
@@ -1721,33 +1881,79 @@ def test_missing_grounded_production_artifact_flags_edge_miswiring_when_owner_ex
     }]
 
 
-def test_missing_grounded_production_artifact_edge_check_accepts_transitive_chain(tmp_path):
-    """A correctly-wired MULTI-hop chain (s4 depends_on s3a, which itself
-    depends_on the real owner s3) must NOT be flagged - the check walks
-    the FULL transitive depends_on closure, not just the immediate edge."""
+def test_grounded_edge_rejects_semantic_provider_mismatch_even_with_both_dependencies(tmp_path):
+    """depends_on alone is insufficient: runtime FUTURE_OWNER routing uses
+    requires -> provides and must resolve to the grounded artifact owner."""
     candidates = _seed_structural_customer_repo(tmp_path)
     _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
-    valid_transitive_plan = EngineeringPlan(
-        plan_id="transitive", kind=ChangeKind.ENHANCEMENT,
+    semantically_miswired_plan = EngineeringPlan(
+        plan_id="semantic-miswire", kind=ChangeKind.ENHANCEMENT,
         subtasks=[
             _structural_customer_subtask("s1", _CUSTOMER_PATH),
-            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
-            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"]),
-            Subtask(
-                id="s3a", description="an intermediate verification-only hop",
-                execution_method=ExecutionMethod.MODEL, execution_role=ExecutionRole.VERIFICATION,
-                depends_on=["s3"],
-                verification=[VerificationMethod(
-                    type=VerificationMethodType.TOOL, tool_name="compile",
-                    verifier_kind=VerifierKind.COMPILE, description="compile check",
-                    requires_runtime_execution=False,
-                )],
+            _structural_customer_subtask(
+                "s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"],
+                provides=["service_cap"],
             ),
-            _structural_customer_subtask("s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3a"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"],
+                provides=["controller_cap"],
+            ),
+            _structural_customer_subtask(
+                "s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2", "s3"],
+                requires=["service_cap"],
+            ),
         ],
     )
 
-    assert find_missing_grounded_production_artifacts(valid_transitive_plan, edges) == []
+    assert find_missing_grounded_production_artifacts(
+        semantically_miswired_plan, edges,
+    ) == [{
+        "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
+        "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "owning_subtask": "s3",
+        "owner_provides": ["controller_cap"],
+        "test_requires": ["service_cap"],
+        "reason": "semantic_provider_mismatch",
+    }]
+
+
+def test_grounded_plan_completeness_matrix_rejects_absence_and_miswire_then_accepts_alignment(tmp_path):
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+
+    def plan(*subtasks, plan_id):
+        return EngineeringPlan(
+            plan_id=plan_id, kind=ChangeKind.ENHANCEMENT, subtasks=list(subtasks),
+        )
+
+    base = _structural_customer_subtask("s1", _CUSTOMER_PATH)
+    service = _structural_customer_subtask(
+        "s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"], provides=["service_cap"],
+    )
+    controller = _structural_customer_subtask(
+        "s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"],
+        requires=["service_cap"], provides=["controller_cap"],
+    )
+    test_via_service = _structural_customer_subtask(
+        "s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+        requires=["service_cap"],
+    )
+    test_miswired = _structural_customer_subtask(
+        "s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2", "s3"],
+        requires=["service_cap"],
+    )
+    test_aligned = _structural_customer_subtask(
+        "s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3"],
+        requires=["controller_cap"],
+    )
+
+    plan_a = plan(base, service, test_via_service, plan_id="missing-owner")
+    plan_b = plan(base, service, controller, test_miswired, plan_id="wrong-provider")
+    plan_c = plan(base, service, controller, test_aligned, plan_id="aligned")
+
+    assert find_missing_grounded_production_artifacts(plan_a, edges)[0]["reason"] == "unowned"
+    assert find_missing_grounded_production_artifacts(plan_b, edges)[0]["reason"] == "semantic_provider_mismatch"
+    assert find_missing_grounded_production_artifacts(plan_c, edges) == []
 
 
 def test_authoritative_planner_request_includes_structural_evidence_when_present():
@@ -1793,6 +1999,41 @@ async def test_enforce_flags_missing_grounded_production_artifact_and_exhausts_o
 
 
 @pytest.mark.asyncio
+async def test_enforce_reports_grounded_semantic_provider_mismatch(tmp_path):
+    _seed_structural_customer_repo(tmp_path)
+    semantic_miswire = EngineeringPlan(
+        plan_id="semantic-miswire", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask(
+                "s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"],
+                provides=["service_cap"],
+            ),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"],
+                provides=["controller_cap"],
+            ),
+            _structural_customer_subtask(
+                "s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2", "s3"],
+                requires=["service_cap"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock()
+    p1, p2, p3 = _patched(semantic_miswire)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "Change lookup behavior and verify it",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "needs_review"
+    assert "GROUNDED_SEMANTIC_PROVIDER_MISMATCH" in result.legacy_result["reason_codes"]
+    we.run_generation_workflow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_enforce_complete_plan_is_not_blocked_by_structural_completeness_check(tmp_path):
     """The positive case: when every grounded relationship IS covered by
     some subtask's own planned_files, this check contributes nothing and
@@ -1803,8 +2044,14 @@ async def test_enforce_complete_plan_is_not_blocked_by_structural_completeness_c
         subtasks=[
             _structural_customer_subtask("s1", _CUSTOMER_PATH),
             _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
-            _structural_customer_subtask("s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"]),
-            _structural_customer_subtask("s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_PATH, depends_on=["s2"],
+                provides=["controller_cap"],
+            ),
+            _structural_customer_subtask(
+                "s4", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s3"],
+                requires=["controller_cap"],
+            ),
         ],
     )
     we = _workflow_engine()
@@ -1826,6 +2073,42 @@ async def test_enforce_complete_plan_is_not_blocked_by_structural_completeness_c
     ]
     assert len(diagnostics) == 1
     assert "MISSING_GROUNDED_PRODUCTION_ARTIFACT" not in diagnostics[0]["reason_codes"]
+    assert diagnostics[0]["approved_plan"] == {
+        "plan_id": "complete",
+        "subtasks": [
+            {
+                "id": "s1", "planned_files": [{
+                    "path": _CUSTOMER_PATH, "action": "modify",
+                    "environment_requirements": [], "requires_capabilities": [],
+                }],
+                "depends_on": [], "requires": [], "provides": [],
+            },
+            {
+                "id": "s2",
+                "planned_files": [{
+                    "path": _CUSTOMER_SERVICE_PATH, "action": "modify",
+                    "environment_requirements": [], "requires_capabilities": [],
+                }],
+                "depends_on": ["s1"], "requires": [], "provides": [],
+            },
+            {
+                "id": "s3",
+                "planned_files": [{
+                    "path": _CUSTOMER_CONTROLLER_PATH, "action": "modify",
+                    "environment_requirements": [], "requires_capabilities": [],
+                }],
+                "depends_on": ["s2"], "requires": [], "provides": ["controller_cap"],
+            },
+            {
+                "id": "s4",
+                "planned_files": [{
+                    "path": _CUSTOMER_CONTROLLER_TEST_PATH, "action": "modify",
+                    "environment_requirements": [], "requires_capabilities": [],
+                }],
+                "depends_on": ["s3"], "requires": ["controller_cap"], "provides": [],
+            },
+        ],
+    }
     assert we.planner.run.await_count == 1
 
 

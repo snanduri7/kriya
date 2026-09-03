@@ -12,13 +12,14 @@ stays in workflow.py - out of scope for this slice.
 """
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import re
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.agents.contracts import (
@@ -29,6 +30,7 @@ from kriya.core.kernel import Kernel
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.tools.validate import get_pom_dependencies
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
     apply_anchored_edits,
@@ -43,7 +45,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -67,18 +69,26 @@ from kriya.workflow.operations import (
     operation_for_file,
     validate_operation_result,
 )
-from kriya.workflow.static_checks import find_established_stack_drift, find_goal_stack_mismatch, run_static_checks
+from kriya.workflow.static_checks import (
+    derive_stack_contract,
+    find_established_stack_drift,
+    find_goal_stack_mismatch,
+    log_stack_contract_boundary,
+    run_static_checks,
+    validate_stack_contract_artifacts,
+)
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.acceptance import (
     goal_explicitly_requires_tests,
     output_confirms_nonzero_test_execution,
-    run_command_targets_missing_entrypoint,
+    runtime_application_step_started,
+    runtime_verification_infrastructure_reason,
     subtask_owns_test_obligation,
 )
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
-from kriya.workflow.verification_authority import deterministic_sequence_kind
+from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
 from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationLedger, ObligationRecord, ObligationStatus
 from kriya.workflow.repair_contract import RepairContractStatus, build_repair_contract, derive_process_boundary_participants
@@ -507,6 +517,7 @@ class AttemptContext:
     # existing tests (predating MA8) keeps working unchanged - every real
     # call site always supplies one.
     obligation_ledger: Optional["ObligationLedger"] = None
+    completed_subtask_ids: FrozenSet[str] = frozenset()
 
 
 def _process_boundary_obligation_id(subtask_id: str) -> str:
@@ -897,6 +908,443 @@ def _record_self_correction_scope_conflict(
 
 _RUNTIME_VERIFICATION_SYNTHETIC_INPUT = "kriya-verification-input"
 
+_NONZERO_PROCESS_EXIT_RE = re.compile(
+    r"(?:non[ -]?zero(?:\s+[a-z]+){0,3}\s+exit|(?:process\s+)?exits?(?:\s+code)?\s+(?:is\s+|must\s+be\s+)?non[ -]?zero)",
+    re.IGNORECASE,
+)
+
+_INITIAL_TEST_PROCESS_BOUNDARY_CONSTRAINT = (
+    "\n\n=== Process-boundary test constraint ===\n"
+    "The structured runtime/process-boundary contract explicitly requires a non-zero process exit. "
+    "Tests must not invoke a process-terminating application path in the test runner's own process. "
+    "Do not use SecurityManager or System.setSecurityManager to intercept termination. Preserve the "
+    "required System.exit behavior. Verify exit code/stdout/stderr through a child process or leave "
+    "that obligation to the declared application_runtime verifier. This constraint changes only the "
+    "verification strategy; do not invent additional product behavior or edge cases (for example, "
+    "overflow handling) that are absent from the authoritative goal."
+)
+
+
+def _initial_test_process_boundary_constraint(
+    required_verification: List[Dict[str, Any]], target_files: Optional[List[str]],
+) -> str:
+    """Return a test-generation constraint only for an explicit runtime fact."""
+    if not any(is_runnable_test_file(path) for path in (target_files or [])):
+        return ""
+    return (
+        _INITIAL_TEST_PROCESS_BOUNDARY_CONSTRAINT
+        if _required_process_terminating_cases(required_verification)
+        else ""
+    )
+
+
+def _runtime_contract_requirements(ctx: "AttemptContext") -> List[Dict[str, Any]]:
+    """Collect runtime/process-boundary facts available to this subtask."""
+    requirements = list(ctx.required_verification)
+    if ctx.structured_plan is not None:
+        for subtask in ctx.structured_plan.subtasks:
+            requirements.extend(
+                verification.model_dump(mode="json")
+                for verification in subtask.verification
+            )
+        current = ctx.structured_plan.subtask_by_id(ctx.current_subtask_id or "")
+        relevant_ids = set(current.relevant_global_invariant_ids if current else [])
+        for invariant in ctx.structured_plan.global_invariants:
+            if invariant.id in relevant_ids:
+                requirements.append({
+                    "description": invariant.statement,
+                    "process_boundary_authority": "relevant_global_invariant",
+                    "invariant_id": invariant.id,
+                })
+    deduplicated: Dict[str, Dict[str, Any]] = {}
+    for requirement in requirements:
+        key = repr(sorted(requirement.items()))
+        deduplicated[key] = requirement
+    return list(deduplicated.values())
+
+
+_TERMINATING_CASE_MARKERS = {
+    "invalid": ("invalid input", "invalid value", "malformed input", "non-numeric input"),
+    "missing": ("missing input", "no input", "missing argument", "no argument"),
+}
+
+
+def _required_process_terminating_cases(
+    required_verification: List[Dict[str, Any]],
+) -> List[str]:
+    """Extract only case labels explicitly grounded by the runtime contract."""
+    cases = set()
+    for requirement in required_verification:
+        runtime_verifier = (
+            requirement.get("verifier_kind") == "application_runtime"
+            and requirement.get("requires_runtime_execution") is True
+        )
+        relevant_global_invariant = (
+            requirement.get("process_boundary_authority") == "relevant_global_invariant"
+        )
+        if not (runtime_verifier or relevant_global_invariant):
+            continue
+        description = str(requirement.get("description") or "")
+        if not _NONZERO_PROCESS_EXIT_RE.search(description):
+            continue
+        lowered = description.lower()
+        for case, phrases in _TERMINATING_CASE_MARKERS.items():
+            if any(phrase in lowered for phrase in phrases):
+                cases.add(case)
+    return sorted(cases)
+
+
+def _enclosing_test_method(source: str, offset: int) -> Optional[str]:
+    prefix = source[:offset]
+    matches = list(re.finditer(
+        r"(?m)^\s*(?:public\s+|protected\s+|private\s+)?(?:static\s+)?"
+        r"(?:void|[A-Za-z_$][\w.$<>\[\], ?]*)\s+([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*\{",
+        prefix,
+    ))
+    return matches[-1].group(1) if matches else None
+
+
+def _enclosing_test_method_source(source: str, offset: int) -> str:
+    """Return the enclosing Java-like method body using bounded brace matching.
+
+    This is deliberately a small source-shape helper, not a Java parser.  It is
+    used only to resolve a local argv variable feeding a grounded main(...) call.
+    """
+    prefix = source[:offset]
+    matches = list(re.finditer(
+        r"(?m)^\s*(?:public\s+|protected\s+|private\s+)?(?:static\s+)?"
+        r"(?:void|[A-Za-z_$][\w.$<>\[\], ?]*)\s+[A-Za-z_$][\w$]*\s*\([^;{}]*\)\s*\{",
+        prefix,
+    ))
+    if not matches:
+        return source
+    start = matches[-1].start()
+    open_brace = source.find("{", matches[-1].start(), offset + 1)
+    if open_brace < 0:
+        return source[start:]
+    depth = 0
+    for index in range(open_brace, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:index + 1]
+    return source[start:]
+
+
+def _resolve_java_main_argv_expression(method_source: str, call_expression: str) -> str:
+    """Resolve a direct main(...) argument or a simple local String[] variable.
+
+    Generated tests commonly use:
+      String[] value = {"not-a-number"};
+      App.main(value);
+    The old gate inspected the method name, so this neutral-name form escaped.
+    Resolve the local initializer instead; unresolved expressions remain as-is.
+    """
+    expression = call_expression.strip()
+    if not re.fullmatch(r"[A-Za-z_$][\w$]*", expression):
+        return expression
+    variable = re.escape(expression)
+    assignments = list(re.finditer(
+        rf"(?:String\s*\[\s*\]|String\s+\[\s*\])\s*{variable}\s*=\s*"
+        r"(?P<value>new\s+String\s*\[\s*\]\s*\{[^;]*\}|\{[^;]*\})\s*;",
+        method_source,
+        re.DOTALL,
+    ))
+    return assignments[-1].group("value").strip() if assignments else expression
+
+
+def _runtime_contract_expects_numeric_input(
+    required_verification: List[Dict[str, Any]],
+) -> bool:
+    """Whether authoritative runtime text explicitly identifies numeric input."""
+    for requirement in required_verification:
+        runtime_verifier = (
+            requirement.get("verifier_kind") == "application_runtime"
+            and requirement.get("requires_runtime_execution") is True
+        )
+        relevant_global_invariant = (
+            requirement.get("process_boundary_authority") == "relevant_global_invariant"
+        )
+        if not (runtime_verifier or relevant_global_invariant):
+            continue
+        description = str(requirement.get("description") or "").lower()
+        if re.search(r"\b(?:integer|numeric|number)\b", description):
+            return True
+    return False
+
+
+def _terminating_case_from_argv_expression(
+    cases: List[str], argv_expression: str, *, numeric_input: bool,
+) -> Optional[str]:
+    """Classify only from the actual argv expression, never the test method name."""
+    compact = re.sub(r"\s+", "", argv_expression)
+    if "missing" in cases and (
+        re.fullmatch(r"newString\[0\]", compact)
+        or re.fullmatch(r"newString\[\]\{\}", compact)
+        or re.fullmatch(r"\{\}", compact)
+    ):
+        return "missing input"
+
+    string_literals = re.findall(r'"((?:\\.|[^"\\])*)"', argv_expression)
+    if "invalid" in cases and string_literals:
+        lowered_literals = [literal.lower() for literal in string_literals]
+        if any(
+            marker in literal
+            for literal in lowered_literals
+            for marker in ("invalid", "malformed", "not-a-number", "not_a_number", "nonnumeric", "non-numeric")
+        ):
+            return "invalid input"
+        if numeric_input:
+            for literal in string_literals:
+                try:
+                    int(literal, 10)
+                except ValueError:
+                    return "invalid input"
+    return None
+
+
+def find_in_process_terminating_test_invocations(
+    required_verification: List[Dict[str, Any]],
+    worktree_path: str,
+    test_files: List[str],
+    application_entrypoints: List[str],
+) -> List[Dict[str, Any]]:
+    """Find test calls that contradict an explicit process-boundary contract.
+
+    Source text never establishes that a path terminates. The structured
+    application_runtime requirement establishes that fact and names its case;
+    source inspection only connects that known case to an in-process call of a
+    grounded entrypoint. Child-process tests contain no such direct call and
+    therefore remain admissible.
+    """
+    cases = _required_process_terminating_cases(required_verification)
+    if not cases or not application_entrypoints:
+        return []
+    entrypoint_names = sorted({
+        name for fqcn in application_entrypoints
+        for name in (fqcn, fqcn.rsplit(".", 1)[-1])
+    }, key=len, reverse=True)
+    call_re = re.compile(
+        r"\b(?:" + "|".join(re.escape(name) for name in entrypoint_names)
+        + r")\s*\.\s*main\s*\((?P<argv>[^;\n]*)\)",
+    )
+    numeric_input = _runtime_contract_expects_numeric_input(required_verification)
+    findings: List[Dict[str, Any]] = []
+    for filepath in sorted(test_files):
+        full_path = os.path.join(worktree_path, filepath)
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
+                source = handle.read()
+        except OSError:
+            continue
+        for match in call_re.finditer(source):
+            method = _enclosing_test_method(source, match.start())
+            method_source = _enclosing_test_method_source(source, match.start())
+            argv_expression = _resolve_java_main_argv_expression(
+                method_source, match.group("argv"),
+            )
+            matched_case = _terminating_case_from_argv_expression(
+                cases, argv_expression, numeric_input=numeric_input,
+            )
+            if matched_case is None:
+                continue
+            findings.append({
+                "test_file": filepath,
+                "test_method": method,
+                "line": source.count("\n", 0, match.start()) + 1,
+                "entrypoint_call": match.group(0),
+                "terminating_case": matched_case,
+            })
+    return findings
+
+
+def _raise_unsafe_process_boundary_test_candidate(
+    state: GenerationState, ctx: "AttemptContext", test_files: List[str],
+) -> None:
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    java_files = [path for path in known_files if path.endswith(".java")]
+    entrypoints = sorted(set(_build_java_main_class_map(java_files, ctx).values()))
+    findings = find_in_process_terminating_test_invocations(
+        _runtime_contract_requirements(ctx), ctx.worktree_path, test_files, entrypoints,
+    )
+    if not findings:
+        return
+    offending_files = sorted({item["test_file"] for item in findings})
+    detail_lines = [
+        f"- {item['test_file']}:{item['line']}"
+        + (f" method={item['test_method']}" if item.get("test_method") else "")
+        + f" invokes {item['entrypoint_call']} for {item['terminating_case']}"
+        for item in findings
+    ]
+    message = (
+        "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS: generated test code invokes an "
+        "application entrypoint in the test runner process for behavior the structured "
+        "runtime/process-boundary contract requires to terminate with a non-zero exit.\n"
+        + "\n".join(detail_lines)
+        + "\nPreserve the product's required process-terminating behavior. Repair the TEST only: "
+        "remove the in-process case or execute it through a child process and assert exit "
+        "code/stdout/stderr. The application_runtime verifier remains responsible for the "
+        "required exit-code behavior."
+    )
+    failure = Failure(
+        type="process_terminating_behavior_tested_in_process",
+        message=message,
+        raw_output=message,
+        file_locations=[
+            FileLocation(filepath=item["test_file"], line=item["line"])
+            for item in findings
+        ],
+        likely_files=offending_files,
+        failed_content=_capture_failed_content(ctx.worktree_path, offending_files),
+        diagnostics={
+            "reason_code": "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS",
+            "repair_owner": "test",
+            "findings": findings,
+        },
+        attempt=state.attempt_number,
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def find_ungrounded_java_child_process_tests(
+    required_verification: List[Dict[str, Any]],
+    worktree_path: str,
+    test_files: List[str],
+    java_main_classes: Dict[str, str],
+    known_files: List[str],
+) -> List[Dict[str, Any]]:
+    """Find invented Java child launch mechanics for a process-exit contract.
+
+    This does not duplicate the in-process safety gate above: that gate decides
+    whether a test crossed a process boundary at all.  This check verifies that
+    an elected boundary uses the entrypoint and classpath Kriya can ground.
+    """
+    if not _required_process_terminating_cases(required_verification):
+        return []
+    if len(java_main_classes) != 1:
+        return []
+    entrypoint = next(iter(java_main_classes.values()))
+    simple_name = entrypoint.rsplit(".", 1)[-1]
+    if "pom.xml" in known_files:
+        classes_dir = "target/classes"
+    elif any(path.endswith(("build.gradle", "build.gradle.kts")) for path in known_files):
+        classes_dir = "build/classes/java/main"
+    else:
+        classes_dir = ".kriya/runtime-verification/classes"
+    expected = build_grounded_java_launch_command(entrypoint, ["<args>"], classes_dir)
+    findings: List[Dict[str, Any]] = []
+    for filepath in sorted(test_files):
+        try:
+            with open(
+                os.path.join(worktree_path, filepath),
+                encoding="utf-8", errors="replace",
+            ) as handle:
+                source = handle.read()
+        except OSError:
+            continue
+        if "ProcessBuilder" not in source or ".start()" not in source:
+            continue
+        mentions_entrypoint = (
+            f'"{entrypoint}"' in source or f'"{simple_name}"' in source
+        )
+        reasons = []
+        if not mentions_entrypoint:
+            reasons.append(f"does not launch grounded main class {entrypoint}")
+        if 'System.getProperty("java.class.path")' in source:
+            reasons.append("reuses the test-runner/Surefire classpath")
+        if classes_dir not in source:
+            reasons.append(f"does not use grounded application classpath {classes_dir}")
+        if "waitFor()" not in source:
+            reasons.append("does not capture the child exit code")
+        if "getInputStream()" not in source and "getErrorStream()" not in source:
+            reasons.append("does not capture child stdout/stderr")
+        if reasons:
+            findings.append({
+                "test_file": filepath,
+                "reasons": reasons,
+                "entrypoint": entrypoint,
+                "classes_dir": classes_dir,
+                "expected_command": expected,
+            })
+    return findings
+
+
+def _raise_ungrounded_child_process_test_candidate(
+    state: GenerationState, ctx: "AttemptContext", test_files: List[str],
+) -> None:
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    java_files = [path for path in known_files if path.endswith(".java")]
+    findings = find_ungrounded_java_child_process_tests(
+        _runtime_contract_requirements(ctx), ctx.worktree_path, test_files,
+        _build_java_main_class_map(java_files, ctx), known_files,
+    )
+    if not findings:
+        return
+    offending = sorted({item["test_file"] for item in findings})
+    details = "\n".join(
+        f"- {item['test_file']}: " + "; ".join(item["reasons"])
+        for item in findings
+    )
+    exemplar = findings[0]
+    message = (
+        "VERIFICATION_INFRASTRUCTURE_FAILURE: generated child-process verification "
+        "does not use Kriya's grounded application launch.\n" + details
+        + "\nRepair the TEST/verification mechanism only; preserve application behavior. "
+        f"Use main class {exemplar['entrypoint']} with classpath "
+        f"{exemplar['classes_dir']}, launch a distinct child, wait for it, and capture "
+        "stdout/stderr/exit code. A child launch/setup failure is not evidence against "
+        "the application source."
+    )
+    failure = Failure(
+        type="test_verification_infrastructure_failure",
+        message=message, raw_output=message,
+        likely_files=offending, attempt=state.attempt_number,
+        diagnostics={
+            "reason_code": "UNGROUNDED_CHILD_PROCESS_LAUNCH",
+            "grounded_entrypoint": exemplar["entrypoint"],
+            "grounded_classpath": exemplar["classes_dir"],
+        },
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _raise_runtime_verification_infrastructure_failure(
+    state: GenerationState,
+    run_result: Dict[str, Any],
+    commands: List[List[str]],
+) -> None:
+    """Stop application-launch failures before grading/source repair.
+
+    Build/test runners are process-based too, but their process status is
+    already the deterministic verdict.  Entrypoint-shaped text in their
+    output therefore belongs to test/build execution and must never be
+    reinterpreted by application-runtime infrastructure handling.
+    """
+    if deterministic_sequence_kind(commands) is not None:
+        return
+    reason = runtime_verification_infrastructure_reason(run_result)
+    if reason is None:
+        return
+    state.cached_run_verification_judgment = None
+    message = (
+        "VERIFICATION_INFRASTRUCTURE_FAILURE: runtime behavior was not observed because "
+        f"the verifier infrastructure failed: {reason}.\n\nCaptured output:\n"
+        f"{run_result.get('output', '')}"
+    )
+    failure = Failure(
+        type="verification_infrastructure_failure", message=message,
+        raw_output=run_result.get("output", ""), attempt=state.attempt_number,
+    )
+    outcome = failure.to_gate_outcome()
+    outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
+    state.gate_outcomes.append(outcome)
+    raise QualityGateFailure(failure)
+
 
 def _apply_runtime_verification_contract(
     commands: List[List[str]], input_channel: str,
@@ -922,27 +1370,34 @@ def _apply_runtime_verification_contract(
     goal-specific text, so it carries no proprietary/external data and is
     safe to record verbatim in verification evidence.
 
-    Deliberately narrow, evidence-bounded shape detection (only the two
-    proven-live invocation forms, plus one generic fallback that covers
-    every other interpreter+target language without any per-ecosystem
-    branching): a Maven exec:java invocation (recognized by an "exec:java"
-    token or an already-present "-Dexec.mainClass=" token - exec:exec is
-    deliberately NOT matched here, since its own argument-passing mechanism
-    is pom.xml-configured, not a "-Dexec.args=" command-line property) gets
+    Deliberately narrow, evidence-bounded shape detection - three proven-live
+    invocation forms get real flag-aware handling, everything else falls
+    back to a plain two-token heuristic rather than being guessed at: a
+    Maven exec:java invocation (recognized by an "exec:java" token or an
+    already-present "-Dexec.mainClass=" token - exec:exec is deliberately
+    NOT matched here, since its own argument-passing mechanism is
+    pom.xml-configured, not a "-Dexec.args=" command-line property) gets
     "-Dexec.args=<value>" appended; any other "mvn"/"gradle"/"./gradlew"
     invocation is left unrecognized rather than guessed at - a bare
     trailing token there is parsed as an additional lifecycle phase/goal,
-    not a program argument, and would fail the build outright. Any other
-    exactly-two-token command (["java","Main"], ["python","app.py"],
-    ["node","app.js"], ...) gets the value appended as a third, positional
-    token - language-agnostic by construction, not hardcoded for Java/Maven
-    or for this one PRV. A command already carrying more than two tokens
-    (java/python/etc. with
-    its own extra argv, or an exec:java command that already sets
-    "-Dexec.args=") is assumed to already supply its own value and is left
-    untouched. Only applied to the LAST command in the sequence - the one
-    that actually exercises the application's behavior in every real
-    sequence this codebase produces (see run_app_sequence's own docstring
+    not a program argument, and would fail the build outright. A `java`
+    launch is parsed through its own known JVM/classpath flags-with-values
+    (-cp/-classpath/--module-path/...) to find the entrypoint token, so a
+    missing application argument is appended after the class rather than
+    confused with a JVM option's value - this flag-aware handling is
+    Java-specific, not a general per-runtime mechanism; a different
+    runtime with its own flag-with-value syntax (e.g. `dotnet run
+    --project X`, `node --experimental-modules app.js`) does NOT get the
+    same treatment and instead falls through to the plain two-token
+    fallback below. Any other exactly-two-token command (["java","Main"],
+    ["python","app.py"], ["node","app.js"], ...) gets the value appended as
+    a third, positional token. Other commands already carrying more than
+    two tokens (a non-Java command with its own extra argv), or an
+    exec:java command that already sets "-Dexec.args=", are assumed to
+    already supply their own value and are left untouched - a pre-existing
+    boundary, not new here. Only applied to the LAST command in the
+    sequence - the one that actually exercises the application's behavior
+    in every real sequence this codebase produces (see run_app_sequence's own docstring
     for the multi-invocation case, e.g. "add an item, then list items",
     where every earlier step is its own already-fully-specified
     invocation, not something this function is meant to touch)."""
@@ -951,6 +1406,35 @@ def _apply_runtime_verification_contract(
     if input_channel == "stdin":
         return commands, _RUNTIME_VERIFICATION_SYNTHETIC_INPUT, None
     *prefix, last = commands
+    # Build/test commands report their own authoritative process verdict and
+    # are not application invocations. An application argv contract is simply
+    # inapplicable to them; never turn the input value into a lifecycle goal,
+    # test selector, or package-manager argument.
+    if deterministic_verification_kind(last) is not None:
+        return commands, None, None
+    if last and os.path.basename(last[0]).lower() == "java":
+        options_with_values = {
+            "-cp", "-classpath", "--class-path", "-p", "--module-path",
+            "--upgrade-module-path", "--add-modules", "--limit-modules",
+            "--add-reads", "--add-exports", "--add-opens", "--patch-module",
+        }
+        target_index: Optional[int] = None
+        skip_next = False
+        for index, token in enumerate(last[1:], start=1):
+            if skip_next:
+                skip_next = False
+                continue
+            if token in options_with_values:
+                skip_next = True
+                continue
+            if token.startswith("-"):
+                continue
+            target_index = index
+            break
+        if target_index is not None and target_index == len(last) - 1:
+            return prefix + [last + [_RUNTIME_VERIFICATION_SYNTHETIC_INPUT]], None, None
+        if target_index is not None:
+            return commands, None, None
     is_maven_exec_java = "exec:java" in last or any(
         tok.startswith("-Dexec.mainClass=") for tok in last
     )
@@ -1630,18 +2114,30 @@ async def _execute_runtime_verification_directly(
         raise QualityGateFailure(failure)
 
     if judgment.get("run_commands"):
+        pom_path_for_correction = os.path.join(ctx.worktree_path, "pom.xml")
         pom_content_for_correction = None
         try:
-            with open(os.path.join(ctx.worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+            with open(pom_path_for_correction, "r", encoding="utf-8") as f:
                 pom_content_for_correction = f.read()
         except Exception:
             pass
         java_files = [f for f in known_files if f.endswith(".java")]
-        if java_files and not pom_content_for_correction:
+        if java_files:
+            # A pom.xml with real <dependency> entries needs Maven's own
+            # classpath resolution - the direct-javac grounded route below
+            # has no mechanism to resolve third-party jars and would compile
+            # with a bare classpath, breaking any dependency import. Only
+            # prefer the grounded route when there's no pom, or the pom has
+            # no dependencies to lose (a bare pom.xml with no libraries is
+            # exactly as safe as no build file at all).
+            pom_declares_dependencies = bool(
+                pom_content_for_correction and get_pom_dependencies(pom_path_for_correction)
+            )
             corrected_commands = ground_java_entrypoint_in_no_build_file_projects(
                 judgment["run_commands"], judgment["command_source"], known_files,
                 _build_java_main_class_map(java_files, ctx),
                 extract_jvm_module_flags(ctx.skills_prompt), pom_content_for_correction,
+                prefer_grounded_runtime=not pom_declares_dependencies,
             )
             if corrected_commands is None:
                 logger.info(
@@ -1718,8 +2214,10 @@ async def _execute_runtime_verification_directly(
         state.toolchain_warning = (
             f"{state.toolchain_warning} {exec_pin_correction}" if state.toolchain_warning else exec_pin_correction
         )
+    command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
     logger.info(
-        "Quality Gates: Running runtime verification (verification-only subtask): "
+        "Quality Gates: Running %s verification (verification-only subtask): "
+        % (command_verification_kind or "application_runtime")
         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
     )
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
@@ -1728,10 +2226,11 @@ async def _execute_runtime_verification_directly(
         stdin_payload=stdin_payload,
     )
     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
-    if run_command_targets_missing_entrypoint(run_res["output"]):
-        state.cached_run_verification_judgment = None
+    _raise_runtime_verification_infrastructure_failure(
+        state, run_res, resolved_run_commands,
+    )
 
-    gate_type = "run_verification"
+    gate_type = "test" if command_verification_kind == "test" else "run_verification"
     verification_authority = "llm"
     if run_res["timed_out"]:
         contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
@@ -1782,11 +2281,12 @@ async def _execute_runtime_verification_directly(
                     output=run_res["output"], returncode=run_res["returncode"],
                     files_written=known_files,
                 )
-        if grade.get("passed"):
+        if grade.get("passed") and not runtime_application_step_started(run_res):
             grade["passed"] = False
             grade["reasoning"] = (
                 "Observed output appeared semantically correct, but one or more required "
-                f"verification steps exited non-zero. Semantic evidence: {grade.get('reasoning', '')}"
+                "verification setup steps failed or the application was never shown to have "
+                f"started. Semantic evidence: {grade.get('reasoning', '')}"
             )
     else:
         deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
@@ -1831,7 +2331,7 @@ async def _execute_runtime_verification_directly(
         raise QualityGateFailure(failure)
 
     state.gate_outcomes.append({
-        "attempt": state.attempt_number, "type": "run_verification", "success": True,
+        "attempt": state.attempt_number, "type": gate_type, "success": True,
         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
         "graded_by": verification_authority, "commands": resolved_run_commands,
         "steps": run_res.get("steps", []),
@@ -1960,6 +2460,43 @@ def _extract_requirement_identifier_tokens(requirement: str) -> List[str]:
     return tokens
 
 
+_REQUIREMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+_REQUIREMENT_PROVENANCE_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "does",
+    "for", "from", "has", "have", "in", "instead", "is", "it", "must",
+    "named", "not", "of", "on", "or", "requires", "require", "required",
+    "should", "that", "the", "this", "to", "uses", "using", "with",
+}
+
+
+def _identifier_local_terms(text: str, identifier: str, radius: int = 3) -> set[str]:
+    """Return meaningful lexical terms close to ``identifier`` in ``text``.
+
+    This is deliberately a provenance primitive, not a vocabulary of code
+    shapes.  It knows nothing about fields, methods, routes, schemas, UI
+    controls, or any particular programming language.  A term matters only
+    because the Planner and the later judgment both placed it next to the
+    same concrete identifier while the authoritative goal did not.
+    """
+    words = _REQUIREMENT_WORD_RE.findall(text)
+    lowered_identifier = identifier.lower()
+    terms: set[str] = set()
+    for index, word in enumerate(words):
+        if word.lower() != lowered_identifier:
+            continue
+        start = max(0, index - radius)
+        end = min(len(words), index + radius + 1)
+        for nearby in words[start:end]:
+            normalized = nearby.lower()
+            if (
+                normalized != lowered_identifier
+                and normalized not in _REQUIREMENT_PROVENANCE_STOPWORDS
+                and len(normalized) >= 3
+            ):
+                terms.add(normalized)
+    return terms
+
+
 def _spec_requirements_naming_planner_only_identifiers(
     missing_requirements: List[str], goal_text: str,
 ) -> Tuple[List[str], List[str]]:
@@ -1978,16 +2515,21 @@ def _spec_requirements_naming_planner_only_identifiers(
     the Planned Implementation Strategy section of the exact goal text it was
     given, never in the Authoritative Goal section.
 
-    Splits missing_requirements into (kept, planner_only): an entry is
-    planner_only when it names at least one concrete identifier token that
-    appears in the Planned Implementation Strategy section, and NONE of its
-    identifier tokens appear anywhere in the Authoritative Goal section. An
-    entry naming no extractable identifier token at all, or naming one that
-    DOES appear in the Authoritative Goal section (a real user requirement,
-    still enforced exactly as before), is always kept - this only ever
-    suppresses a requirement with positive, text-grounded evidence it is the
-    Planner's own word choice, never a vague/behavioral requirement this
-    function has no way to evaluate.
+    Splits missing_requirements into (kept, planner_only). An entry is
+    planner_only in either of two text-grounded cases:
+
+    * it names a concrete identifier found only in Planned Implementation; or
+    * the identifier is authoritative, but the judgment attaches a nearby
+      constraining term that is also attached to it in Planned Implementation
+      and absent from Authoritative Goal.
+
+    The second case closes a more subtle authority leak: a Planner can preserve
+    the user's identifier while silently narrowing its representation. The
+    implementation is intentionally language- and use-case-agnostic: it has no
+    catalog of representation words. It correlates lexical provenance around
+    the same identifier instead. Requirements with no identifier, behavioral
+    terms grounded in the authoritative section, and judgment-only terms with
+    no Planner provenance are always kept.
 
     A no-op (everything kept) when goal_text doesn't carry both section
     headers - every pre-MA6 caller, and every subtask goal without a real
@@ -2009,18 +2551,72 @@ def _spec_requirements_naming_planner_only_identifiers(
         if not tokens:
             kept.append(requirement)
             continue
-        in_authoritative = any(
-            re.search(rf"\b{re.escape(tok)}\b", authoritative_text) for tok in tokens
+        authoritative_tokens = [
+            tok for tok in tokens
+            if re.search(rf"\b{re.escape(tok)}\b", authoritative_text)
+        ]
+        planned_tokens = [
+            tok for tok in tokens
+            if re.search(rf"\b{re.escape(tok)}\b", planned_text)
+        ]
+        planner_only_identifier = bool(planned_tokens) and not authoritative_tokens
+        planner_only_constraint = False
+        for token in set(authoritative_tokens) & set(planned_tokens):
+            requirement_terms = _identifier_local_terms(requirement, token)
+            planned_terms = _identifier_local_terms(planned_text, token)
+            authoritative_terms = _identifier_local_terms(authoritative_text, token)
+            if (requirement_terms & planned_terms) - authoritative_terms:
+                planner_only_constraint = True
+                break
+        (planner_only if planner_only_identifier or planner_only_constraint else kept).append(
+            requirement
         )
-        in_planned = any(
-            re.search(rf"\b{re.escape(tok)}\b", planned_text) for tok in tokens
-        )
-        (planner_only if (not in_authoritative and in_planned) else kept).append(requirement)
     return kept, planner_only
 
 
 def _goal_spec_requirement_obligation_id(subtask_id: str) -> str:
     return f"attempt.subtask.{subtask_id}.goal_spec_requirement"
+
+
+def _stage_scoped_spec_compliance_goal(ctx: "AttemptContext") -> tuple[str, List[str]]:
+    """Return only obligations due at the current structured-plan stage.
+
+    The top-level goal remains the authority used to validate the plan.  Once
+    that plan is approved, however, its acceptance-criterion ownership is the
+    deterministic schedule for *when* each final requirement can be demanded.
+    Feeding the whole final goal to every intermediate candidate gate made a
+    project-scaffold stage fail for an endpoint explicitly owned by a later
+    application stage.  Unstructured callers retain the historical behavior.
+    """
+    plan = ctx.structured_plan
+    current_id = ctx.current_subtask_id
+    if plan is None or not current_id:
+        return ctx.goal, []
+    current = plan.subtask_by_id(current_id)
+    if current is None:
+        return ctx.goal, []
+
+    criteria = {criterion.id: criterion.description for criterion in plan.acceptance_criteria}
+    due = [criteria[cid] for cid in current.acceptance_criteria_ids if cid in criteria]
+    invariants = {invariant.id: invariant.statement for invariant in plan.global_invariants}
+    due.extend(
+        invariants[iid] for iid in current.relevant_global_invariant_ids if iid in invariants
+    )
+    future_ids = sorted({
+        cid
+        for subtask in plan.subtasks
+        if subtask.id != current_id and subtask.id not in ctx.completed_subtask_ids
+        for cid in subtask.acceptance_criteria_ids
+    })
+    scoped = (
+        f"Current approved subtask: {current.id}\n"
+        f"Current implementation obligation: {current.description}\n"
+        "Acceptance requirements due at this stage:\n"
+        + ("\n".join(f"- {item}" for item in due) if due else "- None beyond the current implementation obligation")
+        + "\nOnly decide whether this current stage satisfies the requirements listed above. "
+          "Requirements assigned to unfinished later subtasks are pending, not violated."
+    )
+    return scoped, future_ids
 
 
 def _goal_spec_evidence_fingerprint(goal: str, file_contents: Dict[str, str]) -> str:
@@ -2671,6 +3267,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 f"file(s) - scoping to their dependency closure "
                 f"{', '.join(known_target_files)} instead of the full file set."
             )
+
+        if state.budgets.retry_count == 0:
+            process_boundary_constraint = _initial_test_process_boundary_constraint(
+                _runtime_contract_requirements(ctx), known_target_files,
+            )
+            if process_boundary_constraint:
+                task_desc += process_boundary_constraint
 
         if state.attempt_number == 1 and known_target_files:
             owner_contract = _brownfield_owner_contract_block(ctx, known_target_files)
@@ -3904,6 +4507,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # history. Same all_files_written-only scoping as the check
             # above, same reasoning.
             static_violation = find_goal_stack_mismatch(ctx.goal, state.all_files_written)
+        stack_contract = derive_stack_contract(ctx.grounding_goal or ctx.goal)
+        stack_decision = validate_stack_contract_artifacts(
+            stack_contract, state.all_files_written,
+        )
+        log_stack_contract_boundary("candidate", stack_contract, stack_decision)
+        if not static_violation:
+            # The logged REJECT/PASS decision above must actually gate the
+            # candidate - matching the plan boundary (plan_validation.py)
+            # and terminal boundary (workflow_controller.py), which both
+            # already reject on this same check's non-None result.
+            static_violation = stack_decision
         if static_violation:
             # _build_quality_gate_failure() (not a bare Failure(...)), matching the
             # SAME construction every other Quality Gate type already uses (compile/
@@ -4268,6 +4882,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
 
         accepted_test_output: Optional[str] = None
         runnable_test_files = find_runnable_test_files(state.all_files_written)
+        _raise_unsafe_process_boundary_test_candidate(
+            state, ctx, runnable_test_files,
+        )
+        _raise_ungrounded_child_process_test_candidate(
+            state, ctx, runnable_test_files,
+        )
         target_test = extract_target_test(state.error_context, list(state.all_files_written))
         if target_test:
             logger.info(f"Quality Gates: Running targeted tests: {target_test}")
@@ -4713,8 +5333,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             f"{state.toolchain_warning} {exec_pin_correction}"
                             if state.toolchain_warning else exec_pin_correction
                         )
+                    command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
                     logger.info(
-                        "Quality Gates: Running runtime verification: "
+                        "Quality Gates: Running %s verification: "
+                        % (command_verification_kind or "application_runtime")
                         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
                     )
                     # Snapshot/clean around the actual execution, not just once
@@ -4734,23 +5356,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         stdin_payload=rv_stdin_payload,
                     )
                     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
-                    # Invalidate a stale cached judgment BEFORE grading/raising below,
-                    # so a retry decision made from this failure already has a fresh
-                    # judge() call queued for the NEXT attempt - not one attempt later.
-                    # See run_command_targets_missing_entrypoint()'s own docstring for
-                    # the live incident (a cached command kept targeting a test class
-                    # that was never generated, unchanged across 6 straight attempts,
-                    # even after the file layout changed specifically to try to
-                    # satisfy it).
-                    if run_command_targets_missing_entrypoint(run_res["output"]):
-                        logger.warning(
-                            "Runtime verification's command referenced a class/module "
-                            "that doesn't exist - invalidating the cached judgment so "
-                            "the next attempt re-infers a fresh one against the current "
-                            "file layout instead of repeating this exact command."
-                        )
-                        state.cached_run_verification_judgment = None
-                    gate_type = "run_verification"
+                    _raise_runtime_verification_infrastructure_failure(
+                        state, run_res, resolved_run_commands,
+                    )
+                    gate_type = (
+                        "test" if command_verification_kind == "test"
+                        else "run_verification"
+                    )
                     # Set unconditionally (only ever reassigned in the "plain
                     # nonzero exit, no hang" branch below - see its own
                     # comment for why the other two branches are deliberately
@@ -4879,15 +5491,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 files_written=list(state.all_files_written),
                             )
 
-                        # Output semantics cannot erase a failed required
-                        # process step. The sequence schema currently has no
-                        # explicit expected-nonzero contract, so every step is
-                        # required to exit cleanly by default.
-                        if grade.get("passed"):
+                        # A semantic expected-failure verdict is admissible
+                        # only when every setup step succeeded and the final
+                        # application process actually launched. JVM/module/
+                        # executable launch failures were already classified
+                        # as verifier infrastructure above and never reach
+                        # this branch.
+                        if grade.get("passed") and not runtime_application_step_started(run_res):
                             grade["passed"] = False
                             grade["reasoning"] = (
-                                "Observed output appeared semantically correct, but one or more "
-                                "required verification steps exited non-zero. "
+                                "Observed output appeared semantically correct, but a required "
+                                "verification setup step failed or the application was never "
+                                "shown to have started. "
                                 f"Semantic evidence: {grade.get('reasoning', '')}"
                             )
 
@@ -5108,7 +5723,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         raise QualityGateFailure(failure)
                     run_verification_outcome = {
                         "attempt": state.attempt_number,
-                        "type": "run_verification",
+                        "type": gate_type,
                         "success": True,
                         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
                         # Reachable via the clean-run branch above, or (since
@@ -5264,6 +5879,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # See SpecComplianceAgent's own docstring (kriya/agents/agent.py) for the live
     # incident (ignite_qpid_protocol milestone 1, 2026-08-21) this closes.
     if ctx.kernel.config.autonomy.spec_compliance_enabled:
+        compliance_goal, pending_acceptance_ids = _stage_scoped_spec_compliance_goal(ctx)
+        if ctx.structured_plan is not None and ctx.current_subtask_id:
+            logger.info(
+                "STAGE_OBLIGATION_SCOPE %s",
+                json.dumps({
+                    "subtask_id": ctx.current_subtask_id,
+                    "decision": "CURRENT_STAGE_ONLY",
+                    "pending_acceptance_criteria_ids": pending_acceptance_ids,
+                }, sort_keys=True),
+            )
         # A bounded consumer is judged against both its own candidate and the
         # already-verified upstream contracts it consumes. Restricting this to
         # files written by the current subtask made compliance incorrectly say
@@ -5292,12 +5917,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             _goal_spec_requirement_obligation_id(ctx.current_subtask_id)
             if ctx.current_subtask_id else None
         )
-        goal_spec_evidence_fingerprint = _goal_spec_evidence_fingerprint(ctx.goal, spec_file_contents)
+        goal_spec_evidence_fingerprint = _goal_spec_evidence_fingerprint(compliance_goal, spec_file_contents)
         settled_goal_spec = _settled_goal_spec_requirement(
             ctx.obligation_ledger, goal_spec_obligation_id, goal_spec_evidence_fingerprint,
         )
         spec_result = await ctx.spec_compliance.check(
-            goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
+            goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
             authoritative_context=authoritative_context,
         )
         if spec_result.get("status") == "indeterminate":
@@ -5313,7 +5938,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # move the same problem (an unreliable LLM verdict as sole
             # authority) in the opposite direction.
             spec_result = await ctx.spec_compliance.check(
-                goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
+                goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
                 authoritative_context=authoritative_context,
             )
         if spec_result.get("status") == "indeterminate":

@@ -7,6 +7,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.workflow.failure import Failure, FileLocation
+from kriya.workflow.generation_manifest import FileRole, classify_file_role
 
 logger = logging.getLogger(__name__)
 
@@ -621,19 +622,35 @@ _PROCESS_TERMINATION_SIGNATURES: Tuple[str, ...] = (
 
 _PROCESS_TERMINATION_GUIDANCE = (
     "This is a process-boundary/testability conflict, not an ordinary assertion "
-    "failure: the test runner's own process was killed while running a test, most "
-    "likely because already-written production code calls a process-termination "
-    "primitive (e.g. System.exit/sys.exit/process.exit) on a code path a test "
-    "invokes IN-PROCESS. A single-file edit that just toggles the terminating call "
-    "on and off cannot resolve this - 'observably terminate the process for this "
-    "input' and 'be safely callable from an in-process test' cannot both hold for "
-    "the same in-process call. Resolve it structurally instead: separate the "
-    "directly-testable behavior from the process-terminating call (e.g. have the "
-    "termination-triggering logic return a result/status, and let a thin wrapper "
-    "the tests do not call in-process perform the actual termination), or verify "
-    "the terminating behavior out-of-process instead of invoking it directly from "
-    "a test. Do not just flip the same call back and forth between attempts."
+    "failure: the test runner's own process was killed while running a test. Resolve "
+    "it structurally or verify the terminating behavior out-of-process instead of "
+    "invoking it directly from a test. A single-file edit that toggles the terminating "
+    "call cannot resolve this structural conflict."
 )
+
+_VERIFICATION_STRATEGY_INCOMPATIBLE_GUIDANCE = (
+    "VERIFICATION_STRATEGY_INCOMPATIBLE: the test runner's own process was killed "
+    "because the test invoked process-terminating application behavior IN-PROCESS. "
+    "Do not change or remove the product's required process-exit behavior. Repair "
+    "only the verification strategy: observe that CLI path through a child process "
+    "and assert its exit code/stdout/stderr, or leave process-exit verification to "
+    "the declared application_runtime verifier. Do not use SecurityManager exit "
+    "interception and do not add dependencies or annotations to support it."
+)
+
+_CRASHED_TEST_CLASS_RE = re.compile(r"Crashed tests:\s*\n(?:\[ERROR\]\s*)?([\w.$]+)")
+
+
+def _crashed_test_artifacts(raw_output: str, known_files: Iterable[str]) -> List[str]:
+    match = _CRASHED_TEST_CLASS_RE.search(raw_output or "")
+    if not match:
+        return []
+    simple_name = match.group(1).rsplit(".", 1)[-1].split("$", 1)[0]
+    return sorted(
+        path for path in known_files
+        if classify_file_role(path) is FileRole.TEST
+        and os.path.splitext(os.path.basename(path))[0] == simple_name
+    )
 
 
 def detect_process_termination_signature(output: str) -> Optional[str]:
@@ -668,12 +685,34 @@ def _build_test_quality_gate_failure(
     prepended."""
     signature = detect_process_termination_signature(raw_output)
     if signature:
-        type_ = "test_process_terminated"
-        banner = (
-            f"TEST_PROCESS_TERMINATED (evidence: {signature!r}):\n"
-            f"{_PROCESS_TERMINATION_GUIDANCE}\n\n{raw_output}"
+        crashed_tests = _crashed_test_artifacts(raw_output, known_files)
+        type_ = (
+            "verification_strategy_incompatible"
+            if crashed_tests else "test_process_terminated"
         )
-    return _build_quality_gate_failure(type_, banner, raw_output, worktree_path, known_files, attempt)
+        label = (
+            "VERIFICATION_STRATEGY_INCOMPATIBLE"
+            if crashed_tests else "TEST_PROCESS_TERMINATED"
+        )
+        guidance = (
+            _VERIFICATION_STRATEGY_INCOMPATIBLE_GUIDANCE
+            if crashed_tests else _PROCESS_TERMINATION_GUIDANCE
+        )
+        banner = (
+            f"{label} (evidence: {signature!r}):\n"
+            f"{guidance}\n\n{raw_output}"
+        )
+    failure = _build_quality_gate_failure(
+        type_, banner, raw_output, worktree_path, known_files, attempt,
+    )
+    if signature and crashed_tests:
+        failure.likely_files = crashed_tests
+        failure.diagnostics = {
+            **(failure.diagnostics or {}),
+            "reason_code": "VERIFICATION_STRATEGY_INCOMPATIBLE",
+            "crashed_test_artifacts": crashed_tests,
+        }
+    return failure
 
 
 def _strip_build_tool_info_noise(text: str) -> str:

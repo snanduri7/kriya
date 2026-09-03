@@ -12,7 +12,12 @@ test_brand_new_first_milestone_workspace_never_fires_even_with_a_marker
 below); this closes that exact gap using the goal text's own declared
 language family instead of established file history."""
 
-from kriya.workflow.static_checks import find_established_stack_drift, find_goal_stack_mismatch
+from kriya.workflow.static_checks import (
+    derive_stack_contract,
+    find_established_stack_drift,
+    find_goal_stack_mismatch,
+    validate_stack_contract_artifacts,
+)
 
 
 def _touch(path):
@@ -113,6 +118,18 @@ def test_goal_mismatch_fires_when_declared_family_contradicts_a_fresh_marker():
     assert "pom.xml" in result
     assert "python" in result
     assert "java" in result
+
+
+def test_authoritative_django_stack_contract_is_scoped_to_changed_artifacts():
+    contract = derive_stack_contract("Build a Python Django application")
+    assert contract.languages == ("python",)
+    assert contract.frameworks == ("django",)
+    assert contract.authority == "USER_GOAL"
+    assert validate_stack_contract_artifacts(contract, ["manage.py", "customers/views.py"]) is None
+    assert validate_stack_contract_artifacts(contract, ["pom.xml", "src/main/java/App.java"]) is not None
+    # A caller supplies only the planned/change boundary; unrelated brownfield
+    # artifacts are intentionally outside this decision.
+    assert validate_stack_contract_artifacts(contract, ["customers/views.py"]) is None
 
 
 def test_goal_mismatch_reverse_direction_also_fires():

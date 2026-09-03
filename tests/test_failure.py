@@ -119,3 +119,10 @@ def test_process_termination_failure_gets_same_repair_owner_routing_as_ordinary_
     assert classify_failure_attribution(
         "test_process_terminated", "TEST_PROCESS_TERMINATED (evidence: ...)",
     ) is FailureAttributionKind.TEST_DEFECT
+
+
+def test_incompatible_verification_strategy_is_a_test_defect_not_product_source():
+    assert classify_failure_attribution(
+        "verification_strategy_incompatible",
+        "VERIFICATION_STRATEGY_INCOMPATIBLE",
+    ) is FailureAttributionKind.TEST_DEFECT

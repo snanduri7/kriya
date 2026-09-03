@@ -80,3 +80,22 @@ def test_raw_output_field_stays_the_pure_tool_output_not_the_guidance():
         "test", "TEST FAILURE:\n" + raw, raw, "/tmp/work", ["AppTest.java"], 1,
     )
     assert failure.raw_output == raw
+
+
+def test_surefire_crashed_test_targets_only_incompatible_test_strategy():
+    raw = (
+        "SurefireBooterForkException: VM crash or System.exit called?\n"
+        "Crashed tests:\n"
+        "[ERROR] com.example.AppTest\n"
+        "at com.example.App.main(App.java:12)"
+    )
+    failure = _build_test_quality_gate_failure(
+        "test", "TEST FAILURE", raw, "/tmp/work",
+        ["src/main/java/com/example/App.java", "src/test/java/com/example/AppTest.java"], 1,
+    )
+
+    assert failure.type == "verification_strategy_incompatible"
+    assert failure.likely_files == ["src/test/java/com/example/AppTest.java"]
+    assert failure.diagnostics["reason_code"] == "VERIFICATION_STRATEGY_INCOMPATIBLE"
+    assert "Do not change or remove the product's required process-exit behavior" in failure.message
+    assert "SecurityManager" in failure.message

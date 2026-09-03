@@ -46,7 +46,7 @@ continue under a stale, lighter profile.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -65,6 +65,7 @@ from kriya.workflow.plan_schema import (
     VerificationMethodType,
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
+from kriya.workflow.static_checks import StackContract, validate_stack_contract_artifacts
 
 import os
 
@@ -82,6 +83,75 @@ class PlanValidationResult:
     errors: List[str] = field(default_factory=list)
     reason_codes: List[str] = field(default_factory=list)
     escalated_route: Optional[EngineeringRoute] = None
+    evidence: List[Dict[str, Any]] = field(default_factory=list)
+
+
+_AMBIENT_TOOL_REQUIREMENTS = frozenset({
+    "java", "javac", "maven", "mvn", "gradle", "python", "pip", "pytest",
+    "node", "nodejs", "npm", "yarn", "pnpm", "ruby", "bundler", "go", "cargo", "rustc",
+})
+_TOOL_MANIFEST_BASENAMES = {
+    "maven": {"pom.xml"}, "mvn": {"pom.xml"},
+    "gradle": {"build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"},
+    "node": {"package.json"}, "nodejs": {"package.json"}, "npm": {"package.json"},
+    "yarn": {"package.json"}, "pnpm": {"package.json"},
+    "python": {"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"},
+    "pip": {"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"},
+    "pytest": {"pyproject.toml", "requirements.txt", "setup.cfg", "tox.ini"},
+    "ruby": {"gemfile"}, "bundler": {"gemfile"}, "go": {"go.mod"},
+    "cargo": {"cargo.toml"}, "rustc": {"cargo.toml"},
+}
+_PREREQUISITE_CAPABILITY_MARKERS = (
+    "build", "project", "config", "depend", "tool", "framework", "plugin", "test",
+)
+
+
+def _planned_artifact_prerequisite_evidence(subtasks: List[Subtask]) -> List[Dict[str, Any]]:
+    """Resolve grounded environment-tool -> planned-manifest relationships."""
+    records: List[Dict[str, Any]] = []
+    for consumer in subtasks:
+        for artifact in consumer.planned_files:
+            environment = {item.lower() for item in artifact.environment_requirements if item}
+            # Compatibility with plans produced while requires_capabilities
+            # ambiguously admitted ambient tool names.
+            environment |= {
+                item.lower() for item in artifact.requires_capabilities
+                if item.lower() in _AMBIENT_TOOL_REQUIREMENTS
+            }
+            for tool in sorted(environment):
+                manifests = _TOOL_MANIFEST_BASENAMES.get(tool, set())
+                if not manifests:
+                    continue
+                providers = []
+                for owner in subtasks:
+                    if owner.id == consumer.id:
+                        continue
+                    owner_files = [
+                        pf.path for pf in owner.planned_files
+                        if os.path.basename(pf.path).lower() in manifests
+                    ]
+                    if not owner_files:
+                        continue
+                    tool_capabilities = [cap for cap in owner.provides if tool in cap.lower()]
+                    capabilities = tool_capabilities or [
+                        cap for cap in owner.provides
+                        if any(marker in cap.lower() for marker in _PREREQUISITE_CAPABILITY_MARKERS)
+                    ]
+                    if len(capabilities) == 1:
+                        providers.append((owner, owner_files[0], capabilities[0]))
+                if len(providers) != 1:
+                    continue
+                owner, provider_file, capability = providers[0]
+                records.append({
+                    "consumer_subtask": consumer.id,
+                    "consumer_file": artifact.path,
+                    "prerequisite_capability": capability,
+                    "provider_subtask": owner.id,
+                    "provider_file": provider_file,
+                    "missing_requires_edge": capability not in consumer.requires,
+                    "missing_depends_on_edge": owner.id not in consumer.depends_on,
+                })
+    return records
 
 
 def _acyclic(subtasks: List[Subtask]) -> bool:
@@ -225,6 +295,8 @@ async def validate_plan(
     resuming_own_established_progress: bool = False,
     require_model_planned_files: bool = False,
     require_semantic_contracts: bool = False,
+    runtime_verification_required: bool = False,
+    stack_contract: Optional[StackContract] = None,
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
 ) -> PlanValidationResult:
@@ -269,6 +341,7 @@ async def validate_plan(
     is currently broken."""
     errors: List[str] = []
     reason_codes: List[str] = []
+    evidence: List[Dict[str, Any]] = []
 
     if require_semantic_contracts and not plan.global_invariants:
         errors.append("authoritative multi-stage planning requires non-empty global_invariants")
@@ -291,6 +364,26 @@ async def validate_plan(
                 f"subtask(s) {missing_invariant_projection!r} receive no relevant_global_invariants"
             )
             reason_codes.append("SUBTASK_GLOBAL_INVARIANTS_MISSING")
+
+    if runtime_verification_required:
+        runtime_owner_ids = sorted({
+            st.id for st in plan.subtasks
+            if any(vm.requires_application_runtime for vm in st.verification)
+        })
+        if not runtime_owner_ids:
+            errors.append(
+                "the authoritative request requires observable application-runtime evidence, "
+                "but no subtask owns an application_runtime verifier; compile/test verifiers "
+                "cannot own process exit, process termination, or process stdout/stderr evidence"
+            )
+            reason_codes.append("APPLICATION_RUNTIME_OWNER_MISSING")
+
+    stack_violation = validate_stack_contract_artifacts(
+        stack_contract, (pf.path for st in plan.subtasks for pf in st.planned_files),
+    )
+    if stack_violation:
+        errors.append(stack_violation)
+        reason_codes.append("AUTHORITATIVE_STACK_SUBSTITUTION")
 
     ids = [st.id for st in plan.subtasks]
     duplicate_ids = sorted({sid for sid in ids if ids.count(sid) > 1})
@@ -411,6 +504,50 @@ async def validate_plan(
                 )
                 reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
 
+        # PRV-12: artifact prerequisites are enforced only when the planned
+        # artifact explicitly declares them. This deliberately does not infer
+        # that every test needs every build descriptor (or infer technology
+        # from a filename). The artifact's structured semantics establish the
+        # need; the subtask-level requires/provides DAG remains execution
+        # authority.
+        for planned_file in st.planned_files:
+            for requirement in planned_file.requires_capabilities:
+                if requirement.lower() in _AMBIENT_TOOL_REQUIREMENTS:
+                    continue
+                if not requirement:
+                    errors.append(
+                        f"subtask {st.id!r} planned artifact {planned_file.path!r} declares "
+                        "a blank requires_capabilities entry"
+                    )
+                    reason_codes.append("PLANNED_ARTIFACT_PREREQUISITE_INVALID")
+                    continue
+                if requirement not in st.requires:
+                    errors.append(
+                        f"subtask {st.id!r} planned artifact {planned_file.path!r} requires "
+                        f"capability {requirement!r}, but the consumer subtask does not declare "
+                        "that capability in requires"
+                    )
+                    reason_codes.append("PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED")
+
+    prerequisite_records = _planned_artifact_prerequisite_evidence(plan.subtasks)
+    evidence.extend(prerequisite_records)
+    for record in prerequisite_records:
+        if record["missing_requires_edge"]:
+            errors.append(
+                f"planned prerequisite consumer {record['consumer_subtask']!r} file "
+                f"{record['consumer_file']!r} must require {record['prerequisite_capability']!r} "
+                f"provided by {record['provider_subtask']!r} file {record['provider_file']!r}"
+            )
+            reason_codes.append("PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED")
+        if record["missing_depends_on_edge"]:
+            errors.append(
+                f"planned prerequisite consumer {record['consumer_subtask']!r} file "
+                f"{record['consumer_file']!r} must depend_on provider "
+                f"{record['provider_subtask']!r} for {record['prerequisite_capability']!r} "
+                f"from {record['provider_file']!r}"
+            )
+            reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
+
     # Correctness Continuity Part C (PRV-06, 2026-08-29) - see
     # IntegrationRelationship's own docstring (plan_schema.py). Checked by
     # id, never inferred from free text, same discipline as the global-
@@ -426,6 +563,19 @@ async def validate_plan(
             )
             reason_codes.append("INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK")
             continue
+        for consumer_id in rel.consumer_subtask_ids:
+            upstream = _transitive_dependencies(plan.subtasks).get(consumer_id, set())
+            missing_upstream = sorted(
+                producer_id for producer_id in rel.producer_subtask_ids
+                if producer_id != consumer_id and producer_id not in upstream
+            )
+            if missing_upstream:
+                errors.append(
+                    f"integration relationship {rel.id!r} consumer {consumer_id!r} can execute "
+                    f"before provider(s) {missing_upstream!r}; providers must be upstream through "
+                    "depends_on or integration must be owned by a later subtask"
+                )
+                reason_codes.append("PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM")
         obligation_id = f"plan.integration.{rel.id}"
         if obligation_ledger is not None and obligation_ledger.current(obligation_id) is None:
             # Seeded exactly once per relationship id - a later re-call of
@@ -675,4 +825,5 @@ async def validate_plan(
         errors=errors,
         reason_codes=list(dict.fromkeys(reason_codes)),
         escalated_route=escalated_route,
+        evidence=evidence,
     )

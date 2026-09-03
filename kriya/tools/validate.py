@@ -12,6 +12,7 @@ from kriya.config.config import AutonomyConfig
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
+from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 from kriya.tools.process import ProcessController
@@ -991,6 +992,25 @@ class PolymorphicValidator:
         any_timed_out = False
         last_returncode = None
         for i, command in enumerate(commands, 1):
+            # Raw Java runtime verification compiles into an isolated class
+            # root. javac requires the -d destination to exist; create only
+            # that explicitly named workspace-relative directory here rather
+            # than adding a shell-specific `mkdir` command to the portable
+            # argv sequence.
+            if command and os.path.basename(command[0]) == "javac" and "-d" in command:
+                destination_index = command.index("-d") + 1
+                if destination_index < len(command):
+                    destination = command[destination_index]
+                    if not os.path.isabs(destination):
+                        destination_path = os.path.join(self.workspace_path, destination)
+                        # Symlink-safe containment (kriya/policy/filesystem.py's
+                        # is_within_scope) - a bare os.path.abspath/commonpath
+                        # check has no symlink resolution and reopens exactly
+                        # the sibling-prefix/symlink bypass that primitive was
+                        # built to close.
+                        scope = make_workspace_scope(self.workspace_path)
+                        if is_within_scope(scope, destination_path):
+                            os.makedirs(destination_path, exist_ok=True)
             step_label = f"=== Step {i}/{len(commands)}: {' '.join(command)} ==="
             try:
                 res = self._run_cmd_with_timeout(

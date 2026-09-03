@@ -99,7 +99,8 @@ def test_audit_call_observes_the_real_bootstrap_command(tmp_path, monkeypatch):
     monkeypatch.setattr(worktree_mod._execution_policy, "evaluate", spy)
     create_git_worktree(str(tmp_path))
     assert captured["command"] == (
-        "git", "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation",
+        "git", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
+        "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation",
     )
 
 
