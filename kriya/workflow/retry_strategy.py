@@ -658,13 +658,25 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             "process_terminating_behavior_tested_in_process",
             "test_verification_infrastructure_failure",
         ):
+            # is_runnable_test_file()'s filename regex is narrower than the
+            # classify_file_role() directory-based check that can populate
+            # likely_files upstream (failure_grounding.py's
+            # _crashed_test_artifacts, which matches on an exact simple
+            # class-name equality against the crashed test class - already
+            # precise evidence). A Failsafe integration test (AppIT.java)
+            # or Spock spec (FooSpec.groovy) is real attribution this
+            # stricter regex just doesn't recognize by name - never drop
+            # real evidence to an empty list solely because of that naming
+            # gap; fall back to the unfiltered evidence instead.
+            runnable_likely_files = [
+                path for path in failure.likely_files
+                if is_runnable_test_file(path)
+            ]
+            attribution_files = runnable_likely_files or failure.likely_files
             attribution = AttributionResult(
                 tier="deterministic",
-                files=[
-                    path for path in failure.likely_files
-                    if is_runnable_test_file(path)
-                ],
-                confidence="high",
+                files=attribution_files,
+                confidence="high" if attribution_files else "low",
                 reasoning=(
                     "Deterministic verification-safety evidence identified the test "
                     "artifact whose in-process strategy is incompatible with required "

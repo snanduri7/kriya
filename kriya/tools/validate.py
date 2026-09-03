@@ -12,6 +12,7 @@ from kriya.config.config import AutonomyConfig
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
+from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 from kriya.tools.process import ProcessController
@@ -1001,11 +1002,14 @@ class PolymorphicValidator:
                 if destination_index < len(command):
                     destination = command[destination_index]
                     if not os.path.isabs(destination):
-                        destination_path = os.path.abspath(
-                            os.path.join(self.workspace_path, destination)
-                        )
-                        workspace_root = os.path.abspath(self.workspace_path)
-                        if os.path.commonpath([workspace_root, destination_path]) == workspace_root:
+                        destination_path = os.path.join(self.workspace_path, destination)
+                        # Symlink-safe containment (kriya/policy/filesystem.py's
+                        # is_within_scope) - a bare os.path.abspath/commonpath
+                        # check has no symlink resolution and reopens exactly
+                        # the sibling-prefix/symlink bypass that primitive was
+                        # built to close.
+                        scope = make_workspace_scope(self.workspace_path)
+                        if is_within_scope(scope, destination_path):
                             os.makedirs(destination_path, exist_ok=True)
             step_label = f"=== Step {i}/{len(commands)}: {' '.join(command)} ==="
             try:

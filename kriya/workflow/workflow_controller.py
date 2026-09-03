@@ -168,7 +168,7 @@ from kriya.workflow.edit_safety import (
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
-from kriya.workflow.static_checks import derive_stack_contract, validate_stack_contract_artifacts
+from kriya.workflow.static_checks import derive_stack_contract, log_stack_contract_boundary, validate_stack_contract_artifacts
 from kriya.workflow.planning_diagnostics import (
     bounded_repository_evidence,
     persist_planning_attempt_diagnostic,
@@ -3167,21 +3167,15 @@ class WorkflowController:
             except Exception as e:
                 logger.debug(f"WorkflowController shadow run {run_id!r}: could not list registered tools: {e}")
 
+        shadow_stack_contract = derive_stack_contract(goal)
         validation = await validate_plan(
             plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
             route=route, triage_service=self.workflow_engine.engineering_triage,
             runtime_verification_required=goal_requires_runtime_behavior(goal),
-            stack_contract=derive_stack_contract(goal),
+            stack_contract=shadow_stack_contract,
         )
-        shadow_stack_contract = derive_stack_contract(goal)
-        logger.info(
-            "STACK_CONTRACT_BOUNDARY %s",
-            json.dumps({
-                "boundary": "plan",
-                "languages": list(getattr(shadow_stack_contract, "languages", ())),
-                "frameworks": list(getattr(shadow_stack_contract, "frameworks", ())),
-                "decision": "PASS" if validation.valid else "REJECT",
-            }, sort_keys=True),
+        log_stack_contract_boundary(
+            "plan", shadow_stack_contract, None if validation.valid else "REJECT",
         )
         if not validation.valid:
             notes.append(f"plan failed validation: {validation.errors}")
@@ -3624,15 +3618,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
             if plan is not None and not errors:
                 approved_stack_contract = derive_stack_contract(goal)
-                logger.info(
-                    "STACK_CONTRACT_BOUNDARY %s",
-                    json.dumps({
-                        "boundary": "plan",
-                        "languages": list(getattr(approved_stack_contract, "languages", ())),
-                        "frameworks": list(getattr(approved_stack_contract, "frameworks", ())),
-                        "decision": "PASS",
-                    }, sort_keys=True),
-                )
+                log_stack_contract_boundary("plan", approved_stack_contract, None)
                 try:
                     persist_planning_attempt_diagnostic(
                         workspace_path, run_id,
@@ -3876,7 +3862,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             path: read_file_revision(os.path.join(workspace_path, path))
             for path in planned_paths
         }
-        plan_workspace_path = create_git_worktree(workspace_path)
+        # Happens before any subtask has run - zero real side effects exist
+        # yet, so a bootstrap failure here (git missing, read-only FS, disk
+        # quota) fits _StructuredPlanUnavailable's own established "pre-
+        # execution, safe to fail closed" contract exactly (see that class's
+        # docstring) - reused here rather than letting create_git_worktree's
+        # RuntimeError/ValueError propagate uncaught and crash the whole
+        # enforce run; the caller already converts it into a clean
+        # needs_review WorkflowResult.
+        try:
+            plan_workspace_path = create_git_worktree(workspace_path)
+        except Exception as e:
+            raise _StructuredPlanUnavailable(
+                f"failed to create isolated plan-level worktree sandbox: {e}"
+            ) from e
         # Resolved ONCE, here, against workspace_path - the real, immutable
         # PRE-mutation baseline, before plan_workspace_path accumulates any
         # subtask's committed writes - and reused unchanged by every bounded
@@ -5272,15 +5271,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 terminal_stack_contract,
                 (pf.path for st in plan.subtasks for pf in st.planned_files),
             )
-            logger.info(
-                "STACK_CONTRACT_BOUNDARY %s",
-                json.dumps({
-                    "boundary": "terminal",
-                    "languages": list(getattr(terminal_stack_contract, "languages", ())),
-                    "frameworks": list(getattr(terminal_stack_contract, "frameworks", ())),
-                    "decision": "REJECT" if global_stack_contract_gap else "PASS",
-                }, sort_keys=True),
-            )
+            log_stack_contract_boundary("terminal", terminal_stack_contract, global_stack_contract_gap)
             if global_stack_contract_gap:
                 all_completed = False
 

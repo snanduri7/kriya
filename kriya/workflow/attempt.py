@@ -30,6 +30,7 @@ from kriya.core.kernel import Kernel
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.tools.validate import get_pom_dependencies
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
     apply_anchored_edits,
@@ -72,6 +73,7 @@ from kriya.workflow.static_checks import (
     derive_stack_contract,
     find_established_stack_drift,
     find_goal_stack_mismatch,
+    log_stack_contract_boundary,
     run_static_checks,
     validate_stack_contract_artifacts,
 )
@@ -1368,27 +1370,34 @@ def _apply_runtime_verification_contract(
     goal-specific text, so it carries no proprietary/external data and is
     safe to record verbatim in verification evidence.
 
-    Deliberately narrow, evidence-bounded shape detection (only the two
-    proven-live invocation forms, plus one generic fallback that covers
-    every other interpreter+target language without any per-ecosystem
-    branching): a Maven exec:java invocation (recognized by an "exec:java"
-    token or an already-present "-Dexec.mainClass=" token - exec:exec is
-    deliberately NOT matched here, since its own argument-passing mechanism
-    is pom.xml-configured, not a "-Dexec.args=" command-line property) gets
+    Deliberately narrow, evidence-bounded shape detection - three proven-live
+    invocation forms get real flag-aware handling, everything else falls
+    back to a plain two-token heuristic rather than being guessed at: a
+    Maven exec:java invocation (recognized by an "exec:java" token or an
+    already-present "-Dexec.mainClass=" token - exec:exec is deliberately
+    NOT matched here, since its own argument-passing mechanism is
+    pom.xml-configured, not a "-Dexec.args=" command-line property) gets
     "-Dexec.args=<value>" appended; any other "mvn"/"gradle"/"./gradlew"
     invocation is left unrecognized rather than guessed at - a bare
     trailing token there is parsed as an additional lifecycle phase/goal,
-    not a program argument, and would fail the build outright. Any other
-    exactly-two-token command (["java","Main"], ["python","app.py"],
-    ["node","app.js"], ...) gets the value appended as a third, positional
-    token. A Java launch with JVM/classpath options is parsed through its
-    entrypoint token so a missing application argument is appended after the
-    class rather than confused with JVM options. Other commands already
-    carrying more than two tokens, or an exec:java command that already sets
-    "-Dexec.args=", are assumed to already supply their own value and are left
-    untouched. Only applied to the LAST command in the sequence - the one
-    that actually exercises the application's behavior in every real
-    sequence this codebase produces (see run_app_sequence's own docstring
+    not a program argument, and would fail the build outright. A `java`
+    launch is parsed through its own known JVM/classpath flags-with-values
+    (-cp/-classpath/--module-path/...) to find the entrypoint token, so a
+    missing application argument is appended after the class rather than
+    confused with a JVM option's value - this flag-aware handling is
+    Java-specific, not a general per-runtime mechanism; a different
+    runtime with its own flag-with-value syntax (e.g. `dotnet run
+    --project X`, `node --experimental-modules app.js`) does NOT get the
+    same treatment and instead falls through to the plain two-token
+    fallback below. Any other exactly-two-token command (["java","Main"],
+    ["python","app.py"], ["node","app.js"], ...) gets the value appended as
+    a third, positional token. Other commands already carrying more than
+    two tokens (a non-Java command with its own extra argv), or an
+    exec:java command that already sets "-Dexec.args=", are assumed to
+    already supply their own value and are left untouched - a pre-existing
+    boundary, not new here. Only applied to the LAST command in the
+    sequence - the one that actually exercises the application's behavior
+    in every real sequence this codebase produces (see run_app_sequence's own docstring
     for the multi-invocation case, e.g. "add an item, then list items",
     where every earlier step is its own already-fully-specified
     invocation, not something this function is meant to touch)."""
@@ -2105,19 +2114,30 @@ async def _execute_runtime_verification_directly(
         raise QualityGateFailure(failure)
 
     if judgment.get("run_commands"):
+        pom_path_for_correction = os.path.join(ctx.worktree_path, "pom.xml")
         pom_content_for_correction = None
         try:
-            with open(os.path.join(ctx.worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+            with open(pom_path_for_correction, "r", encoding="utf-8") as f:
                 pom_content_for_correction = f.read()
         except Exception:
             pass
         java_files = [f for f in known_files if f.endswith(".java")]
         if java_files:
+            # A pom.xml with real <dependency> entries needs Maven's own
+            # classpath resolution - the direct-javac grounded route below
+            # has no mechanism to resolve third-party jars and would compile
+            # with a bare classpath, breaking any dependency import. Only
+            # prefer the grounded route when there's no pom, or the pom has
+            # no dependencies to lose (a bare pom.xml with no libraries is
+            # exactly as safe as no build file at all).
+            pom_declares_dependencies = bool(
+                pom_content_for_correction and get_pom_dependencies(pom_path_for_correction)
+            )
             corrected_commands = ground_java_entrypoint_in_no_build_file_projects(
                 judgment["run_commands"], judgment["command_source"], known_files,
                 _build_java_main_class_map(java_files, ctx),
                 extract_jvm_module_flags(ctx.skills_prompt), pom_content_for_correction,
-                prefer_grounded_runtime=True,
+                prefer_grounded_runtime=not pom_declares_dependencies,
             )
             if corrected_commands is None:
                 logger.info(
@@ -2311,7 +2331,7 @@ async def _execute_runtime_verification_directly(
         raise QualityGateFailure(failure)
 
     state.gate_outcomes.append({
-        "attempt": state.attempt_number, "type": "run_verification", "success": True,
+        "attempt": state.attempt_number, "type": gate_type, "success": True,
         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
         "graded_by": verification_authority, "commands": resolved_run_commands,
         "steps": run_res.get("steps", []),
@@ -4491,15 +4511,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         stack_decision = validate_stack_contract_artifacts(
             stack_contract, state.all_files_written,
         )
-        logger.info(
-            "STACK_CONTRACT_BOUNDARY %s",
-            json.dumps({
-                "boundary": "candidate",
-                "languages": list(getattr(stack_contract, "languages", ())),
-                "frameworks": list(getattr(stack_contract, "frameworks", ())),
-                "decision": "REJECT" if stack_decision else "PASS",
-            }, sort_keys=True),
-        )
+        log_stack_contract_boundary("candidate", stack_contract, stack_decision)
+        if not static_violation:
+            # The logged REJECT/PASS decision above must actually gate the
+            # candidate - matching the plan boundary (plan_validation.py)
+            # and terminal boundary (workflow_controller.py), which both
+            # already reject on this same check's non-None result.
+            static_violation = stack_decision
         if static_violation:
             # _build_quality_gate_failure() (not a bare Failure(...)), matching the
             # SAME construction every other Quality Gate type already uses (compile/
@@ -5705,7 +5723,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         raise QualityGateFailure(failure)
                     run_verification_outcome = {
                         "attempt": state.attempt_number,
-                        "type": "run_verification",
+                        "type": gate_type,
                         "success": True,
                         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
                         # Reachable via the clean-run branch above, or (since

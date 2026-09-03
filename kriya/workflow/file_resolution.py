@@ -1413,6 +1413,14 @@ def ground_java_entrypoint_in_no_build_file_projects(
     arguments follow it."""
     if (build_file_content and not prefer_grounded_runtime) or command_source == "goal_explicit":
         return run_commands
+    def _verification_production_java_file(filepath: str) -> bool:
+        normalized = filepath.replace("\\", "/").lstrip("./")
+        return not (
+            normalized.startswith(("src/test/", "test/", "tests/"))
+            or "/src/test/" in normalized
+            or is_runnable_test_file(filepath)
+        )
+
     if len(java_main_classes) == 0:
         if any(cmd and cmd[0] == "java" for cmd in (run_commands or [])):
             return None
@@ -1427,7 +1435,12 @@ def ground_java_entrypoint_in_no_build_file_projects(
         # the real live bug this closes.
         corrected = _correct_java_entrypoint_qualification(run_commands, java_main_classes)
         runtime_classes_dir = ".kriya/runtime-verification/classes"
-        compile_files = sorted(f for f in files_written if f.endswith(".java"))
+        compile_files = sorted(
+            f for f in files_written
+            if f.endswith(".java") and not (
+                prefer_grounded_runtime and not _verification_production_java_file(f)
+            )
+        )
         known_fqcns = set(java_main_classes.values())
         invocations: List[List[str]] = []
         for command in corrected or []:
@@ -1444,14 +1457,6 @@ def ground_java_entrypoint_in_no_build_file_projects(
             return [["javac", "-d", runtime_classes_dir] + compile_files] + invocations
         return corrected
     entrypoint_class = next(iter(java_main_classes.values()))
-    def _verification_production_java_file(filepath: str) -> bool:
-        normalized = filepath.replace("\\", "/").lstrip("./")
-        return not (
-            normalized.startswith(("src/test/", "test/", "tests/"))
-            or "/src/test/" in normalized
-            or is_runnable_test_file(filepath)
-        )
-
     compile_files = sorted(
         f for f in files_written
         if f.endswith(".java") and not (

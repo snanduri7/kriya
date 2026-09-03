@@ -48,6 +48,8 @@ this class of check (see kriya/workflow/failure_grounding.py's
 extract_implicated_files() docstring): a false positive is low-cost since it's
 just one more retry cycle, not a hard block.
 """
+import json
+import logging
 import os
 import re
 import ast
@@ -58,6 +60,8 @@ import xml.etree.ElementTree as ET
 from typing import Dict, Iterable, Optional, Tuple
 
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+
+logger = logging.getLogger(__name__)
 
 
 class StaticCheck:
@@ -422,6 +426,21 @@ class MarkdownInlineCodeLeakCheck(StaticCheck):
 
     name = "markdown_inline_code_leak"
 
+    # Python 3.12+'s PEP 701 tokenizer emits FSTRING_START/MIDDLE/END for an
+    # f-string's own literal text instead of a single STRING token - without
+    # these, an f-string's literal content (which can legitimately contain a
+    # backtick-like substring) is never blanked and falsely trips this check
+    # on valid Python source. getattr() with a None default keeps this
+    # working on Python 3.10/3.11, where these constants don't exist.
+    _BLANKABLE_TOKEN_TYPES = tuple(
+        token_type for token_type in (
+            tokenize.STRING, tokenize.COMMENT,
+            getattr(tokenize, "FSTRING_START", None),
+            getattr(tokenize, "FSTRING_MIDDLE", None),
+            getattr(tokenize, "FSTRING_END", None),
+        ) if token_type is not None
+    )
+
     @staticmethod
     def _python_executable_regions(content: str) -> Optional[str]:
         """Return Python with strings/comments blanked, or None if invalid.
@@ -435,7 +454,7 @@ class MarkdownInlineCodeLeakCheck(StaticCheck):
             tokens = tokenize.generate_tokens(io.StringIO(content).readline)
             lines = content.splitlines(keepends=True)
             for token in tokens:
-                if token.type not in (tokenize.STRING, tokenize.COMMENT):
+                if token.type not in MarkdownInlineCodeLeakCheck._BLANKABLE_TOKEN_TYPES:
                     continue
                 (start_line, start_col), (end_line, end_col) = token.start, token.end
                 for line_index in range(start_line - 1, end_line):
@@ -777,6 +796,24 @@ def derive_stack_contract(goal: str) -> Optional[StackContract]:
     lowered = (goal or "").lower()
     frameworks = tuple(name for name in ("django", "spring") if name in lowered)
     return StackContract(languages=(family,), frameworks=frameworks)
+
+
+def log_stack_contract_boundary(
+    boundary: str, contract: Optional[StackContract], violation: Optional[str],
+) -> None:
+    """Structured STACK_CONTRACT_BOUNDARY log line, shared by every call site
+    that runs validate_stack_contract_artifacts (candidate/plan/terminal
+    boundaries) - was duplicated verbatim at each site, risking drift
+    between them on a future schema change."""
+    logger.info(
+        "STACK_CONTRACT_BOUNDARY %s",
+        json.dumps({
+            "boundary": boundary,
+            "languages": list(getattr(contract, "languages", ())),
+            "frameworks": list(getattr(contract, "frameworks", ())),
+            "decision": "REJECT" if violation else "PASS",
+        }, sort_keys=True),
+    )
 
 
 def validate_stack_contract_artifacts(
