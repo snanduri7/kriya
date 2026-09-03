@@ -763,19 +763,31 @@ def build_structured_plan_repair_prompt(
             if item.get("consumer_subtask") and item.get("required_tool") and item.get("candidate_manifests")
         ]
         if manifest_missing_evidence:
+            # Correctness fix (2026-09-03, post-audit review): the first
+            # draft of this text collapsed classify_file_ownership()'s two
+            # independently-legal satisfying relations (CURRENT: the
+            # consumer subtask plans the manifest itself - no depends_on
+            # involved at all - and PAST_ORDERED: a separate upstream
+            # subtask plans it and the consumer depends_on that subtask)
+            # into one prescriptive "add it to depends_on" instruction,
+            # which would have wrongly steered the Planner into always
+            # inventing a separate provider subtask even when the
+            # simplest, equally valid repair is for the consumer to plan
+            # its own manifest file. State the actual invariant, not one
+            # implementation of it.
             targeted_correction += "- Establish the missing dependency-provisioning prerequisite:\n"
             for item in manifest_missing_evidence:
                 manifests = "/".join(item["candidate_manifests"])
                 targeted_correction += (
                     f"  Consumer: subtask={item['consumer_subtask']} runs "
                     f"{item['required_tool']}-dependent verification\n"
-                    f"  Required repair: add a subtask (or extend an existing upstream one) that "
-                    f"plans one of these dependency manifests: {manifests}\n"
-                    f"  Ordering requirement: that manifest-planning subtask must be CURRENT or "
-                    f"PAST_ORDERED relative to {item['consumer_subtask']} - add it to "
-                    f"{item['consumer_subtask']}.depends_on (directly or transitively) so it is "
-                    "established before the verification consumer runs. Do not remove or weaken "
-                    "the verification itself to satisfy this.\n"
+                    f"  Required repair: the dependency manifest (one of: {manifests}) must be "
+                    "provided either (1) by this consumer subtask itself - add it to that "
+                    f"subtask's own planned_files - or (2) by a subtask ordered before "
+                    f"{item['consumer_subtask']} - if using a separate provider subtask, add that "
+                    f"provider to {item['consumer_subtask']}.depends_on (directly or transitively) "
+                    "so it is established before the verification consumer runs. Do not remove or "
+                    "weaken the verification itself to satisfy this.\n"
                 )
     if "UNKNOWN_GLOBAL_INVARIANT" in reason_codes:
         targeted_correction += (

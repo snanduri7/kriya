@@ -1139,13 +1139,17 @@ def test_manifest_missing_repair_correction_preserves_provider_requirement():
             "candidate_manifests": ["pyproject.toml", "requirements.txt"],
         }],
     )
-    assert "plans one of these dependency manifests: pyproject.toml/requirements.txt" in prompt
+    assert "dependency manifest (one of: pyproject.toml/requirements.txt) must be provided" in prompt
 
 
 def test_manifest_missing_repair_correction_states_ordering_requirement():
-    """(5) The correction explicitly states the CURRENT/PAST_ORDERED
-    ownership requirement and how to satisfy it (depends_on), not just
-    "add a manifest somewhere in the plan"."""
+    """(5) The correction explicitly states BOTH independently-legal
+    satisfying relations - CURRENT (the consumer plans the manifest
+    itself) and PAST_ORDERED (a separate provider subtask ordered ahead
+    via depends_on) - not a single prescriptive "always add a separate
+    provider to depends_on" instruction, which would wrongly rule out the
+    simpler CURRENT repair classify_file_ownership() itself already
+    accepts."""
     prompt = build_structured_plan_repair_prompt(
         "goal", "{}", ["error"], ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
         validation_evidence=[{
@@ -1153,16 +1157,55 @@ def test_manifest_missing_repair_correction_states_ordering_requirement():
             "candidate_manifests": ["requirements.txt"],
         }],
     )
-    assert "must be CURRENT or PAST_ORDERED relative to s2" in prompt
-    assert "add it to s2.depends_on" in prompt
+    assert "provided either (1) by this consumer subtask itself" in prompt
+    assert "or (2) by a subtask ordered before s2" in prompt
+    assert "add that provider to s2.depends_on" in prompt
+
+
+@pytest.mark.asyncio
+async def test_manifest_missing_repaired_plan_current_self_provided_manifest_passes(tmp_path):
+    """(6a) CURRENT: the consumer subtask itself plans the manifest
+    alongside its own tests - no separate provider subtask, no depends_on
+    edge involved at all. classify_file_ownership() already treats this as
+    satisfying (a subtask's own planned_files are trivially CURRENT to
+    itself); the repair correction's wording must not imply this is
+    illegal by always demanding a separate provider be added to
+    depends_on."""
+    plan = EngineeringPlan(
+        plan_id="manifest-missing-current", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="scaffold the app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="declare dependencies and test the app",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s1"],
+                planned_files=[
+                    PlannedFile(path="requirements.txt", action=FileAction.CREATE),
+                    PlannedFile(path="app/tests.py", action=FileAction.CREATE),
+                ],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, description="run tests",
+                    tool_name="test", verifier_kind=VerifierKind.TEST,
+                )],
+            ),
+        ],
+    )
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), stack_contract=_manifest_missing_stack_contract(),
+    )
+
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in result.reason_codes
 
 
 @pytest.mark.asyncio
 async def test_manifest_missing_repaired_plan_with_ordered_provider_passes(tmp_path):
-    """(6) A repaired plan that adds a manifest-planning subtask CURRENT/
-    PAST_ORDERED relative to the verification consumer (s1 provides
-    requirements.txt, s2 depends on s1) satisfies the invariant - exactly
-    the repair the new correction text asks for."""
+    """(6b) PAST_ORDERED: a repaired plan that adds a SEPARATE manifest-
+    planning subtask ordered ahead of the verification consumer (s1
+    provides requirements.txt, s2 depends on s1) satisfies the invariant -
+    the other of the two independently-legal repairs the corrected
+    targeted-correction text now names explicitly."""
     plan = EngineeringPlan(
         plan_id="manifest-missing-repaired", kind=ChangeKind.TASK,
         subtasks=[
