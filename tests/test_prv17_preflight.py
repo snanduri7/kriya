@@ -87,24 +87,6 @@ _PRV17_GOAL = (
     "- Do not use Java, Spring, Maven, Gradle, Node.js, or another web framework.\n"
 )
 
-# derive_stack_contract's own _goal_declared_family (kriya/workflow/
-# static_checks.py) is a plain keyword match with no negation-awareness -
-# confirmed by direct call: _PRV17_GOAL's own "Do not use Java, Spring,
-# Maven, Gradle, Node.js" sentence matches the "java" and "node" families
-# just as strongly as "Use Django" matches "python", so THREE families
-# match and derive_stack_contract(_PRV17_GOAL) returns None (its own
-# documented behavior for an ambiguous goal - "not this check's business
-# to referee"). This is a real, pre-existing StackContract limitation this
-# preflight surfaces, not something this fix touches (explicitly out of
-# scope: "do not modify StackContract design") - sections 2/5/6 below
-# instead derive the contract from this positive-only paraphrase of the
-# SAME goal's affirmative requirement, through the identical, unmodified
-# derive_stack_contract() function.
-_PRV17_GOAL_POSITIVE_ONLY = (
-    "Create a Python 3.12 Django application with a customers app and a "
-    "/customers/health endpoint."
-)
-
 _DJANGO_PLANNED_FILES = [
     "manage.py",
     "customers_project/__init__.py",
@@ -163,14 +145,16 @@ def _django_scaffold_plan() -> EngineeringPlan:
 
 @pytest.mark.asyncio
 async def test_prv17_preflight_pipeline(tmp_path):
-    django_contract = derive_stack_contract(_PRV17_GOAL_POSITIVE_ONLY)
+    # The REAL, full PRV-17 goal text, including its own "Do not use Java,
+    # Spring, Maven, Gradle, Node.js" prohibition sentence - derive_stack_
+    # contract() is now negation-aware (kriya/workflow/static_checks.py,
+    # 2026-09-03) and correctly resolves this to Python/Django rather than
+    # bailing out to None on the false "four competing families" reading a
+    # negation-blind keyword scan used to produce.
+    django_contract = derive_stack_contract(_PRV17_GOAL)
     assert django_contract is not None
     assert django_contract.languages == ("python",)
     assert django_contract.frameworks == ("django",)
-    # The full, real goal text (with its own negative constraint sentence)
-    # is documented as unable to derive a contract at all - see
-    # _PRV17_GOAL_POSITIVE_ONLY's own comment above.
-    assert derive_stack_contract(_PRV17_GOAL) is None
 
     # --- 1. A directory-shaped planned file ("customers_project/", the
     # live run's own literal Planner output) is rejected - at the earliest
