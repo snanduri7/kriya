@@ -238,6 +238,12 @@ def _run_probe(spec: ProbeSpec, *, timeout: float) -> Tuple[Optional[int], Optio
                     "budget while reading the response body"
                 )
             sock.settimeout(remaining)
+            # Read one byte at a time INTENTIONALLY - do not "optimize" this
+            # to a larger size. The socket timeout above is reset to the
+            # remaining wall-clock budget before each read; read(n > 1) may
+            # perform multiple underlying socket reads internally and can
+            # therefore exceed the overall probe deadline when the peer
+            # continuously dribbles response data.
             chunk = resp.read(1)
             if not chunk:
                 break
