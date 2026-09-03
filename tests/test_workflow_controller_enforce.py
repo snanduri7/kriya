@@ -1039,6 +1039,214 @@ def test_plan_repair_prompt_contains_exact_prerequisite_correction_tuple():
     assert "add s2 to s3.depends_on" in prompt
 
 
+# --- PRV-17 Run 8 diagnostic audit (2026-09-03): validator evidence ->
+# repair Planner boundary for VERIFICATION_PREREQUISITE_MANIFEST_MISSING.
+# _stack_dependent_verification_prerequisite_evidence() (plan_validation.py)
+# already reaches validate_plan()'s own `evidence` list and workflow_
+# controller.py's `validation_evidence` parameter unchanged - the gap found
+# here was that build_structured_plan_repair_prompt silently dropped it
+# (the shared `prerequisite_evidence` filter above requires a
+# `provider_subtask` key this record never has) instead of turning it into
+# an explicit correction the way every other reason_code already does.
+
+def _manifest_missing_stack_contract():
+    from kriya.workflow.static_checks import StackContract
+    return StackContract(languages=("python",), frameworks=("django",))
+
+
+def _manifest_missing_consumer_only_plan():
+    """No subtask anywhere plans a Python dependency manifest - s2's TEST
+    verification has no provisioning prerequisite at all."""
+    return EngineeringPlan(
+        plan_id="manifest-missing-repair-audit", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="scaffold the app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="test the app", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app/tests.py", action=FileAction.CREATE)],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, description="run tests",
+                    tool_name="test", verifier_kind=VerifierKind.TEST,
+                )],
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_manifest_missing_evidence_is_actionable_and_structured(tmp_path):
+    """(1) validate_plan() produces a structured evidence record - not just
+    a reason code/free-text error - naming the consumer, the required tool,
+    and the candidate manifest filenames a repair could plan."""
+    result = await validate_plan(
+        _manifest_missing_consumer_only_plan(),
+        workspace_path=str(tmp_path), stack_contract=_manifest_missing_stack_contract(),
+    )
+
+    assert result.valid is False
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in result.reason_codes
+    manifest_records = [e for e in result.evidence if e.get("required_tool") == "python"]
+    assert len(manifest_records) == 1
+    record = manifest_records[0]
+    assert record["consumer_subtask"] == "s2"
+    assert set(record["candidate_manifests"]) == {"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"}
+
+
+def test_manifest_missing_evidence_reaches_the_real_repair_prompt():
+    """(2) The SAME shape validate_plan() actually produces, fed straight
+    into the real build_structured_plan_repair_prompt() (no paraphrase),
+    produces a dedicated targeted-correction section - not just the
+    generic reason-code/error dump every reason code already gets."""
+    prompt = build_structured_plan_repair_prompt(
+        "Create a Django application with a customers app and tests.", "{}",
+        ["subtask 's2' runs 'python'-dependent verification, but no current/past-ordered subtask "
+         "plans (or the workspace already establishes) a dependency manifest (pyproject.toml/"
+         "requirements.txt/setup.cfg/setup.py) to provision it"],
+        ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["pyproject.toml", "requirements.txt", "setup.cfg", "setup.py"],
+        }],
+    )
+
+    assert "Establish the missing dependency-provisioning prerequisite" in prompt
+
+
+def test_manifest_missing_repair_correction_preserves_consumer_identity():
+    """(3) The exact consumer subtask id survives into the correction text,
+    not a generic placeholder."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["error"], ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["requirements.txt"],
+        }],
+    )
+    assert "Consumer: subtask=s2 runs python-dependent verification" in prompt
+
+
+def test_manifest_missing_repair_correction_preserves_provider_requirement():
+    """(4) The exact candidate manifest filenames survive - not a vague
+    "add a dependency file" instruction."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["error"], ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["pyproject.toml", "requirements.txt"],
+        }],
+    )
+    assert "plans one of these dependency manifests: pyproject.toml/requirements.txt" in prompt
+
+
+def test_manifest_missing_repair_correction_states_ordering_requirement():
+    """(5) The correction explicitly states the CURRENT/PAST_ORDERED
+    ownership requirement and how to satisfy it (depends_on), not just
+    "add a manifest somewhere in the plan"."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["error"], ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["requirements.txt"],
+        }],
+    )
+    assert "must be CURRENT or PAST_ORDERED relative to s2" in prompt
+    assert "add it to s2.depends_on" in prompt
+
+
+@pytest.mark.asyncio
+async def test_manifest_missing_repaired_plan_with_ordered_provider_passes(tmp_path):
+    """(6) A repaired plan that adds a manifest-planning subtask CURRENT/
+    PAST_ORDERED relative to the verification consumer (s1 provides
+    requirements.txt, s2 depends on s1) satisfies the invariant - exactly
+    the repair the new correction text asks for."""
+    plan = EngineeringPlan(
+        plan_id="manifest-missing-repaired", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="scaffold and declare dependencies", execution_method=ExecutionMethod.MODEL,
+                planned_files=[
+                    PlannedFile(path="manage.py", action=FileAction.CREATE),
+                    PlannedFile(path="requirements.txt", action=FileAction.CREATE),
+                ],
+            ),
+            Subtask(
+                id="s2", description="test the app", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app/tests.py", action=FileAction.CREATE)],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, description="run tests",
+                    tool_name="test", verifier_kind=VerifierKind.TEST,
+                )],
+            ),
+        ],
+    )
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), stack_contract=_manifest_missing_stack_contract(),
+    )
+
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_manifest_missing_future_ordered_provider_still_fails(tmp_path):
+    """(7) A manifest planned only by a subtask ORDERED AFTER the
+    verification consumer (s3 depends on s2, the consumer - so the
+    manifest is FUTURE_ORDERED relative to s2, not CURRENT/PAST_ORDERED)
+    must still fail - the invariant is about ordering, not mere presence
+    anywhere in the plan."""
+    plan = EngineeringPlan(
+        plan_id="manifest-missing-future-ordered", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="scaffold the app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="test the app", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app/tests.py", action=FileAction.CREATE)],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, description="run tests",
+                    tool_name="test", verifier_kind=VerifierKind.TEST,
+                )],
+            ),
+            Subtask(
+                id="s3", description="declare dependencies later", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s2"],
+                planned_files=[PlannedFile(path="requirements.txt", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), stack_contract=_manifest_missing_stack_contract(),
+    )
+
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in result.reason_codes
+
+
+def test_manifest_missing_correction_does_not_fire_for_unrelated_reason_codes():
+    """(8) Unrelated existing plan-repair diagnostics are unchanged: even
+    when validation_evidence happens to contain records shaped like a
+    manifest-missing record, the new correction text is gated on the
+    VERIFICATION_PREREQUISITE_MANIFEST_MISSING reason code actually being
+    present - it does not fire merely because matching-shaped evidence
+    exists, and the pre-existing prerequisite-tuple correction (a
+    DIFFERENT reason code, same function) is completely unaffected."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["some unrelated error"], ["SUBTASK_REQUIREMENT_UNPROVIDED"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["requirements.txt"],
+        }],
+    )
+    assert "Establish the missing dependency-provisioning prerequisite" not in prompt
+    assert "Replace each unprovided requires value" in prompt
+
+
 def test_authoritative_planner_system_prompt_carries_testability_and_tooling_dag_guidance():
     assert "the terminating call sits in a thin wrapper" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
     assert "any process-termination mechanism" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT

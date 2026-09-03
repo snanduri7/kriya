@@ -48,6 +48,9 @@ from kriya.workflow.attempt import (
     _spec_requirements_contradicting_authority,
     _spec_requirements_naming_planner_only_identifiers,
     _sync_active_repair_contract,
+    _looks_like_shell_compound_command,
+    _resolve_execution_mode,
+    _validate_and_convert_managed_service_contract,
     run_attempt,
 )
 from kriya.workflow.obligations import (
@@ -75,6 +78,7 @@ from kriya.workflow.repair_contract import (
 from kriya.workflow.operations import CodeOperation
 from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.tools.service_runtime import ManagedServiceVerificationResult, ServiceVerificationOutcomeKind
 from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.file_resolution import (
     correct_exec_main_class_property,
@@ -2817,6 +2821,701 @@ async def test_run_attempt_terminal_subtask_still_executes_declared_runtime_veri
         await run_attempt(state, ctx)  # must not raise
 
     run_verifier.judge.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_allowlist_subtask_treats_inferred_runtime_verification_as_advisory(tmp_path):
+    """PRV-17 Runtime Verification Contract Closure (2026-09-03): the
+    second, previously-unpatched authority. The two tests above
+    (test_run_attempt_intermediate_subtask_treats_inferred_runtime_
+    verification_as_advisory and its positive control) both go through
+    _runtime_verifier_ctx, which is DENY_ALL - they only ever exercised
+    _execute_runtime_verification_directly(), never run_attempt()'s own
+    much larger inline run-verification block a few hundred lines below
+    it. An ordinary ALLOWLIST implementation subtask (the actual live
+    PRV-17 shape: s1, scaffolding a Django project with real planned_files)
+    takes that second, separate path - and a prior fix that patched only
+    the DENY_ALL copy left it free to still execute a FUTURE-owned
+    endpoint's inferred `manage.py runserver` command for s1. Both
+    run_app_sequence and grade() must never be invoked; the Developer must
+    still run normally (this subtask owns real files to write)."""
+    plan = EngineeringPlan(
+        plan_id="prv17-stage-verification-allowlist", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="scaffold the Django project", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)]),
+            Subtask(id="s4", description="implement the health endpoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"], planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)]),
+        ],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    manage_py = "manage.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": manage_py, "content": "# manage.py\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["python", "manage.py", "runserver"]],
+        "command_source": "inferred", "success_criteria": "GET /customers/health returns status ok",
+    })
+    run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("must never grade an advisory-only inferred runtime check"),
+    )
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Create a Python 3.12 Django application.",
+        architect_files=[manage_py], expected_files_upfront=[manage_py],
+        architect_basename_to_path={"manage.py": manage_py},
+        allowed_write_relpaths=[manage_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s1", runtime_verification_required=False,
+        required_verification=[{
+            "type": "judgment", "description": "scaffold only, no runtime obligation yet",
+            "tool_name": None, "verifier_kind": None, "requires_runtime_execution": False,
+        }],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+    ) as mock_run_app:
+        await run_attempt(state, ctx)  # must NOT raise
+
+    mock_run_app.assert_not_called()
+    assert developer.run_generation.called
+    run_verifier.judge.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_allowlist_subtask_still_executes_declared_runtime_verification(tmp_path):
+    """Positive control for the test above, through the identical
+    ALLOWLIST context: when THIS subtask's own approved plan DOES declare
+    the runtime obligation (runtime_verification_required=True - e.g. s4,
+    the terminal integration subtask), the exact same inferred judge()
+    verdict is executed and graded for real through run_attempt()'s
+    ALLOWLIST path too, completely unaffected by the advisory-only
+    suppression."""
+    plan = EngineeringPlan(
+        plan_id="prv17-stage-verification-allowlist", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="scaffold the Django project", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)]),
+            Subtask(id="s4", description="implement the health endpoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"], planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)]),
+        ],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {"manage.py"}
+
+    views_py = "customers/views.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["python", "manage.py", "runserver"]],
+        "command_source": "inferred", "success_criteria": "GET /customers/health returns status ok",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "returned status ok", "likely_files": []})
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Create a Python 3.12 Django application.",
+        architect_files=[views_py], expected_files_upfront=[views_py],
+        architect_basename_to_path={"views.py": views_py},
+        allowed_write_relpaths=[views_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+        required_verification=[{
+            "type": "judgment", "description": "GET /customers/health returns status ok",
+            "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "ok", "steps": []},
+    ) as mock_run_app:
+        await run_attempt(state, ctx)  # must not raise
+
+    mock_run_app.assert_called_once()
+    run_verifier.judge.assert_awaited_once()
+    run_verifier.grade.assert_awaited_once()
+
+
+def test_run_app_sequence_foreground_service_start_blocks_the_subsequent_probe(tmp_path):
+    """PRV-17 Runtime Verification Contract Closure (2026-09-03), issue #2:
+    documents (does not fix - no generic long-lived-service runtime
+    verification exists, see the architecture-gap report) the CURRENT,
+    known-insufficient semantics of representing "start a foreground
+    server, then probe it" as a plain two-step run_app_sequence(). Step 1
+    (a process that never exits on its own, standing in for `manage.py
+    runserver`) exhausts its own timeout budget; run_app_sequence's own
+    contract (see its docstring: "a timeout... stops the sequence
+    immediately") means step 2 (the probe) is NEVER attempted - proving,
+    empirically and not by assumption, that this shape cannot correctly
+    verify a running service today. A future fix for issue #2 must change
+    this behavior; this test pins down what "today" actually does so that
+    change is visible as an intentional diff, not a silent behavior
+    change."""
+    from kriya.tools.validate import PolymorphicValidator
+
+    validator = PolymorphicValidator(str(tmp_path))
+
+    result = validator.run_app_sequence(
+        [
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            [sys.executable, "-c", "print('probed')"],
+        ],
+        timeout=1,
+    )
+
+    assert result["timed_out"] is True
+    assert result["success"] is False
+    assert len(result["steps"]) == 1
+    assert result["steps"][0]["timed_out"] is True
+    assert "probed" not in result["output"]
+
+
+# --- Managed Runtime Verification - Agent/Workflow Wiring (2026-09-03) -----
+# The execution primitive (kriya/tools/service_runtime.py) and its 14
+# lifecycle guarantees are tested standalone in tests/test_service_runtime.py.
+# These tests cover the wiring: RunVerifierAgent.judge()'s execution_mode/
+# managed_service fields -> _resolve_execution_mode/_validate_and_convert_
+# managed_service_contract -> _execute_managed_service_verification, at both
+# runtime-verification call sites, reusing the SAME advisory-only/CURRENT-
+# ownership machinery Round 8 already fixed - no new ownership decision.
+
+def _managed_service_judgment(*, port: int = 8000, **overrides) -> dict:
+    judgment = {
+        "should_run": True,
+        "execution_mode": "managed_service",
+        "run_commands": None,
+        "managed_service": {
+            "service_command": ["python", "manage.py", "runserver", f"0.0.0.0:{port}"],
+            "readiness": {"kind": "http", "host": "127.0.0.1", "port": port, "path": "/customers/health"},
+            "probe": {
+                "kind": "http", "method": "GET", "host": "127.0.0.1", "port": port,
+                "path": "/customers/health", "expected_status": 200,
+            },
+            "startup_timeout_seconds": 20, "probe_timeout_seconds": 10, "shutdown_timeout_seconds": 10,
+        },
+        "command_source": "inferred",
+        "input_channel": "none",
+        "success_criteria": "GET /customers/health returns 200",
+        "reasoning": "goal requires a foreground server plus a health-check probe",
+    }
+    judgment.update(overrides)
+    return judgment
+
+
+def _managed_service_plan() -> EngineeringPlan:
+    return EngineeringPlan(
+        plan_id="managed-service-wiring", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(id="s1", description="scaffold the Django project", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)]),
+            Subtask(id="s4", description="implement the health endpoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"], planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)]),
+        ],
+    )
+
+
+def _managed_service_probe_result(**overrides) -> "ManagedServiceVerificationResult":
+    fields = dict(
+        outcome=ServiceVerificationOutcomeKind.PROBE_PASSED, passed=True,
+        reasoning="probe GET http://127.0.0.1:8000/customers/health -> status=200, expected=200",
+        stdout="Starting development server at http://0.0.0.0:8000/\n", stderr="",
+        returncode=None, probe_status=200, probe_body='{"status": "ok"}',
+    )
+    fields.update(overrides)
+    return ManagedServiceVerificationResult(**fields)
+
+
+@pytest.mark.asyncio
+async def test_existing_finite_judgment_without_execution_mode_still_executes_through_existing_path(tmp_path):
+    """(1) Backward compatibility: a judge() response with no execution_mode
+    key at all (an old cached judgment, or any stub that predates this
+    field) must be treated exactly as execution_mode="finite_command" -
+    run_app_sequence still runs, run_managed_service_verification is never
+    even imported into the decision."""
+    app_path = "app.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": app_path, "content": "print('hi')\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["python", app_path]],
+        "command_source": "inferred", "success_criteria": "prints hi",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "printed hi", "likely_files": []})
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Print hi.", architect_files=[app_path], expected_files_upfront=[app_path],
+        architect_basename_to_path={"app.py": app_path},
+        allowed_write_relpaths=[app_path], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        required_verification=[{
+            "type": "judgment", "description": "prints hi", "tool_name": None,
+            "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "hi", "steps": []},
+    ) as mock_run_app_sequence, patch(
+        "kriya.workflow.attempt.run_managed_service_verification",
+    ) as mock_run_managed_service:
+        await run_attempt(state, ctx)
+
+    mock_run_app_sequence.assert_called_once()
+    mock_run_managed_service.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_current_managed_service_judgment_reaches_execution_primitive_with_separate_fields(tmp_path):
+    """(2)+(5)+(3) A CURRENT-owned (runtime_verification_required=True,
+    terminal s4) managed_service judgment reaches run_managed_service_
+    verification() with a real ManagedServiceVerificationSpec, and the
+    service command / readiness / probe stay on their own structurally
+    separate fields - service_command carries ONLY the server-start argv
+    (no "curl", no "&&"), while the probe's method/path/expected_status
+    live on spec.probe, never merged into service_command."""
+    plan = _managed_service_plan()
+    views_py = "customers/views.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=_managed_service_judgment())
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Create a Python 3.12 Django application.",
+        architect_files=[views_py], expected_files_upfront=[views_py],
+        architect_basename_to_path={"views.py": views_py},
+        allowed_write_relpaths=[views_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+        required_verification=[{
+            "type": "judgment", "description": "GET /customers/health returns 200",
+            "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {"manage.py"}
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.workflow.attempt.run_managed_service_verification",
+        return_value=_managed_service_probe_result(),
+    ) as mock_run_managed_service:
+        await run_attempt(state, ctx)
+
+    mock_run_managed_service.assert_called_once()
+    (spec,), _kwargs = mock_run_managed_service.call_args
+    assert spec.service_command == ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    assert not any("&&" in tok or "curl" in tok for tok in spec.service_command)
+    assert spec.readiness.kind == "http" and spec.readiness.port == 8000
+    assert spec.readiness.path == "/customers/health"
+    assert spec.probe.method == "GET"
+    assert spec.probe.path == "/customers/health"
+    assert spec.probe.expected_status == 200
+
+
+@pytest.mark.asyncio
+async def test_future_managed_service_judgment_is_not_executed(tmp_path):
+    """(4) The SAME advisory-only ownership check Round 8 fixed for the
+    finite path applies identically to managed_service: an intermediate
+    subtask (s1, runtime_verification_required=False) whose judge() call
+    infers a managed_service verdict for a LATER subtask's obligation must
+    never reach run_managed_service_verification - the Developer still
+    runs normally."""
+    plan = _managed_service_plan()
+    manage_py = "manage.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": manage_py, "content": "# manage.py\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=_managed_service_judgment())
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Create a Python 3.12 Django application.",
+        architect_files=[manage_py], expected_files_upfront=[manage_py],
+        architect_basename_to_path={"manage.py": manage_py},
+        allowed_write_relpaths=[manage_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s1", runtime_verification_required=False,
+        required_verification=[{
+            "type": "judgment", "description": "scaffold only, no runtime obligation yet",
+            "tool_name": None, "verifier_kind": None, "requires_runtime_execution": False,
+        }],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.workflow.attempt.run_managed_service_verification",
+    ) as mock_run_managed_service:
+        await run_attempt(state, ctx)  # must NOT raise
+
+    mock_run_managed_service.assert_not_called()
+    assert developer.run_generation.called
+
+
+async def _run_managed_service_terminal_attempt(tmp_path, judge_result):
+    """Shared setup for the result-mapping tests (6)/(7)/(8) - the terminal
+    (CURRENT-owned, mutating ALLOWLIST) s4 shape, varying only the mocked
+    run_managed_service_verification() outcome. The Developer IS expected
+    to run once here, for this subtask's own initial generation of
+    views.py - unrelated to and prior to the runtime-verification gate
+    under test. "Zero Developer calls" for an infrastructure-shaped
+    failure is about the RETRY path (no repair call after this attempt
+    fails), which is what test_handle_attempt_failure_stops_before_
+    developer_call_on_verification_contract_defect and the two DENY_ALL
+    verification-only tests below ((9)/(10)) directly prove instead."""
+    plan = _managed_service_plan()
+    views_py = "customers/views.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=_managed_service_judgment())
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Create a Python 3.12 Django application.",
+        architect_files=[views_py], expected_files_upfront=[views_py],
+        architect_basename_to_path={"views.py": views_py},
+        allowed_write_relpaths=[views_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+        required_verification=[{
+            "type": "judgment", "description": "GET /customers/health returns 200",
+            "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {"manage.py"}
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.workflow.attempt.run_managed_service_verification", return_value=judge_result,
+    ) as mock_run_managed_service:
+        raised = None
+        try:
+            await run_attempt(state, ctx)
+        except QualityGateFailure as e:
+            raised = e
+        return state, developer, mock_run_managed_service, raised
+
+
+@pytest.mark.asyncio
+async def test_probe_passed_maps_to_successful_verification(tmp_path):
+    """(6) PROBE_PASSED -> a passing gate_outcome, no exception, evidence
+    (stdout/probe status/body) preserved."""
+    state, developer, mock_run_managed_service, raised = await _run_managed_service_terminal_attempt(
+        tmp_path, _managed_service_probe_result(),
+    )
+
+    assert raised is None
+    mock_run_managed_service.assert_called_once()
+    last_outcome = state.gate_outcomes[-1]
+    assert last_outcome["success"] is True
+    assert last_outcome["graded_by"] == "managed_service_probe"
+    assert "200" in last_outcome["output"] or "ok" in last_outcome["output"]
+
+
+@pytest.mark.asyncio
+async def test_probe_failed_maps_to_behavioral_grounded_failure(tmp_path):
+    """(7) PROBE_FAILED -> a normal run_verification-typed QualityGateFailure
+    (grounded, behavioral - NOT verification_infrastructure_failure),
+    eligible for the ordinary Developer-repair retry path."""
+    state, developer, mock_run_managed_service, raised = await _run_managed_service_terminal_attempt(
+        tmp_path,
+        _managed_service_probe_result(
+            outcome=ServiceVerificationOutcomeKind.PROBE_FAILED, passed=False,
+            reasoning="probe GET .../customers/health -> status=500, expected=200",
+            probe_status=500, probe_body="Internal Server Error",
+        ),
+    )
+
+    assert raised is not None
+    assert raised.failure.type == "run_verification"
+    assert raised.failure.type != "verification_infrastructure_failure"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", [
+    ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
+    ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
+    ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
+    ServiceVerificationOutcomeKind.CLEANUP_FAILED,
+])
+async def test_infrastructure_outcomes_map_to_verification_infrastructure_failure(tmp_path, outcome):
+    """(8) Every non-behavioral outcome maps to verification_infrastructure_
+    failure - the same type the finite path already routes through
+    STOP_ENVIRONMENT with zero further (retry) Developer calls, proven
+    generically by test_handle_attempt_failure_stops_before_developer_
+    call_on_verification_contract_defect for this exact failure.type."""
+    state, developer, mock_run_managed_service, raised = await _run_managed_service_terminal_attempt(
+        tmp_path,
+        _managed_service_probe_result(outcome=outcome, passed=False, reasoning=f"{outcome.value} occurred"),
+    )
+
+    assert raised is not None
+    assert raised.failure.type == "verification_infrastructure_failure"
+    assert outcome.value in raised.failure.message
+
+
+@pytest.mark.asyncio
+async def test_malformed_managed_service_contract_causes_zero_developer_calls(tmp_path):
+    """(9) execution_mode="managed_service" but the managed_service object
+    itself is missing entirely - rejected deterministically BEFORE
+    run_managed_service_verification is ever called. Uses a DENY_ALL
+    verification-only subtask (_runtime_verifier_ctx, the same shape as
+    test_run_attempt_application_runtime_verification_only_never_calls_
+    developer above) so "zero Developer calls" is a genuine, direct
+    guarantee - not conflated with a mutating subtask's own unrelated
+    initial-generation call for the files it legitimately owns."""
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for a malformed verification contract"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=_managed_service_judgment(managed_service=None))
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    with patch("kriya.workflow.attempt.run_managed_service_verification") as mock_run_managed_service:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
+    assert "MANAGED_SERVICE_CONTRACT_INVALID" in exc_info.value.failure.message
+    mock_run_managed_service.assert_not_called()
+    assert not developer.run_generation.called
+
+
+@pytest.mark.asyncio
+async def test_compound_server_and_probe_managed_service_contract_is_rejected(tmp_path):
+    """(10) A managed_service.service_command that itself contains "&&"
+    (the model fell back to shell-compound text instead of the structured
+    probe field) is rejected the same way as a missing contract - never
+    reaches run_managed_service_verification, zero Developer calls (same
+    DENY_ALL verification-only shape as the test above)."""
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for a malformed verification contract"),
+    )
+    compound_judgment = _managed_service_judgment()
+    compound_judgment["managed_service"]["service_command"] = [
+        "python", "manage.py", "runserver", "&&", "curl", "http://localhost:8000/customers/health",
+    ]
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=compound_judgment)
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    with patch("kriya.workflow.attempt.run_managed_service_verification") as mock_run_managed_service:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
+    assert "shell-compound" in exc_info.value.failure.message
+    mock_run_managed_service.assert_not_called()
+    assert not developer.run_generation.called
+
+
+def test_looks_like_shell_compound_command_detects_forbidden_shapes():
+    """Direct unit coverage of the shell-compound detector's boundary -
+    every forbidden shape from the spec, plus the ordinary shapes that must
+    NOT be flagged (a real launcher script as a plain argument, a token
+    that merely CONTAINS an ampersand as part of a value)."""
+    assert _looks_like_shell_compound_command(["python", "manage.py", "runserver", "&&", "curl", "x"])
+    assert _looks_like_shell_compound_command(["sh", "-c", "runserver && curl"])
+    assert _looks_like_shell_compound_command(["nohup", "python", "manage.py", "runserver"])
+    assert _looks_like_shell_compound_command(["python", "manage.py", "runserver", ";", "curl", "x"])
+    assert not _looks_like_shell_compound_command(["bash", "start_server.sh"])
+    assert not _looks_like_shell_compound_command(["python", "manage.py", "runserver", "--flag=a&b"])
+    assert not _looks_like_shell_compound_command(["python", "manage.py", "runserver"])
+
+
+@pytest.mark.asyncio
+async def test_finite_commands_with_ordinary_shell_looking_argv_remain_unaffected(tmp_path):
+    """(11) A genuine finite_command judgment is never routed through the
+    managed-service validator at all, even when one of its own argv tokens
+    happens to contain an ampersand as a literal value (not a shell
+    operator) - execution_mode="finite_command" short-circuits before
+    _validate_and_convert_managed_service_contract is ever consulted."""
+    app_path = "app.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": app_path, "content": "print('hi')\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "execution_mode": "finite_command",
+        "run_commands": [["python", app_path, "--flag=a&b"]], "managed_service": None,
+        "command_source": "inferred", "success_criteria": "prints hi",
+    })
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "printed hi", "likely_files": []})
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Print hi.", architect_files=[app_path], expected_files_upfront=[app_path],
+        architect_basename_to_path={"app.py": app_path},
+        allowed_write_relpaths=[app_path], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        required_verification=[{
+            "type": "judgment", "description": "prints hi", "tool_name": None,
+            "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={"success": True, "timed_out": False, "returncode": 0, "output": "hi", "steps": []},
+    ) as mock_run_app_sequence, patch(
+        "kriya.workflow.attempt.run_managed_service_verification",
+    ) as mock_run_managed_service:
+        await run_attempt(state, ctx)
+
+    mock_run_app_sequence.assert_called_once()
+    mock_run_managed_service.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prv17_managed_service_semantic_shape_never_constructs_compound_command(tmp_path):
+    """One additional acceptance condition (2026-09-03): through the REAL
+    production path (run_attempt(), a real EngineeringPlan with s1/s4 stage
+    ownership, a mocked RunVerifierAgent.judge() - no live LLM), prove
+    Kriya can produce/consume exactly the PRV-17 behavioral intent:
+        service: manage.py runserver
+        probe:   GET /customers/health
+        expected: 200
+    WITHOUT ever constructing `runserver && curl` as a single command -
+    the literal tokens "runserver" and "curl" must never appear together
+    in the same argv list anywhere in what reaches the execution
+    primitive."""
+    plan = _managed_service_plan()
+    views_py = "customers/views.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=_managed_service_judgment(
+        managed_service={
+            "service_command": ["python", "manage.py", "runserver"],
+            "readiness": {"kind": "http", "host": "127.0.0.1", "port": 8000, "path": "/customers/health"},
+            "probe": {
+                "kind": "http", "method": "GET", "host": "127.0.0.1", "port": 8000,
+                "path": "/customers/health", "expected_status": 200,
+            },
+        },
+    ))
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal=(
+            "Create a Python 3.12 Django application. Requirements:\n"
+            "- Use Django.\n- Provide one Django project and one application named `customers`.\n"
+            "- Expose a `/customers/health` HTTP endpoint returning JSON: {\"status\": \"ok\"}\n"
+            "- Add an automated test for the endpoint.\n"
+        ),
+        architect_files=[views_py], expected_files_upfront=[views_py],
+        architect_basename_to_path={"views.py": views_py},
+        allowed_write_relpaths=[views_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+        required_verification=[{
+            "type": "judgment", "description": "GET /customers/health returns 200",
+            "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {"manage.py"}
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.workflow.attempt.run_managed_service_verification",
+        return_value=_managed_service_probe_result(),
+    ) as mock_run_managed_service:
+        await run_attempt(state, ctx)  # must not raise
+
+    mock_run_managed_service.assert_called_once()
+    (spec,), _kwargs = mock_run_managed_service.call_args
+    assert spec.service_command == ["python", "manage.py", "runserver"]
+    assert spec.probe.method == "GET"
+    assert spec.probe.path == "/customers/health"
+    assert spec.probe.expected_status == 200
+    all_argv_lists = [spec.service_command]
+    for argv in all_argv_lists:
+        joined = set(argv)
+        assert not ({"runserver"} <= joined and "curl" in joined)
+        assert "&&" not in argv
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_stops_before_developer_call_on_verification_contract_defect(tmp_path):
+    """PRV-17 Runtime Verification Contract Closure (2026-09-03), issue #3:
+    a verifier orchestration/contract failure (the run-verification judge
+    inferred an unexecutable contract - e.g. an input_channel that can't
+    resolve to a concrete argv/stdin shape) must stop before another
+    Developer call, with zero retry-budget changes. Already correctly
+    implemented by existing machinery: verification_infrastructure_
+    failure is hardcoded into this function's own environment_failure
+    terminal-type set (state.environment_failure gets set unconditionally
+    for this failure.type, a few lines above the classify_environment_
+    failure() branch), which routes through the pre-existing RetryAction.
+    STOP_ENVIRONMENT path - the same mechanism this session's unrecoverable-
+    scope-denial and no-authorized-repair-target fixes already reuse. This
+    test locks that behavior in as a regression guard, not a new fix."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = QualityGateFailure(Failure(
+        type="verification_infrastructure_failure",
+        message="RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE: input_channel could not be "
+                "resolved to a concrete argv/stdin shape",
+        raw_output="RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE",
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.environment_failure is not None
+    assert "RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE" in state.environment_failure
 
 
 def test_verification_only_java_grounding_outranks_inferred_maven_exec():

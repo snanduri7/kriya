@@ -2209,19 +2209,49 @@ class RunVerifierAgent(BaseAgent):
             "You decide whether a goal describes observable RUNTIME BEHAVIOR (e.g. \"send a "
             "message and print the result\", \"start a server and respond to a request\") that "
             "compiling and passing the existing test suite would NOT actually verify.\n"
-            "Only self-terminating/batch entrypoints can be verified this way - a script or app "
-            "that runs, does its work, and exits on its own. Do not propose running a long-lived "
-            "server/daemon that never exits by itself.\n"
+            "Two execution shapes exist, and you must pick the right one:\n"
+            "FINITE_COMMAND - a script or app that runs, does its work, and exits on its own. "
+            "Use this for everything that terminates by itself, exactly as before.\n"
+            "MANAGED_SERVICE - the goal requires starting a foreground application/service that "
+            "does NOT exit on its own (a server, a daemon, anything meant to keep listening) and "
+            "then separately checking its behavior while it's running (e.g. \"start a server and "
+            "respond to a request\", \"expose an HTTP endpoint\"). Kriya runs this as a real "
+            "managed lifecycle - start the service, wait until it's actually ready, run one "
+            "bounded probe against it, then terminate it - so you must NEVER represent this as a "
+            "single run_commands sequence that starts the service and then runs a second command "
+            "after it (that second command would never run, since the first one never exits on "
+            "its own). Whenever verification needs a foreground service plus a later probe, set "
+            "execution_mode to \"managed_service\" and describe the service and the probe as "
+            "SEPARATE structured fields below - never combine them into one shell command.\n"
             "Return ONLY a JSON object, no markdown fences, no extra commentary, with exactly "
             "these fields:\n"
             "{\n"
             '  "should_run": true or false,\n'
+            '  "execution_mode": "finite_command" or "managed_service",\n'
             '  "run_commands": [["executable", "arg1", "arg2"], ...] or null,\n'
+            '  "managed_service": null, or (only when execution_mode is "managed_service") {\n'
+            '    "service_command": ["executable", "arg1", "arg2"],\n'
+            '    "readiness": {"kind": "http" or "tcp", "host": "127.0.0.1", "port": <int>, "path": "/some/path"},\n'
+            '    "probe": {"kind": "http", "method": "GET", "host": "127.0.0.1", "port": <int>, "path": "/some/path", "expected_status": 200, "expected_body_contains": "text" or null},\n'
+            '    "startup_timeout_seconds": <number>, "probe_timeout_seconds": <number>, "shutdown_timeout_seconds": <number>\n'
+            "  },\n"
             '  "command_source": "goal_explicit" or "inferred",\n'
             '  "input_channel": "argv" or "stdin" or "none",\n'
             '  "success_criteria": "one or two sentences describing what observable output would prove success",\n'
             '  "reasoning": "one or two sentences explaining WHY should_run is what it is"\n'
             "}\n"
+            "For execution_mode \"finite_command\", set managed_service to null and use "
+            "run_commands exactly as always. For execution_mode \"managed_service\", set "
+            "run_commands to null and populate managed_service instead - service_command is the "
+            "argv that starts the service (the SAME shape as a run_commands entry, one process, "
+            "never a shell string with && / ; / & / nohup in it); readiness/probe host/port must "
+            "be the actual host/port the service will bind to per the goal/design (default "
+            "127.0.0.1 when the goal doesn't say otherwise); readiness.path is what Kriya polls "
+            "until the service answers (often the same endpoint the probe itself checks, or a "
+            "dedicated health path if the goal names one); probe is the ONE bounded behavioral "
+            "check that proves the goal's described endpoint/behavior actually works. Omit any "
+            "timeout field you have no specific reason to change - Kriya fills in a sensible "
+            "default.\n"
             "input_channel says HOW the running application receives the external value the goal "
             "describes it acting on, independent of whatever literal command you return: "
             "\"argv\" when the goal describes reading a value from a command-line argument/parameter "
@@ -2309,10 +2339,12 @@ class RunVerifierAgent(BaseAgent):
             "them). Compile with -d to an isolated class-output directory, then run with java "
             "-cp pointing at that same directory and the fully-qualified main class name "
             "(including its declared package; never a source path or .java/.class extension).\n"
-            "If there is no runnable, self-terminating "
-            "entrypoint at all (a library, a config file, a long-running service, or the goal doesn't "
-            "describe observable behavior), set should_run to false, run_commands to null, and "
-            "success_criteria to an empty string."
+            "If there is no runnable entrypoint at all worth verifying (a library, a config file, "
+            "or the goal doesn't describe observable behavior), set should_run to false, "
+            "execution_mode to \"finite_command\", run_commands to null, managed_service to null, "
+            "and success_criteria to an empty string - this is different from a long-running "
+            "service the goal DOES want verified, which uses execution_mode \"managed_service\" "
+            "above instead, not should_run=false."
         )
 
     async def judge(
@@ -2383,15 +2415,15 @@ class RunVerifierAgent(BaseAgent):
             )
         except Exception as e:
             logger.warning(f"Run Verifier judge() call failed entirely, skipping run verification: {e}")
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "reasoning": f"judge() call failed entirely: {e}", "infrastructure_error": str(e)}
+            return {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None, "command_source": "inferred", "success_criteria": "", "reasoning": f"judge() call failed entirely: {e}", "infrastructure_error": str(e)}
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
             logger.warning(f"Run Verifier judge() returned unparseable JSON, skipping run verification: {e}")
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "reasoning": f"judge() response was unparseable JSON: {e}", "infrastructure_error": f"unparseable response: {e}"}
+            return {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None, "command_source": "inferred", "success_criteria": "", "reasoning": f"judge() response was unparseable JSON: {e}", "infrastructure_error": f"unparseable response: {e}"}
 
         if not isinstance(parsed, dict):
-            return {"should_run": False, "run_commands": None, "command_source": "inferred", "success_criteria": "", "reasoning": "judge() response was not a JSON object", "infrastructure_error": "response was not a JSON object"}
+            return {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None, "command_source": "inferred", "success_criteria": "", "reasoning": "judge() response was not a JSON object", "infrastructure_error": "response was not a JSON object"}
 
         raw_commands = parsed.get("run_commands")
         # Tolerate a model still returning the old single-command shape
@@ -2438,9 +2470,32 @@ class RunVerifierAgent(BaseAgent):
 
         success_criteria = parsed.get("success_criteria") or ""
         reasoning = parsed.get("reasoning") or ""
+        # Managed Runtime Verification (2026-09-03): execution_mode picks
+        # which of the two structured shapes this judgment is - the SAME
+        # tolerant-coercion discipline every other field on this response
+        # already uses (an unrecognized value degrades to the existing,
+        # backward-compatible "finite_command" behavior rather than
+        # propagating something the execution layer wouldn't recognize).
+        # managed_service is passed through as-is (only requiring it be a
+        # JSON object, nothing deeper) - the deterministic admission check
+        # that actually validates its inner shape (service_command/
+        # readiness/probe/timeouts, and rejects a shell-compound
+        # service_command) lives at the execution boundary
+        # (kriya/workflow/attempt.py::_validate_and_convert_managed_service_
+        # contract), not here, matching input_channel's own "structured
+        # fact, enforced downstream" precedent immediately below.
+        raw_execution_mode = parsed.get("execution_mode")
+        execution_mode = raw_execution_mode if raw_execution_mode in ("finite_command", "managed_service") else "finite_command"
+        raw_managed_service = parsed.get("managed_service")
+        managed_service = raw_managed_service if isinstance(raw_managed_service, dict) else None
         return {
-            "should_run": _coerce_bool_field(parsed.get("should_run"), "should_run", "Run Verifier judge()") and run_commands is not None,
+            "should_run": (
+                _coerce_bool_field(parsed.get("should_run"), "should_run", "Run Verifier judge()")
+                and (managed_service is not None if execution_mode == "managed_service" else run_commands is not None)
+            ),
+            "execution_mode": execution_mode,
             "run_commands": run_commands,
+            "managed_service": managed_service,
             "command_source": parsed.get("command_source") if parsed.get("command_source") in ("goal_explicit", "inferred") else "inferred",
             # Runtime Verification Contract (PRV-06, 2026-08-29) - "detection
             # knows more than execution remembers" was the root of a live

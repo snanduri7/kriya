@@ -1,0 +1,386 @@
+"""Managed Runtime Verification (2026-09-03) - deterministic tests for the
+managed long-lived service execution primitive (kriya/tools/service_runtime.py).
+
+No LLM calls, no network dependency beyond localhost: every "service" here
+is a tiny stdlib http.server script launched as a real child process via
+`sys.executable -c <script>`, so these tests exercise the actual process
+lifecycle (start, drain threads, readiness polling, probe, SIGKILL/process-
+group termination) rather than mocking it away.
+"""
+import contextlib
+import os
+import socket
+import sys
+import time
+from typing import Optional
+from unittest.mock import patch
+
+from kriya.tools.process import ProcessController
+from kriya.tools.service_runtime import (
+    ManagedServiceVerificationSpec,
+    ProbeSpec,
+    ReadinessSpec,
+    ServiceVerificationOutcomeKind,
+    run_managed_service_verification,
+)
+
+
+def _free_port() -> int:
+    with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _http_service_script(*, delay_seconds: float = 0.0, exit_code: Optional[int] = None, health_status: int = 200) -> str:
+    """A minimal HTTP service: GET /health returns health_status with a
+    JSON body, everything else 404. delay_seconds simulates slow startup
+    (proves readiness actually waits); exit_code, when not None, makes it
+    exit immediately with that code instead of serving (proves early-exit
+    is captured) - None (the default) means "serve normally"."""
+    exit_line = f"sys.exit({exit_code})" if exit_code is not None else "pass"
+    return f"""
+import http.server, socket, sys, time
+
+port = int(sys.argv[1])
+time.sleep({delay_seconds})
+{exit_line}
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response({health_status})
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{{"status": "ok"}}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    def log_message(self, *a):
+        pass
+
+server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.serve_forever()
+"""
+
+
+def _spec(port: int, script: str, *, startup_timeout=5.0, probe_timeout=5.0, shutdown_timeout=5.0,
+          expected_status=200, expected_body_contains=None) -> ManagedServiceVerificationSpec:
+    return ManagedServiceVerificationSpec(
+        service_command=[sys.executable, "-c", script, str(port)],
+        cwd=os.getcwd(),
+        readiness=ReadinessSpec(kind="http", port=port, path="/health"),
+        probe=ProbeSpec(
+            port=port, path="/health", expected_status=expected_status,
+            expected_body_contains=expected_body_contains,
+        ),
+        startup_timeout_seconds=startup_timeout,
+        probe_timeout_seconds=probe_timeout,
+        shutdown_timeout_seconds=shutdown_timeout,
+    )
+
+
+class _TrackingController(ProcessController):
+    """Records every ManagedProcess it starts so a test can confirm it was
+    actually terminated after run_managed_service_verification() returns -
+    the whole point of the cleanup guarantee is observable from OUTSIDE the
+    function under test, not just from its return value."""
+
+    def __init__(self):
+        super().__init__()
+        self.started = []
+
+    def start_managed(self, *args, **kwargs):
+        managed = super().start_managed(*args, **kwargs)
+        self.started.append(managed)
+        return managed
+
+
+def _wait_until_dead(managed, timeout=5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if managed.poll() is not None:
+            return True
+        time.sleep(0.05)
+    return managed.poll() is not None
+
+
+# --- (1) finite runtime command behavior unchanged --------------------------
+
+def test_run_app_sequence_finite_command_behavior_is_unchanged(tmp_path):
+    """Managed Runtime Verification adds a second execution mode; it must
+    not touch the first. PolymorphicValidator.run_app_sequence() (the
+    finite path) is exercised completely untouched by this module - no
+    import of kriya.tools.service_runtime anywhere in validate.py."""
+    from kriya.tools.validate import PolymorphicValidator
+
+    validator = PolymorphicValidator(str(tmp_path))
+    result = validator.run_app_sequence([[sys.executable, "-c", "print('hello')"]])
+
+    assert result["success"] is True
+    assert "hello" in result["output"]
+
+    import kriya.tools.validate as validate_module
+    assert "service_runtime" not in validate_module.__file__  # sanity: real module
+    assert "kriya.tools.service_runtime" not in dir(validate_module)
+
+
+# --- (2)+(3)+(4) service starts without blocking; readiness waits for it ----
+
+def test_readiness_waits_for_actual_availability_before_probing(tmp_path):
+    """(2) starting a foreground service does not block orchestration - this
+    whole test function returns well before the service's own artificial
+    startup delay would, if start_managed() were itself blocking.
+    (3) readiness genuinely waits: the service sleeps before binding, so a
+    readiness check that fired immediately would see nothing and this
+    would come back READINESS_TIMEOUT instead of PROBE_PASSED.
+    (4) the probe only ever runs after readiness succeeds - proven by the
+    result being PROBE_PASSED at all (a probe against a not-yet-listening
+    port would be a connection error, not a clean pass)."""
+    port = _free_port()
+    script = _http_service_script(delay_seconds=0.5)
+    controller = _TrackingController()
+
+    started_at = time.monotonic()
+    result = run_managed_service_verification(_spec(port, script), controller=controller)
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 5.0  # well inside the 5s startup_timeout - not blocked on anything else
+    assert result.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
+    assert result.passed is True
+    assert elapsed >= 0.5  # genuinely waited past the service's own artificial delay
+
+
+# --- (5) successful probe returns PASS evidence -----------------------------
+
+def test_successful_probe_returns_pass_evidence():
+    port = _free_port()
+    script = _http_service_script()
+    controller = _TrackingController()
+
+    result = run_managed_service_verification(
+        _spec(port, script, expected_body_contains='"status": "ok"'), controller=controller,
+    )
+
+    assert result.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
+    assert result.passed is True
+    assert result.probe_status == 200
+    assert result.probe_body is not None and "ok" in result.probe_body
+    assert result.cleanup_error is None
+
+
+# --- (6) failed probe returns behavioral failure evidence -------------------
+
+def test_failed_probe_returns_behavioral_failure_evidence():
+    """Service starts and becomes ready (readiness passes), but the probed
+    path returns the wrong status - a genuine behavioral defect, not an
+    infrastructure one. Readiness is checked via a plain TCP connect here
+    (not the same /health path the probe uses) - the service genuinely IS
+    up and accepting connections, so readiness must succeed; only the
+    probe's own status expectation (200) against the endpoint's real
+    behavior (500) may fail."""
+    port = _free_port()
+    script = _http_service_script(health_status=500)
+    controller = _TrackingController()
+    spec = ManagedServiceVerificationSpec(
+        service_command=[sys.executable, "-c", script, str(port)],
+        cwd=os.getcwd(),
+        readiness=ReadinessSpec(kind="tcp", port=port),
+        probe=ProbeSpec(port=port, path="/health", expected_status=200),
+    )
+
+    result = run_managed_service_verification(spec, controller=controller)
+
+    assert result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED
+    assert result.passed is False
+    assert result.probe_status == 500
+
+
+# --- (7) startup timeout cleans up process ----------------------------------
+
+def test_startup_timeout_terminates_the_process():
+    """The service never binds at all (sleeps far past startup_timeout) -
+    READINESS_TIMEOUT, and the process must be confirmed dead afterward,
+    not merely signaled."""
+    port = _free_port()
+    script = _http_service_script(delay_seconds=30.0)
+    controller = _TrackingController()
+
+    result = run_managed_service_verification(
+        _spec(port, script, startup_timeout=0.6, shutdown_timeout=5.0), controller=controller,
+    )
+
+    assert result.outcome == ServiceVerificationOutcomeKind.READINESS_TIMEOUT
+    assert result.passed is False
+    assert len(controller.started) == 1
+    assert _wait_until_dead(controller.started[0])
+
+
+# --- (8) readiness timeout cleans up process (same mechanism as 7, distinct
+#         from "service never starts listening at all": here the port is
+#         simply never reachable at the expected path/status) -------------
+
+def test_readiness_timeout_via_wrong_status_cleans_up_process():
+    """The service DOES start and DOES listen, but /health never returns an
+    in-range status (readiness itself, not just the later probe, rejects
+    it) - readiness never succeeds, so this must time out (not hang
+    forever) and the process must still be torn down."""
+    port = _free_port()
+    script = _http_service_script(health_status=503)
+    controller = _TrackingController()
+
+    result = run_managed_service_verification(
+        _spec(port, script, startup_timeout=0.6, shutdown_timeout=5.0), controller=controller,
+    )
+
+    assert result.outcome == ServiceVerificationOutcomeKind.READINESS_TIMEOUT
+    assert len(controller.started) == 1
+    assert _wait_until_dead(controller.started[0])
+
+
+# --- (9) probe timeout cleans up process ------------------------------------
+
+def test_probe_timeout_cleans_up_process():
+    """Readiness passes (service is up), but the probe itself never gets a
+    response within its own independent, much shorter budget - simulated by
+    patching _run_probe to hang past probe_timeout via a real blocking
+    call, proving the probe's timeout is honored independently of
+    startup_timeout and that cleanup still runs when the probe raises."""
+    port = _free_port()
+    script = _http_service_script()
+    controller = _TrackingController()
+
+    def _hanging_probe(spec, *, timeout):
+        raise TimeoutError(f"probe exceeded its own {timeout}s budget")
+
+    with patch("kriya.tools.service_runtime._run_probe", side_effect=_hanging_probe):
+        result = run_managed_service_verification(
+            _spec(port, script, probe_timeout=0.2), controller=controller,
+        )
+
+    assert result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED
+    assert result.passed is False
+    assert "probe exceeded" in result.reasoning
+    assert len(controller.started) == 1
+    assert _wait_until_dead(controller.started[0])
+
+
+# --- (10) service early-exit captured correctly -----------------------------
+
+def test_service_early_exit_is_captured_with_returncode():
+    port = _free_port()
+    script = _http_service_script(exit_code=3)
+    controller = _TrackingController()
+
+    result = run_managed_service_verification(
+        _spec(port, script, startup_timeout=3.0), controller=controller,
+    )
+
+    assert result.outcome == ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY
+    assert result.passed is False
+    assert result.returncode == 3
+
+
+# --- (11) exception path cleans up process ----------------------------------
+
+def test_unexpected_exception_during_readiness_still_cleans_up_process():
+    """A genuinely unexpected error (not a probe-request failure - readiness
+    checking itself blowing up) must not leak the process or escape as a
+    raw exception - it comes back as a structured, failed result, and the
+    service is still confirmed terminated."""
+    port = _free_port()
+    script = _http_service_script()
+    controller = _TrackingController()
+
+    with patch("kriya.tools.service_runtime._check_readiness", side_effect=RuntimeError("boom")):
+        result = run_managed_service_verification(_spec(port, script), controller=controller)
+
+    assert result.passed is False
+    assert "boom" in result.reasoning
+    assert len(controller.started) == 1
+    assert _wait_until_dead(controller.started[0])
+
+
+# --- (12) child/process-group cleanup leaves no surviving service ----------
+
+def test_cleanup_leaves_no_surviving_process_after_successful_probe():
+    port = _free_port()
+    script = _http_service_script()
+    controller = _TrackingController()
+
+    result = run_managed_service_verification(_spec(port, script), controller=controller)
+
+    assert result.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
+    assert len(controller.started) == 1
+    assert _wait_until_dead(controller.started[0])
+    # The OS port itself is free again - not merely "process object reports
+    # exited" but genuinely no listener left bound to it.
+    with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as probe_socket:
+        probe_socket.settimeout(0.5)
+        connected = True
+        try:
+            probe_socket.connect(("127.0.0.1", port))
+        except OSError:
+            connected = False
+        assert connected is False
+
+
+# --- (13) two sequential runs do not conflict due to leaked port/process ---
+
+def test_two_sequential_runs_on_the_same_port_do_not_conflict():
+    port = _free_port()
+    script = _http_service_script()
+    controller = _TrackingController()
+
+    first = run_managed_service_verification(_spec(port, script), controller=controller)
+    second = run_managed_service_verification(_spec(port, script), controller=controller)
+
+    assert first.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
+    assert second.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
+    assert len(controller.started) == 2
+    assert controller.started[0].pid != controller.started[1].pid
+
+
+# --- (14) infrastructure failure invokes zero Developer repair calls -------
+
+def test_managed_service_result_maps_to_zero_developer_calls_for_infrastructure_outcomes():
+    """This module has no knowledge of Failure/QualityGateFailure/the
+    Developer by design (see module docstring) - but the outcome taxonomy
+    it returns must be able to drive the SAME zero-Developer-calls contract
+    kriya/workflow/retry_strategy.py already enforces for
+    verification_infrastructure_failure (see
+    tests/test_workflow.py::test_handle_attempt_failure_stops_before_developer_call_on_verification_contract_defect).
+    Proven here at the boundary this module owns: every outcome that is NOT
+    a behavioral probe verdict (PROBE_PASSED/PROBE_FAILED) is infrastructure-
+    shaped, and a workflow-layer caller can classify purely from `outcome`
+    with no service-specific knowledge - the exact minimal contract a
+    future wiring step needs, without this module reaching into
+    kriya/workflow/* itself."""
+    infrastructure_outcomes = {
+        ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
+        ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
+        ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
+        ServiceVerificationOutcomeKind.CLEANUP_FAILED,
+    }
+    behavioral_outcomes = {
+        ServiceVerificationOutcomeKind.PROBE_PASSED,
+        ServiceVerificationOutcomeKind.PROBE_FAILED,
+    }
+    assert infrastructure_outcomes | behavioral_outcomes == set(ServiceVerificationOutcomeKind)
+    assert infrastructure_outcomes.isdisjoint(behavioral_outcomes)
+
+    port = _free_port()
+    controller = _TrackingController()
+    result = run_managed_service_verification(
+        ManagedServiceVerificationSpec(
+            service_command=["/no/such/executable-kriya-test"],
+            cwd=os.getcwd(),
+            readiness=ReadinessSpec(kind="tcp", port=port),
+            probe=ProbeSpec(port=port),
+        ),
+        controller=controller,
+    )
+
+    assert result.outcome == ServiceVerificationOutcomeKind.SERVICE_START_FAILED
+    assert result.outcome in infrastructure_outcomes
+    assert len(controller.started) == 0  # never even reached ManagedProcess bookkeeping

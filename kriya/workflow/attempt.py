@@ -30,6 +30,13 @@ from kriya.core.kernel import Kernel
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode, normalize_workspace_relpath
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.tools.service_runtime import (
+    ManagedServiceVerificationSpec,
+    ProbeSpec,
+    ReadinessSpec,
+    ServiceVerificationOutcomeKind,
+    run_managed_service_verification,
+)
 from kriya.tools.validate import get_pom_dependencies
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
@@ -1795,6 +1802,48 @@ def _build_workspace_type_index(state: GenerationState, ctx: "AttemptContext") -
         return {}
 
 
+def _runtime_verification_is_advisory_only(ctx: "AttemptContext", judgment: Dict[str, Any]) -> bool:
+    """The ONE authority for "is this subtask allowed to actually execute
+    the run-verification judge's inferred command right now" - PRV-17
+    (2026-09-03). ctx.goal for a bounded MA6 subtask always includes the
+    full, unmediated "Authoritative Goal" section (build_subtask_goal_
+    text(), the PRV-11 authority-isolation fix) - deliberately, so judge()
+    can still recognize a goal-explicit run command - but judge() itself
+    has no per-subtask stage-scoping equivalent to SpecComplianceAgent's
+    own _stage_scoped_spec_compliance_goal() (that fix's own docstring:
+    "this gate's own prompt below is the other half of that fix" - judge()
+    was never given the other half). ctx.runtime_verification_required IS
+    already computed correctly per-subtask (workflow_controller.py, from
+    THIS subtask's own target.verification) - an inferred should_run=True
+    from a subtask whose own approved plan declares no runtime obligation
+    is judge()'s best-effort guess against the full goal text, not
+    evidence this specific, bounded subtask must satisfy runtime behavior
+    right now. A later subtask whose plan DOES declare the obligation
+    still runs this exact check for real - this only ever suppresses an
+    UNDECLARED inference, never a declared requirement (a no-op whenever
+    ctx.runtime_verification_required is True).
+
+    A live incident found TWO separate call sites independently re-
+    implementing "call judge(), maybe execute, maybe grade()"
+    (_execute_runtime_verification_directly for a DENY_ALL verification-
+    only subtask, and run_attempt()'s own much larger inline block for an
+    ordinary ALLOWLIST implementation subtask) - an earlier fix patched
+    only the first, so an ordinary scaffold subtask (ALLOWLIST, not
+    DENY_ALL - the common case) still executed a FUTURE-owned endpoint's
+    inferred `manage.py runserver` command. Both call sites now consult
+    this ONE function instead of each re-deriving the same decision - the
+    "second authority" is closed by construction, not by finding and
+    patching every copy by hand. Unstructured/legacy callers (ctx.
+    structured_plan is None) are completely unaffected - runtime_
+    verification_required there is already derived from the WHOLE goal,
+    matching pre-existing behavior exactly."""
+    return bool(
+        ctx.structured_plan is not None and ctx.current_subtask_id
+        and not ctx.runtime_verification_required
+        and judgment.get("should_run")
+    )
+
+
 def _required_runtime_verification_missing_message(judgment: Dict[str, Any]) -> str:
     """PRV-06 (2026-08-28): observability fix, not a behavioral one - the
     judge's own stated reasoning (RunVerifierAgent.judge()'s `reasoning`
@@ -1971,6 +2020,256 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
     )
 
 
+_SUPPORTED_RUNTIME_EXECUTION_MODES = frozenset({"finite_command", "managed_service"})
+
+_MANAGED_SERVICE_SHELL_MARKERS = frozenset({"&&", "||", ";", "&"})
+_MANAGED_SERVICE_FORBIDDEN_LEADING_EXECUTABLES = frozenset({"nohup", "sleep"})
+_SHELL_INTERPRETER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+
+_MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES = frozenset({
+    ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
+    ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
+    ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
+    ServiceVerificationOutcomeKind.CLEANUP_FAILED,
+})
+
+_MANAGED_SERVICE_READINESS_KINDS = frozenset({"tcp", "http"})
+_MANAGED_SERVICE_PROBE_KINDS = frozenset({"http"})
+
+
+def _resolve_execution_mode(judgment: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+    """Managed Runtime Verification (2026-09-03): (mode, error). error is
+    None for either of the two supported modes; anything else is itself a
+    verification-infrastructure defect, not a silent fallback to
+    finite_command - a caller passing an unsupported execution_mode is
+    exactly as unexecutable as a missing service_command, and must be
+    rejected the same way (RunVerifierAgent.judge() itself already
+    normalizes its own model-facing output to one of the two supported
+    values, matching every other tolerant-parsing field on that response -
+    this check exists for callers that construct/replay a judgment
+    directly, and as the single source of truth both runtime-verification
+    call sites consult, exactly like _runtime_verification_is_advisory_
+    only above)."""
+    execution_mode = judgment.get("execution_mode") or "finite_command"
+    if execution_mode not in _SUPPORTED_RUNTIME_EXECUTION_MODES:
+        return execution_mode, f"unsupported execution_mode {execution_mode!r}"
+    return execution_mode, None
+
+
+def _looks_like_shell_compound_command(command: Any) -> bool:
+    """Managed Runtime Verification (2026-09-03): the one thing a managed-
+    service judgment must never be allowed to smuggle through - a service-
+    start-then-probe intent re-encoded as a single shell-compound command
+    (`runserver && curl`, `runserver ; curl`, `nohup runserver &`, a
+    `sh -c "..."` wrapper) instead of the structured service_command/
+    readiness/probe fields MANAGED_SERVICE exists specifically to carry.
+    Deliberately narrow: `["bash", "start_server.sh"]` (a real launcher
+    script as an ordinary argument, no `-c`) is NOT flagged - only the
+    shapes that are actually shell orchestration are."""
+    if not isinstance(command, list) or not command or not all(isinstance(tok, str) for tok in command):
+        return False
+    executable = os.path.basename(command[0]).lower()
+    if executable in _MANAGED_SERVICE_FORBIDDEN_LEADING_EXECUTABLES:
+        return True
+    if executable in _SHELL_INTERPRETER_EXECUTABLES and "-c" in command:
+        return True
+    return any(tok in _MANAGED_SERVICE_SHELL_MARKERS for tok in command)
+
+
+def _validate_and_convert_readiness(raw: Any) -> Tuple[Optional[ReadinessSpec], Optional[str]]:
+    if not isinstance(raw, dict):
+        return None, "managed_service.readiness is missing or not a JSON object"
+    kind = raw.get("kind")
+    if kind not in _MANAGED_SERVICE_READINESS_KINDS:
+        return None, f"managed_service.readiness.kind must be one of {sorted(_MANAGED_SERVICE_READINESS_KINDS)}, got {kind!r}"
+    host = raw.get("host", "127.0.0.1")
+    if not isinstance(host, str) or not host:
+        return None, f"managed_service.readiness.host must be a non-empty string, got {host!r}"
+    port = raw.get("port")
+    if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
+        return None, f"managed_service.readiness.port must be an integer 1-65535, got {port!r}"
+    path = raw.get("path", "/")
+    if not isinstance(path, str) or (kind == "http" and not path.startswith("/")):
+        return None, f"managed_service.readiness.path must be a string starting with '/', got {path!r}"
+    return ReadinessSpec(kind=kind, host=host, port=port, path=path), None
+
+
+def _validate_and_convert_probe(raw: Any) -> Tuple[Optional[ProbeSpec], Optional[str]]:
+    if not isinstance(raw, dict):
+        return None, "managed_service.probe is missing or not a JSON object"
+    kind = raw.get("kind", "http")
+    if kind not in _MANAGED_SERVICE_PROBE_KINDS:
+        return None, f"managed_service.probe.kind must be one of {sorted(_MANAGED_SERVICE_PROBE_KINDS)}, got {kind!r}"
+    host = raw.get("host", "127.0.0.1")
+    if not isinstance(host, str) or not host:
+        return None, f"managed_service.probe.host must be a non-empty string, got {host!r}"
+    port = raw.get("port")
+    if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
+        return None, f"managed_service.probe.port must be an integer 1-65535, got {port!r}"
+    path = raw.get("path", "/")
+    if not isinstance(path, str) or not path.startswith("/"):
+        return None, f"managed_service.probe.path must be a string starting with '/', got {path!r}"
+    expected_status = raw.get("expected_status", 200)
+    if not isinstance(expected_status, int) or isinstance(expected_status, bool) or not (100 <= expected_status <= 599):
+        return None, f"managed_service.probe.expected_status must be an HTTP status integer, got {expected_status!r}"
+    method = raw.get("method", "GET")
+    if not isinstance(method, str) or not method:
+        return None, f"managed_service.probe.method must be a non-empty string, got {method!r}"
+    expected_body_contains = raw.get("expected_body_contains")
+    if expected_body_contains is not None and not isinstance(expected_body_contains, str):
+        return None, f"managed_service.probe.expected_body_contains must be a string or null, got {expected_body_contains!r}"
+    return ProbeSpec(
+        kind=kind, method=method, host=host, port=port, path=path,
+        expected_status=expected_status, expected_body_contains=expected_body_contains,
+    ), None
+
+
+def _validate_and_convert_managed_service_contract(
+    managed_service: Any, worktree_path: str,
+) -> Tuple[Optional[ManagedServiceVerificationSpec], Optional[str]]:
+    """Managed Runtime Verification (2026-09-03) - the deterministic
+    admission check a MANAGED_SERVICE judgment must pass BEFORE any
+    process starts. Mirrors _apply_runtime_verification_contract's own
+    (spec_or_none, reason_or_none) shape exactly: a non-None reason means
+    the caller raises VERIFICATION_INFRASTRUCTURE_FAILURE and calls
+    neither run_managed_service_verification() nor the Developer, the same
+    RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE precedent the finite-command
+    path already uses. Pure validation/conversion - no process is started,
+    no I/O happens here, nothing in this function can itself fail non-
+    deterministically. This is the one place a kriya.tools.service_runtime
+    type gets constructed from agent/workflow-facing data - the dependency
+    direction stays agent/workflow representation -> this conversion ->
+    kriya.tools.service_runtime's own execution spec, never the reverse
+    (kriya/tools/service_runtime.py imports nothing from kriya.workflow or
+    kriya.agents)."""
+    if not isinstance(managed_service, dict):
+        return None, "managed_service object is missing or not a JSON object"
+
+    service_command = managed_service.get("service_command")
+    if (
+        not isinstance(service_command, list) or not service_command
+        or not all(isinstance(tok, str) and tok for tok in service_command)
+    ):
+        return None, "managed_service.service_command is missing, empty, or not a list of non-empty strings"
+    if _looks_like_shell_compound_command(service_command):
+        return None, (
+            f"managed_service.service_command {service_command!r} looks like a shell-compound "
+            "invocation (&&, ;, &, nohup, sleep, or a shell -c wrapper) - the service and its "
+            "probe must be represented as separate structured fields, not one shell command"
+        )
+
+    readiness, readiness_error = _validate_and_convert_readiness(managed_service.get("readiness"))
+    if readiness_error:
+        return None, readiness_error
+    probe, probe_error = _validate_and_convert_probe(managed_service.get("probe"))
+    if probe_error:
+        return None, probe_error
+
+    timeout_fields = {}
+    for field_name, default in (
+        ("startup_timeout_seconds", 20.0),
+        ("probe_timeout_seconds", 10.0),
+        ("shutdown_timeout_seconds", 10.0),
+    ):
+        raw_value = managed_service.get(field_name, default)
+        if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool) or raw_value <= 0:
+            return None, f"managed_service.{field_name} must be a positive number, got {raw_value!r}"
+        timeout_fields[field_name] = float(raw_value)
+
+    return ManagedServiceVerificationSpec(
+        service_command=service_command, cwd=worktree_path,
+        readiness=readiness, probe=probe, **timeout_fields,
+    ), None
+
+
+async def _execute_managed_service_verification(
+    state: GenerationState, ctx: "AttemptContext", judgment: Dict[str, Any], known_files: List[str],
+) -> None:
+    """Managed Runtime Verification (2026-09-03) - the ONE place both
+    runtime-verification call sites route a MANAGED_SERVICE judgment
+    through, matching _runtime_verification_is_advisory_only's own "one
+    shared authority, not two independently-patched copies" precedent from
+    the previous PRV-17 round. Validates the judgment's managed_service
+    object deterministically before starting any process, converts it to
+    kriya.tools.service_runtime's own execution-layer spec type, runs it
+    (a plain blocking call - run_app_sequence() is called exactly the same
+    way a few lines away in the finite-command path, no new async pattern
+    introduced here), and maps the result onto the SAME Failure/
+    gate_outcome shapes the finite-command path already produces: no new
+    recovery system, no new ownership decision - WHETHER this subtask owns
+    the obligation was already decided above (advisory-only suppression,
+    ctx.runtime_verification_required) before this function is ever
+    called."""
+    spec, invalid_reason = _validate_and_convert_managed_service_contract(
+        judgment.get("managed_service"), ctx.worktree_path,
+    )
+    if invalid_reason:
+        message = f"MANAGED_SERVICE_CONTRACT_INVALID: {invalid_reason}"
+        logger.warning(message)
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+
+    logger.info(
+        "Quality Gates: Running managed_service verification: service=%s probe=%s %s:%d%s",
+        " ".join(spec.service_command), spec.probe.method, spec.probe.host, spec.probe.port, spec.probe.path,
+    )
+    pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
+    result = run_managed_service_verification(spec)
+    clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
+
+    output = f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+    if result.probe_status is not None:
+        output += f"\n\nprobe_status: {result.probe_status}\nprobe_body: {result.probe_body}"
+
+    if result.outcome in _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES:
+        message = (
+            f"VERIFICATION_INFRASTRUCTURE_FAILURE: managed-service verification could not "
+            f"produce behavioral evidence ({result.outcome.value}): {result.reasoning}\n\n"
+            f"Captured output:\n{output}"
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=output, attempt=state.attempt_number,
+        )
+        outcome_dict = failure.to_gate_outcome()
+        outcome_dict.update({
+            "commands": [spec.service_command], "managed_service_outcome": result.outcome.value,
+        })
+        state.gate_outcomes.append(outcome_dict)
+        raise QualityGateFailure(failure)
+
+    if result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED:
+        message = (
+            f"RUNTIME VERIFICATION FAILURE (managed service): {result.reasoning}"
+            f"\n\nCaptured output:\n{output}"
+        )
+        failure = _build_quality_gate_failure(
+            "run_verification", message, output, ctx.worktree_path, known_files, state.attempt_number,
+        )
+        failure_outcome = failure.to_gate_outcome()
+        failure_outcome.update({
+            "graded_by": "managed_service_probe", "commands": [spec.service_command],
+            "managed_service_outcome": result.outcome.value,
+        })
+        state.gate_outcomes.append(failure_outcome)
+        raise QualityGateFailure(failure)
+
+    # PROBE_PASSED - successful runtime evidence, deterministic (the probe's
+    # own status/body match IS the verdict, no LLM grade() call needed -
+    # same "process exit is already the authoritative verdict" precedent
+    # deterministic_sequence_kind's test/compile commands already use.
+    state.gate_outcomes.append({
+        "attempt": state.attempt_number, "type": "run_verification", "success": True,
+        "output": output + f"\n\n[Managed service probe]: {result.reasoning}",
+        "graded_by": "managed_service_probe", "commands": [spec.service_command],
+        "managed_service_outcome": result.outcome.value, "deterministic_result": "PASS",
+    })
+
+
 async def _execute_runtime_verification_directly(
     state: GenerationState, ctx: "AttemptContext", validator: "PolymorphicValidator",
 ) -> None:
@@ -2100,33 +2399,7 @@ async def _execute_runtime_verification_directly(
         )
         state.gate_outcomes.append(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
-    if (
-        ctx.structured_plan is not None and ctx.current_subtask_id
-        and not ctx.runtime_verification_required
-        and judgment.get("should_run")
-    ):
-        # Stage-scoped verification (PRV-17, 2026-09-03): ctx.goal for a
-        # bounded MA6 subtask always includes the full, unmediated
-        # "Authoritative Goal" section (build_subtask_goal_text(), the
-        # authority-isolation fix, PRV-11) - deliberately, so this SAME
-        # judge() call can still recognize a goal-explicit run command.
-        # judge() itself has no per-subtask stage-scoping equivalent to
-        # SpecComplianceAgent's own _stage_scoped_spec_compliance_goal()
-        # (that fix's own docstring: "this gate's own prompt below is the
-        # other half of that fix" - judge() was never given the other
-        # half). ctx.runtime_verification_required IS already computed
-        # correctly per-subtask (workflow_controller.py, from this
-        # subtask's own target.verification) - an inferred should_run=True
-        # here, from a subtask whose OWN approved plan declares no runtime
-        # obligation, is judge()'s best-effort guess against the full goal
-        # text, not evidence THIS subtask must satisfy runtime behavior
-        # right now. Treated as advisory only: never executed or graded as
-        # a real gate - a later subtask whose plan DOES declare the
-        # obligation still runs this exact check for real, unaffected (this
-        # branch is a no-op whenever ctx.runtime_verification_required is
-        # True). Unstructured/legacy callers (ctx.structured_plan is None)
-        # are completely unaffected - runtime_verification_required there
-        # is already derived from the WHOLE goal, matching today's behavior.
+    if _runtime_verification_is_advisory_only(ctx, judgment):
         logger.info(
             "Run-verification judge inferred should_run=True, but this subtask's own "
             "approved plan declares no runtime-verification obligation - treating as "
@@ -2135,6 +2408,18 @@ async def _execute_runtime_verification_directly(
         )
         return
     if not judgment.get("should_run"):
+        return
+    execution_mode, execution_mode_error = _resolve_execution_mode(judgment)
+    if execution_mode_error:
+        message = f"MANAGED_SERVICE_CONTRACT_INVALID: {execution_mode_error}"
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    if execution_mode == "managed_service":
+        await _execute_managed_service_verification(state, ctx, judgment, known_files)
         return
     if deterministic_sequence_kind(judgment.get("run_commands") or []) == "build":
         message = (
@@ -5287,6 +5572,31 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             else:
                 logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
             judgment = state.cached_run_verification_judgment
+            if _runtime_verification_is_advisory_only(ctx, judgment):
+                # PRV-17 (2026-09-03): the SAME authority _execute_runtime_
+                # verification_directly() consults for a DENY_ALL
+                # verification-only subtask - this is the OTHER, much more
+                # common call site (an ordinary ALLOWLIST implementation
+                # subtask's own candidate-gates run-verification), which a
+                # prior fix missed entirely: patching only the DENY_ALL copy
+                # left this one free to still execute a FUTURE-owned
+                # endpoint's inferred command for an ordinary scaffold
+                # subtask. Forcing should_run False here (rather than an
+                # early return) lets every later section of this same
+                # attempt - candidate_gates_succeeded, Spec Compliance, etc.
+                # - proceed exactly as it already does for judge()'s own
+                # genuine should_run=False verdict, matching precedent
+                # already established a few lines below for the Java-
+                # entrypoint self-heal.
+                logger.info(
+                    "Run-verification judge inferred should_run=True, but this subtask's own "
+                    "approved plan declares no runtime-verification obligation - treating as "
+                    "advisory only, not executing (a later subtask that DOES own this "
+                    "obligation still runs it for real)."
+                )
+                judgment = dict(judgment)
+                judgment["should_run"] = False
+                judgment["run_commands"] = None
             if ctx.runtime_verification_required and not judgment.get("should_run"):
                 message = _required_runtime_verification_missing_message(judgment)
                 failure = Failure(
@@ -5295,6 +5605,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
+            execution_mode, execution_mode_error = _resolve_execution_mode(judgment)
+            if execution_mode_error:
+                message = f"MANAGED_SERVICE_CONTRACT_INVALID: {execution_mode_error}"
+                failure = Failure(
+                    type="verification_infrastructure_failure", message=message,
+                    raw_output=message, attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+            if judgment.get("should_run") and execution_mode == "managed_service":
+                await _execute_managed_service_verification(
+                    state, ctx, judgment,
+                    sorted(set(state.all_files_written) | set(ctx.established_files)),
+                )
+                return
             if (
                 ctx.runtime_verification_required
                 and judgment.get("should_run")

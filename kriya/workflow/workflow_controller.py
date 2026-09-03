@@ -737,6 +737,46 @@ def build_structured_plan_repair_prompt(
             "verification through an earlier or unrelated producer. Keep depends_on and "
             "requires -> provides aligned with the same responsible owner.\n"
         )
+    if "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in reason_codes:
+        # PRV-17 Run 8 diagnostic audit (2026-09-03): the structured
+        # record _stack_dependent_verification_prerequisite_evidence()
+        # (plan_validation.py) attaches to validate_plan()'s own
+        # `evidence` list - {consumer_subtask, required_tool,
+        # candidate_manifests} - already reaches this function's
+        # `validation_evidence` parameter (workflow_controller.py extends
+        # it straight from validation.evidence), but was silently dropped
+        # here: the `prerequisite_evidence` filter above requires a
+        # `provider_subtask` key this record never has (there IS no
+        # provider yet - that's the entire reason the record exists), and
+        # unlike every other reason_code in this function, nothing
+        # consumed it into an actionable correction - the reason code
+        # string and free-text error alone reached the repair prompt,
+        # with no explicit "add a provider, order it ahead" instruction
+        # the way SUBTASK_REQUIREMENT_UNPROVIDED/MISSING_GROUNDED_
+        # PRODUCTION_ARTIFACT/etc. above already get. Generic by
+        # construction - required_tool/candidate_manifests come from
+        # plan_validation.py's own _TOOL_MANIFEST_BASENAMES table (every
+        # supported ecosystem, not just Python/Django), so this carries no
+        # framework-specific special case.
+        manifest_missing_evidence = [
+            item for item in (validation_evidence or [])
+            if item.get("consumer_subtask") and item.get("required_tool") and item.get("candidate_manifests")
+        ]
+        if manifest_missing_evidence:
+            targeted_correction += "- Establish the missing dependency-provisioning prerequisite:\n"
+            for item in manifest_missing_evidence:
+                manifests = "/".join(item["candidate_manifests"])
+                targeted_correction += (
+                    f"  Consumer: subtask={item['consumer_subtask']} runs "
+                    f"{item['required_tool']}-dependent verification\n"
+                    f"  Required repair: add a subtask (or extend an existing upstream one) that "
+                    f"plans one of these dependency manifests: {manifests}\n"
+                    f"  Ordering requirement: that manifest-planning subtask must be CURRENT or "
+                    f"PAST_ORDERED relative to {item['consumer_subtask']} - add it to "
+                    f"{item['consumer_subtask']}.depends_on (directly or transitively) so it is "
+                    "established before the verification consumer runs. Do not remove or weaken "
+                    "the verification itself to satisfy this.\n"
+                )
     if "UNKNOWN_GLOBAL_INVARIANT" in reason_codes:
         targeted_correction += (
             "- For each subtask the errors name as referencing an unknown global invariant id: "
