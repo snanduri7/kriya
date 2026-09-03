@@ -2443,7 +2443,7 @@ async def test_run_attempt_ordinary_test_failure_records_no_process_boundary_obl
         with pytest.raises(QualityGateFailure) as exc_info:
             await run_attempt(state, ctx)
 
-    assert exc_info.value.failure.type == "run_verification"
+    assert exc_info.value.failure.type == "test"
     assert ledger.current(_process_boundary_obligation_id("s3")) is None
     assert ledger.ids_by_kind(ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY) == []
 
