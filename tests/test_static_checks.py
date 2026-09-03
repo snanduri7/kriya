@@ -12,8 +12,26 @@ from kriya.workflow.static_checks import (
     IgniteUnclosedResourceCheck,
     MismatchedFileTypeContentCheck,
     TestContradictsVerificationMarkerCheck,
+    MarkdownInlineCodeLeakCheck,
     run_static_checks,
 )
+
+
+def test_python_markdown_leak_check_ignores_strings_docstrings_and_comments():
+    check = MarkdownInlineCodeLeakCheck()
+    assert check.check({"asgi.py": '"""Expose ``application``.\nRST :setting:`NAME`."""\napplication = object()\n'}) is None
+    assert check.check({"settings.py": "# configure `django` here\nDEBUG = False\n"}) is None
+    assert check.check({
+        "urls.py": '"""Django URL configuration.\nSee ``urlpatterns``.\n"""\nurlpatterns = []\n',
+        "wsgi.py": '"""WSGI config for project."""\napplication = None\n',
+    }) is None
+
+
+def test_python_markdown_leak_check_rejects_prose_outside_valid_syntax():
+    check = MarkdownInlineCodeLeakCheck()
+    result = check.check({"views.py": "Here is the `Django` implementation:\n```python\npass\n```\n"})
+    assert result is not None
+    assert "markdown_inline_code" not in result  # check returns evidence, caller adds the rule name
 
 _METHOD_MIXING_JAVA = """
 public class ProtocolApp {

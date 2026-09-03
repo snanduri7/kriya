@@ -2266,6 +2266,7 @@ class WorkflowEngine:
             structured_plan=structured_plan,
             current_subtask_id=current_subtask_id,
             obligation_ledger=resolved_obligation_ledger,
+            completed_subtask_ids=completed_subtask_ids or frozenset(),
         )
 
         from kriya.workflow.retry_policy import decide_for_state

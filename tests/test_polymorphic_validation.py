@@ -237,6 +237,14 @@ def test_deterministic_verification_classifier_separates_builds_from_runtime():
     assert deterministic_verification_kind(["mvn", "-f", "sub/pom.xml", "verify"]) == "test"
     assert deterministic_verification_kind(["./mvnw", "test"]) == "test"
     assert deterministic_verification_kind(["python", "-m", "pytest", "-q"]) == "test"
+    assert deterministic_verification_kind(["pytest", "-q"]) == "test"
+    assert deterministic_verification_kind(["python", "-m", "unittest"]) == "test"
+    assert deterministic_verification_kind(
+        ["python", "-m", "django", "test", "customers.tests"]
+    ) == "test"
+    assert deterministic_verification_kind(["mvn", "test"]) == "test"
+    assert deterministic_verification_kind(["python", "-m", "django", "runserver"]) is None
+    assert deterministic_verification_kind(["python", "app.py"]) is None
     assert deterministic_verification_kind(["mvn", "spring-boot:run"]) is None
     assert deterministic_verification_kind(["mvn", "exec:java"]) is None
     assert deterministic_verification_kind(["gradle", "run"]) is None

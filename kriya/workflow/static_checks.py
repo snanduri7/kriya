@@ -50,6 +50,10 @@ just one more retry cycle, not a hard block.
 """
 import os
 import re
+import ast
+import io
+import tokenize
+from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 from typing import Dict, Iterable, Optional, Tuple
 
@@ -418,11 +422,42 @@ class MarkdownInlineCodeLeakCheck(StaticCheck):
 
     name = "markdown_inline_code_leak"
 
+    @staticmethod
+    def _python_executable_regions(content: str) -> Optional[str]:
+        """Return Python with strings/comments blanked, or None if invalid.
+
+        Token positions are preserved closely enough for the textual leak
+        diagnostic while valid docstrings, ordinary strings, and comments
+        are excluded from consideration deterministically.
+        """
+        try:
+            ast.parse(content)
+            tokens = tokenize.generate_tokens(io.StringIO(content).readline)
+            lines = content.splitlines(keepends=True)
+            for token in tokens:
+                if token.type not in (tokenize.STRING, tokenize.COMMENT):
+                    continue
+                (start_line, start_col), (end_line, end_col) = token.start, token.end
+                for line_index in range(start_line - 1, end_line):
+                    line = lines[line_index]
+                    left = start_col if line_index == start_line - 1 else 0
+                    right = end_col if line_index == end_line - 1 else len(line.rstrip("\r\n"))
+                    lines[line_index] = line[:left] + (" " * max(0, right - left)) + line[right:]
+            return "".join(lines)
+        except (SyntaxError, tokenize.TokenError, IndentationError):
+            return None
+
     def check(self, files: Dict[str, str]) -> Optional[str]:
         for filepath, content in sorted(files.items()):
-            if os.path.splitext(filepath)[1].lower() not in _BACKTICK_ILLEGAL_EXTENSIONS:
+            extension = os.path.splitext(filepath)[1].lower()
+            if extension not in _BACKTICK_ILLEGAL_EXTENSIONS:
                 continue
-            for line_number, line in enumerate((content or "").splitlines(), start=1):
+            scan_content = content or ""
+            if extension == ".py":
+                tokenized = self._python_executable_regions(scan_content)
+                if tokenized is not None:
+                    scan_content = tokenized
+            for line_number, line in enumerate(scan_content.splitlines(), start=1):
                 stripped = line.lstrip()
                 if not stripped or stripped.startswith(("//", "#", "/*", "*", "--")):
                     continue
@@ -717,6 +752,14 @@ _GOAL_FAMILY_PATTERNS: Dict[str, "re.Pattern"] = {
 }
 
 
+@dataclass(frozen=True)
+class StackContract:
+    languages: Tuple[str, ...]
+    frameworks: Tuple[str, ...]
+    substitution_policy: str = "FORBID"
+    authority: str = "USER_GOAL"
+
+
 def _goal_declared_family(goal: str) -> Optional[str]:
     """The single, unambiguous language family the goal text names - None
     if the goal names zero families (nothing to check against) OR two-plus
@@ -725,6 +768,38 @@ def _goal_declared_family(goal: str) -> Optional[str]:
     check's business to referee)."""
     matched = {family for family, pattern in _GOAL_FAMILY_PATTERNS.items() if pattern.search(goal or "")}
     return next(iter(matched)) if len(matched) == 1 else None
+
+
+def derive_stack_contract(goal: str) -> Optional[StackContract]:
+    family = _goal_declared_family(goal)
+    if family is None:
+        return None
+    lowered = (goal or "").lower()
+    frameworks = tuple(name for name in ("django", "spring") if name in lowered)
+    return StackContract(languages=(family,), frameworks=frameworks)
+
+
+def validate_stack_contract_artifacts(
+    contract: Optional[StackContract], artifact_paths: Iterable[str],
+) -> Optional[str]:
+    """Validate only artifacts inside the requested change boundary."""
+    if contract is None or contract.substitution_policy != "FORBID":
+        return None
+    requested = contract.languages[0]
+    for filepath in sorted(artifact_paths):
+        ecosystem = _ecosystem_for_marker(filepath)
+        family = _MARKER_ECOSYSTEM_FAMILY.get(ecosystem) if ecosystem else None
+        normalized = filepath.replace("\\", "/").lower()
+        if family is None and normalized.endswith((".java", ".kt", ".kts")):
+            family = "java"
+        elif family is None and normalized.endswith(".py"):
+            family = "python"
+        if family is not None and family != requested:
+            return (
+                f"STACK_CONTRACT_VIOLATION: {filepath} belongs to {family!r}, but the "
+                f"authoritative USER_GOAL requests {requested!r}; substitution_policy=FORBID"
+            )
+    return None
 
 
 def find_goal_stack_mismatch(goal: str, all_files_written: Iterable[str]) -> Optional[str]:
@@ -742,11 +817,19 @@ def find_goal_stack_mismatch(goal: str, all_files_written: Iterable[str]) -> Opt
     only). Only ONE mismatch is ever reported (first found, sorted
     iteration), matching this module's own "first violation wins"
     convention."""
-    declared_family = _goal_declared_family(goal)
+    contract = derive_stack_contract(goal)
+    declared_family = contract.languages[0] if contract else None
     if declared_family is None:
         return None
 
-    for filepath in sorted(all_files_written):
+    artifacts = tuple(all_files_written)
+    contract_violation = validate_stack_contract_artifacts(
+        contract, (path for path in artifacts if _ecosystem_for_marker(path) is None),
+    )
+    if contract_violation:
+        return contract_violation
+
+    for filepath in sorted(artifacts):
         ecosystem = _ecosystem_for_marker(filepath)
         if ecosystem is None:
             continue

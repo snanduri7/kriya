@@ -12,13 +12,14 @@ stays in workflow.py - out of scope for this slice.
 """
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import re
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.agents.contracts import (
@@ -67,7 +68,13 @@ from kriya.workflow.operations import (
     operation_for_file,
     validate_operation_result,
 )
-from kriya.workflow.static_checks import find_established_stack_drift, find_goal_stack_mismatch, run_static_checks
+from kriya.workflow.static_checks import (
+    derive_stack_contract,
+    find_established_stack_drift,
+    find_goal_stack_mismatch,
+    run_static_checks,
+    validate_stack_contract_artifacts,
+)
 from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.acceptance import (
@@ -508,6 +515,7 @@ class AttemptContext:
     # existing tests (predating MA8) keeps working unchanged - every real
     # call site always supplies one.
     obligation_ledger: Optional["ObligationLedger"] = None
+    completed_subtask_ids: FrozenSet[str] = frozenset()
 
 
 def _process_boundary_obligation_id(subtask_id: str) -> str:
@@ -1308,7 +1316,15 @@ def _raise_runtime_verification_infrastructure_failure(
     run_result: Dict[str, Any],
     commands: List[List[str]],
 ) -> None:
-    """Stop verifier-owned launch failures before grading/source repair."""
+    """Stop application-launch failures before grading/source repair.
+
+    Build/test runners are process-based too, but their process status is
+    already the deterministic verdict.  Entrypoint-shaped text in their
+    output therefore belongs to test/build execution and must never be
+    reinterpreted by application-runtime infrastructure handling.
+    """
+    if deterministic_sequence_kind(commands) is not None:
+        return
     reason = runtime_verification_infrastructure_reason(run_result)
     if reason is None:
         return
@@ -2178,8 +2194,10 @@ async def _execute_runtime_verification_directly(
         state.toolchain_warning = (
             f"{state.toolchain_warning} {exec_pin_correction}" if state.toolchain_warning else exec_pin_correction
         )
+    command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
     logger.info(
-        "Quality Gates: Running runtime verification (verification-only subtask): "
+        "Quality Gates: Running %s verification (verification-only subtask): "
+        % (command_verification_kind or "application_runtime")
         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
     )
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
@@ -2192,7 +2210,7 @@ async def _execute_runtime_verification_directly(
         state, run_res, resolved_run_commands,
     )
 
-    gate_type = "run_verification"
+    gate_type = "test" if command_verification_kind == "test" else "run_verification"
     verification_authority = "llm"
     if run_res["timed_out"]:
         contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
@@ -2538,6 +2556,47 @@ def _spec_requirements_naming_planner_only_identifiers(
 
 def _goal_spec_requirement_obligation_id(subtask_id: str) -> str:
     return f"attempt.subtask.{subtask_id}.goal_spec_requirement"
+
+
+def _stage_scoped_spec_compliance_goal(ctx: "AttemptContext") -> tuple[str, List[str]]:
+    """Return only obligations due at the current structured-plan stage.
+
+    The top-level goal remains the authority used to validate the plan.  Once
+    that plan is approved, however, its acceptance-criterion ownership is the
+    deterministic schedule for *when* each final requirement can be demanded.
+    Feeding the whole final goal to every intermediate candidate gate made a
+    project-scaffold stage fail for an endpoint explicitly owned by a later
+    application stage.  Unstructured callers retain the historical behavior.
+    """
+    plan = ctx.structured_plan
+    current_id = ctx.current_subtask_id
+    if plan is None or not current_id:
+        return ctx.goal, []
+    current = plan.subtask_by_id(current_id)
+    if current is None:
+        return ctx.goal, []
+
+    criteria = {criterion.id: criterion.description for criterion in plan.acceptance_criteria}
+    due = [criteria[cid] for cid in current.acceptance_criteria_ids if cid in criteria]
+    invariants = {invariant.id: invariant.statement for invariant in plan.global_invariants}
+    due.extend(
+        invariants[iid] for iid in current.relevant_global_invariant_ids if iid in invariants
+    )
+    future_ids = sorted({
+        cid
+        for subtask in plan.subtasks
+        if subtask.id != current_id and subtask.id not in ctx.completed_subtask_ids
+        for cid in subtask.acceptance_criteria_ids
+    })
+    scoped = (
+        f"Current approved subtask: {current.id}\n"
+        f"Current implementation obligation: {current.description}\n"
+        "Acceptance requirements due at this stage:\n"
+        + ("\n".join(f"- {item}" for item in due) if due else "- None beyond the current implementation obligation")
+        + "\nOnly decide whether this current stage satisfies the requirements listed above. "
+          "Requirements assigned to unfinished later subtasks are pending, not violated."
+    )
+    return scoped, future_ids
 
 
 def _goal_spec_evidence_fingerprint(goal: str, file_contents: Dict[str, str]) -> str:
@@ -4428,6 +4487,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # history. Same all_files_written-only scoping as the check
             # above, same reasoning.
             static_violation = find_goal_stack_mismatch(ctx.goal, state.all_files_written)
+        stack_contract = derive_stack_contract(ctx.grounding_goal or ctx.goal)
+        stack_decision = validate_stack_contract_artifacts(
+            stack_contract, state.all_files_written,
+        )
+        logger.info(
+            "STACK_CONTRACT_BOUNDARY %s",
+            json.dumps({
+                "boundary": "candidate",
+                "languages": list(getattr(stack_contract, "languages", ())),
+                "frameworks": list(getattr(stack_contract, "frameworks", ())),
+                "decision": "REJECT" if stack_decision else "PASS",
+            }, sort_keys=True),
+        )
         if static_violation:
             # _build_quality_gate_failure() (not a bare Failure(...)), matching the
             # SAME construction every other Quality Gate type already uses (compile/
@@ -5243,8 +5315,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             f"{state.toolchain_warning} {exec_pin_correction}"
                             if state.toolchain_warning else exec_pin_correction
                         )
+                    command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
                     logger.info(
-                        "Quality Gates: Running runtime verification: "
+                        "Quality Gates: Running %s verification: "
+                        % (command_verification_kind or "application_runtime")
                         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
                     )
                     # Snapshot/clean around the actual execution, not just once
@@ -5267,7 +5341,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     _raise_runtime_verification_infrastructure_failure(
                         state, run_res, resolved_run_commands,
                     )
-                    gate_type = "run_verification"
+                    gate_type = (
+                        "test" if command_verification_kind == "test"
+                        else "run_verification"
+                    )
                     # Set unconditionally (only ever reassigned in the "plain
                     # nonzero exit, no hang" branch below - see its own
                     # comment for why the other two branches are deliberately
@@ -5784,6 +5861,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # See SpecComplianceAgent's own docstring (kriya/agents/agent.py) for the live
     # incident (ignite_qpid_protocol milestone 1, 2026-08-21) this closes.
     if ctx.kernel.config.autonomy.spec_compliance_enabled:
+        compliance_goal, pending_acceptance_ids = _stage_scoped_spec_compliance_goal(ctx)
+        if ctx.structured_plan is not None and ctx.current_subtask_id:
+            logger.info(
+                "STAGE_OBLIGATION_SCOPE %s",
+                json.dumps({
+                    "subtask_id": ctx.current_subtask_id,
+                    "decision": "CURRENT_STAGE_ONLY",
+                    "pending_acceptance_criteria_ids": pending_acceptance_ids,
+                }, sort_keys=True),
+            )
         # A bounded consumer is judged against both its own candidate and the
         # already-verified upstream contracts it consumes. Restricting this to
         # files written by the current subtask made compliance incorrectly say
@@ -5812,12 +5899,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             _goal_spec_requirement_obligation_id(ctx.current_subtask_id)
             if ctx.current_subtask_id else None
         )
-        goal_spec_evidence_fingerprint = _goal_spec_evidence_fingerprint(ctx.goal, spec_file_contents)
+        goal_spec_evidence_fingerprint = _goal_spec_evidence_fingerprint(compliance_goal, spec_file_contents)
         settled_goal_spec = _settled_goal_spec_requirement(
             ctx.obligation_ledger, goal_spec_obligation_id, goal_spec_evidence_fingerprint,
         )
         spec_result = await ctx.spec_compliance.check(
-            goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
+            goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
             authoritative_context=authoritative_context,
         )
         if spec_result.get("status") == "indeterminate":
@@ -5833,7 +5920,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # move the same problem (an unreliable LLM verdict as sole
             # authority) in the opposite direction.
             spec_result = await ctx.spec_compliance.check(
-                goal=ctx.goal, files_written=spec_check_files, file_contents=spec_file_contents,
+                goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
                 authoritative_context=authoritative_context,
             )
         if spec_result.get("status") == "indeterminate":

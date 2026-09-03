@@ -23,6 +23,7 @@ from kriya.workflow.plan_schema import (
 from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.triage import ChangeKind
+from kriya.workflow.static_checks import derive_stack_contract
 
 
 def _plan(subtasks, **overrides):
@@ -95,6 +96,58 @@ async def test_runtime_and_test_verifiers_have_distinct_owners(tmp_path):
     assert result.valid is True
     assert tests.verification[0].verifier_kind is VerifierKind.TEST
     assert runtime.verification[0].requires_application_runtime is True
+
+
+@pytest.mark.asyncio
+async def test_integration_provider_must_be_upstream_of_consumer(tmp_path):
+    provider = _model_subtask(
+        id="views", description="create views",
+        planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)],
+    )
+    early_consumer = _model_subtask(
+        id="urls", description="wire urls",
+        planned_files=[PlannedFile(path="customers_project/urls.py", action=FileAction.CREATE)],
+    )
+    relationship = IntegrationRelationship(
+        id="urls-import-views", kind=IntegrationRelationshipKind.USES,
+        producer_subtask_ids=["views"], consumer_subtask_ids=["urls"],
+        participating_artifacts=["customers/views.py", "customers_project/urls.py"],
+        relationship_statement="urls imports customers.views",
+    )
+
+    rejected = await validate_plan(
+        _plan([early_consumer, provider], integration_relationships=[relationship]),
+        workspace_path=str(tmp_path),
+    )
+    assert rejected.valid is False
+    assert "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM" in rejected.reason_codes
+
+    late_consumer = early_consumer.model_copy(update={"depends_on": ["views"]})
+    accepted = await validate_plan(
+        _plan([provider, late_consumer], integration_relationships=[relationship]),
+        workspace_path=str(tmp_path),
+    )
+    assert accepted.valid is True
+
+
+@pytest.mark.asyncio
+async def test_plan_validation_enforces_authoritative_stack_contract(tmp_path):
+    contract = derive_stack_contract("Build a Python Django application")
+    django = _plan([_model_subtask(
+        planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)],
+    )])
+    spring = _plan([_model_subtask(
+        planned_files=[PlannedFile(path="src/main/java/App.java", action=FileAction.CREATE)],
+    )])
+
+    assert (await validate_plan(
+        django, workspace_path=str(tmp_path), stack_contract=contract,
+    )).valid is True
+    rejected = await validate_plan(
+        spring, workspace_path=str(tmp_path), stack_contract=contract,
+    )
+    assert rejected.valid is False
+    assert "AUTHORITATIVE_STACK_SUBSTITUTION" in rejected.reason_codes
 
 
 def _planned_prerequisite_plan(*, artifact_requires, consumer_requires, consumer_depends_on):
@@ -1132,7 +1185,10 @@ async def test_integration_relationship_unknown_subtask_id_is_an_error(tmp_path)
 
 @pytest.mark.asyncio
 async def test_valid_integration_relationship_seeds_pending_terminal_obligation(tmp_path):
-    s2 = _model_subtask(id="s2", planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)])
+    s2 = _model_subtask(
+        id="s2", depends_on=["s3"],
+        planned_files=[PlannedFile(path="App.java", action=FileAction.CREATE)],
+    )
     s3 = _model_subtask(id="s3", planned_files=[PlannedFile(path="InMemoryService.java", action=FileAction.CREATE)])
     plan = _plan([s2, s3]).model_copy(update={
         "integration_relationships": [IntegrationRelationship(

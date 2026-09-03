@@ -30,6 +30,7 @@ from kriya.workflow.attempt import (
     _directly_executable_verifiers,
     _goal_spec_evidence_fingerprint,
     _goal_spec_requirement_obligation_id,
+    _stage_scoped_spec_compliance_goal,
     _initial_test_process_boundary_constraint,
     _materialize_candidate_content,
     _operation_map,
@@ -56,7 +57,14 @@ from kriya.workflow.obligations import (
     ObligationRecord,
     ObligationStatus,
 )
-from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
+from kriya.workflow.plan_schema import (
+    AcceptanceCriterion,
+    EngineeringPlan,
+    ExecutionMethod,
+    FileAction,
+    PlannedFile,
+    Subtask,
+)
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.repair_contract import (
     RepairContract,
@@ -2435,7 +2443,7 @@ async def test_run_attempt_ordinary_test_failure_records_no_process_boundary_obl
         with pytest.raises(QualityGateFailure) as exc_info:
             await run_attempt(state, ctx)
 
-    assert exc_info.value.failure.type == "test"
+    assert exc_info.value.failure.type == "run_verification"
     assert ledger.current(_process_boundary_obligation_id("s3")) is None
     assert ledger.ids_by_kind(ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY) == []
 
@@ -3604,11 +3612,46 @@ async def test_run_attempt_application_runtime_verifier_deterministic_process_ex
         with pytest.raises(QualityGateFailure) as exc_info:
             await run_attempt(state, ctx)
 
-    assert exc_info.value.failure.type == "run_verification"
+    assert exc_info.value.failure.type == "test"
     # graded_by is attached to the appended gate_outcomes dict directly, not
     # to Failure itself (matching the mutating path's identical pattern) -
     # check the actually-recorded outcome, not a fresh to_gate_outcome() call.
     assert state.gate_outcomes[-1]["graded_by"] == "process_exit"
+
+
+@pytest.mark.asyncio
+async def test_django_test_command_bypasses_application_entrypoint_infrastructure_classification(tmp_path):
+    """PRV-17 production path: a process-based test runner is still TEST."""
+    state = GenerationState()
+    developer = AsyncMock()
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["python", "-m", "django", "test", "customers.tests"]],
+        "command_source": "inferred",
+        "input_channel": "none",
+        "success_criteria": "customers tests pass",
+    })
+    run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("a deterministic test command must use process-exit authority"),
+    )
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        return_value={
+            "success": False, "timed_out": False, "returncode": 1,
+            "output": "ModuleNotFoundError: No module named 'nonexistent_entrypoint'",
+            "steps": [],
+        },
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "test"
+    assert exc_info.value.failure.type != "verification_infrastructure_failure"
+    assert state.gate_outcomes[-1]["graded_by"] == "process_exit"
+    assert not developer.run_generation.called
 
 
 @pytest.mark.asyncio
@@ -6744,11 +6787,9 @@ async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
     itself evidence Java (_goal_or_repo_targets_java(), 2026-08-06 fix) for
     the fact to be looked up at all - a stack-neutral goal no longer gets it
     just because Java happens to be installed on the machine running this.
-    Kept the generated file itself as plain Python (real, unmocked compile
-    via Python's own compile() builtin, no external tool dependency) -
-    _java_toolchain_fact() is gated purely on goal text/workspace markers,
-    resolved before any file exists, so what actually gets generated
-    afterward doesn't matter for what this test is checking."""
+    The candidate remains consistent with the authoritative Java stack; its
+    compile gate is mocked so this prompt-wiring test has no external JDK
+    dependency."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
@@ -6757,8 +6798,8 @@ async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
 
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code",
-        "Design: Write app.py",
-        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Design: Write App.java",
+        '[{"filepath": "App.java", "content": "class App {}"}]',
         "Review: Approved",
     ])
 
@@ -6768,7 +6809,10 @@ async def test_workflow_injects_target_jvm_fact_into_planner_prompt(tmp_path):
         "java_found": True, "java_version": "17",
         "mvn_found": True, "mvn_java_version": "26",
         "mismatch": True,
-    }):
+    }), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ):
         res = await we.run_generation_workflow(
             goal="Create a Java app",
             workspace_path=str(tmp_path)
@@ -7876,6 +7920,96 @@ async def test_run_attempt_passes_when_spec_compliant(tmp_path):
 
     spec_compliance.check.assert_called_once()
     assert any(g.get("type") == "goal_spec_compliance" and g.get("success") for g in state.gate_outcomes)
+
+
+@pytest.mark.asyncio
+async def test_prv17_scaffold_gate_defers_future_health_endpoint_before_retry(tmp_path):
+    """Production candidate gates evaluate only criteria owned by this stage."""
+    scaffold = Subtask(
+        id="s1", description="Create the Django project scaffold",
+        execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)],
+        acceptance_criteria_ids=["scaffold"],
+    )
+    customers = Subtask(
+        id="s2", description="Create customers app, view, and URL routing",
+        execution_method=ExecutionMethod.MODEL, depends_on=["s1"],
+        planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)],
+        acceptance_criteria_ids=["health"],
+    )
+    plan = EngineeringPlan(
+        plan_id="prv17", kind=ChangeKind.TASK, subtasks=[scaffold, customers],
+        acceptance_criteria=[
+            AcceptanceCriterion(id="scaffold", description="Django project scaffold exists"),
+            AcceptanceCriterion(
+                id="health", description='/customers/health returns {"status": "ok"}',
+            ),
+        ],
+    )
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "manage.py", "content": "#!/usr/bin/env python\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": True, "reasoning": "The scaffold requirement is satisfied.",
+        "missing_requirements": [], "likely_files": [],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    state = GenerationState()
+    state.all_files_written = {"manage.py"}
+    ctx = _minimal_attempt_ctx(
+        tmp_path, goal='Build Django API; /customers/health returns {"status": "ok"}',
+        developer=developer, architect_files=["manage.py"],
+        expected_files_upfront=["manage.py"],
+        architect_basename_to_path={"manage.py": "manage.py"},
+        spec_compliance=spec_compliance, kernel=Kernel(config=cfg),
+        structured_plan=plan, current_subtask_id="s1",
+        completed_subtask_ids=frozenset(),
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    checked_goal = spec_compliance.check.await_args.kwargs["goal"]
+    assert "Django project scaffold exists" in checked_goal
+    assert "/customers/health" not in checked_goal
+    assert developer.run_generation.await_count == 1
+    assert any(
+        outcome.get("type") == "goal_spec_compliance" and outcome.get("success")
+        for outcome in state.gate_outcomes
+    )
+
+
+def test_stage_scoped_goal_marks_later_acceptance_pending():
+    plan = EngineeringPlan(
+        plan_id="p", kind=ChangeKind.TASK,
+        acceptance_criteria=[
+            AcceptanceCriterion(id="now", description="scaffold exists"),
+            AcceptanceCriterion(id="later", description="health endpoint responds"),
+        ],
+        subtasks=[
+            Subtask(id="s1", description="scaffold", execution_method=ExecutionMethod.MODEL,
+                    acceptance_criteria_ids=["now"]),
+            Subtask(id="s2", description="endpoint", execution_method=ExecutionMethod.MODEL,
+                    depends_on=["s1"], acceptance_criteria_ids=["later"]),
+        ],
+    )
+    ctx = MagicMock(
+        structured_plan=plan, current_subtask_id="s1", completed_subtask_ids=frozenset(),
+        goal="whole final goal",
+    )
+    scoped, pending = _stage_scoped_spec_compliance_goal(ctx)
+    assert "scaffold exists" in scoped
+    assert "health endpoint responds" not in scoped
+    assert pending == ["later"]
 
 
 def test_settled_goal_spec_requirement_pure_function():

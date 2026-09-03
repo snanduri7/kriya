@@ -65,6 +65,7 @@ from kriya.workflow.plan_schema import (
     VerificationMethodType,
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
+from kriya.workflow.static_checks import StackContract, validate_stack_contract_artifacts
 
 import os
 
@@ -295,6 +296,7 @@ async def validate_plan(
     require_model_planned_files: bool = False,
     require_semantic_contracts: bool = False,
     runtime_verification_required: bool = False,
+    stack_contract: Optional[StackContract] = None,
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
 ) -> PlanValidationResult:
@@ -375,6 +377,13 @@ async def validate_plan(
                 "cannot own process exit, process termination, or process stdout/stderr evidence"
             )
             reason_codes.append("APPLICATION_RUNTIME_OWNER_MISSING")
+
+    stack_violation = validate_stack_contract_artifacts(
+        stack_contract, (pf.path for st in plan.subtasks for pf in st.planned_files),
+    )
+    if stack_violation:
+        errors.append(stack_violation)
+        reason_codes.append("AUTHORITATIVE_STACK_SUBSTITUTION")
 
     ids = [st.id for st in plan.subtasks]
     duplicate_ids = sorted({sid for sid in ids if ids.count(sid) > 1})
@@ -554,6 +563,19 @@ async def validate_plan(
             )
             reason_codes.append("INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK")
             continue
+        for consumer_id in rel.consumer_subtask_ids:
+            upstream = _transitive_dependencies(plan.subtasks).get(consumer_id, set())
+            missing_upstream = sorted(
+                producer_id for producer_id in rel.producer_subtask_ids
+                if producer_id != consumer_id and producer_id not in upstream
+            )
+            if missing_upstream:
+                errors.append(
+                    f"integration relationship {rel.id!r} consumer {consumer_id!r} can execute "
+                    f"before provider(s) {missing_upstream!r}; providers must be upstream through "
+                    "depends_on or integration must be owned by a later subtask"
+                )
+                reason_codes.append("PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM")
         obligation_id = f"plan.integration.{rel.id}"
         if obligation_ledger is not None and obligation_ledger.current(obligation_id) is None:
             # Seeded exactly once per relationship id - a later re-call of

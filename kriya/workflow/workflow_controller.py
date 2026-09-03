@@ -168,6 +168,7 @@ from kriya.workflow.edit_safety import (
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
+from kriya.workflow.static_checks import derive_stack_contract, validate_stack_contract_artifacts
 from kriya.workflow.planning_diagnostics import (
     bounded_repository_evidence,
     persist_planning_attempt_diagnostic,
@@ -1091,7 +1092,11 @@ def find_missing_grounded_production_artifacts(
     gaps: List[Dict[str, str]] = []
     seen = set()
     for source, targets in resolved_edges.items():
-        if not is_runnable_test_file(source) and classify_file_role(source) is not FileRole.TEST:
+        # Grounded import/reference evidence is an execution prerequisite for
+        # any planned code consumer, not only a test.  PRV-17 exposed the
+        # production form: urls.py imported a view owned by a later stage and
+        # was nevertheless required to compile first.
+        if source not in source_subtask_by_path:
             continue
         for target in targets:
             if is_runnable_test_file(target) or classify_file_role(target) in (
@@ -1120,6 +1125,15 @@ def find_missing_grounded_production_artifacts(
                     "test_file": source, "missing_production_artifact": target,
                     "owning_subtask": target_subtask_id, "reason": "not_in_dependency_chain",
                 })
+                continue
+            if not (
+                is_runnable_test_file(source)
+                or classify_file_role(source) is FileRole.TEST
+            ):
+                # For an ordinary production import, grounded provider-before-
+                # consumer ordering is the required intermediate-workspace
+                # invariant. Capability-name matching remains the stronger
+                # verification/FUTURE_OWNER rule for tests only.
                 continue
             target_subtask = plan.subtask_by_id(target_subtask_id)
             owner_capabilities = set(target_subtask.provides if target_subtask else [])
@@ -3157,6 +3171,17 @@ class WorkflowController:
             plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
             route=route, triage_service=self.workflow_engine.engineering_triage,
             runtime_verification_required=goal_requires_runtime_behavior(goal),
+            stack_contract=derive_stack_contract(goal),
+        )
+        shadow_stack_contract = derive_stack_contract(goal)
+        logger.info(
+            "STACK_CONTRACT_BOUNDARY %s",
+            json.dumps({
+                "boundary": "plan",
+                "languages": list(getattr(shadow_stack_contract, "languages", ())),
+                "frameworks": list(getattr(shadow_stack_contract, "frameworks", ())),
+                "decision": "PASS" if validation.valid else "REJECT",
+            }, sort_keys=True),
         )
         if not validation.valid:
             notes.append(f"plan failed validation: {validation.errors}")
@@ -3525,6 +3550,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         require_model_planned_files=True,
                         require_semantic_contracts=True,
                         runtime_verification_required=goal_requires_runtime_behavior(goal),
+                        stack_contract=derive_stack_contract(goal),
                         obligation_ledger=obligation_ledger, revision=repair_attempts,
                     )
                     errors.extend(validation.errors)
@@ -3597,6 +3623,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
             if plan is not None and not errors:
+                approved_stack_contract = derive_stack_contract(goal)
+                logger.info(
+                    "STACK_CONTRACT_BOUNDARY %s",
+                    json.dumps({
+                        "boundary": "plan",
+                        "languages": list(getattr(approved_stack_contract, "languages", ())),
+                        "frameworks": list(getattr(approved_stack_contract, "frameworks", ())),
+                        "decision": "PASS",
+                    }, sort_keys=True),
+                )
                 try:
                     persist_planning_attempt_diagnostic(
                         workspace_path, run_id,
@@ -4094,6 +4130,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         require_model_planned_files=True,
                         require_semantic_contracts=True,
                         runtime_verification_required=goal_requires_runtime_behavior(goal),
+                        stack_contract=derive_stack_contract(goal),
                     )
                     if prerequisite_validation.valid:
                         prior_hash = current_plan_hash
@@ -4254,6 +4291,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     require_model_planned_files=True,
                     require_semantic_contracts=True,
                     runtime_verification_required=goal_requires_runtime_behavior(goal),
+                    stack_contract=derive_stack_contract(goal),
                 )
                 if revision_validation.valid:
                     prior_hash = current_plan_hash
@@ -5227,6 +5265,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 all_completed = False
 
+        global_stack_contract_gap: Optional[str] = None
+        if all_completed:
+            terminal_stack_contract = derive_stack_contract(goal)
+            global_stack_contract_gap = validate_stack_contract_artifacts(
+                terminal_stack_contract,
+                (pf.path for st in plan.subtasks for pf in st.planned_files),
+            )
+            logger.info(
+                "STACK_CONTRACT_BOUNDARY %s",
+                json.dumps({
+                    "boundary": "terminal",
+                    "languages": list(getattr(terminal_stack_contract, "languages", ())),
+                    "frameworks": list(getattr(terminal_stack_contract, "frameworks", ())),
+                    "decision": "REJECT" if global_stack_contract_gap else "PASS",
+                }, sort_keys=True),
+            )
+            if global_stack_contract_gap:
+                all_completed = False
+
         # MA8 (spec §42/43) - a generic backstop layered ALONGSIDE the
         # migration-specific gate above, not a replacement for it (§43's
         # own explicit interim model: existing gates AND terminal MA8
@@ -5277,6 +5334,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["global_terminal_obligation_gap"] = global_terminal_obligation_gap
             logger.error(
                 f"WorkflowController enforce run {run_id!r}: {global_terminal_obligation_gap}"
+            )
+        if global_stack_contract_gap:
+            aggregated["global_stack_contract_gap"] = global_stack_contract_gap
+            logger.error(
+                f"WorkflowController enforce run {run_id!r}: {global_stack_contract_gap}"
             )
         if knowledge_gap_break is not None:
             # Overrides status/run_id above (not quality_gates_passed/subtask_
