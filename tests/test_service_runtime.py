@@ -10,7 +10,9 @@ group termination) rather than mocking it away.
 import contextlib
 import os
 import socket
+import subprocess
 import sys
+import threading
 import time
 from typing import Optional
 from unittest.mock import patch
@@ -21,6 +23,7 @@ from kriya.tools.service_runtime import (
     ProbeSpec,
     ReadinessSpec,
     ServiceVerificationOutcomeKind,
+    _run_probe,
     run_managed_service_verification,
 )
 
@@ -516,10 +519,106 @@ server.serve_forever()
 
     # The dribbling server takes 20 * 0.5s = 10s to actually finish
     # responding; a true wall-clock deadline returns well before that, not
-    # after ~10s.
+    # after ~10s. Whether the deadline is caught by this module's own
+    # explicit "remaining <= 0" check or by the underlying socket's own
+    # settimeout() (re-tightened to the same remaining budget every read)
+    # is a genuine, harmless race - either produces a timeout, just with a
+    # different message ("wall-clock" vs the raw socket.timeout "timed
+    # out") - so this only asserts the OUTCOME the fix is actually
+    # responsible for: bounded elapsed time and a failed, non-hanging probe.
     assert elapsed < 5.0
     assert result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED
-    assert "wall-clock" in result.reasoning
+    assert "timed out" in result.reasoning.lower() or "wall-clock" in result.reasoning
+
+
+def test_probe_wall_clock_timeout_closes_the_connection_and_leaks_no_thread():
+    """Stronger than "the caller returned on time" (external review,
+    2026-09-03, follow-up): Python threads cannot be forcibly cancelled, so
+    an earlier draft of this fix (ThreadPoolExecutor + future.result(timeout=...),
+    abandoning the worker on timeout) only unblocked the CALLER - the
+    background thread's urlopen()/resp.read() kept running and the socket
+    stayed open indefinitely, meaning the connection (and the server's own
+    belief that a client is still reading) could survive the entire
+    verification attempt regardless of Kriya's own timeout. _run_probe is
+    now fully synchronous (no thread at all) and closes its socket/response
+    explicitly in a finally block, so this proves the STRONGER property
+    directly: (1) _run_probe returns within its configured wall-clock
+    budget, (2) no thread is left running afterward, and (3) the dribbling
+    server's own next write actually fails (broken pipe/connection reset)
+    shortly after the deadline - proof the connection was really closed,
+    not merely that Kriya stopped waiting on it."""
+    import tempfile
+
+    port = _free_port()
+    marker_path = os.path.join(tempfile.gettempdir(), f"kriya-test-disconnect-marker-{port}")
+    if os.path.exists(marker_path):
+        os.unlink(marker_path)
+    script = f"""
+import http.server, time
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Length", "200")
+        self.end_headers()
+        try:
+            for _ in range(200):
+                self.wfile.write(b"x")
+                self.wfile.flush()
+                time.sleep(0.3)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            with open({marker_path!r}, "w") as f:
+                f.write("disconnected")
+    def log_message(self, *a):
+        pass
+
+server = http.server.HTTPServer(("127.0.0.1", {port}), Handler)
+server.serve_forever()
+"""
+    proc = subprocess.Popen([sys.executable, "-c", script])
+    try:
+        deadline = time.monotonic() + 5.0
+        ready = False
+        while time.monotonic() < deadline:
+            try:
+                with contextlib.closing(socket.create_connection(("127.0.0.1", port), timeout=0.2)):
+                    ready = True
+                    break
+            except OSError:
+                time.sleep(0.05)
+        assert ready, "dribbling test server never started listening"
+
+        probe = ProbeSpec(port=port, path="/slow", expected_status=200)
+        threads_before = threading.active_count()
+        started_at = time.monotonic()
+        raised = None
+        try:
+            _run_probe(probe, timeout=1.0)
+        except Exception as e:
+            raised = e
+        elapsed = time.monotonic() - started_at
+        threads_after = threading.active_count()
+
+        assert raised is not None and isinstance(raised, OSError)  # a real timeout, not a silent pass
+        assert elapsed < 3.0
+        assert threads_after == threads_before  # no probe-worker thread left running
+
+        # The dribbling server's OWN next write should fail (its peer
+        # closed the connection) well before its full ~60s write loop -
+        # direct, external proof the socket was actually closed, not just
+        # abandoned.
+        marker_deadline = time.monotonic() + 4.0
+        while time.monotonic() < marker_deadline and not os.path.exists(marker_path):
+            time.sleep(0.05)
+        assert os.path.exists(marker_path), (
+            "server never observed the client disconnect within 4s of the 1s probe timeout - "
+            "the connection was not actually closed on timeout"
+        )
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+        if os.path.exists(marker_path):
+            os.unlink(marker_path)
 
 
 def test_probe_connection_error_maps_to_probe_failed_but_internal_bug_maps_to_internal_error():

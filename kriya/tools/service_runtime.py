@@ -36,7 +36,7 @@ output marker, a gRPC health check) is a new branch, not a redesign.
 """
 from __future__ import annotations
 
-import concurrent.futures
+import http.client
 import time
 import urllib.error
 import urllib.request
@@ -164,41 +164,97 @@ def _check_readiness(spec: ReadinessSpec) -> bool:
     raise ValueError(f"Unsupported readiness kind: {spec.kind!r}")
 
 
-def _do_http_request(request: urllib.request.Request, *, timeout: float) -> Tuple[int, str]:
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as resp:
-            return resp.status, resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        return e.code, (e.read().decode("utf-8", errors="replace") if e.fp is not None else "")
+_PROBE_READ_CHUNK_BYTES = 65536
 
 
 def _run_probe(spec: ProbeSpec, *, timeout: float) -> Tuple[Optional[int], Optional[str], bool, str]:
+    """Correctness fix (2026-09-03, post-hardening review): the first draft
+    of this function bounded the overall probe with a ThreadPoolExecutor +
+    future.result(timeout=...) - that stops the CALLER waiting, but Python
+    threads cannot be forcibly cancelled, so the abandoned worker's
+    urlopen()/resp.read() call kept running and the socket stayed open
+    indefinitely, exactly the "probe worker survives verification" leak a
+    review caught. Rebuilt synchronously instead: a single http.client.
+    HTTPConnection, read in bounded chunks, re-tightening the socket's own
+    timeout to the REMAINING wall-clock budget before every blocking
+    operation (connect, each read) - and unconditionally conn.close()'d in
+    a finally block. Because this never spawns a thread, closing the
+    connection is a real, synchronous cancellation: the moment this
+    function returns (success or timeout), the socket is already closed in
+    the SAME call stack, not "abandoned and hopefully cleaned up later."
+    A server dribbling single bytes forever therefore sees its OWN next
+    write fail (broken pipe/connection reset) shortly after the deadline,
+    instead of continuing to believe a client is still reading."""
     if spec.kind != "http":
         raise ValueError(f"Unsupported probe kind: {spec.kind!r}")
     url = f"http://{spec.host}:{spec.port}{spec.path}"
     data = spec.body.encode("utf-8") if spec.body is not None else None
-    request = urllib.request.Request(url, data=data, headers=dict(spec.headers), method=spec.method)
-    # External review, 2026-09-03: urlopen's own `timeout` bounds each
-    # individual socket operation (connect/read), not the CUMULATIVE
-    # request - a server that keeps trickling response bytes can keep
-    # resp.read() alive past `timeout` without any single read() call ever
-    # exceeding it, defeating "probe bounded independently." Enforcing the
-    # real wall-clock deadline from OUTSIDE the HTTP client call via a
-    # bounded future gives an unconditional caller-side bound regardless of
-    # what the socket-level timeout does or doesn't catch; the worker
-    # thread is abandoned (shutdown(wait=False)) rather than joined, so a
-    # still-reading thread can never block this function past its own
-    # budget - it finishes or dies on its own, off Kriya's critical path.
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(_do_http_request, request, timeout=timeout)
+    deadline = time.monotonic() + timeout
+
+    conn = http.client.HTTPConnection(spec.host, spec.port, timeout=timeout)
+    sock = None
+    resp = None
     try:
-        status, body = future.result(timeout=timeout)
-    except concurrent.futures.TimeoutError:
-        executor.shutdown(wait=False)
-        raise TimeoutError(
-            f"probe against {url} did not complete within its {timeout}s wall-clock budget"
-        )
-    executor.shutdown(wait=False)
+        conn.request(spec.method, spec.path, body=data, headers=dict(spec.headers))
+        # Captured ONCE, right after the request is sent, and reused for
+        # every settimeout() call below - never re-read from conn.sock
+        # later. HTTPConnection.getresponse() itself sets conn.sock back to
+        # None for a will-close response (this module's own test server, a
+        # bare http.server.BaseHTTPRequestHandler, defaults to HTTP/1.0 -
+        # no keep-alive - so this is the COMMON case, not an edge case) even
+        # though the underlying OS socket stays open and readable via the
+        # response's own file object (makefile() holds an independent
+        # reference) - re-fetching conn.sock after getresponse() crashes
+        # with AttributeError on a None, confirmed live while hardening
+        # this fix.
+        sock = conn.sock
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"probe against {url} did not complete within its {timeout}s wall-clock budget "
+                "(request send)"
+            )
+        sock.settimeout(remaining)
+        resp = conn.getresponse()
+
+        # Read ONE byte per iteration, not a large chunk size. resp.read(n)
+        # for n > 1 can satisfy the request via MULTIPLE internal low-level
+        # socket reads before returning control here at all (io.BufferedReader's
+        # documented behavior: "multiple raw reads may be issued to satisfy
+        # the byte count") - a dribbling server sending faster than any
+        # single read's own timeout, but far slower overall than the probe
+        # budget, would silently reproduce the exact cumulative-block gap
+        # this rewrite exists to close, just one level deeper. Reading 1
+        # byte at a time means every single socket read is its own loop
+        # iteration, so the wall-clock deadline below is checked between
+        # every byte - probe bodies are small health/status payloads, not
+        # bulk transfers, so the added per-byte call overhead is immaterial.
+        chunks = []
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"probe against {url} did not complete within its {timeout}s wall-clock "
+                    "budget while reading the response body"
+                )
+            sock.settimeout(remaining)
+            chunk = resp.read(1)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        status = resp.status
+        body = b"".join(chunks).decode("utf-8", errors="replace")
+    finally:
+        # Explicit, unconditional close of every handle this function
+        # opened, regardless of conn's own internal close/will-close
+        # bookkeeping - the property under test is "no lingering resource
+        # survives this call," not "conn.close() was called."
+        if resp is not None:
+            resp.close()
+        if sock is not None:
+            sock.close()
+        conn.close()
+
     passed = status == spec.expected_status
     if passed and spec.expected_body_contains is not None:
         passed = spec.expected_body_contains in body
