@@ -286,8 +286,11 @@ def test_service_early_exit_is_captured_with_returncode():
 def test_unexpected_exception_during_readiness_still_cleans_up_process():
     """A genuinely unexpected error (not a probe-request failure - readiness
     checking itself blowing up) must not leak the process or escape as a
-    raw exception - it comes back as a structured, failed result, and the
-    service is still confirmed terminated."""
+    raw exception - it comes back as a structured, failed result with the
+    dedicated VERIFICATION_INTERNAL_ERROR outcome (external review,
+    2026-09-03 - never PROBE_FAILED, which a workflow-layer caller routes
+    to normal Developer repair; an internal Kriya bug must not trigger
+    that), and the service is still confirmed terminated."""
     port = _free_port()
     script = _http_service_script()
     controller = _TrackingController()
@@ -295,6 +298,7 @@ def test_unexpected_exception_during_readiness_still_cleans_up_process():
     with patch("kriya.tools.service_runtime._check_readiness", side_effect=RuntimeError("boom")):
         result = run_managed_service_verification(_spec(port, script), controller=controller)
 
+    assert result.outcome == ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR
     assert result.passed is False
     assert "boom" in result.reasoning
     assert len(controller.started) == 1
@@ -361,6 +365,7 @@ def test_managed_service_result_maps_to_zero_developer_calls_for_infrastructure_
         ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
         ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
         ServiceVerificationOutcomeKind.CLEANUP_FAILED,
+        ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR,
     }
     behavioral_outcomes = {
         ServiceVerificationOutcomeKind.PROBE_PASSED,
@@ -384,3 +389,155 @@ def test_managed_service_result_maps_to_zero_developer_calls_for_infrastructure_
     assert result.outcome == ServiceVerificationOutcomeKind.SERVICE_START_FAILED
     assert result.outcome in infrastructure_outcomes
     assert len(controller.started) == 0  # never even reached ManagedProcess bookkeeping
+
+
+# --- External review hardening (2026-09-03) --------------------------------
+
+def test_managed_process_stdout_buffer_stays_bounded_while_running():
+    """P1: _drain() must bound the buffer WHILE appending, not only when
+    captured_output() is later called - a noisy long-lived service must not
+    grow Kriya's memory without limit for however long readiness/probe
+    polling keeps waiting. A tiny max_output_chars budget plus a script
+    that writes far more than that almost immediately, inspected WHILE the
+    process is still alive (poll() is None), proves the bound holds
+    continuously, not just at read time."""
+    controller = ProcessController(max_output_chars=200)
+    script = (
+        "import sys, time\n"
+        "for i in range(20000):\n"
+        "    print('x' * 50)\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(5)\n"
+    )
+    managed = controller.start_managed([sys.executable, "-c", script], cwd=os.getcwd())
+    try:
+        time.sleep(1.5)  # let the burst of output drain
+        assert managed.poll() is None  # still running - the writer sleeps before exiting
+        with managed._lock:
+            total_buffered = sum(len(c) for c in managed._stdout_chunks)
+        # The raw output would otherwise reach ~1MB (20000 * 51 bytes) -
+        # bounded here to a small multiple of max_output_chars, not left
+        # to grow unbounded for the remaining 3.5s the process stays alive.
+        assert total_buffered < 5000
+    finally:
+        managed.terminate(reap_timeout=5.0)
+
+
+def test_managed_process_terminate_passes_fractional_reap_timeout_unmodified():
+    """P2: shutdown_timeout_seconds is a float end-to-end - terminate()'s
+    reap_timeout must reach Popen.wait() as the real fractional value, not
+    truncated to int(0.5)==0 (which would make Popen.wait(timeout=0) an
+    effectively-zero wait, producing a false CLEANUP_FAILED for a process
+    that would have exited in time)."""
+    controller = ProcessController()
+    managed = controller.start_managed(
+        [sys.executable, "-c", "import time; time.sleep(30)"], cwd=os.getcwd(),
+    )
+    try:
+        with patch.object(managed._popen, "wait", wraps=managed._popen.wait) as mock_wait:
+            managed.terminate(reap_timeout=0.5)
+        mock_wait.assert_called_once_with(timeout=0.5)
+    finally:
+        if managed.poll() is None:
+            managed.terminate(reap_timeout=5.0)
+
+
+def test_service_runtime_cleanup_does_not_truncate_fractional_shutdown_timeout():
+    """P2: kriya.tools.service_runtime._cleanup must pass shutdown_timeout_
+    seconds straight through to ManagedProcess.terminate(), never
+    int()-truncated."""
+    from kriya.tools.service_runtime import _cleanup
+
+    class _FakeManaged:
+        def __init__(self):
+            self.calls = []
+
+        def poll(self):
+            return None  # still running
+
+        def terminate(self, *, reap_timeout):
+            self.calls.append(reap_timeout)
+            return True
+
+    fake = _FakeManaged()
+    _cleanup(fake, shutdown_timeout_seconds=0.5)
+
+    assert fake.calls == [0.5]
+
+
+def test_probe_wall_clock_deadline_enforced_despite_a_dribbling_response():
+    """P1: a server that keeps sending SOME bytes (never letting a single
+    socket read exceed urlopen's own per-operation timeout) but takes far
+    longer than probe_timeout_seconds overall must still be bounded by a
+    real wall-clock deadline - proven by the whole run_managed_service_
+    verification() call returning well within a small multiple of
+    probe_timeout_seconds, not blocking for anywhere near the server's
+    actual (much longer) total response time."""
+    port = _free_port()
+    script = f"""
+import http.server, time
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+        if self.path == "/slow":
+            self.send_response(200)
+            self.send_header("Content-Length", "20")
+            self.end_headers()
+            for _ in range(20):
+                self.wfile.write(b"x")
+                self.wfile.flush()
+                time.sleep(0.5)
+            return
+        self.send_response(404)
+        self.end_headers()
+    def log_message(self, *a):
+        pass
+
+server = http.server.HTTPServer(("127.0.0.1", {port}), Handler)
+server.serve_forever()
+"""
+    controller = _TrackingController()
+    spec = ManagedServiceVerificationSpec(
+        service_command=[sys.executable, "-c", script],
+        cwd=os.getcwd(),
+        readiness=ReadinessSpec(kind="http", port=port, path="/health"),
+        probe=ProbeSpec(port=port, path="/slow", expected_status=200),
+        probe_timeout_seconds=1.0,
+    )
+
+    started_at = time.monotonic()
+    result = run_managed_service_verification(spec, controller=controller)
+    elapsed = time.monotonic() - started_at
+
+    # The dribbling server takes 20 * 0.5s = 10s to actually finish
+    # responding; a true wall-clock deadline returns well before that, not
+    # after ~10s.
+    assert elapsed < 5.0
+    assert result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED
+    assert "wall-clock" in result.reasoning
+
+
+def test_probe_connection_error_maps_to_probe_failed_but_internal_bug_maps_to_internal_error():
+    """P2: _run_lifecycle splits probe-time exceptions by type - an OSError
+    (connection refused/reset, our own wall-clock TimeoutError, a genuine
+    network-level failure) is BEHAVIORAL evidence about the running service
+    (PROBE_FAILED, eligible for normal Developer repair); anything else is
+    treated as an internal Kriya defect (VERIFICATION_INTERNAL_ERROR, never
+    eligible for repair) - the exact distinction the review asked for."""
+    port = _free_port()
+    script = _http_service_script()
+
+    controller = _TrackingController()
+    with patch("kriya.tools.service_runtime._run_probe", side_effect=ConnectionRefusedError("refused")):
+        connection_result = run_managed_service_verification(_spec(port, script), controller=controller)
+    assert connection_result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED
+
+    controller2 = _TrackingController()
+    with patch("kriya.tools.service_runtime._run_probe", side_effect=KeyError("not_a_network_error")):
+        bug_result = run_managed_service_verification(_spec(port, script), controller=controller2)
+    assert bug_result.outcome == ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR

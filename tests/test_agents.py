@@ -2636,6 +2636,54 @@ async def test_run_verifier_judge_string_true_is_honored():
     assert judgment["should_run"] is True
 
 @pytest.mark.asyncio
+async def test_run_verifier_judge_missing_execution_mode_defaults_to_finite_command():
+    """Backward compatibility (Managed Runtime Verification, 2026-09-03):
+    an old-shaped response with no execution_mode key at all must default
+    to finite_command, exactly like before this field existed."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "run_commands": [["python", "app.py"]],
+        "command_source": "inferred",
+        "success_criteria": "Something",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["execution_mode"] == "finite_command"
+    assert judgment["managed_service"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_preserves_an_explicitly_invalid_execution_mode():
+    """External review, 2026-09-03 (P2): an execution_mode value that IS
+    present but not one of the two supported modes (e.g. a model returning
+    "service" instead of "managed_service") must survive unchanged into the
+    returned judgment - NOT be silently rewritten to "finite_command" the
+    way a genuinely absent field is. Silently coercing it here would make
+    kriya/workflow/attempt.py::_resolve_execution_mode's own deterministic
+    rejection of an unsupported execution_mode unreachable, since by the
+    time that check runs it would only ever see "finite_command"."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "execution_mode": "service",
+        "run_commands": None,
+        "managed_service": {"service_command": ["python", "manage.py", "runserver"]},
+        "command_source": "inferred",
+        "success_criteria": "Something",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["execution_mode"] == "service"
+
+
+@pytest.mark.asyncio
 async def test_run_verifier_judge_unrecognized_should_run_value_defaults_false():
     cfg = AppConfig()
     llm = LLMClient(cfg)

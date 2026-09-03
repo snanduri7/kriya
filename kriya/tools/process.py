@@ -73,10 +73,23 @@ class ManagedProcess:
         self._stderr_thread.start()
 
     def _drain(self, stream, buf: List[str]) -> None:
+        # Bounded WHILE writing (external review, 2026-09-03), not just at
+        # captured_output() read time - a noisy long-lived service can
+        # otherwise grow this buffer without limit for the entire duration
+        # Kriya waits on readiness/probe, since captured_output() (the only
+        # place _bounded_tail was previously applied) may not be called
+        # again for a long time. Each drain thread tracks its own running
+        # character count and drops the oldest chunks once over budget, the
+        # same tail-keeping policy _bounded_tail applies at read time - so
+        # this is a strict tightening of an existing bound, not a new one.
+        total_chars = 0
         try:
             for line in iter(stream.readline, ""):
                 with self._lock:
                     buf.append(line)
+                    total_chars += len(line)
+                    while total_chars > self._max_output_chars and len(buf) > 1:
+                        total_chars -= len(buf.pop(0))
         except (ValueError, OSError):
             # Stream closed out from under the reader by terminate()/reap -
             # the buffer already holds everything produced before that.
@@ -105,7 +118,7 @@ class ManagedProcess:
         stderr, _ = _bounded_tail(stderr, self._max_output_chars)
         return stdout, stderr
 
-    def terminate(self, *, reap_timeout: int) -> bool:
+    def terminate(self, *, reap_timeout: float) -> bool:
         """Sends the SAME process-group kill `run()`'s own timeout path
         uses, then waits up to reap_timeout for the OS to confirm the tree
         is actually gone. Returns False (never raises) when it can't

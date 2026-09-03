@@ -2031,27 +2031,35 @@ _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES = frozenset({
     ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
     ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
     ServiceVerificationOutcomeKind.CLEANUP_FAILED,
+    ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR,
 })
 
 _MANAGED_SERVICE_READINESS_KINDS = frozenset({"tcp", "http"})
 _MANAGED_SERVICE_PROBE_KINDS = frozenset({"http"})
 
 
-def _resolve_execution_mode(judgment: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+def _resolve_execution_mode(judgment: Dict[str, Any]) -> Tuple[Any, Optional[str]]:
     """Managed Runtime Verification (2026-09-03): (mode, error). error is
     None for either of the two supported modes; anything else is itself a
     verification-infrastructure defect, not a silent fallback to
     finite_command - a caller passing an unsupported execution_mode is
     exactly as unexecutable as a missing service_command, and must be
-    rejected the same way (RunVerifierAgent.judge() itself already
-    normalizes its own model-facing output to one of the two supported
-    values, matching every other tolerant-parsing field on that response -
-    this check exists for callers that construct/replay a judgment
-    directly, and as the single source of truth both runtime-verification
-    call sites consult, exactly like _runtime_verification_is_advisory_
-    only above)."""
-    execution_mode = judgment.get("execution_mode") or "finite_command"
-    if execution_mode not in _SUPPORTED_RUNTIME_EXECUTION_MODES:
+    rejected the same way. RunVerifierAgent.judge() only backward-
+    compatibly defaults a genuinely ABSENT execution_mode to
+    "finite_command" - an explicitly-present, unrecognized value now
+    survives unchanged so this check (the single source of truth both
+    runtime-verification call sites consult, exactly like _runtime_
+    verification_is_advisory_only above) can actually reject it, rather
+    than the agent layer silently rewriting it into something that always
+    passed. isinstance-guarded (not a bare `in _SUPPORTED_RUNTIME_
+    EXECUTION_MODES` membership test) so a malformed non-string value (a
+    list, a dict) is reported as unsupported instead of crashing on an
+    unhashable-type lookup - a JSON response neither this function nor
+    judge() controls the exact shape of."""
+    execution_mode = judgment.get("execution_mode")
+    if execution_mode is None:
+        execution_mode = "finite_command"
+    if not isinstance(execution_mode, str) or execution_mode not in _SUPPORTED_RUNTIME_EXECUTION_MODES:
         return execution_mode, f"unsupported execution_mode {execution_mode!r}"
     return execution_mode, None
 
@@ -2076,6 +2084,35 @@ def _looks_like_shell_compound_command(command: Any) -> bool:
     return any(tok in _MANAGED_SERVICE_SHELL_MARKERS for tok in command)
 
 
+def _reject_non_local_managed_service_host(field_name: str, host: str) -> Optional[str]:
+    """External review, 2026-09-03 (P0): a managed-service readiness/probe
+    target is a real outbound network connection kriya/tools/service_
+    runtime.py will actually make (socket.create_connection/urllib.request.
+    urlopen), completely bypassing kriya/core/llm.py's egress boundary -
+    that boundary only ever guards LLM completion calls, and MA4.6's
+    ExecutionPolicy network-egress check (kriya/policy/execution.py) only
+    ever guards NETWORK_ACCESS/LLM_NETWORK_ACCESS action requests routed
+    through the policy engine, neither of which this new code path is. An
+    LLM judgment naming host="example.com" would otherwise connect
+    externally with zero enforcement - exactly the local-only boundary
+    CLAUDE.md's "Egress control" section says every LLM call site must
+    respect, now extended to this one. Deliberately reuses is_local_url
+    itself (function-local import, mirroring kriya/policy/execution.py's
+    own _check_network_egress precedent and its own documented reasoning)
+    rather than writing a second, independently-maintained local/private-
+    address heuristic that could quietly drift from the real boundary's
+    definition of "local"."""
+    from kriya.core.llm import is_local_url
+
+    if not is_local_url(f"http://{host}"):
+        return (
+            f"managed_service.{field_name} host {host!r} is not a local/private address - "
+            "managed-service verification may only target the local workspace, matching "
+            "Kriya's local-only egress boundary (kriya/core/llm.py::is_local_url)"
+        )
+    return None
+
+
 def _validate_and_convert_readiness(raw: Any) -> Tuple[Optional[ReadinessSpec], Optional[str]]:
     if not isinstance(raw, dict):
         return None, "managed_service.readiness is missing or not a JSON object"
@@ -2085,6 +2122,9 @@ def _validate_and_convert_readiness(raw: Any) -> Tuple[Optional[ReadinessSpec], 
     host = raw.get("host", "127.0.0.1")
     if not isinstance(host, str) or not host:
         return None, f"managed_service.readiness.host must be a non-empty string, got {host!r}"
+    egress_error = _reject_non_local_managed_service_host("readiness", host)
+    if egress_error:
+        return None, egress_error
     port = raw.get("port")
     if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
         return None, f"managed_service.readiness.port must be an integer 1-65535, got {port!r}"
@@ -2103,6 +2143,9 @@ def _validate_and_convert_probe(raw: Any) -> Tuple[Optional[ProbeSpec], Optional
     host = raw.get("host", "127.0.0.1")
     if not isinstance(host, str) or not host:
         return None, f"managed_service.probe.host must be a non-empty string, got {host!r}"
+    egress_error = _reject_non_local_managed_service_host("probe", host)
+    if egress_error:
+        return None, egress_error
     port = raw.get("port")
     if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
         return None, f"managed_service.probe.port must be an integer 1-65535, got {port!r}"

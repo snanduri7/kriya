@@ -3366,6 +3366,139 @@ def test_looks_like_shell_compound_command_detects_forbidden_shapes():
     assert not _looks_like_shell_compound_command(["python", "manage.py", "runserver"])
 
 
+# --- External review hardening (2026-09-03) --------------------------------
+
+@pytest.mark.asyncio
+async def test_managed_service_readiness_and_probe_reject_non_local_host(tmp_path):
+    """P0: a managed_service.readiness/probe host that is not local/private
+    must be rejected deterministically before any process starts or any
+    connection is attempted - kriya/tools/service_runtime.py calls
+    socket.create_connection()/urllib.request.urlopen() directly and never
+    consults kriya/core/llm.py's egress boundary or kriya/policy/
+    execution.py's network-egress check on its own, so an LLM judgment
+    naming host="example.com" would otherwise connect externally with zero
+    enforcement. Uses the same DENY_ALL verification-only shape as the
+    other malformed-contract tests so "zero Developer calls" is
+    unambiguous."""
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for a malformed verification contract"),
+    )
+    non_local_judgment = _managed_service_judgment()
+    non_local_judgment["managed_service"]["readiness"]["host"] = "example.com"
+    non_local_judgment["managed_service"]["probe"]["host"] = "example.com"
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=non_local_judgment)
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    with patch("kriya.workflow.attempt.run_managed_service_verification") as mock_run_managed_service, \
+         patch("kriya.tools.service_runtime.create_connection") as mock_connect, \
+         patch("urllib.request.urlopen") as mock_urlopen:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
+    assert "is not a local/private address" in exc_info.value.failure.message
+    mock_run_managed_service.assert_not_called()
+    mock_connect.assert_not_called()
+    mock_urlopen.assert_not_called()
+    assert not developer.run_generation.called
+
+
+@pytest.mark.asyncio
+async def test_managed_service_readiness_and_probe_accept_private_and_loopback_hosts(tmp_path):
+    """Positive control: a private-network host (matching kriya.core.llm.
+    is_local_url's own local/private definition, not merely "localhost")
+    is still accepted - this is a policy-controlled boundary reusing the
+    existing local-target determination, not a new "localhost-only"
+    restriction."""
+    plan = _managed_service_plan()
+    views_py = "customers/views.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
+    private_judgment = _managed_service_judgment()
+    private_judgment["managed_service"]["readiness"]["host"] = "192.168.1.50"
+    private_judgment["managed_service"]["probe"]["host"] = "192.168.1.50"
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=private_judgment)
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Create a Python 3.12 Django application.",
+        architect_files=[views_py], expected_files_upfront=[views_py],
+        architect_basename_to_path={"views.py": views_py},
+        allowed_write_relpaths=[views_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+        required_verification=[{
+            "type": "judgment", "description": "GET /customers/health returns 200",
+            "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = {"manage.py"}
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.workflow.attempt.run_managed_service_verification",
+        return_value=_managed_service_probe_result(),
+    ) as mock_run_managed_service:
+        await run_attempt(state, ctx)  # must not raise
+
+    mock_run_managed_service.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_managed_service_judgment_with_explicitly_invalid_execution_mode_is_rejected(tmp_path):
+    """P2: an execution_mode value that is explicitly present but not one
+    of the two supported modes (e.g. a model returning "service" instead
+    of "managed_service") must be rejected deterministically, not silently
+    treated as finite_command - simulates RunVerifierAgent.judge()'s own
+    corrected behavior (it now preserves an explicitly-invalid value rather
+    than coercing it, see test_run_verifier_judge_preserves_an_explicitly_
+    invalid_execution_mode in test_agents.py) by constructing the judgment
+    directly, matching this suite's established convention of testing the
+    workflow-layer boundary independent of the agent."""
+    invalid_judgment = _managed_service_judgment(execution_mode="service")
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for a malformed verification contract"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=invalid_judgment)
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    with patch("kriya.workflow.attempt.run_managed_service_verification") as mock_run_managed_service:
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
+    assert "unsupported execution_mode 'service'" in exc_info.value.failure.message
+    mock_run_managed_service.assert_not_called()
+    assert not developer.run_generation.called
+
+
+def test_resolve_execution_mode_rejects_unhashable_malformed_values():
+    """Defensive hardening alongside the P2 fix above: a non-string,
+    unhashable execution_mode (a list/dict a malformed response could
+    produce) must be classified as unsupported, never crash the `in
+    frozenset` membership check with an unhashable-type TypeError."""
+    mode, error = _resolve_execution_mode({"execution_mode": ["managed_service"]})
+    assert error is not None
+    assert "unsupported execution_mode" in error
+
+    mode, error = _resolve_execution_mode({"execution_mode": {"mode": "managed_service"}})
+    assert error is not None
+
+
 @pytest.mark.asyncio
 async def test_finite_commands_with_ordinary_shell_looking_argv_remain_unaffected(tmp_path):
     """(11) A genuine finite_command judgment is never routed through the

@@ -2471,11 +2471,20 @@ class RunVerifierAgent(BaseAgent):
         success_criteria = parsed.get("success_criteria") or ""
         reasoning = parsed.get("reasoning") or ""
         # Managed Runtime Verification (2026-09-03): execution_mode picks
-        # which of the two structured shapes this judgment is - the SAME
-        # tolerant-coercion discipline every other field on this response
-        # already uses (an unrecognized value degrades to the existing,
-        # backward-compatible "finite_command" behavior rather than
-        # propagating something the execution layer wouldn't recognize).
+        # which of the two structured shapes this judgment is. Backward
+        # compatibility is deliberately narrower than every other tolerant-
+        # coercion field on this response: a MISSING key (None - an old
+        # cached judgment, or a mock/stub that predates this field) degrades
+        # to "finite_command", but an explicitly-present, UNRECOGNIZED value
+        # (e.g. the model returning "service" instead of "managed_service")
+        # is preserved as-is rather than silently rewritten - external
+        # review, 2026-09-03: silently coercing it here would make
+        # attempt.py::_resolve_execution_mode's own deterministic rejection
+        # of an unsupported execution_mode unreachable, since by the time
+        # that check runs it would only ever see "finite_command". An
+        # explicitly wrong value is a genuine contract violation Kriya
+        # should reject, not paper over the same way a genuinely absent
+        # field is backward-compatibly defaulted.
         # managed_service is passed through as-is (only requiring it be a
         # JSON object, nothing deeper) - the deterministic admission check
         # that actually validates its inner shape (service_command/
@@ -2485,7 +2494,7 @@ class RunVerifierAgent(BaseAgent):
         # contract), not here, matching input_channel's own "structured
         # fact, enforced downstream" precedent immediately below.
         raw_execution_mode = parsed.get("execution_mode")
-        execution_mode = raw_execution_mode if raw_execution_mode in ("finite_command", "managed_service") else "finite_command"
+        execution_mode = "finite_command" if raw_execution_mode is None else raw_execution_mode
         raw_managed_service = parsed.get("managed_service")
         managed_service = raw_managed_service if isinstance(raw_managed_service, dict) else None
         return {

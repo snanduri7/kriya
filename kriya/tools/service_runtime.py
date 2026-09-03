@@ -36,6 +36,7 @@ output marker, a gRPC health check) is a new branch, not a redesign.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import time
 import urllib.error
 import urllib.request
@@ -54,6 +55,14 @@ class ServiceVerificationOutcomeKind(str, Enum):
     PROBE_FAILED = "PROBE_FAILED"
     PROBE_PASSED = "PROBE_PASSED"
     CLEANUP_FAILED = "CLEANUP_FAILED"
+    # External review, 2026-09-03: a genuinely unexpected internal/
+    # orchestration error (not a probe-request failure - see _run_lifecycle's
+    # own split below) must never be reported as PROBE_FAILED. PROBE_FAILED
+    # is a workflow-layer signal that routes to normal Developer repair
+    # (kriya/workflow/attempt.py); an internal Kriya defect getting that
+    # treatment would start rewriting application code to "fix" a bug that
+    # was never in the application at all.
+    VERIFICATION_INTERNAL_ERROR = "VERIFICATION_INTERNAL_ERROR"
 
 
 @dataclass(frozen=True)
@@ -155,19 +164,41 @@ def _check_readiness(spec: ReadinessSpec) -> bool:
     raise ValueError(f"Unsupported readiness kind: {spec.kind!r}")
 
 
+def _do_http_request(request: urllib.request.Request, *, timeout: float) -> Tuple[int, str]:
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            return resp.status, resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, (e.read().decode("utf-8", errors="replace") if e.fp is not None else "")
+
+
 def _run_probe(spec: ProbeSpec, *, timeout: float) -> Tuple[Optional[int], Optional[str], bool, str]:
     if spec.kind != "http":
         raise ValueError(f"Unsupported probe kind: {spec.kind!r}")
     url = f"http://{spec.host}:{spec.port}{spec.path}"
     data = spec.body.encode("utf-8") if spec.body is not None else None
     request = urllib.request.Request(url, data=data, headers=dict(spec.headers), method=spec.method)
+    # External review, 2026-09-03: urlopen's own `timeout` bounds each
+    # individual socket operation (connect/read), not the CUMULATIVE
+    # request - a server that keeps trickling response bytes can keep
+    # resp.read() alive past `timeout` without any single read() call ever
+    # exceeding it, defeating "probe bounded independently." Enforcing the
+    # real wall-clock deadline from OUTSIDE the HTTP client call via a
+    # bounded future gives an unconditional caller-side bound regardless of
+    # what the socket-level timeout does or doesn't catch; the worker
+    # thread is abandoned (shutdown(wait=False)) rather than joined, so a
+    # still-reading thread can never block this function past its own
+    # budget - it finishes or dies on its own, off Kriya's critical path.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_do_http_request, request, timeout=timeout)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as resp:
-            status = resp.status
-            body = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        status = e.code
-        body = e.read().decode("utf-8", errors="replace") if e.fp is not None else ""
+        status, body = future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        executor.shutdown(wait=False)
+        raise TimeoutError(
+            f"probe against {url} did not complete within its {timeout}s wall-clock budget"
+        )
+    executor.shutdown(wait=False)
     passed = status == spec.expected_status
     if passed and spec.expected_body_contains is not None:
         passed = spec.expected_body_contains in body
@@ -223,10 +254,26 @@ def _run_lifecycle(
         probe_status, probe_body, probe_passed, reasoning = _run_probe(
             spec.probe, timeout=spec.probe_timeout_seconds,
         )
-    except Exception as e:
+    except OSError as e:
+        # External review, 2026-09-03: expected, BEHAVIORAL probe-request
+        # failures only - connection refused/reset, DNS failure, our own
+        # wall-clock TimeoutError above (a builtin OSError subclass). The
+        # service already passed readiness, so a probe-time connection
+        # failure is itself evidence about the running service (e.g. it
+        # crashed handling this specific request), not a Kriya defect -
+        # eligible for normal Developer repair, same as an HTTP 500.
         return (
             ServiceVerificationOutcomeKind.PROBE_FAILED, False,
             f"Probe execution raised: {e}", None, None, None,
+        )
+    except Exception as e:
+        # Anything else is a genuinely unexpected internal/orchestration
+        # error (a bug in this module, a malformed spec field that slipped
+        # past validation) - never a behavioral verdict, never eligible for
+        # Developer repair.
+        return (
+            ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR, False,
+            f"Unexpected internal error during probe execution: {e}", None, None, None,
         )
     outcome = (
         ServiceVerificationOutcomeKind.PROBE_PASSED if probe_passed
@@ -239,7 +286,7 @@ def _cleanup(managed: ManagedProcess, *, shutdown_timeout_seconds: float) -> Opt
     if managed.poll() is not None:
         return None
     try:
-        died = managed.terminate(reap_timeout=int(shutdown_timeout_seconds))
+        died = managed.terminate(reap_timeout=shutdown_timeout_seconds)
     except Exception as e:
         return f"terminate() raised: {e}"
     if not died:
@@ -271,15 +318,17 @@ def run_managed_service_verification(
     try:
         outcome, passed, reasoning, returncode, probe_status, probe_body = _run_lifecycle(managed, spec)
     except Exception as e:
-        # A genuinely unexpected failure somewhere in readiness/probe
-        # orchestration itself (not the probe's own request, already
-        # caught above) - still not a pass, still must not escape without
-        # tearing the service down. There is no dedicated "internal error"
-        # outcome in the required evidence taxonomy; PROBE_FAILED is the
-        # closest honest fit (no conclusive PASS evidence was obtained).
-        outcome = ServiceVerificationOutcomeKind.PROBE_FAILED
+        # A genuinely unexpected failure somewhere in readiness-checking
+        # itself (not the probe's own request, already split into
+        # behavioral-vs-internal above) - still not a pass, still must not
+        # escape without tearing the service down, and (external review,
+        # 2026-09-03) must never be reported as PROBE_FAILED - that outcome
+        # is eligible for normal Developer repair, and an internal Kriya
+        # defect getting that treatment would start rewriting application
+        # code to "fix" a bug that was never in the application.
+        outcome = ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR
         passed = False
-        reasoning = f"Unexpected error during managed service verification: {e}"
+        reasoning = f"Unexpected internal error during managed service verification: {e}"
         returncode = None
         probe_status = None
         probe_body = None
