@@ -194,6 +194,28 @@ def prefer_existing_artifact_owners(
     vocabulary provide the semantic score.
     An existing owner replaces a nonexistent planned path only when that
     evidence is unique and the request does not explicitly ask for a new artifact.
+
+    PRV-17 Run 12 fix (2026-09-04): a bare basename match is NOT sufficient
+    identity evidence on its own for a directory-scoped artifact whose own
+    name carries no distinguishing content - "__init__.py" identifies a
+    package only via which DIRECTORY it's in, unlike "CustomerService.java"
+    (a proper name that stays meaningful anywhere in the tree). Confirmed
+    live: a Django app subtask's own approved `customers/__init__.py` was
+    silently redirected to an unrelated, already-owned
+    `customers_project/__init__.py` purely because both share the basename
+    "__init__.py" - two genuinely different, both-legitimate package
+    markers in a real Django project, not a Developer-invented duplicate.
+    The exact-basename tier below now requires the basename (stripped of
+    extension) to tokenize into at least 2 meaningful tokens before it may
+    fire at all - the SAME threshold the containment tier immediately below
+    it already requires for its own match (`len(planned_tokens) >= 2`), not
+    a new one invented for this fix. A thin/generic name (one token or
+    fewer) is exactly the case where path context is semantically
+    significant and basename equality alone must not decide identity; it
+    falls through to the containment/scored tiers below (which themselves
+    already guard on multi-token names) and, finding no match there either,
+    is correctly left as its own genuinely new path rather than merged into
+    an unrelated existing file that happens to share a generic name.
     """
     planned = list(planned_files)
 
@@ -223,7 +245,7 @@ def prefer_existing_artifact_owners(
             and os.path.splitext(candidate)[1].lower() == extension
             and is_runnable_test_file(candidate) == planned_is_test
             and os.path.basename(candidate) == os.path.basename(path)
-        ]
+        ] if len(planned_tokens) >= 2 else []
         if len(exact_name_candidates) == 1:
             owner = exact_name_candidates[0]
             resolved.append(owner)

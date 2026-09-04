@@ -5405,6 +5405,58 @@ def test_brownfield_owner_resolution_preserves_unique_exact_owner_package_path(t
     assert resolved == [implementation, test]
 
 
+def test_directory_scoped_marker_basename_is_not_redirected_across_packages(tmp_path):
+    """PRV-17 Run 12 (2026-09-04): the exact live incident - a Django app
+    subtask's own approved 'customers/__init__.py' must never be silently
+    redirected to an unrelated, already-owned 'customers_project/__init__.py'
+    just because both share the basename '__init__.py'. That basename
+    carries no distinguishing content on its own (a package marker's
+    identity comes from its directory, not its name) - genuinely different,
+    both-legitimate files in a real Django project, not a Developer-invented
+    duplicate the original heuristic exists to catch."""
+    (tmp_path / "customers_project").mkdir()
+    (tmp_path / "customers_project" / "__init__.py").write_text("", encoding="utf-8")
+
+    resolved = prefer_existing_artifact_owners(
+        ["customers/__init__.py", "customers/apps.py"],
+        "Create a Python 3.12 Django application. Provide one Django project "
+        "and one application named customers.",
+        str(tmp_path),
+    )
+
+    assert resolved == ["customers/__init__.py", "customers/apps.py"]
+
+
+def test_generic_single_token_basename_in_unrelated_directory_remains_a_new_artifact(tmp_path):
+    """The invariant is generic, not an __init__.py special case: ANY
+    basename that tokenizes to fewer than 2 meaningful tokens must not be
+    treated as sufficient identity evidence across unrelated directories."""
+    (tmp_path / "billing").mkdir()
+    (tmp_path / "billing" / "config.py").write_text("", encoding="utf-8")
+
+    resolved = prefer_existing_artifact_owners(
+        ["shipping/config.py"],
+        "Add a shipping module with its own configuration.",
+        str(tmp_path),
+    )
+
+    assert resolved == ["shipping/config.py"]
+
+
+def test_prefer_existing_artifact_owners_leaves_an_already_existing_planned_path_unchanged(tmp_path):
+    """Exact path match behavior (the `os.path.exists(planned_path)` early
+    branch) is untouched by the token-count guard above - it never reaches
+    the exact-basename tier at all."""
+    (tmp_path / "customers").mkdir()
+    (tmp_path / "customers" / "__init__.py").write_text("", encoding="utf-8")
+
+    resolved = prefer_existing_artifact_owners(
+        ["customers/__init__.py"], "Create a Django application.", str(tmp_path),
+    )
+
+    assert resolved == ["customers/__init__.py"]
+
+
 def test_brownfield_exact_owner_resolution_refuses_duplicate_basenames(tmp_path):
     for package in ("one", "two"):
         candidate = tmp_path / "src" / package / "Formatter.java"
