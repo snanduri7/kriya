@@ -141,7 +141,32 @@ class ObligationKind(str, Enum):
     regression check either passes for real (obligation settled
     SATISFIED) or fails for real against the now-responsible owner's own
     ordinary retry loop (settled VIOLATED, recovered through the existing
-    machinery, not a new one)."""
+    machinery, not a new one).
+
+    RUNTIME_PLAN_GAP (PRV-17 Run 13, 2026-09-04): a live incident where a
+    validated 5-subtask Django plan never once declared myproject/wsgi.py,
+    because nothing in the plan schema forces a Planner to notice that a
+    file it DID plan (myproject/settings.py) inherently references a
+    sibling module by framework convention. Managed-service verification
+    (s5, write scope empty by design) failed deterministically with
+    ModuleNotFoundError: No module named 'myproject.wsgi' - real runtime
+    evidence, but of an artifact NO subtask owns, existing NOWHERE in the
+    approved plan or on disk. Every existing recovery mechanism in this
+    module family (CROSS_OWNER_ARTIFACT_REQUIREMENT, FUTURE_OWNER_
+    VERIFICATION, revise_plan_for_planned_prerequisite/revise_plan_for_
+    grounded_scope_owner in workflow_controller.py) presupposes an owner
+    that already exists somewhere in the plan or a target that already
+    exists on disk - none can legally introduce a genuinely NEW planned
+    artifact. This kind exists so that narrow gap - execution proves the
+    plan itself is incomplete, but nothing may convert that proof into new
+    write authority except a validated plan revision - is tracked exactly
+    like PLAN_STRUCTURAL_VALIDITY already tracks repair-attempt bounds:
+    at most 2 revision attempts per (failing subtask, missing logical
+    artifact) fingerprint before this obligation is recorded VIOLATED and
+    the run fails closed, never silently retried forever. The invariant
+    this kind exists to enforce, verbatim: 'Execution evidence may prove
+    that the plan is incomplete; only a validated plan revision may
+    convert that evidence into new write authority.'"""
 
     PLAN_STRUCTURAL_VALIDITY = "plan_structural_validity"
     MIGRATION_COMPLETION = "migration_completion"
@@ -150,6 +175,7 @@ class ObligationKind(str, Enum):
     CROSS_OWNER_ARTIFACT_REQUIREMENT = "cross_owner_artifact_requirement"
     FUTURE_OWNER_VERIFICATION = "future_owner_verification"
     CROSS_SUBTASK_INTEGRATION = "cross_subtask_integration"
+    RUNTIME_PLAN_GAP = "runtime_plan_gap"
 
 
 class ObligationStatus(str, Enum):

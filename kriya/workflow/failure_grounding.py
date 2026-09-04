@@ -141,6 +141,42 @@ _MISSING_MODULE_PATTERN = re.compile(
 )
 
 
+def extract_missing_project_local_python_module(
+    error_text: str, *, known_files: Iterable[str],
+) -> Optional[str]:
+    """Returns the dotted module name when error_text shows Python's
+    ModuleNotFoundError/ImportError shape AND the missing module's top-level
+    package is project-local (already a known file/package this same
+    candidate - or a sibling subtask's own established output - is
+    responsible for), e.g. 'customers_project.settings' resolving to
+    customers_project/settings.py. Returns None both when no missing-module
+    pattern matches at all, and when the top-level name is NOT project-local
+    (that second case is _classify_missing_module_environment_failure's own
+    question, not this function's - the two are deliberately asked
+    separately so a caller can act on "this IS project-local" without
+    duplicating the pattern match/known-files lookup).
+
+    Runtime-Evidence Plan Repair (2026-09-04, PRV-17 Run 13): the grounding
+    query kriya/workflow/attempt.py's managed-service verification path uses
+    to name WHICH logical artifact a runtime traceback proves is missing,
+    once classify_environment_failure() has already ruled out an external-
+    dependency explanation - see that module's own docstring for the full
+    incident (myproject.wsgi never planned by any subtask)."""
+    match = _MISSING_MODULE_PATTERN.search(error_text)
+    if not match:
+        return None
+    module_name = match.group(1) or match.group(2)
+    if not module_name:
+        return None
+    top_level = module_name.split(".")[0]
+    known = list(known_files)
+    known_module_names = {os.path.splitext(os.path.basename(f))[0] for f in known}
+    known_package_dirs = {f.split("/", 1)[0] for f in known if "/" in f}
+    if top_level in known_module_names or top_level in known_package_dirs:
+        return module_name
+    return None
+
+
 def _classify_missing_module_environment_failure(
     error_text: str, *, worktree_path: str, known_files: Iterable[str],
 ) -> Optional[str]:
@@ -163,11 +199,7 @@ def _classify_missing_module_environment_failure(
     module_name = match.group(1) or match.group(2)
     if not module_name:
         return None
-    top_level = module_name.split(".")[0]
-    known = list(known_files)
-    known_module_names = {os.path.splitext(os.path.basename(f))[0] for f in known}
-    known_package_dirs = {f.split("/", 1)[0] for f in known if "/" in f}
-    if top_level in known_module_names or top_level in known_package_dirs:
+    if extract_missing_project_local_python_module(error_text, known_files=known_files) is not None:
         # Project-local (e.g. 'customers_project.settings' resolving to
         # customers_project/settings.py, or a Django app package this
         # candidate itself owns) - ordinary code-repair territory, not an

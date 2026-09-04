@@ -3458,6 +3458,111 @@ async def test_infrastructure_outcomes_map_to_verification_infrastructure_failur
     assert outcome.value in raised.failure.message
 
 
+async def _run_managed_service_terminal_attempt_with_files(tmp_path, judge_result, all_files_written):
+    """Same shape as _run_managed_service_terminal_attempt above, but lets
+    the caller control state.all_files_written directly - Runtime-Evidence
+    Plan Repair (PRV-17 Run 13, 2026-09-04) grounds its missing-module
+    check against exactly that set, so testing it needs a realistic
+    Django-shaped known_files list the shared helper doesn't provide."""
+    plan = _managed_service_plan()
+    views_py = "customers/views.py"
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value=_managed_service_judgment())
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Create a Python 3.12 Django application.",
+        architect_files=[views_py], expected_files_upfront=[views_py],
+        architect_basename_to_path={"views.py": views_py},
+        allowed_write_relpaths=[views_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
+        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+        required_verification=[{
+            "type": "judgment", "description": "GET /customers/health returns 200",
+            "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
+        }],
+    )
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set(all_files_written)
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.workflow.attempt.run_managed_service_verification", return_value=judge_result,
+    ) as mock_run_managed_service:
+        raised = None
+        try:
+            await run_attempt(state, ctx)
+        except QualityGateFailure as e:
+            raised = e
+        return state, developer, mock_run_managed_service, raised
+
+
+@pytest.mark.asyncio
+async def test_managed_service_readiness_timeout_with_project_local_module_traceback_becomes_runtime_plan_gap(tmp_path):
+    """Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): a
+    READINESS_TIMEOUT whose captured output shows Django's own
+    ModuleNotFoundError for a module whose top-level package (myproject)
+    IS already project-local (known from state.all_files_written) must NOT
+    be classified verification_infrastructure_failure/STOP_ENVIRONMENT -
+    classify_environment_failure() already correctly says this is not an
+    environment problem. It becomes its own typed
+    managed_service_runtime_plan_gap Failure instead, carrying the
+    grounded module name for retry_strategy.py/workflow_controller.py's
+    own dedicated routing - never ordinary STOP_ENVIRONMENT, never silent
+    Developer retry."""
+    traceback_output = (
+        "Watching for file changes with StatReloader\n"
+        "Traceback (most recent call last):\n"
+        "  File \"manage.py\", line 22, in <module>\n"
+        "    main()\n"
+        "django.core.exceptions.ImproperlyConfigured: WSGI application "
+        "'myproject.wsgi.application' could not be loaded; Error importing module.\n"
+        "ModuleNotFoundError: No module named 'myproject.wsgi'\n"
+    )
+    state, developer, mock_run_managed_service, raised = await _run_managed_service_terminal_attempt_with_files(
+        tmp_path,
+        _managed_service_probe_result(
+            outcome=ServiceVerificationOutcomeKind.READINESS_TIMEOUT, passed=False,
+            reasoning="Service did not become ready within 15.0s.",
+            stdout=traceback_output, stderr="",
+        ),
+        all_files_written={"manage.py", "myproject/__init__.py", "myproject/settings.py", "myproject/urls.py"},
+    )
+
+    assert raised is not None
+    assert raised.failure.type == "managed_service_runtime_plan_gap"
+    assert raised.failure.diagnostics["missing_python_module"] == "myproject.wsgi"
+    assert raised.failure.diagnostics["managed_service_outcome"] == "READINESS_TIMEOUT"
+    assert "myproject.wsgi" in raised.failure.message
+
+
+@pytest.mark.asyncio
+async def test_managed_service_readiness_timeout_with_genuinely_missing_external_package_stays_environment_failure(tmp_path):
+    """Regression companion to the test above: when classify_environment_
+    failure() DOES conclude this is a genuine external-dependency gap (the
+    top-level module is not project-local, and no manifest exists for the
+    candidate to declare it in), the ORIGINAL, unchanged verification_
+    infrastructure_failure/STOP_ENVIRONMENT behavior must still apply -
+    Runtime-Evidence Plan Repair must never widen an existing incident
+    (Round 11's Django-not-installed case) it wasn't built to touch."""
+    state, developer, mock_run_managed_service, raised = await _run_managed_service_terminal_attempt_with_files(
+        tmp_path,
+        _managed_service_probe_result(
+            outcome=ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY, passed=False,
+            reasoning="Process exited before becoming ready.",
+            stdout="", stderr="ModuleNotFoundError: No module named 'django'\n",
+        ),
+        all_files_written={"manage.py", "myproject/__init__.py", "myproject/settings.py"},
+    )
+
+    assert raised is not None
+    assert raised.failure.type == "verification_infrastructure_failure"
+
+
 @pytest.mark.asyncio
 async def test_malformed_managed_service_contract_causes_zero_developer_calls(tmp_path):
     """(9) execution_mode="managed_service" but the managed_service object
@@ -3821,6 +3926,45 @@ async def test_handle_attempt_failure_stops_before_developer_call_on_verificatio
     assert should_break is True
     assert state.environment_failure is not None
     assert "RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE" in state.environment_failure
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_routes_runtime_plan_gap_to_plan_scope_conflict_not_stop_environment(tmp_path):
+    """Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): a
+    managed_service_runtime_plan_gap Failure (constructed in kriya/workflow/
+    attempt.py once classify_environment_failure has already ruled out an
+    environment explanation) must stop this subtask's OWN retry loop
+    (should_break is True, no LLM attribute_failure() call, no retry-budget
+    change - the SAME "exits to the authoritative controller immediately"
+    contract every other plan_scope_conflict path already has), but through
+    state.plan_scope_conflict, NOT state.environment_failure/STOP_
+    ENVIRONMENT - only kriya/workflow/workflow_controller.py's own
+    dedicated RUNTIME_PLAN_GAP branch may resolve an owner/path and mutate
+    the plan; this function must never guess one itself."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = QualityGateFailure(Failure(
+        type="managed_service_runtime_plan_gap",
+        message="MANAGED_SERVICE_RUNTIME_PLAN_GAP: managed-service verification failed "
+                "(READINESS_TIMEOUT) importing project-local Python module 'myproject.wsgi'",
+        raw_output="ModuleNotFoundError: No module named 'myproject.wsgi'",
+        diagnostics={
+            "missing_python_module": "myproject.wsgi",
+            "managed_service_outcome": "READINESS_TIMEOUT",
+        },
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.plan_scope_conflict is not None
+    assert state.plan_scope_conflict["classification"] == "runtime_plan_gap"
+    assert state.plan_scope_conflict["reason_code"] == "RUNTIME_PLAN_GAP"
+    assert state.plan_scope_conflict["missing_logical_artifact"] == "myproject.wsgi"
+    assert state.plan_scope_conflict["required_files"] == []
+    assert state.budgets.retry_count == 0
 
 
 def test_verification_only_java_grounding_outranks_inferred_maven_exec():

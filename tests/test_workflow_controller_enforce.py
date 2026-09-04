@@ -63,7 +63,10 @@ from kriya.workflow.workflow_controller import (
     build_planning_structural_evidence,
     find_missing_grounded_production_artifacts,
     build_recovery_execution_plan,
+    resolve_python_module_to_candidate_artifact_path,
+    resolve_runtime_plan_gap_owner,
     revise_plan_for_planned_prerequisite,
+    revise_plan_for_runtime_plan_gap,
     build_subtask_constraint_context,
     build_subtask_goal_text,
     build_subtask_semantic_context,
@@ -977,6 +980,173 @@ def test_planned_prerequisite_revision_wires_owner_upstream_without_moving_owner
     assert revised.subtask_by_id("s2").planned_files[0].requires_capabilities == ["test_tooling"]
     assert [pf.path for pf in revised.subtask_by_id("s4").planned_files] == ["build.config"]
     assert plan.subtask_by_id("s2").depends_on == []
+
+
+def _prv17_run13_shaped_plan():
+    """The exact ownership shape of the live PRV-17 Run 13 incident:
+    myproject/ owned by BOTH s1 (__init__.py, settings.py) and s3 (urls.py)
+    - the case that rules out a naive "unique owner of the parent
+    directory" rule (see resolve_runtime_plan_gap_owner's own docstring).
+    s5 (the managed-service verification subtask) has empty planned_files
+    by design and depends transitively on s1 via s2->s3->s4->s5."""
+    return EngineeringPlan(
+        plan_id="prv17-run13", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="Django project scaffold", execution_method=ExecutionMethod.MODEL,
+                planned_files=[
+                    PlannedFile(path="manage.py", action=FileAction.CREATE),
+                    PlannedFile(path="myproject/__init__.py", action=FileAction.CREATE),
+                    PlannedFile(path="myproject/settings.py", action=FileAction.CREATE),
+                ],
+            ),
+            Subtask(
+                id="s2", description="customers app scaffold", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="customers/__init__.py", action=FileAction.CREATE)],
+                depends_on=["s1"],
+            ),
+            Subtask(
+                id="s3", description="urls", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="myproject/urls.py", action=FileAction.CREATE)],
+                depends_on=["s2"],
+            ),
+            Subtask(
+                id="s4", description="tests", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="customers/tests.py", action=FileAction.CREATE)],
+                depends_on=["s3"],
+            ),
+            Subtask(
+                id="s5", description="managed-service verification", execution_method=ExecutionMethod.MODEL,
+                planned_files=[], depends_on=["s4"],
+            ),
+        ],
+    )
+
+
+def test_resolve_python_module_to_candidate_artifact_path_picks_module_file_form(tmp_path):
+    os.makedirs(tmp_path / "myproject")
+    (tmp_path / "myproject" / "__init__.py").write_text("")
+    assert resolve_python_module_to_candidate_artifact_path(
+        "myproject.wsgi", str(tmp_path),
+    ) == "myproject/wsgi.py"
+
+
+def test_resolve_python_module_to_candidate_artifact_path_refuses_bare_top_level_name(tmp_path):
+    # No established parent package to anchor against - could equally be a
+    # fresh single-file module or the start of a brand-new package.
+    assert resolve_python_module_to_candidate_artifact_path("django", str(tmp_path)) is None
+
+
+def test_resolve_python_module_to_candidate_artifact_path_refuses_when_parent_package_missing(tmp_path):
+    assert resolve_python_module_to_candidate_artifact_path(
+        "myproject.wsgi", str(tmp_path),
+    ) is None
+
+
+def test_resolve_python_module_to_candidate_artifact_path_refuses_when_module_file_already_exists(tmp_path):
+    os.makedirs(tmp_path / "myproject")
+    (tmp_path / "myproject" / "wsgi.py").write_text("existing")
+    assert resolve_python_module_to_candidate_artifact_path(
+        "myproject.wsgi", str(tmp_path),
+    ) is None
+
+
+def test_resolve_python_module_to_candidate_artifact_path_refuses_when_package_dir_already_exists(tmp_path):
+    os.makedirs(tmp_path / "myproject" / "wsgi")
+    assert resolve_python_module_to_candidate_artifact_path(
+        "myproject.wsgi", str(tmp_path),
+    ) is None
+
+
+def test_resolve_runtime_plan_gap_owner_picks_the_init_py_owner_not_any_directory_owner():
+    plan = _prv17_run13_shaped_plan()
+    s5 = plan.subtask_by_id("s5")
+    # myproject/ is owned by BOTH s1 (__init__.py) and s3 (urls.py) - only
+    # __init__.py's owner (s1) is the correct, unambiguous answer.
+    assert resolve_runtime_plan_gap_owner(plan, "myproject/wsgi.py", s5) == "s1"
+
+
+def test_resolve_runtime_plan_gap_owner_refuses_when_no_parent_directory():
+    plan = _prv17_run13_shaped_plan()
+    s5 = plan.subtask_by_id("s5")
+    assert resolve_runtime_plan_gap_owner(plan, "toplevel.py", s5) is None
+
+
+def test_resolve_runtime_plan_gap_owner_refuses_when_init_py_is_multi_owned():
+    plan = EngineeringPlan(
+        plan_id="ambiguous-init", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="a", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pkg/__init__.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="b", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pkg/__init__.py", action=FileAction.MODIFY)],
+                depends_on=["s1"],
+            ),
+            Subtask(
+                id="s3", description="verify", execution_method=ExecutionMethod.MODEL,
+                planned_files=[], depends_on=["s2"],
+            ),
+        ],
+    )
+    s3 = plan.subtask_by_id("s3")
+    assert resolve_runtime_plan_gap_owner(plan, "pkg/missing.py", s3) is None
+
+
+def test_resolve_runtime_plan_gap_owner_refuses_owner_not_upstream_of_failing_subtask():
+    plan = EngineeringPlan(
+        plan_id="downstream-owner", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="verify", execution_method=ExecutionMethod.MODEL,
+                planned_files=[],
+            ),
+            Subtask(
+                id="s2", description="unrelated package", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pkg/__init__.py", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    s1 = plan.subtask_by_id("s1")
+    # s2 is not upstream of s1 (no depends_on edge either way) - FUTURE_
+    # ORDERED/UNRELATED, not PAST_ORDERED, so it must not be reopened.
+    assert resolve_runtime_plan_gap_owner(plan, "pkg/missing.py", s1) is None
+
+
+def test_revise_plan_for_runtime_plan_gap_adds_exactly_one_planned_file_to_the_owner():
+    plan = _prv17_run13_shaped_plan()
+    revised = revise_plan_for_runtime_plan_gap(
+        plan, owner_subtask_id="s1", artifact_path="myproject/wsgi.py", reason="test",
+    )
+    revised_s1_paths = [pf.path for pf in revised.subtask_by_id("s1").planned_files]
+    assert revised_s1_paths == [
+        "manage.py", "myproject/__init__.py", "myproject/settings.py", "myproject/wsgi.py",
+    ]
+    # Every other subtask's own planned_files/depends_on is untouched.
+    assert [pf.path for pf in revised.subtask_by_id("s3").planned_files] == ["myproject/urls.py"]
+    assert revised.subtask_by_id("s5").depends_on == ["s4"]
+    # The original plan object passed in is never mutated.
+    assert [pf.path for pf in plan.subtask_by_id("s1").planned_files] == [
+        "manage.py", "myproject/__init__.py", "myproject/settings.py",
+    ]
+
+
+def test_revise_plan_for_runtime_plan_gap_rejects_unknown_owner():
+    plan = _prv17_run13_shaped_plan()
+    with pytest.raises(ValueError, match="unknown owner subtask"):
+        revise_plan_for_runtime_plan_gap(
+            plan, owner_subtask_id="does-not-exist", artifact_path="myproject/wsgi.py", reason="test",
+        )
+
+
+def test_revise_plan_for_runtime_plan_gap_rejects_already_planned_path():
+    plan = _prv17_run13_shaped_plan()
+    with pytest.raises(ValueError, match="already planned"):
+        revise_plan_for_runtime_plan_gap(
+            plan, owner_subtask_id="s1", artifact_path="myproject/settings.py", reason="test",
+        )
 
 
 def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():

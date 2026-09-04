@@ -2559,6 +2559,108 @@ def revise_plan_for_planned_prerequisite(
     return EngineeringPlan.model_validate(revised.model_dump(mode="json"))
 
 
+def resolve_python_module_to_candidate_artifact_path(
+    module_name: str, workspace_path: str,
+) -> Optional[str]:
+    """Deterministic dotted-module -> physical-file resolution for Runtime-
+    Evidence Plan Repair (PRV-17 Run 13, 2026-09-04 - see ObligationKind.
+    RUNTIME_PLAN_GAP's own docstring for the live incident). Never guesses:
+    Python module resolution genuinely has more than one physical shape (a
+    plain module x/y.py vs. a package directory x/y/__init__.py), and this
+    function returns a path only when exactly one interpretation is safe.
+
+    Requires at least two dotted segments - a bare top-level name has no
+    established parent package on disk to anchor against, exactly the
+    "fresh single-file module OR the start of a brand-new package"
+    ambiguity this function refuses to guess through.
+
+    Requires the parent package directory to ALREADY exist on disk (real,
+    established content, not merely planned) - with no established
+    convention to resolve against, there is nothing to prefer one form
+    over the other for.
+
+    Prefers the ordinary module-file form (parent/leaf.py) over the
+    package-directory form (parent/leaf/__init__.py): the module-file form
+    never requires creating a new directory beyond what already exists -
+    the strictly more conservative reading of what the evidence proves.
+    Returns None (instead of guessing the module-file form) when EITHER
+    candidate already exists on disk - the module already exists in some
+    form, so this is a different bug, not a missing artifact this
+    mechanism is scoped to repair."""
+    parts = [p for p in module_name.split(".") if p]
+    if len(parts) < 2:
+        return None
+    parent_dir = "/".join(parts[:-1])
+    if not os.path.isdir(os.path.join(workspace_path, parent_dir)):
+        return None
+    leaf = parts[-1]
+    module_file_real_path = os.path.join(workspace_path, parent_dir, f"{leaf}.py")
+    package_dir_real_path = os.path.join(workspace_path, parent_dir, leaf)
+    if os.path.exists(module_file_real_path) or os.path.exists(package_dir_real_path):
+        return None
+    return f"{parent_dir}/{leaf}.py"
+
+
+def resolve_runtime_plan_gap_owner(
+    plan: EngineeringPlan, candidate_path: str, failed_subtask: Subtask,
+) -> Optional[str]:
+    """Package-establisher ownership rule for Runtime-Evidence Plan Repair
+    (PRV-17 Run 13, 2026-09-04): the subtask that owns candidate_path's
+    parent package's own __init__.py is the one deterministic, language-
+    convention (not framework-specific) signal for "who should own a new
+    member of this package." Deliberately narrower than "any subtask
+    owning any file under this directory" - PRV-17 Run 13's own audit
+    found myproject/ owned by BOTH s1 (myproject/__init__.py,
+    myproject/settings.py) and s3 (myproject/urls.py) in the live incident
+    this closes; only __init__.py's owner is unambiguous.
+
+    Returns None (never guesses) when: candidate_path has no parent
+    directory (a root-level new module has no package-establisher to
+    anchor to); __init__.py has no unique plan-declared owner
+    (EngineeringPlan.file_owner() itself already returns None for a
+    multi-declared path - see revise_plan_for_planned_prerequisite's own
+    precedent, above); the owner IS the failing subtask itself (nothing to
+    reopen); or the owner is not upstream (PAST_ORDERED) of the failing
+    subtask - a downstream or unrelated "owner" is not a legal reopen
+    target."""
+    parent_dir = os.path.dirname(candidate_path)
+    if not parent_dir:
+        return None
+    init_path = f"{parent_dir}/__init__.py"
+    owner = plan.file_owner(init_path)
+    if owner is None or owner.id == failed_subtask.id:
+        return None
+    if plan.classify_file_ownership(failed_subtask.id, init_path) != FileOwnershipRelation.PAST_ORDERED:
+        return None
+    return owner.id
+
+
+def revise_plan_for_runtime_plan_gap(
+    plan: EngineeringPlan, *, owner_subtask_id: str, artifact_path: str, reason: str,
+) -> EngineeringPlan:
+    """Mints exactly one new PlannedFile(action=CREATE) on an EXISTING,
+    already-validated owner subtask - the one new kind of plan mutation
+    Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04) performs.
+    Deliberately as small an edit as revise_plan_for_planned_prerequisite's
+    own: no new subtask, no reordering, no touching any other subtask's
+    planned_files/requires/depends_on. The caller's own validate_plan()
+    call on the returned plan is what proves this bounded edit is safe -
+    never this function's own judgment, matching the north-star invariant
+    this whole mechanism exists to preserve: runtime evidence may prove
+    the plan is incomplete, but only a validated plan revision may convert
+    that evidence into new write authority."""
+    revised = plan.model_copy(deep=True)
+    owner = revised.subtask_by_id(owner_subtask_id)
+    if owner is None:
+        raise ValueError(f"runtime plan gap revision references unknown owner subtask {owner_subtask_id!r}")
+    if any(pf.path == artifact_path for pf in owner.planned_files):
+        raise ValueError(f"{artifact_path!r} is already planned by {owner_subtask_id!r}")
+    owner.planned_files = owner.planned_files + [
+        PlannedFile(path=artifact_path, action=FileAction.CREATE, reason=reason)
+    ]
+    return EngineeringPlan.model_validate(revised.model_dump(mode="json"))
+
+
 def compute_abandoned_plan_files(
     prior_subtask_states: Dict[str, str],
     prior_subtask_written_files: Dict[str, List[str]],
@@ -4239,6 +4341,188 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "reason": "planned prerequisite wiring failed revalidation: "
                             + "; ".join(prerequisite_validation.errors),
                         }
+            elif scope_conflict.get("reason_code") == "RUNTIME_PLAN_GAP":
+                # Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04) -
+                # see ObligationKind.RUNTIME_PLAN_GAP's own docstring for the
+                # live incident (myproject.wsgi never planned by any
+                # subtask) and kriya/workflow/attempt.py's own _execute_
+                # managed_service_verification for where this evidence
+                # originates. Structurally parallel to the
+                # PLANNED_PREREQUISITE_OWNER_REQUIRED branch just above -
+                # revise, revalidate, swap in - but for the case that branch
+                # cannot handle: no owner exists yet for the missing
+                # artifact at all. Positioned BEFORE grounded_scope_files is
+                # computed below deliberately: resolve_effective_scope_
+                # conflict_owners() (used further down) can only find an
+                # owner for a file the plan ALREADY declares - this block's
+                # entire job is to make that true first, never to reuse the
+                # generic PLAN_SCOPE_DEFECT merge path's own "genuinely
+                # unowned -> assign to the FAILING subtask" fallback
+                # (revise_plan_for_grounded_scope_owner), which would
+                # silently hand a managed-service verification subtask
+                # (empty write scope by design) a new artifact it was never
+                # meant to own - exactly what PRV-17 Run 13's own audit
+                # explicitly ruled out.
+                missing_artifact = scope_conflict.get("missing_logical_artifact")
+                obligation_id = f"runtime_plan_gap.{subtask.id}.{missing_artifact}"
+                prior_attempts = len(obligation_ledger.history(obligation_id)) if obligation_ledger else 0
+                if not isinstance(missing_artifact, str) or not missing_artifact:
+                    logger.error(
+                        "RUNTIME_PLAN_GAP_UNRESOLVED subtask=%s reason=missing_logical_artifact_absent_or_invalid",
+                        subtask.id,
+                    )
+                elif prior_attempts >= 2:
+                    if obligation_ledger:
+                        obligation_ledger.record(ObligationRecord(
+                            id=obligation_id, kind=ObligationKind.RUNTIME_PLAN_GAP,
+                            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+                            description=(
+                                f"Runtime evidence repeatedly proved {missing_artifact!r} missing "
+                                "with no resolvable owner/path."
+                            ),
+                            source="managed_service_verification", revision=subtask.id,
+                            evidence={"missing_logical_artifact": missing_artifact, "attempts": prior_attempts},
+                            owner_subtask_id=None, terminal_required=True,
+                        ))
+                    logger.error(
+                        "RUNTIME_PLAN_REPAIR_NO_PROGRESS subtask=%s missing_logical_artifact=%s attempts=%d",
+                        subtask.id, missing_artifact, prior_attempts,
+                    )
+                else:
+                    candidate_path = resolve_python_module_to_candidate_artifact_path(
+                        missing_artifact, plan_workspace_path,
+                    )
+                    owner_id = (
+                        resolve_runtime_plan_gap_owner(plan, candidate_path, subtask)
+                        if candidate_path else None
+                    )
+                    if candidate_path is None or owner_id is None:
+                        if obligation_ledger:
+                            obligation_ledger.record(ObligationRecord(
+                                id=obligation_id, kind=ObligationKind.RUNTIME_PLAN_GAP,
+                                status=ObligationStatus.INDETERMINATE, authority=ObligationAuthority.DETERMINISTIC,
+                                description=(
+                                    f"Runtime evidence proved {missing_artifact!r} missing, but no "
+                                    "single safe physical path/owner could be resolved deterministically."
+                                ),
+                                source="managed_service_verification", revision=subtask.id,
+                                evidence={
+                                    "missing_logical_artifact": missing_artifact,
+                                    "candidate_path": candidate_path,
+                                    "owner_subtask_id": owner_id,
+                                },
+                                owner_subtask_id=None, terminal_required=True,
+                            ))
+                        logger.error(
+                            "RUNTIME_PLAN_GAP_UNRESOLVED subtask=%s missing_logical_artifact=%s "
+                            "candidate_path=%s owner_subtask_id=%s - ambiguous or no compatible "
+                            "owner; refusing to guess.",
+                            subtask.id, missing_artifact, candidate_path, owner_id,
+                        )
+                    else:
+                        gap_revision = revise_plan_for_runtime_plan_gap(
+                            plan, owner_subtask_id=owner_id, artifact_path=candidate_path,
+                            reason=(
+                                f"Runtime-Evidence Plan Repair: {subtask.id}'s managed-service "
+                                f"verification deterministically proved Python module "
+                                f"{missing_artifact!r} is imported but never planned."
+                            ),
+                        )
+                        gap_validation = await validate_plan(
+                            gap_revision,
+                            workspace_path=plan_workspace_path,
+                            available_tool_names=available_tool_names,
+                            route=route,
+                            triage_service=self.workflow_engine.engineering_triage,
+                            resuming_own_established_progress=True,
+                            require_model_planned_files=True,
+                            require_semantic_contracts=True,
+                            runtime_verification_required=goal_requires_runtime_behavior(goal),
+                            stack_contract=derive_stack_contract(goal),
+                        )
+                        if obligation_ledger:
+                            obligation_ledger.record(ObligationRecord(
+                                id=obligation_id, kind=ObligationKind.RUNTIME_PLAN_GAP,
+                                status=(
+                                    ObligationStatus.PENDING if gap_validation.valid
+                                    else ObligationStatus.VIOLATED
+                                ),
+                                authority=ObligationAuthority.DETERMINISTIC,
+                                description=(
+                                    f"Runtime-Evidence Plan Repair adds {candidate_path!r} to "
+                                    f"{owner_id!r}'s planned files."
+                                ),
+                                source="managed_service_verification", revision=subtask.id,
+                                evidence={
+                                    "missing_logical_artifact": missing_artifact,
+                                    "candidate_path": candidate_path,
+                                    "validation_errors": gap_validation.errors,
+                                },
+                                owner_subtask_id=owner_id, terminal_required=True,
+                                repair_scope=(candidate_path,),
+                            ))
+                        if gap_validation.valid:
+                            prior_hash = current_plan_hash
+                            plan = gap_revision
+                            current_plan_hash = plan.content_hash()
+                            order = topological_subtask_order(plan)
+                            execution_context = await self._build_context(
+                                goal, plan, plan_workspace_path, route, control_context, control_state,
+                            )
+                            subtask = plan.subtask_by_id(subtask_id)
+                            assert subtask is not None
+                            save_approved_plan(
+                                workspace_path, plan.plan_id,
+                                build_approved_plan_document(
+                                    plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                                    stage_states=approved_stage_states,
+                                    lifecycle_state="runtime_plan_gap_revised",
+                                ),
+                            )
+                            plan_recovery_events.append({
+                                "failed_subtask": subtask.id,
+                                "classification": "RUNTIME_PLAN_GAP",
+                                "reason_code": "RUNTIME_PLAN_GAP",
+                                "missing_logical_artifact": missing_artifact,
+                                "new_artifact_path": candidate_path,
+                                "new_artifact_owner": owner_id,
+                                "prior_plan_hash": prior_hash,
+                                "revised_plan_hash": current_plan_hash,
+                                "ownership_preserved": False,
+                            })
+                            logger.warning(
+                                "RUNTIME_PLAN_GAP_REPAIRED subtask=%s missing_logical_artifact=%s "
+                                "new_artifact=%s owner=%s - owner reopens for the added artifact "
+                                "before %s resumes.",
+                                subtask.id, missing_artifact, candidate_path, owner_id, subtask.id,
+                            )
+                            # Reshape scope_conflict into the ordinary
+                            # PLAN_SCOPE_DEFECT contract so every downstream
+                            # mechanism (resolve_effective_scope_conflict_
+                            # owners, build_recovery_execution_plan, the
+                            # existing reopen/regenerate/resume machinery)
+                            # runs completely unmodified - the owner it now
+                            # resolves to is correct because gap_revision
+                            # already made it true, not because this dict
+                            # says so.
+                            scope_conflict = {
+                                "classification": "PLAN_SCOPE_DEFECT",
+                                "reason_code": "RUNTIME_PLAN_GAP",
+                                "failure_type": scope_conflict.get("failure_type"),
+                                "reason": (
+                                    f"Runtime-Evidence Plan Repair: {candidate_path!r} was added to "
+                                    f"{owner_id!r}'s planned files after deterministic runtime "
+                                    "evidence proved it missing."
+                                ),
+                                "required_files": [candidate_path],
+                                "attribution_tier": "architectural_owner",
+                            }
+                        else:
+                            logger.error(
+                                "RUNTIME_PLAN_GAP_REVISION_REJECTED subtask=%s candidate_path=%s "
+                                "owner=%s validation_errors=%s",
+                                subtask.id, candidate_path, owner_id, gap_validation.errors,
+                            )
             grounded_scope_files = _plan_scope_conflict_files(scope_conflict)
             # MA8 (spec §30): a DETERMINISTIC-authority obligation
             # (currently only the migration gate's authoritative_files,

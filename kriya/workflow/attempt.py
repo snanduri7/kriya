@@ -51,7 +51,7 @@ from kriya.workflow.dependency_invalidation import (
     invalidate_validated_revisions,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
+from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, classify_environment_failure, extract_missing_project_local_python_module, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -2034,6 +2034,31 @@ _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES = frozenset({
     ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR,
 })
 
+# Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): the subset of
+# _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES above whose `output` is the
+# TARGET APPLICATION's own captured stdout/stderr - real text worth running
+# through classify_environment_failure(), the same classifier compile/test
+# failures already consult. CLEANUP_FAILED and VERIFICATION_INTERNAL_ERROR
+# are deliberately excluded: both are Kriya's OWN process-management code
+# failing (or an exception raised inside kriya.tools.service_runtime
+# itself), never the target application's text - classifying an internal
+# Kriya traceback via a heuristic built to read a DIFFERENT application's
+# output would be exactly the "never designed to recognize an arbitrary
+# internal traceback" mistake this module's own PRV-06 precedent (see
+# retry_strategy.py's environment_failure bypass-set comment) already
+# rejected once. SERVICE_START_FAILED is included even though it can also
+# legitimately mean "no captured output at all" (e.g. the interpreter
+# itself was never found) - classify_environment_failure/extract_missing_
+# project_local_python_module both fail closed (return None) on text that
+# doesn't match their own patterns, so an empty/unrelated `output` here
+# simply falls through to the unchanged STOP_ENVIRONMENT path below, no
+# special-casing required.
+_MANAGED_SERVICE_OUTCOMES_WITH_CAPTURED_APPLICATION_OUTPUT = frozenset({
+    ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
+    ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
+    ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
+})
+
 _MANAGED_SERVICE_READINESS_KINDS = frozenset({"tcp", "http"})
 _MANAGED_SERVICE_PROBE_KINDS = frozenset({"http"})
 
@@ -2292,6 +2317,75 @@ async def _execute_managed_service_verification(
         output += f"\n\nprobe_status: {result.probe_status}\nprobe_body: {result.probe_body}"
 
     if result.outcome in _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES:
+        # Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): before
+        # unconditionally treating this as environment-only (as every one
+        # of these outcomes used to be, unconditionally), give the SAME
+        # classify_environment_failure() compile/test failures already
+        # consult a chance to read the target application's own captured
+        # output - see _MANAGED_SERVICE_OUTCOMES_WITH_CAPTURED_APPLICATION_
+        # OUTPUT's own docstring for exactly which outcomes qualify and why.
+        if result.outcome in _MANAGED_SERVICE_OUTCOMES_WITH_CAPTURED_APPLICATION_OUTPUT:
+            environment_verdict = classify_environment_failure(
+                output, worktree_path=ctx.worktree_path, known_files=known_files,
+            )
+            if environment_verdict is None:
+                missing_module = extract_missing_project_local_python_module(
+                    output, known_files=known_files,
+                )
+                if missing_module is not None:
+                    # Deterministic evidence that a project-local Python
+                    # module the running application imports is missing -
+                    # NOT an environment failure (classify_environment_
+                    # failure already ruled that out) and NOT ordinary
+                    # Developer retry evidence either: this subtask may own
+                    # no write scope at all (a managed-service verification
+                    # subtask is frequently DENY_ALL by construction), and
+                    # even when it does, the missing module may belong to a
+                    # DIFFERENT subtask entirely. Surfaced as its own typed
+                    # Failure so retry_strategy.py can route it through
+                    # plan-scope-conflict evidence rather than either the
+                    # STOP_ENVIRONMENT bypass or the ordinary attribution/
+                    # retry pipeline - see ObligationKind.RUNTIME_PLAN_GAP's
+                    # own docstring for the live incident this closes and
+                    # the invariant it preserves: execution evidence may
+                    # prove the plan is incomplete, but only a validated
+                    # plan revision (kriya/workflow/workflow_controller.py)
+                    # may convert that evidence into new write authority -
+                    # never this function, never the Developer.
+                    message = (
+                        f"MANAGED_SERVICE_RUNTIME_PLAN_GAP: managed-service verification "
+                        f"failed ({result.outcome.value}) importing project-local Python "
+                        f"module {missing_module!r}, which no subtask in the approved plan "
+                        f"currently owns.\n\nCaptured output:\n{output}"
+                    )
+                    failure = Failure(
+                        type="managed_service_runtime_plan_gap", message=message,
+                        raw_output=output, attempt=state.attempt_number,
+                        diagnostics={
+                            "missing_python_module": missing_module,
+                            "managed_service_outcome": result.outcome.value,
+                        },
+                    )
+                    outcome_dict = failure.to_gate_outcome()
+                    outcome_dict.update({
+                        "commands": [spec.service_command], "managed_service_outcome": result.outcome.value,
+                    })
+                    state.gate_outcomes.append(outcome_dict)
+                    raise QualityGateFailure(failure)
+                # Neither an environment gap nor a missing-module shape -
+                # classify_environment_failure found nothing conclusive
+                # either way. Deliberately falls through to the UNCHANGED
+                # verification_infrastructure_failure/STOP_ENVIRONMENT path
+                # below rather than guessing this is ordinary Developer-
+                # retryable evidence: Runtime-Evidence Plan Repair (PRV-17
+                # Run 13, 2026-09-04) is scoped narrowly to the one grounded
+                # case classify_environment_failure/extract_missing_
+                # project_local_python_module can actually prove - widening
+                # the classification of every OTHER captured-output shape is
+                # a separate, unauthorized behavior change (and would
+                # silently break test_infrastructure_outcomes_map_to_
+                # verification_infrastructure_failure's own, deliberately
+                # unconditional, coverage of this exact case).
         message = (
             f"VERIFICATION_INFRASTRUCTURE_FAILURE: managed-service verification could not "
             f"produce behavioral evidence ({result.outcome.value}): {result.reasoning}\n\n"

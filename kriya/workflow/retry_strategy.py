@@ -690,6 +690,46 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                     "targets outside the validated subtask scope."
                 ),
             )
+        elif fail_type == "managed_service_runtime_plan_gap":
+            # Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): this
+            # failure already carries deterministic evidence (a captured
+            # ModuleNotFoundError traceback, pattern-matched in attempt.py -
+            # see kriya.workflow.attempt._execute_managed_service_
+            # verification) that a project-local Python module has no
+            # current owner. Routing it through attribute_failure()'s
+            # LLM-based self-diagnosis pipeline below would both waste a
+            # call and risk downgrading DETERMINISTIC evidence to a JUDGMENT
+            # verdict. No physical file path or owner subtask is resolved
+            # here - required_files stays empty on purpose. Only
+            # kriya/workflow/workflow_controller.py's dedicated RUNTIME_PLAN_
+            # GAP branch (the control plane, never this attempt-scoped
+            # function) may resolve a candidate artifact path/owner and
+            # mutate the plan - see ObligationKind.RUNTIME_PLAN_GAP's own
+            # docstring for the invariant this split preserves. tier=
+            # "full_set" (not a DETERMINISTIC_ATTRIBUTION_TIERS member)
+            # deliberately keeps scope_conflict_is_grounded False below, so
+            # the generic PLAN_SCOPE_DEFECT machinery further down never
+            # overwrites this dict - the same precedent VERIFICATION_
+            # CONTRACT_DEFECT already established just below.
+            attribution = AttributionResult(
+                tier="full_set", files=[], confidence="high",
+                reasoning=(
+                    "Managed-service runtime verification captured deterministic evidence "
+                    "of a missing project-local artifact; ownership/scope resolution is "
+                    "reserved for the control plane's own Runtime-Evidence Plan Repair path."
+                ),
+            )
+            diagnostics = failure.diagnostics or {}
+            state.plan_scope_conflict = {
+                "classification": "runtime_plan_gap",
+                "reason_code": "RUNTIME_PLAN_GAP",
+                "failure_type": fail_type,
+                "reason": attribution.reasoning,
+                "missing_logical_artifact": diagnostics.get("missing_python_module"),
+                "artifact_kind": "python_module",
+                "managed_service_outcome": diagnostics.get("managed_service_outcome"),
+                "required_files": [],
+            }
         elif attribution_kind in (
             FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT,
             FailureAttributionKind.INFRASTRUCTURE_DEFECT,
