@@ -217,6 +217,188 @@ async def test_assertion_failure_with_no_resolvable_provider_fails_closed_not_to
     assert "FooTest.java" not in result.files
 
 
+# --- Test fixture/precondition failures (P1, 2026-09-04) ---
+#
+# Live incident: EmployeeServiceTest mocked DepartmentRepository but never
+# stubbed existsById() - Mockito's default (false) made the EXISTING,
+# unmodified EmployeeService.hire() guard correctly throw
+# IllegalArgumentException("Department id=101 does not exist") while the
+# test was still seeding fixture data, before ever reaching
+# findByEmailDomain() (the actual behavior under test). The plain locator
+# tier attributed this to EmployeeService.java (the throwing frame) and
+# dispatched a bounded cross-owner recovery there - no edit to hire() could
+# ever satisfy a missing mock stub in the test's own fixture, so recovery
+# exhausted its bounded budget by construction, not chance.
+
+_EMPLOYEE_SERVICE_PATH = "src/main/java/com/example/ignite/service/EmployeeService.java"
+_EMPLOYEE_SERVICE_TEST_PATH = "src/test/java/com/example/ignite/service/EmployeeServiceTest.java"
+
+_HIRE_GUARD_TRACE = (
+    "java.lang.IllegalArgumentException: Department id=101 does not exist\n"
+    "\tat com.example.ignite.service.EmployeeService.hire(EmployeeService.java:3)\n"
+    "\tat com.example.ignite.service.EmployeeServiceTest."
+    "findByEmailDomain_nonMatchingDomain_returnsEmptyList(EmployeeServiceTest.java:10)\n"
+    "\tat java.base/java.lang.reflect.Method.invoke(Method.java:568)\n"
+)
+
+_EMPLOYEE_SERVICE_UNCHANGED = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) { if (!deptRepo.existsById(e.getDepartmentId())) throw new IllegalArgumentException(\"x\"); return e; }\n"
+    "}\n"
+)
+
+_EMPLOYEE_SERVICE_NEWLY_WRITTEN = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) { if (e.getSalary() < 0) throw new IllegalArgumentException(\"x\"); return e; }\n"
+    "}\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_failure_attributes_to_test_not_production_guard():
+    """The core fix: an unstubbed mock making an EXISTING production guard
+    throw, called directly from the test's own fixture setup (zero
+    intervening production call depth), attributes to the test file - not
+    the production file the exception happened to surface in."""
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=_HIRE_GUARD_TRACE)
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, [_EMPLOYEE_SERVICE_PATH, _EMPLOYEE_SERVICE_TEST_PATH], 0, [], llm,
+        lambda fp: {_EMPLOYEE_SERVICE_PATH: _EMPLOYEE_SERVICE_UNCHANGED}.get(fp),
+        original_contents={_EMPLOYEE_SERVICE_PATH: _EMPLOYEE_SERVICE_UNCHANGED},
+    )
+    assert result.tier == "locator"
+    assert result.files == [_EMPLOYEE_SERVICE_TEST_PATH]
+    assert _EMPLOYEE_SERVICE_PATH not in result.files
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_check_falls_through_when_guard_line_is_newly_written():
+    """Genuine product case: the SAME shape (test calls a production method
+    directly, which throws), but the throwing line is NEW - part of THIS
+    generation's own work, not pre-existing behavior - per
+    state.all_original_contents showing a different baseline line. Must
+    still attribute to the production file (falling through to the plain,
+    unmodified locator tier - which, unrelated to this fix, also still
+    names the test file it found in the same raw text; this test's own
+    concern is only that the new check never SUPPRESSES the production
+    file, not the plain locator's separate multi-file behavior); a
+    freshly-written line throwing is real evidence of a defect in the new
+    code, not a fixture gap."""
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=_HIRE_GUARD_TRACE)
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, [_EMPLOYEE_SERVICE_PATH, _EMPLOYEE_SERVICE_TEST_PATH], 0, [], llm,
+        lambda fp: {_EMPLOYEE_SERVICE_PATH: _EMPLOYEE_SERVICE_NEWLY_WRITTEN}.get(fp),
+        original_contents={_EMPLOYEE_SERVICE_PATH: _EMPLOYEE_SERVICE_UNCHANGED},
+    )
+    assert result.tier == "locator"
+    assert _EMPLOYEE_SERVICE_PATH in result.files
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_check_is_opt_in_without_original_contents():
+    """A caller that doesn't pass original_contents (every pre-2026-09-04
+    caller) sees IDENTICAL behavior to before this parameter existed - the
+    plain locator tier still attributes to the throwing production file
+    (the new check requires original_contents and no-ops entirely without
+    it, per its own docstring)."""
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=_HIRE_GUARD_TRACE)
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, [_EMPLOYEE_SERVICE_PATH, _EMPLOYEE_SERVICE_TEST_PATH], 0, [], llm, lambda fp: "content",
+    )
+    assert result.tier == "locator"
+    assert _EMPLOYEE_SERVICE_PATH in result.files
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_check_does_not_redirect_a_genuine_multi_layer_production_bug():
+    """A real bug reached through several layers of production code before
+    surfacing (e.g. a hand-rolled parser's decode() called from a broker
+    class, never directly from the test) must NOT redirect to the test file
+    merely because both are known files - the caller frame here is another
+    PRODUCTION file, not the test, so this check never fires and the plain
+    (unmodified) locator tier decides, as before, unaffected by this fix."""
+    raw = (
+        "java.nio.BufferUnderflowException\n"
+        "\tat com.example.ProtocolParser.decode(ProtocolParser.java:42)\n"
+        "\tat com.example.BrokerServer.handle(BrokerServer.java:88)\n"
+        "\tat com.example.BrokerServerTest.testHandle(BrokerServerTest.java:15)\n"
+    )
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=raw)
+    llm = MagicMock()
+    parser_baseline = "class ProtocolParser {\n    // unchanged\n    void decode() { throw new java.nio.BufferUnderflowException(); }\n}\n"
+    result = await attribute_failure(
+        failure,
+        ["ProtocolParser.java", "BrokerServer.java", "BrokerServerTest.java"], 0, [], llm,
+        lambda fp: {"ProtocolParser.java": parser_baseline}.get(fp),
+        original_contents={"ProtocolParser.java": parser_baseline},
+    )
+    assert result.tier == "locator"
+    assert "ProtocolParser.java" in result.files
+
+
+_EARLY_RETURN_BASELINE_HIRE = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) {\n"
+    "        if (e.getId() > 1000) { return e; }\n"
+    "        if (!deptRepo.existsById(e.getDepartmentId())) throw new IllegalArgumentException(\"x\");\n"
+    "        return e;\n"
+    "    }\n"
+    "}\n"
+)
+
+# Same method, same throwing line (line 5, byte-identical) - but the
+# early-return's OWN threshold on line 4 was widened by this generation,
+# so a request that used to short-circuit BEFORE ever reaching the guard
+# now falls through into it. Line-level baseline comparison alone cannot
+# see this: the throwing line never changed.
+_EARLY_RETURN_MODIFIED_HIRE = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) {\n"
+    "        if (e.getId() > 100000) { return e; }\n"
+    "        if (!deptRepo.existsById(e.getDepartmentId())) throw new IllegalArgumentException(\"x\");\n"
+    "        return e;\n"
+    "    }\n"
+    "}\n"
+)
+
+_EARLY_RETURN_TRACE = (
+    "java.lang.IllegalArgumentException: Department id=101 does not exist\n"
+    "\tat com.example.ignite.service.EmployeeService.hire(EmployeeService.java:5)\n"
+    "\tat com.example.ignite.service.EmployeeServiceTest.someFixtureSetup(EmployeeServiceTest.java:20)\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_check_does_not_redirect_when_enclosing_method_changed_elsewhere():
+    """Method-level strengthening (2026-09-05, user review): the throwing
+    line itself is byte-identical to baseline, called directly from the
+    test with zero intervening production frames - exactly the shape the
+    line-level check would have redirected to the test. But a DIFFERENT
+    statement earlier in the SAME method (the early-return's threshold)
+    was modified by this generation, which is what actually caused
+    execution to reach the pre-existing guard in a case it never used to.
+    That is real evidence of a genuine, newly-introduced production
+    defect - the shortcut must NOT fire; production must stay eligible as
+    repair owner."""
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=_EARLY_RETURN_TRACE)
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, [_EMPLOYEE_SERVICE_PATH, _EMPLOYEE_SERVICE_TEST_PATH], 0, [], llm,
+        lambda fp: {_EMPLOYEE_SERVICE_PATH: _EARLY_RETURN_MODIFIED_HIRE}.get(fp),
+        original_contents={_EMPLOYEE_SERVICE_PATH: _EARLY_RETURN_BASELINE_HIRE},
+    )
+    assert result.tier == "locator"
+    assert _EMPLOYEE_SERVICE_PATH in result.files
+
+
 # --- failure.authoritative_files (PRV-05 run 7, 2026-08-28) ---
 
 @pytest.mark.asyncio

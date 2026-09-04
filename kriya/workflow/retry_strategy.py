@@ -749,6 +749,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 ctx.developer.llm,
                 lambda fp: read_worktree_file(ctx.worktree_path, fp),
                 self_diagnosed_files=self_diagnosed_files,
+                original_contents=state.all_original_contents,
             )
         implicated = attribution.files
         if (
