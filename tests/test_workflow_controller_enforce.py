@@ -2124,6 +2124,64 @@ def test_missing_grounded_production_artifact_flags_the_exact_omitted_file(tmp_p
     }]
 
 
+_WIDGET_JAVA = (
+    "package com.example.widget;\n"
+    "public class Widget {\n"
+    "    public String label() { return \"widget\"; }\n"
+    "}\n"
+)
+_WIDGET_SERVICE_JAVA = (
+    "package com.example.widget;\n"
+    "public class WidgetService {\n"
+    "    public Widget make() { return new Widget(); }\n"
+    "}\n"
+)
+_WIDGET_PATH = "src/main/java/com/example/widget/Widget.java"
+_WIDGET_SERVICE_PATH = "src/main/java/com/example/widget/WidgetService.java"
+
+
+def _seed_single_production_dependency_repo(tmp_path):
+    files = {_WIDGET_PATH: _WIDGET_JAVA, _WIDGET_SERVICE_PATH: _WIDGET_SERVICE_JAVA}
+    for relpath, content in files.items():
+        full = tmp_path / relpath
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    return list(files.keys())
+
+
+def test_missing_grounded_production_artifact_is_silent_for_production_source_with_one_unplanned_dependency(tmp_path):
+    """(2026-09-04) Source-role scoping fix: a PRODUCTION source referencing
+    a single existing, unplanned production dependency (Widget.java is
+    ordinary brownfield WidgetService.java already correctly depends on) is
+    not the PRV-11 omitted-owner shape - only a test source omitting a
+    production owner is."""
+    candidates = _seed_single_production_dependency_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    assert edges[_WIDGET_SERVICE_PATH] == [_WIDGET_PATH]
+    plan = EngineeringPlan(
+        plan_id="widget-service-only", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[_structural_customer_subtask("s1", _WIDGET_SERVICE_PATH)],
+    )
+
+    assert find_missing_grounded_production_artifacts(plan, edges) == []
+
+
+def test_missing_grounded_production_artifact_is_silent_for_production_source_with_multiple_unplanned_dependencies(tmp_path):
+    """Same shape as above but with a source (CustomerController.java) that
+    structurally references TWO unplanned production files (Customer.java
+    AND CustomerService.java) - neither is flagged, since the source is
+    production, not a test."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    assert set(edges[_CUSTOMER_CONTROLLER_PATH]) == {_CUSTOMER_PATH, _CUSTOMER_SERVICE_PATH}
+    plan = EngineeringPlan(
+        plan_id="controller-only", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[_structural_customer_subtask("s1", _CUSTOMER_CONTROLLER_PATH)],
+    )
+
+    assert find_missing_grounded_production_artifacts(plan, edges) == []
+
+
 def test_missing_grounded_production_artifact_is_silent_when_the_owner_is_planned(tmp_path):
     candidates = _seed_structural_customer_repo(tmp_path)
     _, edges = build_planning_structural_evidence(str(tmp_path), candidates)

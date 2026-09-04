@@ -1115,7 +1115,19 @@ def find_missing_grounded_production_artifacts(
        them (or invents an unrelated substitute test file instead of the
        real, pre-existing one - scanning EVERY candidate test file this
        function was given evidence for, not only currently-planned ones,
-       catches that shape too).
+       catches that shape too). Scoped to a runnable-test SOURCE only
+       (2026-09-04, Production Validation P1): build_planning_structural_
+       evidence only ever indexes candidates that already exist on disk, so
+       every target this function sees - real gap or not - already exists
+       in the workspace. Filesystem existence therefore can't distinguish
+       a genuine omitted owner from a production file's ordinary, correct
+       reference to an untouched brownfield dependency (found live: a
+       clean plan modifying EmployeeRepository.java was rejected for its
+       own unremarkable, unchanged import of IgniteConfig.java). What
+       distinguishes them is the SOURCE: a test's reference to an unowned
+       production file is exactly the PRV-11 omitted-producer shape; a
+       production file's reference to an unowned production file is an
+       ordinary dependency this plan was never asked to touch.
     2. MISWIRED (reason="not_in_dependency_chain", 2026-08-31): the
        referenced production file IS owned by a real subtask, but that
        subtask is not in the REFERENCING subtask's own transitive
@@ -1162,6 +1174,8 @@ def find_missing_grounded_production_artifacts(
             if key in seen:
                 continue
             if target not in owned_paths:
+                if not is_runnable_test_file(source):
+                    continue
                 seen.add(key)
                 gaps.append({
                     "test_file": source, "missing_production_artifact": target,
