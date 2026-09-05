@@ -12283,6 +12283,44 @@ async def test_handle_attempt_failure_scope_denial_with_real_existing_owner_is_u
 
 
 @pytest.mark.asyncio
+async def test_handle_attempt_failure_scope_denial_with_real_existing_test_owner_is_grounded(tmp_path):
+    """Real bug found live in the P2 production-validation run (2026-09-05,
+    spring-ignite-demo): a plan split "change EmployeeService.giveRaise"
+    (s1) and "update the existing EmployeeServiceTest that pins its old
+    behavior" (s2, depends_on=[s1]) into two subtasks. s1's own full
+    regression gate could never pass without updating that test, s1 has no
+    write authority over it, and _failure_from_validated_scope_denial()
+    used to blanket-exclude every test-file target regardless of whether it
+    really existed - sending this straight to the unrecoverable-scope-
+    denial circuit breaker instead of the plan-surgery path
+    (revise_plan_for_grounded_scope_owner) built for exactly this
+    downstream-owner shape. A real, existing test file must ground exactly
+    like a real, existing production file (previous test above) -
+    should_break True via plan_scope_conflict, never the hard-stop
+    counter."""
+    owner = "src/test/java/AppTest.java"
+    (tmp_path / "src" / "test" / "java").mkdir(parents=True)
+    (tmp_path / owner).write_text("class AppTest {}\n")
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(
+        tmp_path, max_retries=4,
+        allowed_write_relpaths=["manage.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+
+    should_break = await handle_attempt_failure(
+        state, ctx, _hallucinated_target_scope_denial(tmp_path, owner),
+    )
+
+    assert should_break is True
+    assert state.unrecoverable_scope_denial_count == 0
+    assert state.environment_failure is None
+    assert state.plan_scope_conflict["classification"] == "PLAN_SCOPE_DEFECT"
+    assert state.plan_scope_conflict["grounded_owner_files"] == [owner]
+
+
+@pytest.mark.asyncio
 async def test_missing_planned_prerequisite_outside_scope_immediately_routes_to_plan_scope_defect(tmp_path):
     """A compiler-grounded missing prerequisite owned by another planned
     stage exits to controller recovery without an ordinary consumer retry."""

@@ -94,7 +94,7 @@ def _abandon_active_repair_contract_if_any(state: GenerationState, *, reason: st
 def _failure_from_validated_scope_denial(
     error: Exception, ctx,
 ) -> Optional[Failure]:
-    """Turn an exact denied existing production target into plan evidence."""
+    """Turn an exact denied existing target into plan evidence."""
     if not isinstance(error, PolicyDeniedError):
         return None
     if error.result.reason_code != "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE":
@@ -110,12 +110,28 @@ def _failure_from_validated_scope_denial(
     if relative == ".." or relative.startswith(f"..{os.sep}"):
         return None
     # Automatic authority expansion is only justified for a real existing
-    # production owner. A hallucinated new path or test target remains a
-    # denied policy error and cannot mutate the approved plan.
-    if not os.path.isfile(target) or is_runnable_test_file(relative):
+    # owner - a hallucinated new path cannot mutate the approved plan. A
+    # test file that genuinely exists on disk is NOT excluded here: a
+    # dependent, not-yet-run subtask can legitimately own it (a downstream
+    # test-update stage the current stage's own regression gate needs
+    # before it can pass), and workflow_controller.py's
+    # revise_plan_for_grounded_scope_owner() already handles a downstream
+    # owner correctly (merges it forward, drops the now-redundant
+    # dependency edge). Confirmed live, P2 production-validation run
+    # (2026-09-05): a plan split "change EmployeeService.giveRaise" (s1)
+    # and "update the existing EmployeeServiceTest that pins its old
+    # behavior" (s2, depends_on=[s1]) into two subtasks; s1's own full
+    # regression gate could never pass without updating that test, s1 has
+    # no authority to write it, and the blanket exclusion below used to
+    # send this straight to the unrecoverable-scope-denial circuit breaker
+    # (see test_handle_attempt_failure_stops_immediately_on_first_
+    # unrecoverable_scope_denial) instead of the plan-surgery path this
+    # exact shape was built for - killing the whole run on a legitimate,
+    # already-planned cross-subtask dependency.
+    if not os.path.isfile(target):
         return None
     message = (
-        "PLAN_SCOPE_DEFECT: generated repair targeted an existing production "
+        "PLAN_SCOPE_DEFECT: generated repair targeted an existing "
         f"owner outside validated subtask scope: {relative}"
     )
     return Failure(
