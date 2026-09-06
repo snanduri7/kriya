@@ -271,7 +271,38 @@ def _build_required_verification_evidence(
             and requirement.get("requires_runtime_execution") is True
             and outcomes_supplied
         ):
-            item["passed"] = _outcome_passed(_latest_outcome({"run_verification"}))
+            # A run-verification pass whose concrete command happens to be
+            # a test-runner invocation (kriya/workflow/attempt.py's own
+            # `gate_type = "test" if command_verification_kind == "test"
+            # else "run_verification"`) is deliberately tagged type="test",
+            # not "run_verification" - so the SAME outcome also satisfies
+            # an ordinary tool_name="test" requirement via the branch
+            # above. Searching only {"run_verification"} here made a
+            # genuine, already-PASSING runtime-verification outcome
+            # produced by exactly that path invisible to this lookup.
+            # Found live, P2 production-validation run 4 (2026-09-06,
+            # spring-ignite-demo): the auto-approved command was `mvn
+            # test`, it ran via run_app_sequence() and passed, and Kriya's
+            # own generated success criteria ("Running `mvn test` exits
+            # with code 0 ... confirming the salary cap logic and save
+            # invariant are correctly implemented") already declared that
+            # sufficient - yet this requirement still reported REQUIRED
+            # VERIFICATION UNRESOLVED. Widened to also accept a "test"/
+            # "targeted_test"/"regression_test"-typed outcome, but ONLY
+            # when it carries the "commands" key - set exclusively by
+            # run_app_sequence()'s own two success-path appends (attempt.py)
+            # and never by an ordinary compile/test Quality Gate outcome -
+            # so a ordinary test run that never went through real runtime
+            # verification can never satisfy a runtime-execution
+            # requirement it was never produced to prove.
+            item["passed"] = _outcome_passed(next(
+                (
+                    outcome for outcome in reversed(outcomes)
+                    if outcome.get("type") in {"run_verification", "test", "targeted_test", "regression_test"}
+                    and outcome.get("commands")
+                ),
+                None,
+            ))
             item["source"] = (
                 "authoritative_runtime_verification"
                 if item["passed"] is not None else "unresolved"

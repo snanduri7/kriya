@@ -579,6 +579,59 @@ def test_executed_targeted_test_satisfies_test_runtime_requirement():
     assert evidence[0]["source"] == "authoritative_gate_outcome"
 
 
+def test_test_command_run_verification_satisfies_judgment_runtime_requirement():
+    """Real bug found live in the P2 production-validation run (spring-
+    ignite-demo, 2026-09-06, run 4): a genuine run_app_sequence() pass
+    whose concrete command happened to be a test-runner invocation (`mvn
+    test`) is deliberately tagged type="test", not "run_verification"
+    (kriya/workflow/attempt.py's own gate_type = "test" if
+    command_verification_kind == "test" else "run_verification") - so a
+    judgment/requires_runtime_execution=True requirement that only ever
+    searched for type="run_verification" never saw it, and the run failed
+    with REQUIRED VERIFICATION UNRESOLVED despite Kriya's own generated
+    success criteria already having declared that exact test-exit-0
+    sufficient evidence."""
+    requirements = [{
+        "type": "judgment", "verifier_kind": "application_runtime",
+        "description": "Verify observable application-runtime behavior via test execution.",
+        "requires_runtime_execution": True,
+    }]
+    evidence = _build_required_verification_evidence(
+        requirements,
+        quality_gates_passed=True,
+        gate_outcomes=[{
+            "type": "test", "success": True,
+            "output": "BUILD SUCCESS", "graded_by": "process_exit",
+            "commands": [["mvn", "test"]],
+        }],
+    )
+    assert evidence[0]["passed"] is True
+    assert evidence[0]["source"] == "authoritative_runtime_verification"
+
+
+def test_ordinary_test_gate_outcome_does_not_satisfy_judgment_runtime_requirement():
+    """The widening above must stay narrow: an ORDINARY compile/test
+    Quality Gate outcome (no "commands" key - that marker is set
+    exclusively by run_app_sequence()'s own success-path appends) must
+    NOT satisfy a runtime-execution requirement it was never produced to
+    prove, even though it shares the same type="test" tag."""
+    requirements = [{
+        "type": "judgment", "verifier_kind": "application_runtime",
+        "description": "Verify observable application-runtime behavior via test execution.",
+        "requires_runtime_execution": True,
+    }]
+    evidence = _build_required_verification_evidence(
+        requirements,
+        quality_gates_passed=True,
+        gate_outcomes=[{
+            "type": "test", "success": True,
+            "output": "Tests run: 2, Failures: 0, Errors: 0",
+        }],
+    )
+    assert evidence[0]["passed"] is None
+    assert evidence[0]["source"] == "unresolved"
+
+
 def test_response_shape_owner_discovery_finds_existing_controller(tmp_path):
     controller = tmp_path / "src/main/java/com/example/customer/CustomerController.java"
     controller.parent.mkdir(parents=True)
