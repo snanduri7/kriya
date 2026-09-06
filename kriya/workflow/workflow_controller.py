@@ -1151,34 +1151,10 @@ def find_missing_grounded_production_artifacts(
     edge that IS already correctly wired (the referencing subtask's own
     planned_files, or any subtask already in its own depends_on closure,
     are never flagged for owning the SAME grounded target). A target
-    itself test/documentation is never flagged.
-
-    Shape 1 (UNOWNED) is further narrowed to a test source planned as
-    action=CREATE (2026-09-05, Production Validation P2): an EXISTING test
-    file (action=MODIFY - plan_schema.py's own PlannedFile contract already
-    requires this to be real on disk) importing an untouched production
-    type is exactly the same "ordinary, correct reference to an untouched
-    brownfield dependency" already recognized above for a production
-    SOURCE (the IgniteConfig example) - a pre-existing test commonly
-    imports/mocks collaborator types it needs for its own fixtures
-    (Mockito, constructors) that the current goal was never asked to
-    change. Found live: a baseline EmployeeServiceTest.java (existing,
-    action=MODIFY) importing Employee/DepartmentRepository/
-    EmployeeRepository purely for `mock(...)`/constructor use made EVERY
-    plan that correctly scoped its OWN subtask to just EmployeeService.java
-    unvalidatable - the goal explicitly forbade owning those three files,
-    yet this check demanded an owner for them, a deterministic
-    contradiction the Planner could never repair (3 attempts, same error).
-    The true "Planner omitted the intermediate consumer" incident this
-    shape targets is a Planner INVENTING a new test (action=CREATE) that
-    references a file it forgot to plan - that shape is untouched by this
-    narrowing."""
+    itself test/documentation is never flagged."""
     owned_paths = {pf.path for st in plan.subtasks for pf in st.planned_files}
     owner_by_path = {pf.path: st.id for st in plan.subtasks for pf in st.planned_files}
     source_subtask_by_path = {pf.path: st for st in plan.subtasks for pf in st.planned_files}
-    source_planned_file_by_path = {
-        pf.path: pf for st in plan.subtasks for pf in st.planned_files
-    }
     upstream_cache: Dict[str, set] = {}
     gaps: List[Dict[str, str]] = []
     seen = set()
@@ -1199,9 +1175,6 @@ def find_missing_grounded_production_artifacts(
                 continue
             if target not in owned_paths:
                 if not is_runnable_test_file(source):
-                    continue
-                source_planned_file = source_planned_file_by_path.get(source)
-                if source_planned_file is not None and source_planned_file.action != FileAction.CREATE:
                     continue
                 seen.add(key)
                 gaps.append({
