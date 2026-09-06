@@ -589,6 +589,24 @@ async def validate_plan(
         # from a filename). The artifact's structured semantics establish the
         # need; the subtask-level requires/provides DAG remains execution
         # authority.
+        #
+        # A requirement satisfied by THIS SAME subtask's own `provides` (it
+        # is the sole provider - the same predicate revise_plan_for_grounded_
+        # scope_owner()'s own requires/provides merge already uses at
+        # workflow_controller.py, "if item not in failed.provides") needs no
+        # `requires` edge: nothing to sequence, the capability and its
+        # consumer execute together in the same subtask. `capability_
+        # providers` (built once above) - not a bare `st.provides` membership
+        # check - so an AMBIGUOUS multi-provider capability (already its own
+        # separate AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER error) is never
+        # silently treated as self-satisfied here. Found live, P2 production-
+        # validation run 3 (2026-09-05, spring-ignite-demo): a grounded-owner
+        # merge folded a downstream test subtask's sole planned_file (whose
+        # own requires_capabilities still named the now-absorbing subtask's
+        # OWN capability) into the absorbing subtask - whose merged
+        # `requires` correctly DROPS that same capability once it's self-
+        # provided, making every merge of this exact (and common) shape
+        # unvalidatable before this fix.
         for planned_file in st.planned_files:
             for requirement in planned_file.requires_capabilities:
                 if requirement.lower() in _AMBIENT_TOOL_REQUIREMENTS:
@@ -600,7 +618,7 @@ async def validate_plan(
                     )
                     reason_codes.append("PLANNED_ARTIFACT_PREREQUISITE_INVALID")
                     continue
-                if requirement not in st.requires:
+                if requirement not in st.requires and capability_providers.get(requirement) != [st.id]:
                     errors.append(
                         f"subtask {st.id!r} planned artifact {planned_file.path!r} requires "
                         f"capability {requirement!r}, but the consumer subtask does not declare "

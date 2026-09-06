@@ -24,6 +24,7 @@ from kriya.workflow.obligations import ObligationKind, ObligationLedger, Obligat
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.static_checks import derive_stack_contract
+from kriya.workflow.workflow_controller import revise_plan_for_grounded_scope_owner
 
 
 def _plan(subtasks, **overrides):
@@ -334,6 +335,122 @@ async def test_planned_artifact_prerequisite_provider_not_upstream_is_rejected(t
     result = await validate_plan(plan, workspace_path=str(tmp_path))
     assert result.valid is False
     assert "SEMANTIC_DEPENDENCY_EDGE_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_self_satisfied_by_sole_provider_passes(tmp_path):
+    """A subtask whose own planned artifact requires_capabilities names a
+    capability THIS SAME subtask is the sole provider of needs no
+    `requires` edge - nothing to sequence, since the capability and its
+    consumer execute together in the same subtask's own generation pass.
+    Mirrors revise_plan_for_grounded_scope_owner()'s own merge predicate
+    (kriya/workflow/workflow_controller.py: "if item not in failed.provides")
+    - see the end-to-end merge test below for the live incident this closes."""
+    subtask = _model_subtask(
+        id="s1", provides=["employee_service_code"],
+        planned_files=[PlannedFile(
+            path="checks/behavior.spec", action=FileAction.CREATE,
+            requires_capabilities=["employee_service_code"],
+        )],
+    )
+    result = await validate_plan(_plan([subtask]), workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_ambiguous_provider_is_not_self_satisfied(tmp_path):
+    """The self-satisfaction exemption above must key off "this subtask is
+    the SOLE provider" (capability_providers[requirement] == [st.id]), not
+    a bare `requirement in st.provides` membership check - a capability
+    with two providers is already a separate, real ambiguity
+    (AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER) and must still ALSO be flagged
+    here when the declaring subtask never put it in its own `requires`."""
+    same_capability_elsewhere = _model_subtask(
+        id="s2", provides=["shared_capability"],
+    )
+    subtask = _model_subtask(
+        id="s1", provides=["shared_capability"],
+        planned_files=[PlannedFile(
+            path="checks/behavior.spec", action=FileAction.CREATE,
+            requires_capabilities=["shared_capability"],
+        )],
+    )
+    result = await validate_plan(
+        _plan([subtask, same_capability_elsewhere]), workspace_path=str(tmp_path),
+    )
+    assert result.valid is False
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" in result.reason_codes
+    assert "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER" in result.reason_codes
+
+
+def _p2_grounded_owner_merge_plan():
+    """The exact s1/s2/s3 shape from the P2 production-validation run
+    (spring-ignite-demo, 2026-09-05, run 20260905T050205Z's approved plan) -
+    s1 changes EmployeeService.giveRaise, s2 updates the existing test that
+    pins its old behavior, s3 is a dependent verification-only stage."""
+    s1 = _model_subtask(
+        id="s1", provides=["employee_service_code"],
+        planned_files=[PlannedFile(
+            path="src/main/java/com/example/ignite/service/EmployeeService.java",
+            action=FileAction.MODIFY,
+        )],
+    )
+    s2 = _model_subtask(
+        id="s2", depends_on=["s1"], requires=["employee_service_code"],
+        provides=["employee_service_tests"],
+        planned_files=[PlannedFile(
+            path="src/test/java/com/example/ignite/service/EmployeeServiceTest.java",
+            action=FileAction.MODIFY, requires_capabilities=["employee_service_code"],
+        )],
+    )
+    s3 = _model_subtask(
+        id="s3", depends_on=["s1", "s2"],
+        requires=["employee_service_code", "employee_service_tests"],
+    )
+    return _plan([s1, s2, s3])
+
+
+@pytest.mark.asyncio
+async def test_grounded_owner_merge_of_test_file_into_provider_subtask_revalidates(tmp_path):
+    """Real bug found live in the P2 production-validation run (2026-09-05):
+    s1's own full regression gate could never pass without updating s2's
+    existing pinned test, s1 had no write authority over it, and
+    revise_plan_for_grounded_scope_owner() correctly merged s2's sole
+    planned_file into s1 - but the moved PlannedFile still carried its
+    original requires_capabilities=["employee_service_code"], and the
+    merged s1.requires correctly DROPS that same capability once s1 is its
+    sole provider (revise_plan_for_grounded_scope_owner's own invariant),
+    so the OLD per-file check demanded an edge that could never exist.
+    The revised plan must validate cleanly - this is the actual gate the
+    live run hit, not just the isolated predicate above."""
+    (tmp_path / "src/main/java/com/example/ignite/service").mkdir(parents=True)
+    (tmp_path / "src/test/java/com/example/ignite/service").mkdir(parents=True)
+    (tmp_path / "src/main/java/com/example/ignite/service/EmployeeService.java").write_text(
+        "class EmployeeService {}\n"
+    )
+    (tmp_path / "src/test/java/com/example/ignite/service/EmployeeServiceTest.java").write_text(
+        "class EmployeeServiceTest {}\n"
+    )
+    plan = _p2_grounded_owner_merge_plan()
+
+    revised = revise_plan_for_grounded_scope_owner(
+        plan, "s1",
+        ["src/test/java/com/example/ignite/service/EmployeeServiceTest.java"],
+        str(tmp_path),
+    )
+
+    assert revised.subtask_by_id("s2") is None
+    s1 = revised.subtask_by_id("s1")
+    assert sorted(pf.path for pf in s1.planned_files) == [
+        "src/main/java/com/example/ignite/service/EmployeeService.java",
+        "src/test/java/com/example/ignite/service/EmployeeServiceTest.java",
+    ]
+    assert revised.subtask_by_id("s3").depends_on == ["s1"]
+
+    result = await validate_plan(revised, workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" not in result.reason_codes
 
 
 @pytest.mark.asyncio
