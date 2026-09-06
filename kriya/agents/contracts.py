@@ -539,16 +539,17 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
     one shape that happened to occur live would leave the identical bug
     pattern unfixed in its siblings.
 
-    Extended 2026-09-06 (P2 production-validation run 5, Planner-
+    Extended 2026-09-06 (P2 production-validation runs 5 and 6, Planner-
     convergence audit) with two more MECHANICALLY UNAMBIGUOUS cases that
     consumed real repair budget for pure formatting noise:
     _heal_missing_execution_method (an omitted, not just mistagged,
-    required field) and _heal_test_method_alias (method="test", a stray
-    THIRD value with no sane reading other than "tool"/tool_name="test").
-    Same non-negotiable bar as everything else here: canonicalize only
-    when the object's own existing content already makes the intended
-    value unambiguous - never fuzzy-match an unrelated typo, and never
-    resolve a genuine contradiction (e.g. a conflicting tool_name already
+    required field - two independently unambiguous shapes, see its own
+    docstring) and _heal_test_method_alias (method="test", a stray THIRD
+    value with no sane reading other than "tool"/tool_name="test"). Same
+    non-negotiable bar as everything else here: canonicalize only when
+    the object's own existing content already makes the intended value
+    unambiguous - never fuzzy-match an unrelated typo, and never resolve
+    a genuine contradiction (e.g. a conflicting tool_name already
     present) silently.
 
     Mutates and returns `parsed` in place; a non-dict/malformed shape is
@@ -588,24 +589,47 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
         spring-ignite-demo): two repair attempts burned solely on this
         omission before any real semantic repair had a chance to run.
 
-        Defaults to MODEL only when the omission is genuinely unambiguous:
-        real, non-empty planned_files already establish this is an
-        implementation subtask - the identical "planned_files already
-        present" signal _heal_tool_pair itself already trusts for the
-        analogous tool-with-no-name downgrade just above - and no tool_name
-        is present to suggest TOOL was actually intended. When tool_name IS
-        present, this is a genuine contradiction (execution_method=tool
-        needs a tool_name; execution_method=model must never carry one) and
-        must NOT be silently resolved either way - left for normal
-        validation/repair, which already has a targeted correction for
-        exactly that shape. Never invents planned_files, ownership, or a
-        tool_name - only supplies the one missing enum value real content
-        elsewhere in the same object already implies."""
+        Defaults to MODEL in two, and only two, genuinely unambiguous
+        shapes - both require no subtask-level tool_name (TOOL always
+        needs one; its presence with no execution_method is a real
+        contradiction, never silently resolved either way, left for
+        normal validation/repair which already has a targeted correction
+        for exactly that shape):
+
+        1. Non-empty planned_files - this already establishes an
+           implementation subtask, the identical "planned_files already
+           present" signal _heal_tool_pair itself already trusts for the
+           analogous tool-with-no-name downgrade just above.
+        2. execution_role=="verification" - Subtask's own model_validator
+           (plan_schema.py) already REQUIRES a verification-role subtask
+           to have zero planned_files and at least one concrete verifier,
+           so empty planned_files here is the CORRECT, expected shape for
+           this role, not evidence of an unbounded write the way it would
+           be for an implementation-role subtask (deliberately NOT
+           broadened to execution_role=="implementation" with empty
+           planned_files - that shape is the real unbounded-write hazard
+           MODEL_SUBTASK_MISSING_PLANNED_FILES exists to catch, and stays
+           unresolved for real repair). An unknown/missing execution_role
+           with empty planned_files is likewise left unresolved - only an
+           EXPLICIT "verification" tag is trusted, never inferred from
+           absence.
+
+        Found live, P2 production-validation run 5 (2026-09-06,
+        spring-ignite-demo, shape 1) and run 6 (2026-09-06, same repo,
+        shape 2 - a verification-only subtask with planned_files=[] and a
+        real tool_name="test" verifier one level down, but no subtask-
+        level tool_name): repair attempts burned solely on this omission
+        before any real semantic repair had a chance to run. Never
+        invents planned_files, ownership, or a tool_name - only supplies
+        the one missing enum value real content elsewhere in the same
+        object already implies."""
         if not isinstance(subtask, dict):
             return
         if subtask.get("execution_method"):
             return
-        if subtask.get("planned_files") and not subtask.get("tool_name"):
+        if subtask.get("tool_name"):
+            return
+        if subtask.get("planned_files") or subtask.get("execution_role") == "verification":
             subtask["execution_method"] = "model"
 
     def _heal_test_method_alias(criterion: Dict[str, Any]) -> None:

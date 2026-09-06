@@ -274,14 +274,66 @@ def test_missing_execution_method_with_tool_name_is_left_unresolved():
     assert "execution_method" in err
 
 
-def test_missing_execution_method_with_no_planned_files_is_left_unresolved():
-    """No planned_files means "has real content elsewhere implying MODEL"
-    doesn't hold either - the omission stays genuinely ambiguous (could be
-    a verification-only subtask that should have been execution_role=
-    verification, not silently guessed) and must still fail schema
-    validation for real repair."""
+def test_missing_execution_method_with_no_planned_files_and_no_execution_role_is_left_unresolved():
+    """Neither non-empty planned_files nor an EXPLICIT execution_role=
+    "verification" tag is present - the omission stays genuinely ambiguous
+    (an unknown/missing execution_role is never treated as "verification"
+    by absence) and must still fail schema validation for real repair."""
     output, err = parse_planner_structured_output(_plan_text({
         "subtasks": [{"id": "s1", "description": "x", "acceptance_criteria_ids": []}],
+        "acceptance_criteria": [],
+    }))
+    assert output is None
+    assert "execution_method" in err
+
+
+def test_missing_execution_method_verification_role_empty_planned_files_defaults_to_model():
+    """A verification-role subtask is REQUIRED (Subtask's own model_
+    validator) to have zero planned_files - that emptiness is the correct,
+    expected shape for this role, not evidence of an unbounded write the
+    way it would be for an implementation-role subtask. With no subtask-
+    level tool_name to suggest TOOL, MODEL is the only remaining valid
+    value. Real shape found live, P2 production-validation run 6
+    (2026-09-06, spring-ignite-demo)."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "run the test suite", "execution_role": "verification",
+            "planned_files": [], "acceptance_criteria_ids": [],
+            "verification": [{
+                "type": "tool", "description": "run tests", "tool_name": "test",
+                "verifier_kind": "test", "requires_runtime_execution": True,
+            }],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    assert output.subtasks[0].execution_method == ExecutionMethod.MODEL
+
+
+def test_missing_execution_method_implementation_role_empty_planned_files_is_left_unresolved():
+    """Deliberately NOT broadened to execution_role="implementation" with
+    empty planned_files - that shape is the real unbounded-write hazard
+    MODEL_SUBTASK_MISSING_PLANNED_FILES exists to catch (an implementation
+    subtask with no declared write scope), not a safe canonicalization."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_role": "implementation",
+            "planned_files": [], "acceptance_criteria_ids": [],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert output is None
+    assert "execution_method" in err
+
+
+def test_missing_execution_method_verification_role_with_tool_name_is_left_unresolved():
+    """A subtask-level tool_name is a real, ambiguous signal regardless of
+    execution_role - never silently inferred either way."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "x", "execution_role": "verification",
+            "planned_files": [], "tool_name": "compile", "acceptance_criteria_ids": [],
+        }],
         "acceptance_criteria": [],
     }))
     assert output is None
@@ -371,6 +423,64 @@ def test_p2_run5_attempt1_schema_shape_parses_without_a_repair_round():
     assert output is not None
     assert output.subtasks[0].execution_method == ExecutionMethod.MODEL
     assert output.subtasks[1].execution_method == ExecutionMethod.MODEL
+
+
+def test_p2_run6_attempt_schema_shape_parses_without_a_repair_round():
+    """Reconstructs the real P2 production-validation run 6 (2026-09-06,
+    spring-ignite-demo) payload shape verbatim: a verification-only
+    subtask (execution_role="verification", planned_files=[], a real
+    tool_name="test" verifier one level down) omitted execution_method
+    entirely, with no subtask-level tool_name to disambiguate - failing
+    schema validation identically across all 3 attempts in the live run,
+    never even reaching semantic validation. Must now parse cleanly on
+    the first attempt."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [
+            {
+                "id": "s1", "description": "cap giveRaise salary", "execution_method": "model",
+                "execution_role": "implementation", "depends_on": [],
+                "planned_files": [{
+                    "path": "src/main/java/com/example/ignite/service/EmployeeService.java",
+                    "action": "modify",
+                }],
+                "provides": ["employee_service_with_cap"], "requires": [],
+                "acceptance_criteria_ids": ["ac1"],
+            },
+            {
+                "id": "s2", "description": "update the pinned test", "execution_method": "model",
+                "execution_role": "implementation", "depends_on": ["s1"],
+                "planned_files": [{
+                    "path": "src/test/java/com/example/ignite/service/EmployeeServiceTest.java",
+                    "action": "modify",
+                    "requires_capabilities": ["employee_service_with_cap"],
+                }],
+                "provides": ["employee_service_test_source"],
+                "requires": ["employee_service_with_cap"],
+                "acceptance_criteria_ids": ["ac2"],
+            },
+            {
+                "id": "s3", "description": "Run the test suite to verify cap logic, invariant, and "
+                                            "updated expectations",
+                "execution_role": "verification", "depends_on": ["s2"],
+                "planned_files": [], "provides": [],
+                "requires": ["employee_service_test_source"],
+                "verification": [{
+                    "type": "tool", "description": "Execute Maven test phase to run EmployeeServiceTest "
+                                                    "and confirm all assertions pass",
+                    "tool_name": "test", "verifier_kind": "test", "requires_runtime_execution": True,
+                }],
+                "acceptance_criteria_ids": ["ac1", "ac2", "ac3"],
+            },
+        ],
+        "acceptance_criteria": [
+            {"id": "ac1", "description": "x", "method": "judgment"},
+            {"id": "ac2", "description": "y", "method": "judgment"},
+            {"id": "ac3", "description": "z", "method": "judgment"},
+        ],
+    }))
+    assert err is None
+    assert output is not None
+    assert output.subtasks[2].execution_method == ExecutionMethod.MODEL
 
 
 # --- PRV-06 self-healing: pre-existing List[str] global_invariants shape ---
