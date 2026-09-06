@@ -578,6 +578,36 @@ def _authoritative_planner_extension_candidates(
     return candidates[:max_files]
 
 
+def _is_strict_regression(
+    retained_reason_codes: Optional[frozenset], candidate_reason_codes: frozenset,
+) -> bool:
+    """Planner-convergence audit (2026-09-06, P2 production-validation run
+    7): reason-code sets across repair attempts form a PARTIAL order, not a
+    total one - {D} -> {X} is incomparable (a different problem, possibly a
+    legitimate trade-off), never itself evidence of regression, while
+    {D} -> {A, D} is unambiguous: every previously-unresolved problem in
+    the retained baseline is STILL unresolved, and a problem already
+    cleared as of the retained baseline has reappeared. Only that second,
+    strict-superset shape is safe to reject deterministically - anything
+    else (unchanged, empty/success, or a genuinely different set) must
+    fall through to the existing repair-loop behavior unchanged. No
+    cardinality/heuristic scoring: `retained_reason_codes < candidate_
+    reason_codes` is Python's own frozenset "proper subset" operator, not
+    a size comparison (a smaller candidate set could still fail this check
+    if it isn't a superset at all, and a same-size candidate never can).
+
+    Found live: P2 run 7's attempt 1 correctly resolved 4 of 5 semantic
+    reason codes, leaving only MISSING_GROUNDED_PRODUCTION_ARTIFACT -
+    attempt 2, chasing that one remaining code, silently reintroduced
+    APPLICATION_RUNTIME_OWNER_MISSING (already-cleared) while STILL not
+    resolving MISSING_GROUNDED_PRODUCTION_ARTIFACT. must_preserve (prompt
+    text only, no structural enforcement) did not stop this - this
+    function backs a REAL, deterministic rejection instead."""
+    if retained_reason_codes is None:
+        return False
+    return retained_reason_codes < candidate_reason_codes
+
+
 def build_structured_plan_repair_prompt(
     goal: str,
     previous_plan_text: str,
@@ -3671,6 +3701,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # wrongly refusing an otherwise-valid resume (found via this
         # session's own regression sweep, not a live incident).
         raw_plan: Optional[EngineeringPlan] = None
+        # Planner-convergence audit (2026-09-06, P2 run 7): the retained
+        # semantic-repair baseline - the most recent FAILED attempt that was
+        # never itself a strict regression against what came before it (see
+        # _is_strict_regression's own docstring for the live incident this
+        # closes). Seeded on the first failure, updated on every subsequent
+        # non-regressed failure, and deliberately NEVER updated by a
+        # strict-regression candidate - the next repair prompt, and the
+        # terminal exhaustion report, are built from this retained state
+        # instead of a regressed candidate's own worse one. This does not
+        # change the repair_attempts bound (still fixed at 2) or refund a
+        # slot spent on a rejected regression - it only changes which
+        # state seeds the NEXT prompt/report.
+        retained_plan_text: Optional[str] = None
+        retained_errors: List[str] = []
+        retained_reason_codes: Optional[frozenset] = None
+        retained_validation_evidence: List[Dict[str, Any]] = []
+        retained_invalid_subtask_ids: List[str] = []
         while True:
             errors: List[str] = []
             reason_codes: List[str] = []
@@ -3815,6 +3862,32 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 break
 
             repair_prompt = None
+            # Planner-convergence audit (2026-09-06, P2 run 7): classify
+            # THIS attempt against the retained baseline before deciding
+            # what seeds the next repair prompt (and, on exhaustion, the
+            # terminal report) - see _is_strict_regression's own docstring.
+            # Per-attempt forensic logging below (ledger.record_and_persist/
+            # logger.warning/persist_planning_attempt_diagnostic) still
+            # records what THIS attempt actually produced, unmodified -
+            # only the forward-looking prompt state and the terminal
+            # exception are redirected to the retained baseline.
+            current_reason_code_set = frozenset(reason_codes)
+            is_strict_regression = _is_strict_regression(retained_reason_codes, current_reason_code_set)
+            if is_strict_regression:
+                prompt_plan_text = retained_plan_text
+                prompt_errors = retained_errors
+                prompt_reason_codes = list(retained_reason_codes)
+                prompt_validation_evidence = retained_validation_evidence
+            else:
+                prompt_plan_text = plan_text
+                prompt_errors = errors
+                prompt_reason_codes = reason_codes
+                prompt_validation_evidence = validation_evidence
+                retained_plan_text = plan_text
+                retained_errors = errors
+                retained_reason_codes = current_reason_code_set
+                retained_validation_evidence = validation_evidence
+                retained_invalid_subtask_ids = invalid_subtask_ids
             if repair_attempts < 2:
                 # MA8: everything PLAN_STRUCTURAL_VALIDITY currently reports
                 # SATISFIED (as of the validate_plan() call just above) must
@@ -3830,12 +3903,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     )
                 ]
                 repair_prompt = build_structured_plan_repair_prompt(
-                    goal, plan_text, errors, reason_codes, repair_attempts + 1,
+                    goal, prompt_plan_text, prompt_errors, prompt_reason_codes, repair_attempts + 1,
                     route_kind=route.kind,
                     extension_candidates=planning_repository_candidates,
                     repository_candidates=planning_repository_candidates,
                     must_preserve=must_preserve,
-                    validation_evidence=validation_evidence,
+                    validation_evidence=prompt_validation_evidence,
                 )
             try:
                 persist_planning_attempt_diagnostic(
@@ -3868,14 +3941,27 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 run_id, repair_attempts, reason_codes, invalid_subtask_ids,
             )
             if repair_attempts >= 2:
-                reason_codes.append("STRUCTURED_PLAN_REPAIR_EXHAUSTED")
+                # Planner-convergence audit (2026-09-06, P2 run 7): the
+                # TERMINAL report must reflect the retained (non-regressed)
+                # baseline, not a final attempt that was itself rejected as
+                # a strict regression - reporting the worse candidate's
+                # state here would misrepresent APPLICATION_RUNTIME_OWNER_
+                # MISSING as though it were part of the best reachable
+                # state, when the retained baseline already resolved it.
+                final_reason_codes = (
+                    list(retained_reason_codes) if is_strict_regression else list(reason_codes)
+                )
+                final_invalid_subtask_ids = (
+                    retained_invalid_subtask_ids if is_strict_regression else invalid_subtask_ids
+                )
+                final_reason_codes.append("STRUCTURED_PLAN_REPAIR_EXHAUSTED")
                 # MA8 (PRV-05 run #8): distinguish "kept oscillating between
                 # constraints" from "just never converged" - both are
                 # reported, never used to raise the repair-attempt bound
                 # itself (that stays fixed at 2, per this fix's own scope).
                 oscillating = obligation_ledger.oscillating_ids(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
                 if oscillating:
-                    reason_codes.append("PLAN_REPAIR_OSCILLATION")
+                    final_reason_codes.append("PLAN_REPAIR_OSCILLATION")
                     logger.error(
                         "WorkflowController enforce run %r: plan repair OSCILLATED on "
                         "obligation(s) %s - full revision history: %s",
@@ -3884,11 +3970,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                          for oid in oscillating},
                     )
                 else:
-                    reason_codes.append("PLAN_REPAIR_NON_CONVERGENCE")
+                    final_reason_codes.append("PLAN_REPAIR_NON_CONVERGENCE")
                 raise _UnsafeStructuredPlan(
                     "structured plan remained unsafe after two bounded repair attempts",
-                    reason_codes=list(dict.fromkeys(reason_codes)),
-                    invalid_subtask_ids=invalid_subtask_ids,
+                    reason_codes=list(dict.fromkeys(final_reason_codes)),
+                    invalid_subtask_ids=final_invalid_subtask_ids,
                     repair_attempts=repair_attempts,
                 )
 

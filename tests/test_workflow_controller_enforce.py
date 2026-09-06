@@ -47,6 +47,7 @@ from kriya.workflow.obligations import (
 from kriya.workflow.workflow_controller import (
     AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
     _StructuredPlanUnavailable,
+    _is_strict_regression,
     ArtifactOwnerResolutionBasis,
     WorkflowController,
     _attempt_owner_recovery_self_correction,
@@ -6061,6 +6062,133 @@ async def test_enforce_rejects_model_subtask_without_planned_files(tmp_path):
     assert result.legacy_result["invalid_subtask_ids"] == ["s1"]
     assert we.planner.run.await_count == 3
     we.run_generation_workflow.assert_not_awaited()
+
+
+# --- Planner-convergence audit (2026-09-06, P2 production-validation run 7):
+# a semantic repair regressed an already-cleared deterministic reason code
+# (APPLICATION_RUNTIME_OWNER_MISSING) while chasing a remaining one
+# (MISSING_GROUNDED_PRODUCTION_ARTIFACT) - must_preserve is prompt text only
+# and never stopped it. _is_strict_regression() + the retained-baseline
+# bookkeeping in the structured-planning repair loop reject a candidate
+# whose reason-code set is a proper SUPERSET of the retained baseline's,
+# without adding/refunding a repair attempt or touching any validator. ---
+
+@pytest.mark.parametrize(
+    "retained, candidate, expected",
+    [
+        (frozenset({"D"}), frozenset({"A", "D"}), True),
+        (frozenset({"D"}), frozenset({"D"}), False),
+        (frozenset({"D"}), frozenset(), False),
+        (frozenset({"D"}), frozenset({"X"}), False),
+        (None, frozenset({"D"}), False),
+    ],
+)
+def test_is_strict_regression_partial_order(retained, candidate, expected):
+    assert _is_strict_regression(retained, candidate) is expected
+
+
+def _p2_run7_plan():
+    return EngineeringPlan(
+        plan_id="p2-run7", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="cap giveRaise salary", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="src/main/java/com/example/ignite/service/EmployeeService.java",
+                    action=FileAction.MODIFY,
+                )],
+            ),
+            Subtask(
+                id="s2", description="update the pinned test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(
+                    path="src/test/java/com/example/ignite/service/EmployeeServiceTest.java",
+                    action=FileAction.MODIFY,
+                )],
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_enforce_rejects_terminal_regression_and_reports_retained_baseline(tmp_path):
+    """Reproduces P2 run 7's real 3-attempt sequence: attempt 0 has 5
+    semantic reason codes, attempt 1 correctly resolves 4 of them (leaving
+    only MISSING_GROUNDED_PRODUCTION_ARTIFACT), attempt 2 - chasing that
+    one remaining code - regresses APPLICATION_RUNTIME_OWNER_MISSING back
+    while STILL not resolving MISSING_GROUNDED_PRODUCTION_ARTIFACT. With
+    the production repair budget unchanged (still exactly 3 Planner calls,
+    nothing refunded or added), the terminal report must reflect attempt
+    1's retained state, not attempt 2's strictly worse one."""
+    plan = _p2_run7_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text", "attempt2 text"])
+    we.run_generation_workflow = AsyncMock(
+        side_effect=AssertionError("must never reach generation - planning never converges"),
+    )
+
+    attempt0 = PlanValidationResult(
+        valid=False, errors=["five things wrong"],
+        reason_codes=[
+            "SUBTASK_SEMANTIC_CONTRACT_MISSING", "APPLICATION_RUNTIME_OWNER_MISSING",
+            "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED", "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
+            "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
+        ],
+    )
+    attempt1 = PlanValidationResult(
+        valid=False, errors=["one thing wrong"],
+        reason_codes=["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+    )
+    attempt2 = PlanValidationResult(
+        valid=False, errors=["two things wrong, one reintroduced"],
+        reason_codes=["APPLICATION_RUNTIME_OWNER_MISSING", "MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+    )
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=[attempt0, attempt1, attempt2]),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    # The candidate that reintroduced APPLICATION_RUNTIME_OWNER_MISSING
+    # must never be reported as though it were the best reachable state.
+    assert result.legacy_result["reason_codes"] == [
+        "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
+        "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+        "PLAN_REPAIR_NON_CONVERGENCE",
+    ]
+    assert "APPLICATION_RUNTIME_OWNER_MISSING" not in result.legacy_result["reason_codes"]
+    assert result.legacy_result["plan_repair_attempts"] == 2
+    # Budget is unchanged by the regression rejection - exactly 3 calls
+    # (initial + 2 repairs), nothing refunded, nothing added.
+    assert we.planner.run.await_count == 3
+    we.run_generation_workflow.assert_not_called()
+
+
+def test_repair_prompt_built_from_retained_baseline_not_regressed_candidate():
+    """Focused plumbing check: when the loop selects the RETAINED baseline's
+    plan_text/errors/reason_codes for a repair prompt (as it does whenever
+    _is_strict_regression() returns True), the resulting prompt reflects
+    that retained content, not a different, regressed candidate's own."""
+    retained_prompt = build_structured_plan_repair_prompt(
+        "goal", "attempt1 plan text", ["one thing wrong"],
+        ["MISSING_GROUNDED_PRODUCTION_ARTIFACT"], 3,
+    )
+    regressed_prompt = build_structured_plan_repair_prompt(
+        "goal", "attempt2 plan text", ["two things wrong, one reintroduced"],
+        ["APPLICATION_RUNTIME_OWNER_MISSING", "MISSING_GROUNDED_PRODUCTION_ARTIFACT"], 3,
+    )
+    assert "attempt1 plan text" in retained_prompt
+    assert "attempt2 plan text" not in retained_prompt
+    assert "attempt2 plan text" in regressed_prompt
+    assert "attempt1 plan text" not in regressed_prompt
 
 
 # --- MA8.1 (PRV-06, 2026-08-29): Cross-Owner Requirement-Preserving Recovery
