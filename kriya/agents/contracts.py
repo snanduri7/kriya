@@ -539,6 +539,18 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
     one shape that happened to occur live would leave the identical bug
     pattern unfixed in its siblings.
 
+    Extended 2026-09-06 (P2 production-validation run 5, Planner-
+    convergence audit) with two more MECHANICALLY UNAMBIGUOUS cases that
+    consumed real repair budget for pure formatting noise:
+    _heal_missing_execution_method (an omitted, not just mistagged,
+    required field) and _heal_test_method_alias (method="test", a stray
+    THIRD value with no sane reading other than "tool"/tool_name="test").
+    Same non-negotiable bar as everything else here: canonicalize only
+    when the object's own existing content already makes the intended
+    value unambiguous - never fuzzy-match an unrelated typo, and never
+    resolve a genuine contradiction (e.g. a conflicting tool_name already
+    present) silently.
+
     Mutates and returns `parsed` in place; a non-dict/malformed shape is
     returned unchanged (model_validate below still catches whatever this
     can't fix, exactly as before - this is a best-effort pre-pass, not a
@@ -566,6 +578,63 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
         elif obj.get(kind_field) == other_value:
             obj.pop("tool_name", None)
             obj.pop("tool_arguments", None)
+
+    def _heal_missing_execution_method(subtask: Dict[str, Any]) -> None:
+        """Subtask.execution_method is a REQUIRED field with no schema
+        default (plan_schema.py) - _heal_tool_pair above only fires when the
+        field IS PRESENT and equals its tool_value; an OMITTED field matches
+        neither of its branches and reaches pydantic as "Field required."
+        Found live, P2 production-validation run 5 (2026-09-06,
+        spring-ignite-demo): two repair attempts burned solely on this
+        omission before any real semantic repair had a chance to run.
+
+        Defaults to MODEL only when the omission is genuinely unambiguous:
+        real, non-empty planned_files already establish this is an
+        implementation subtask - the identical "planned_files already
+        present" signal _heal_tool_pair itself already trusts for the
+        analogous tool-with-no-name downgrade just above - and no tool_name
+        is present to suggest TOOL was actually intended. When tool_name IS
+        present, this is a genuine contradiction (execution_method=tool
+        needs a tool_name; execution_method=model must never carry one) and
+        must NOT be silently resolved either way - left for normal
+        validation/repair, which already has a targeted correction for
+        exactly that shape. Never invents planned_files, ownership, or a
+        tool_name - only supplies the one missing enum value real content
+        elsewhere in the same object already implies."""
+        if not isinstance(subtask, dict):
+            return
+        if subtask.get("execution_method"):
+            return
+        if subtask.get("planned_files") and not subtask.get("tool_name"):
+            subtask["execution_method"] = "model"
+
+    def _heal_test_method_alias(criterion: Dict[str, Any]) -> None:
+        """AcceptanceCriterion.method="test" is not a valid
+        VerificationMethodType member (only "tool"/"judgment" are), but has
+        no other sane reading as a METHOD value - "test" can only ever mean
+        "checked by running tests," a TOOL-kind check, never JUDGMENT.
+        Found live, P2 production-validation run 5 (2026-09-06,
+        spring-ignite-demo): three acceptance criteria used method="test"
+        with no tool_name at all, failing schema validation and consuming a
+        repair round before any real semantic repair had a chance to run.
+
+        Canonicalizes to method="tool", tool_name="test" ONLY when
+        tool_name is absent or already "test" - a genuinely DIFFERENT
+        tool_name already present is a real, ambiguous contradiction (the
+        model may have meant something else by "test") and must NOT be
+        silently overwritten; it proceeds to normal schema-repair handling
+        instead, exactly like any other unrecognized value (e.g. a typo
+        such as "tets", which this deliberately does NOT touch - fuzzy
+        correction is explicitly out of scope)."""
+        if not isinstance(criterion, dict):
+            return
+        if criterion.get("method") != "test":
+            return
+        existing_tool_name = criterion.get("tool_name")
+        if existing_tool_name and existing_tool_name != "test":
+            return
+        criterion["method"] = "tool"
+        criterion["tool_name"] = "test"
 
     def _heal_stale_tool_name_on_runtime_verification(verification: Dict[str, Any]) -> None:
         """A verification entry occasionally carries a build-tool tool_name
@@ -603,6 +672,7 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
     for subtask in parsed.get("subtasks") or []:
         if not isinstance(subtask, dict):
             continue
+        _heal_missing_execution_method(subtask)
         _heal_tool_pair(subtask, "execution_method", "tool", "model")
 
         subtask_id = subtask.get("id")
@@ -617,6 +687,7 @@ def _self_heal_structured_plan_dict(parsed: Any) -> Any:
             _heal_tool_pair(verification, "type", "tool", "judgment")
 
     for criterion in parsed.get("acceptance_criteria") or []:
+        _heal_test_method_alias(criterion)
         _heal_tool_pair(criterion, "method", "tool", "judgment")
 
     return parsed

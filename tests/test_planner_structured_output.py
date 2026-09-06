@@ -196,6 +196,183 @@ def test_subtask_verification_method_tool_with_no_tool_name_downgrades_to_judgme
     assert output.subtasks[0].verification[0].tool_name is None
 
 
+# --- Planner-convergence audit (2026-09-06, P2 production-validation run 5):
+# two more MECHANICALLY UNAMBIGUOUS schema shapes that previously consumed a
+# real repair round each - see _self_heal_structured_plan_dict's own
+# docstring for the live incident (schema noise burning 2 of 3 total
+# structured-planning attempts before any real semantic repair could run). ---
+
+def test_acceptance_criterion_test_method_with_no_tool_name_canonicalizes_to_tool():
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{"id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": ["ac1"]}],
+        "acceptance_criteria": [{"id": "ac1", "description": "y", "method": "test"}],
+    }))
+    assert err is None
+    assert output.acceptance_criteria[0].method == VerificationMethodType.TOOL
+    assert output.acceptance_criteria[0].tool_name == "test"
+
+
+def test_acceptance_criterion_test_method_with_existing_test_tool_name_canonicalizes_to_tool():
+    """Non-contradictory - tool_name already says "test" too, just the
+    method field itself was wrong. Still safe to canonicalize."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{"id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": ["ac1"]}],
+        "acceptance_criteria": [{"id": "ac1", "description": "y", "method": "test", "tool_name": "test"}],
+    }))
+    assert err is None
+    assert output.acceptance_criteria[0].method == VerificationMethodType.TOOL
+    assert output.acceptance_criteria[0].tool_name == "test"
+
+
+def test_acceptance_criterion_test_method_with_contradictory_tool_name_is_left_alone():
+    """A genuinely DIFFERENT tool_name already present is a real
+    contradiction, not a formatting slip - must NOT be silently
+    overwritten, and must still fail schema validation for real repair."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{"id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": ["ac1"]}],
+        "acceptance_criteria": [{"id": "ac1", "description": "y", "method": "test", "tool_name": "compile"}],
+    }))
+    assert output is None
+    assert "acceptance_criteria" in err and "method" in err
+
+
+def test_acceptance_criterion_unrelated_invalid_method_stays_invalid():
+    """Fuzzy correction is explicitly out of scope - an unrelated typo must
+    reach real schema-repair handling, never be guessed at."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{"id": "s1", "description": "x", "execution_method": "model", "acceptance_criteria_ids": ["ac1"]}],
+        "acceptance_criteria": [{"id": "ac1", "description": "y", "method": "tets"}],
+    }))
+    assert output is None
+    assert "acceptance_criteria" in err and "method" in err
+
+
+def test_missing_execution_method_with_planned_files_and_no_tool_name_defaults_to_model():
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "x", "acceptance_criteria_ids": [],
+            "planned_files": [{"path": "a.py", "action": "create"}],
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert err is None
+    assert output.subtasks[0].execution_method == ExecutionMethod.MODEL
+    assert output.subtasks[0].planned_files[0].path == "a.py"
+
+
+def test_missing_execution_method_with_tool_name_is_left_unresolved():
+    """tool_name present is a real, ambiguous signal - never silently
+    inferred either way; must still fail schema validation."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "x", "acceptance_criteria_ids": [],
+            "tool_name": "compile",
+        }],
+        "acceptance_criteria": [],
+    }))
+    assert output is None
+    assert "execution_method" in err
+
+
+def test_missing_execution_method_with_no_planned_files_is_left_unresolved():
+    """No planned_files means "has real content elsewhere implying MODEL"
+    doesn't hold either - the omission stays genuinely ambiguous (could be
+    a verification-only subtask that should have been execution_role=
+    verification, not silently guessed) and must still fail schema
+    validation for real repair."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{"id": "s1", "description": "x", "acceptance_criteria_ids": []}],
+        "acceptance_criteria": [],
+    }))
+    assert output is None
+    assert "execution_method" in err
+
+
+def test_both_new_self_heal_cases_in_one_payload_resolve_in_a_single_parse():
+    """Both defect classes in the SAME Planner payload heal together,
+    without a second round-trip to the model."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [
+            {
+                "id": "s1", "description": "x", "acceptance_criteria_ids": ["ac1"],
+                "planned_files": [{"path": "a.py", "action": "create"}],
+            },
+        ],
+        "acceptance_criteria": [{"id": "ac1", "description": "y", "method": "test"}],
+    }))
+    assert err is None
+    assert output.subtasks[0].execution_method == ExecutionMethod.MODEL
+    assert output.acceptance_criteria[0].method == VerificationMethodType.TOOL
+    assert output.acceptance_criteria[0].tool_name == "test"
+
+
+def test_p2_run5_attempt0_schema_shape_parses_without_a_repair_round():
+    """Reconstructs the real P2 production-validation run 5 (2026-09-06,
+    spring-ignite-demo) attempt-0 payload shape verbatim: three acceptance
+    criteria used method="test" with no tool_name, failing schema
+    validation and consuming a repair round in the live run. Must now
+    parse cleanly on the first attempt."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [{
+            "id": "s1", "description": "cap giveRaise salary", "execution_method": "model",
+            "planned_files": [{
+                "path": "src/main/java/com/example/ignite/service/EmployeeService.java",
+                "action": "modify",
+            }],
+            "acceptance_criteria_ids": ["ac1", "ac2", "ac3", "ac4"],
+        }],
+        "acceptance_criteria": [
+            {"id": "ac1", "description": "Salary cap enforced via a named constant.", "method": "judgment"},
+            {"id": "ac2", "description": "Raised salary > cap gets exactly the cap.", "method": "test"},
+            {"id": "ac3", "description": "save is only invoked for the target department.", "method": "test"},
+            {"id": "ac4", "description": "Existing pinned test passes with the capped value.", "method": "test"},
+        ],
+    }))
+    assert err is None
+    assert output is not None
+    for ac in output.acceptance_criteria[1:]:
+        assert ac.method == VerificationMethodType.TOOL
+        assert ac.tool_name == "test"
+
+
+def test_p2_run5_attempt1_schema_shape_parses_without_a_repair_round():
+    """Reconstructs the real P2 production-validation run 5 attempt-1
+    payload shape verbatim: every subtask omitted execution_method
+    entirely while declaring real planned_files, failing schema validation
+    and consuming a second repair round in the live run. Must now parse
+    cleanly."""
+    output, err = parse_planner_structured_output(_plan_text({
+        "subtasks": [
+            {
+                "id": "s1", "description": "cap giveRaise salary", "execution_role": "implementation",
+                "depends_on": [],
+                "planned_files": [{
+                    "path": "src/main/java/com/example/ignite/service/EmployeeService.java",
+                    "action": "modify",
+                }],
+                "acceptance_criteria_ids": ["ac1"],
+            },
+            {
+                "id": "s2", "description": "update the pinned test", "execution_role": "implementation",
+                "depends_on": ["s1"],
+                "planned_files": [{
+                    "path": "src/test/java/com/example/ignite/service/EmployeeServiceTest.java",
+                    "action": "modify",
+                }],
+                "acceptance_criteria_ids": ["ac2"],
+            },
+        ],
+        "acceptance_criteria": [
+            {"id": "ac1", "description": "x", "method": "judgment"},
+            {"id": "ac2", "description": "y", "method": "judgment"},
+        ],
+    }))
+    assert err is None
+    assert output is not None
+    assert output.subtasks[0].execution_method == ExecutionMethod.MODEL
+    assert output.subtasks[1].execution_method == ExecutionMethod.MODEL
+
+
 # --- PRV-06 self-healing: pre-existing List[str] global_invariants shape ---
 
 def test_flat_string_global_invariants_are_reshaped_into_ids():
