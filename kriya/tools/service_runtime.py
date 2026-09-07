@@ -37,6 +37,7 @@ output marker, a gRPC health check) is a new branch, not a redesign.
 from __future__ import annotations
 
 import http.client
+import os
 import time
 import urllib.error
 import urllib.request
@@ -49,6 +50,19 @@ from kriya.tools.process import ManagedProcess, ProcessController
 
 
 class ServiceVerificationOutcomeKind(str, Enum):
+    # Artifact Preparation (P6 production-validation, 2026-09-07): a live
+    # run's own service_command (`java -jar target/spring-petclinic-
+    # rest-4.0.2.jar`) named the jar correctly, but nothing in Kriya's
+    # pipeline had ever run the Maven `package` phase - only `mvn clean
+    # compile`/`mvn test` (kriya/tools/validate.py), neither of which
+    # produces a packaged artifact - so the jar simply didn't exist and the
+    # launch failed as SERVICE_EXITED_BEFORE_READY, discovering the missing
+    # packaging step only by trying to run something that couldn't
+    # possibly work. These two outcomes give that failure its own honest
+    # name, distinct from an actual service-process crash - see
+    # _prepare_required_artifact's own docstring for the full mechanism.
+    PREPARATION_FAILED = "PREPARATION_FAILED"
+    ARTIFACT_MATERIALIZATION_FAILED = "ARTIFACT_MATERIALIZATION_FAILED"
     SERVICE_START_FAILED = "SERVICE_START_FAILED"
     READINESS_TIMEOUT = "READINESS_TIMEOUT"
     SERVICE_EXITED_BEFORE_READY = "SERVICE_EXITED_BEFORE_READY"
@@ -356,6 +370,155 @@ def _cleanup(managed: ManagedProcess, *, shutdown_timeout_seconds: float) -> Opt
     return None
 
 
+_JAR_LAUNCH_FLAG = "-jar"
+_MAVEN_PACKAGE_TIMEOUT_SECONDS = 300
+_MAVEN_PACKAGE_ARGS = ["package", "-DskipTests"]
+
+
+def _detect_required_artifact(service_command: List[str], cwd: str) -> Optional[str]:
+    """If `service_command` launches a pre-built artifact that must already
+    exist on disk, returns its absolute path - otherwise None. Deliberately
+    narrow: only the JVM `-jar <path>` pattern is recognized today (the
+    exact P6 shape). A directly runnable command with no separate artifact
+    dependency - `mvn spring-boot:run`, `python manage.py runserver`, a
+    script invoked in place - returns None and triggers no preparation at
+    all; this function's job is detecting a REQUIREMENT, not guessing one
+    into existence."""
+    for i, token in enumerate(service_command):
+        if token == _JAR_LAUNCH_FLAG and i + 1 < len(service_command):
+            artifact = service_command[i + 1]
+            return artifact if os.path.isabs(artifact) else os.path.join(cwd, artifact)
+    return None
+
+
+def _artifact_is_current(artifact_path: str, cwd: str) -> bool:
+    """True only if `artifact_path` exists AND is at least as new as every
+    file that can affect a Maven package's output (`pom.xml` plus
+    everything under `src/main`) - the same timestamp-based staleness
+    signal Maven's own incremental build already relies on internally,
+    applied one layer up so a leftover jar from an earlier attempt in a
+    reused worktree can never satisfy verification for source that has
+    since changed. A worktree reset/checkout rewrites the mtime of any
+    source file it touches to the current time, so genuinely updated
+    source always looks newer than a stale prior build - the property this
+    check depends on."""
+    if not os.path.isfile(artifact_path):
+        return False
+    artifact_mtime = os.path.getmtime(artifact_path)
+    pom_path = os.path.join(cwd, "pom.xml")
+    if os.path.isfile(pom_path) and os.path.getmtime(pom_path) > artifact_mtime:
+        return False
+    src_main = os.path.join(cwd, "src", "main")
+    if os.path.isdir(src_main):
+        for root, _dirs, files in os.walk(src_main):
+            for name in files:
+                try:
+                    if os.path.getmtime(os.path.join(root, name)) > artifact_mtime:
+                        return False
+                except OSError:
+                    # Deleted/unreadable between listing and stat - cannot
+                    # make this artifact look newer than something that no
+                    # longer has a readable mtime; not a staleness signal.
+                    continue
+    return True
+
+
+def _maven_package_command(cwd: str) -> Optional[List[str]]:
+    """The deterministic command to (re)build a Maven project's packaged
+    artifact - the project's own `package` lifecycle phase (never a
+    hand-constructed jar), `-DskipTests` because Kriya's own compile/test
+    quality gates already ran `mvn test` earlier in this same pipeline
+    (kriya/tools/validate.py) - re-running the full test suite here would
+    only duplicate already-passed evidence, not add any. Prefers the
+    project's own wrapper (`./mvnw`) when present and executable - the same
+    command a human working in this exact repository would run - falling
+    back to a bare `mvn` on PATH otherwise. Returns None when `cwd` has no
+    `pom.xml` at all: not a Maven project, so this function has no known
+    way to prepare anything here and must not guess."""
+    if not os.path.isfile(os.path.join(cwd, "pom.xml")):
+        return None
+    wrapper = os.path.join(cwd, "mvnw")
+    if os.path.isfile(wrapper) and os.access(wrapper, os.X_OK):
+        return ["./mvnw"] + _MAVEN_PACKAGE_ARGS
+    return ["mvn"] + _MAVEN_PACKAGE_ARGS
+
+
+@dataclass(frozen=True)
+class _PreparationOutcome:
+    """None `outcome` means preparation succeeded (or was never required) -
+    the caller proceeds straight to launch. Any other value is the exact
+    failure to report; the launch must never be attempted."""
+
+    outcome: Optional[ServiceVerificationOutcomeKind]
+    reasoning: str
+    stdout: str = ""
+    stderr: str = ""
+    command: Optional[List[str]] = None
+    returncode: Optional[int] = None
+
+
+def _prepare_required_artifact(
+    service_command: List[str], cwd: str, *, controller: ProcessController,
+) -> _PreparationOutcome:
+    """Artifact Preparation (P6 production-validation, 2026-09-07) - the
+    deterministic PREPARE/BUILD phase that must complete, successfully,
+    BEFORE a managed service is ever launched, whenever service_command
+    references a runnable artifact this layer can detect. Kriya owns this
+    responsibility, not the Planner/Developer: the model may legitimately
+    propose `java -jar target/app.jar` without knowing or caring whether
+    that jar has been packaged yet - making that launch actually
+    executable in the candidate workspace is an execution-layer concern,
+    derived entirely from the existing service_command plus detected build
+    system, never a new plan-facing field.
+
+    Distinguishes exactly three failure shapes, matching the two dedicated
+    outcome kinds above:
+    - no known way to prepare a genuinely required, missing artifact (no
+      pom.xml), or the build command itself failed/could not be
+      invoked/timed out -> PREPARATION_FAILED.
+    - the build command reported success but the artifact still does not
+      exist afterward -> ARTIFACT_MATERIALIZATION_FAILED (a more surprising
+      case worth its own distinct signal, never conflated with an ordinary
+      build failure)."""
+    artifact = _detect_required_artifact(service_command, cwd)
+    if artifact is None:
+        return _PreparationOutcome(None, "service command references no artifact this layer must prepare")
+    if _artifact_is_current(artifact, cwd):
+        return _PreparationOutcome(
+            None, f"{artifact} already exists and is current relative to pom.xml/src/main - no preparation needed",
+        )
+    build_command = _maven_package_command(cwd)
+    if build_command is None:
+        return _PreparationOutcome(
+            ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+            f"{artifact} does not exist and {cwd} has no known build system (no pom.xml) to prepare it",
+        )
+    try:
+        result = controller.run(build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS)
+    except Exception as e:
+        return _PreparationOutcome(
+            ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+            f"failed to invoke preparation command {build_command!r}: {e}", command=build_command,
+        )
+    if result.returncode != 0 or result.timeout:
+        return _PreparationOutcome(
+            ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+            f"preparation command {' '.join(build_command)} failed (exit {result.returncode}, "
+            f"timeout={result.timeout})",
+            stdout=result.stdout, stderr=result.stderr, command=build_command, returncode=result.returncode,
+        )
+    if not os.path.isfile(artifact):
+        return _PreparationOutcome(
+            ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED,
+            f"preparation command {' '.join(build_command)} exited 0 but {artifact} still does not exist",
+            stdout=result.stdout, stderr=result.stderr, command=build_command, returncode=result.returncode,
+        )
+    return _PreparationOutcome(
+        None, f"prepared {artifact} via {' '.join(build_command)}",
+        stdout=result.stdout, stderr=result.stderr, command=build_command, returncode=result.returncode,
+    )
+
+
 def run_managed_service_verification(
     spec: ManagedServiceVerificationSpec, *, controller: Optional[ProcessController] = None,
 ) -> ManagedServiceVerificationResult:
@@ -368,6 +531,14 @@ def run_managed_service_verification(
     after the lifecycle is fully decided (success or failure), never
     skipped by an early return."""
     controller = controller or ProcessController()
+
+    preparation = _prepare_required_artifact(spec.service_command, spec.cwd, controller=controller)
+    if preparation.outcome is not None:
+        return ManagedServiceVerificationResult(
+            outcome=preparation.outcome, passed=False, reasoning=preparation.reasoning,
+            stdout=preparation.stdout, stderr=preparation.stderr, returncode=preparation.returncode,
+        )
+
     try:
         managed = controller.start_managed(spec.service_command, cwd=spec.cwd, env=spec.env)
     except Exception as e:

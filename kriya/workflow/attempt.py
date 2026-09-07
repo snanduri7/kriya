@@ -2027,6 +2027,14 @@ _MANAGED_SERVICE_FORBIDDEN_LEADING_EXECUTABLES = frozenset({"nohup", "sleep"})
 _SHELL_INTERPRETER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 
 _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES = frozenset({
+    # Artifact Preparation (P6 production-validation, 2026-09-07): a
+    # missing/unbuildable runnable artifact is exactly as much an
+    # infrastructure condition as a service that never started - the
+    # application itself was never even launched, so PROBE_FAILED-style
+    # "eligible for normal Developer repair" treatment would be wrong here
+    # too, same reasoning as every other member of this set.
+    ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+    ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED,
     ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
     ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
     ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
@@ -2054,6 +2062,15 @@ _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES = frozenset({
 # simply falls through to the unchanged STOP_ENVIRONMENT path below, no
 # special-casing required.
 _MANAGED_SERVICE_OUTCOMES_WITH_CAPTURED_APPLICATION_OUTPUT = frozenset({
+    # PREPARATION_FAILED's own `output` is the build tool's real stdout/
+    # stderr (e.g. a genuine `mvn package` compile error) - real,
+    # classifiable project text, same category as a compile-check failure
+    # already routed through this classifier. ARTIFACT_MATERIALIZATION_
+    # FAILED is deliberately excluded: that outcome's own stdout/stderr is
+    # a build command that reported SUCCESS - nothing in it indicates a
+    # code defect to classify, same reasoning CLEANUP_FAILED/VERIFICATION_
+    # INTERNAL_ERROR already use to stay out of this set.
+    ServiceVerificationOutcomeKind.PREPARATION_FAILED,
     ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
     ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
     ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,

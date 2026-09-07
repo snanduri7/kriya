@@ -3610,6 +3610,11 @@ async def test_probe_failed_maps_to_behavioral_grounded_failure(tmp_path):
     ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
     ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
     ServiceVerificationOutcomeKind.CLEANUP_FAILED,
+    # Artifact Preparation (P6 production-validation, 2026-09-07): a
+    # missing/unbuildable runnable artifact is exactly as infrastructural
+    # as every other member above - the application was never launched.
+    ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+    ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED,
 ])
 async def test_infrastructure_outcomes_map_to_verification_infrastructure_failure(tmp_path, outcome):
     """(8) Every non-behavioral outcome maps to verification_infrastructure_
