@@ -1109,6 +1109,38 @@ def test_reactor_compile_check_fails_when_owning_module_produced_no_classes(tmp_
     assert "target/classes" in res["output"]
 
 
+def test_reactor_compile_check_scans_every_owning_module_not_just_the_first(tmp_path):
+    """Candidates span TWO reactor modules (the real P7 shape - it modifies
+    Java in both core and repository): core produced real output,
+    repository did not. Must not stop after finding the first owning
+    module's bytecode - the loop has to keep checking every distinct
+    owning module and report exactly the one that's actually missing, not
+    just whichever it happens to see first, and not the one that's fine."""
+    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "core" / "target" / "classes" / "A.class").write_bytes(b"")
+    # repository/target/classes deliberately does not exist.
+
+    validator = PolymorphicValidator(str(tmp_path))
+    missing = validator._java_reactor_modules_missing_compiled_output(
+        [
+            "core/src/main/java/com/narendra/app/core/A.java",
+            "repository/src/main/java/com/narendra/app/serviceImpl/B.java",
+        ],
+        ["core", "repository", "api"],
+    )
+
+    assert missing == ["repository"]
+
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check([
+            "core/src/main/java/com/narendra/app/core/A.java",
+            "repository/src/main/java/com/narendra/app/serviceImpl/B.java",
+        ])
+    assert res["success"] is False
+    assert "repository" in res["output"]
+
+
 def test_reactor_compile_check_stale_unrelated_module_classes_do_not_grant_false_success(tmp_path):
     """(4) core has real, stale .class output; repository (the module that
     actually owns the ONLY candidate file) has none - the fix must not be
