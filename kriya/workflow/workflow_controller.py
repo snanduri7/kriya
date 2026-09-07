@@ -613,6 +613,28 @@ def _is_strict_regression(
     return retained_reason_codes < candidate_reason_codes
 
 
+def _preserved_reference_must_preserve_lines(obligation_ledger: ObligationLedger) -> List[str]:
+    """MUST-PRESERVE reinforcement lines for currently-SATISFIED
+    PRESERVED_REFERENCE obligations (PRV-11 preservation extension,
+    2026-09-07, Production Validation P5) - see build_structured_plan_
+    repair_prompt's own docstring for the live incident this closes.
+    Each line self-attributes its own (source, target) pair explicitly, so
+    one source's already-validated preservation can never be misread as
+    applying to a different source - no grouping/scoping structure needed
+    beyond that. Surfaces validated ObligationLedger state only, never the
+    previous draft's raw JSON directly - the same discipline
+    PLAN_STRUCTURAL_VALIDITY's own must_preserve block already follows."""
+    return [
+        f"{rec.evidence.get('source')} must keep declaring "
+        f"{rec.evidence.get('target')} in its own "
+        "planned_files[].preserved_references (already validated - a real grounded "
+        "edge with no legitimate owner; do not remove this entry while fixing other "
+        "reported issues, and do not replace it with a different target)"
+        for rec in obligation_ledger.relevant_for_preservation(ObligationKind.PRESERVED_REFERENCE)
+        if rec.evidence.get("source") and rec.evidence.get("target")
+    ]
+
+
 def build_structured_plan_repair_prompt(
     goal: str,
     previous_plan_text: str,
@@ -629,14 +651,30 @@ def build_structured_plan_repair_prompt(
     """Build a bounded local-only correction request for the complete plan.
 
     must_preserve (PRV-05 run #8, MA8 - kriya/workflow/obligations.py):
-    human-readable descriptions of PLAN_STRUCTURAL_VALIDITY obligations the
-    PREVIOUS draft already satisfied (computed by the caller from the
-    ObligationLedger, not re-derived here) - found live, run #8: the
-    Planner fixed refactor_baseline on repair attempt 2 but silently
-    regressed an already-fixed planned-file action, because the repair
-    prompt only ever showed the CURRENT attempt's error list, with nothing
-    telling the model that both constraints had to hold simultaneously.
-    This is a best-effort PROMPT instruction, not an enforcement mechanism
+    human-readable descriptions of obligations the PREVIOUS draft already
+    satisfied (computed by the caller from the ObligationLedger, not
+    re-derived here) - found live, run #8: the Planner fixed
+    refactor_baseline on repair attempt 2 but silently regressed an
+    already-fixed planned-file action, because the repair prompt only ever
+    showed the CURRENT attempt's error list, with nothing telling the model
+    that both constraints had to hold simultaneously. Originally
+    PLAN_STRUCTURAL_VALIDITY only; the caller now also folds in
+    PRESERVED_REFERENCE obligations (PRV-11 preservation extension,
+    2026-09-07, Production Validation P5) for the identical reason at a
+    finer resolution: P5's own live incident showed the strict-regression
+    guard (_is_strict_regression, reason-code-set level) cannot see a
+    regression INSIDE a single reason code's own evidence - two rounds
+    both reporting only MISSING_GROUNDED_PRODUCTION_ARTIFACT looked
+    identical even though round 2 silently dropped an already-correct
+    preserved_references entry (BaseEntity.java) while adding a new one
+    (Visit.java) instead of retaining both. Each PRESERVED_REFERENCE line
+    self-attributes its own (source, target) pair explicitly, so one
+    file's already-validated preservation can never be misread as applying
+    to a different file - no separate grouping/scoping structure needed,
+    and no new ledger: this reuses relevant_for_preservation() exactly as
+    PLAN_STRUCTURAL_VALIDITY already does, surfacing validated obligation
+    state, never the previous draft's raw JSON directly. This is a
+    best-effort PROMPT instruction, not an enforcement mechanism
     - the ledger's own regression detection (surfaced by the caller as
     PLAN_REPAIR_OSCILLATION/PLAN_REPAIR_NON_CONVERGENCE) is what actually
     catches it if the model ignores this anyway."""
@@ -3995,12 +4033,31 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # and relevant_for_preservation's own docstring for why this
                 # is unconditional on `kind` rather than correlated to what
                 # else is currently violated (PRV-11, 2026-08-31).
+                #
+                # PRESERVED_REFERENCE (PRV-11 preservation extension,
+                # 2026-09-07, Production Validation P5): the identical
+                # reinforcement need at a finer resolution than reason codes
+                # can see - MISSING_GROUNDED_PRODUCTION_ARTIFACT stays the
+                # same reason code whether ONE grounded target is still
+                # unowned or a DIFFERENT one is, so _is_strict_regression's
+                # own reason-code-set comparison cannot detect a repair that
+                # silently drops one already-correct preserved_references
+                # entry while adding another (found live: P5's PetTests.java
+                # needed both BaseEntity.java and Visit.java preserved
+                # simultaneously - two rounds each declared only one,
+                # alternating, never both together). Each line below
+                # self-attributes its own (source, target) pair explicitly,
+                # so one source's already-validated preservation can never
+                # be misread as applying to a different source - no new
+                # ledger, no new prompt section, this is the exact same
+                # must_preserve mechanism PLAN_STRUCTURAL_VALIDITY already
+                # uses, just also fed from this obligation kind.
                 must_preserve = [
                     f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
                     for rec in obligation_ledger.relevant_for_preservation(
                         ObligationKind.PLAN_STRUCTURAL_VALIDITY,
                     )
-                ]
+                ] + _preserved_reference_must_preserve_lines(obligation_ledger)
                 repair_prompt = build_structured_plan_repair_prompt(
                     goal, prompt_plan_text, prompt_errors, prompt_reason_codes, repair_attempts + 1,
                     route_kind=route.kind,

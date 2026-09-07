@@ -48,6 +48,7 @@ from kriya.workflow.workflow_controller import (
     AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
     _StructuredPlanUnavailable,
     _is_strict_regression,
+    _preserved_reference_must_preserve_lines,
     ArtifactOwnerResolutionBasis,
     WorkflowController,
     _attempt_owner_recovery_self_correction,
@@ -6405,6 +6406,183 @@ def test_repair_prompt_built_from_retained_baseline_not_regressed_candidate():
     assert "attempt2 plan text" not in retained_prompt
     assert "attempt2 plan text" in regressed_prompt
     assert "attempt1 plan text" not in regressed_prompt
+
+
+# --- PRESERVED_REFERENCE repair-prompt reinforcement (PRV-11 preservation
+# extension, 2026-09-07, Production Validation P5) - missing wiring, not a
+# new architectural concept: ObligationKind.PRESERVED_REFERENCE obligations
+# were already recorded SATISFIED per (source, target) pair (cd0434f/
+# 9ac8202), but build_structured_plan_repair_prompt never surfaced them the
+# way PLAN_STRUCTURAL_VALIDITY's own must_preserve block already does.
+# Live incident: P5's PetTests.java genuinely needed BOTH BaseEntity.java
+# and Visit.java preserved simultaneously - attempt 1 declared only
+# BaseEntity.java (correctly resolving that gap), attempt 2 declared only
+# Visit.java, SILENTLY DROPPING BaseEntity.java - both attempts reported
+# the identical reason-code set {MISSING_GROUNDED_PRODUCTION_ARTIFACT}, so
+# _is_strict_regression() (a deliberately reason-code-set-only guard) could
+# not see the regression - it lives inside one reason code's own evidence,
+# a resolution that guard was never meant to track. ---
+
+def _preserved_reference_obligation(source, target, revision=0):
+    return ObligationRecord(
+        id=f"plan.preserved_reference.{source}->{target}",
+        kind=ObligationKind.PRESERVED_REFERENCE,
+        status=ObligationStatus.SATISFIED,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description=f"{source} references {target} without requiring it modified - target must "
+                    "remain byte-identical to its pre-generation content",
+        source="workflow_controller.find_missing_grounded_production_artifacts",
+        revision=revision,
+        evidence={"source": source, "target": target, "baseline_hash": "deadbeef"},
+        terminal_required=True,
+    )
+
+
+def test_preserved_reference_lines_surface_a_single_satisfied_obligation():
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation("TestA.java", "Foo.java"))
+
+    lines = _preserved_reference_must_preserve_lines(ledger)
+
+    assert len(lines) == 1
+    assert "TestA.java must keep declaring Foo.java" in lines[0]
+    assert "already validated" in lines[0]
+
+
+def test_preserved_reference_lines_accumulate_across_repair_rounds():
+    """The exact P5 shape: round 1 satisfies BaseEntity.java, round 2 (a
+    later revision) satisfies Visit.java for the SAME source - both must
+    appear together, not just the most recent one."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation(
+        "src/test/.../PetTests.java", "src/main/.../BaseEntity.java", revision=0,
+    ))
+    after_round_1 = _preserved_reference_must_preserve_lines(ledger)
+    assert any("BaseEntity.java" in line for line in after_round_1)
+
+    ledger.record(_preserved_reference_obligation(
+        "src/test/.../PetTests.java", "src/main/.../Visit.java", revision=1,
+    ))
+    after_round_2 = _preserved_reference_must_preserve_lines(ledger)
+
+    assert any("BaseEntity.java" in line for line in after_round_2)
+    assert any("Visit.java" in line for line in after_round_2)
+    assert len(after_round_2) == 2
+
+
+def test_preserved_reference_lines_do_not_leak_across_sources():
+    """A preserved reference belonging to one source file must never be
+    attributable to a different, unrelated source - each line names its
+    own source explicitly, so this holds by construction, not by a
+    separate grouping/filtering step."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation("TestA.java", "Foo.java"))
+    ledger.record(_preserved_reference_obligation("TestB.java", "Bar.java"))
+
+    lines = _preserved_reference_must_preserve_lines(ledger)
+
+    a_line = next(line for line in lines if "TestA.java" in line)
+    b_line = next(line for line in lines if "TestB.java" in line)
+    assert "Foo.java" in a_line and "Bar.java" not in a_line
+    assert "Bar.java" in b_line and "Foo.java" not in b_line
+
+
+def test_preserved_reference_reinforcement_does_not_override_ownership_conflict():
+    """A satisfied PRESERVED_REFERENCE obligation must never be used to
+    excuse or override a genuine PRESERVED_REFERENCE_CONFLICTS_WITH_
+    OWNERSHIP contradiction - this reinforcement is prompt-text guidance
+    only, never an authorization or validation override. validate_plan()
+    itself is untouched by this fix and must still reject the contradictory
+    state regardless of any prior obligation history."""
+    conflicting_plan = EngineeringPlan(
+        plan_id="p-conflict", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="test file", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="Test.java", action=FileAction.CREATE,
+                    preserved_references=["Production.java"],
+                )],
+            ),
+            Subtask(
+                id="s2", description="also plans to modify the preserved target",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="Production.java", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    ledger = ObligationLedger()
+    # A PRIOR round's ledger already recorded this exact target as a
+    # satisfied preservation (as if an earlier draft had it legitimately
+    # unowned) - the CURRENT plan's own contradiction must still be caught.
+    ledger.record(_preserved_reference_obligation("Test.java", "Production.java"))
+
+    import asyncio
+    result = asyncio.run(validate_plan(conflicting_plan, workspace_path="/tmp"))
+
+    assert result.valid is False
+    assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" in result.reason_codes
+
+
+def test_preserved_reference_lines_absent_leaves_structural_validity_block_unchanged():
+    """When no PRESERVED_REFERENCE obligations exist yet (the common case -
+    every P1-P4 run before this extension, and any run whose test files
+    reference no unowned production artifact), the reinforcement helper
+    contributes nothing and the existing PLAN_STRUCTURAL_VALIDITY
+    must_preserve block's own prompt text is completely unaffected -
+    proving this addition is additive, not a replacement."""
+    ledger = ObligationLedger()
+    ledger.record(ObligationRecord(
+        id="plan.refactor_baseline.non_blank", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        description="refactor_baseline is set to a real subtask id",
+        source="plan_validation.validate_plan", evidence={}, terminal_required=True,
+    ))
+
+    structural_lines = [
+        f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
+        for rec in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
+    ]
+    preserved_reference_lines = _preserved_reference_must_preserve_lines(ledger)
+
+    assert preserved_reference_lines == []
+    assert len(structural_lines) == 1
+    assert "refactor_baseline" in structural_lines[0]
+
+
+def test_p5_reproduction_repair_prompt_retains_prior_preserved_reference():
+    """The exact required reproduction: attempt 1 satisfies BaseEntity.java;
+    building the NEXT repair prompt (reporting the remaining Visit.java
+    gap) must explicitly instruct the Planner to retain BaseEntity.java
+    while adding Visit.java - not silently let it drop, which is exactly
+    what happened live (attempt 2 declared only Visit.java)."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation(
+        "src/test/java/org/springframework/samples/petclinic/model/PetTests.java",
+        "src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java",
+    ))
+    must_preserve = _preserved_reference_must_preserve_lines(ledger)
+
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "attempt1 plan text",
+        [
+            "grounded structural evidence shows test file(s) referencing a production artifact "
+            "no subtask owns: src/test/java/org/springframework/samples/petclinic/model/"
+            "PetTests.java references src/main/java/org/springframework/samples/petclinic/model/"
+            "Visit.java"
+        ],
+        ["MISSING_GROUNDED_PRODUCTION_ARTIFACT"], 2,
+        must_preserve=must_preserve,
+    )
+
+    assert "BaseEntity.java" in prompt
+    assert "must keep declaring" in prompt
+    assert "Visit.java" in prompt
+    # The retained instruction and the newly-reported gap are both visible
+    # in the same prompt - the Planner has everything it needs to produce
+    # preserved_references containing both entries at once.
+    must_preserve_section = prompt.split("MUST FIX")[0]
+    assert "BaseEntity.java" in must_preserve_section
 
 
 # --- MA8.1 (PRV-06, 2026-08-29): Cross-Owner Requirement-Preserving Recovery
