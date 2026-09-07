@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kriya.config import AppConfig
-from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies, get_pom_own_coordinate
+from kriya.tools.validate import (
+    PolymorphicValidator,
+    get_pom_dependencies,
+    get_pom_own_coordinate,
+    get_pom_reactor_modules,
+)
 from kriya.workflow.verification_authority import (
     deterministic_sequence_kind,
     deterministic_verification_kind,
@@ -1014,6 +1019,149 @@ def test_java_compile_check_trusts_maven_success_when_something_really_compiled(
         res = validator.run_compile_check(["App.java"])
 
     assert res["success"] is True
+
+
+# --- Maven multi-module reactor compile-check (P7 production-validation, 2026-09-07) -----
+# Live incident: a genuine Maven reactor (root pom.xml packaging=pom,
+# <modules>core, repository, api</modules>) had Maven correctly report BUILD
+# SUCCESS while the single-module check above rejected every one of 16
+# attempts identically - it always looked for <workspace>/target/classes,
+# which a pom-packaged aggregator root never produces (each module compiles
+# into its OWN <module>/target/classes). Bounded audit of the rest of this
+# file's Java/Maven path (run_tests, run_pom_validate, resolve_maven_
+# classpath, _has_any_java_file, stack detection) found no other root-
+# relative single-module assumption - this was the only one.
+
+_REACTOR_POM = """<project>
+  <packaging>pom</packaging>
+  <modules>
+    <module>core</module>
+    <module>repository</module>
+    <module>api</module>
+  </modules>
+</project>"""
+
+
+def _mock_mvn_success():
+    mock_process = MagicMock(returncode=0)
+    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
+    return mock_process
+
+
+def _mock_mvn_failure():
+    mock_process = MagicMock(returncode=1)
+    mock_process.communicate.return_value = ("", "COMPILATION ERROR")
+    return mock_process
+
+
+def test_get_pom_reactor_modules_parses_real_declared_modules(tmp_path):
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    assert get_pom_reactor_modules(str(tmp_path / "pom.xml")) == ["core", "repository", "api"]
+
+
+def test_get_pom_reactor_modules_empty_for_genuinely_single_module_pom(tmp_path):
+    """The exact minimal pom.xml the sibling single-module tests above
+    already use - ties this fix's own "single-module is completely
+    unaffected" claim directly to the pre-existing regression coverage."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    assert get_pom_reactor_modules(str(tmp_path / "pom.xml")) == []
+
+
+def test_reactor_compile_check_succeeds_when_owning_modules_have_real_classes(tmp_path):
+    """(1) The exact P7 reproduction shape: root pom.xml declares a real
+    reactor; both candidate .java files' owning modules (core, repository)
+    have real .class output in their OWN target/classes; the aggregator
+    root's own target/classes never exists at all (packaging=pom - a real
+    Maven aggregator produces nothing there) - must succeed."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "core" / "target" / "classes" / "UserService.class").write_bytes(b"")
+    (tmp_path / "repository" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "repository" / "target" / "classes" / "UserServiceImpl.class").write_bytes(b"")
+    assert not (tmp_path / "target").exists()  # (7) aggregator root has none - still valid
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check([
+            "core/src/main/java/com/narendra/app/core/ports/UserService.java",
+            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+        ])
+
+    assert res["success"] is True
+
+
+def test_reactor_compile_check_fails_when_owning_module_produced_no_classes(tmp_path):
+    """(3) Maven reports success, but the module that actually owns the
+    candidate .java file produced zero .class files - the real live
+    failure this fix exists to correctly diagnose (rather than falsely
+    accept OR falsely reject) - must fail, and name the real module."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    # repository/target/classes deliberately does not exist at all.
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check([
+            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+        ])
+
+    assert res["success"] is False
+    assert "repository" in res["output"]
+    assert "target/classes" in res["output"]
+
+
+def test_reactor_compile_check_stale_unrelated_module_classes_do_not_grant_false_success(tmp_path):
+    """(4) core has real, stale .class output; repository (the module that
+    actually owns the ONLY candidate file) has none - the fix must not be
+    satisfiable by ANY declared module having classes, only the module(s)
+    that genuinely own a candidate in this change set."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "core" / "target" / "classes" / "Unrelated.class").write_bytes(b"")
+    # repository/target/classes deliberately does not exist.
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check([
+            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+        ])
+
+    assert res["success"] is False
+    assert "repository" in res["output"]
+
+
+def test_reactor_compile_check_does_not_require_every_module_to_produce_classes(tmp_path):
+    """(2)/(7) A module (api) that owns NO candidate file in this change
+    set must never be required to have compiled output - api has no
+    target/classes at all here, and is correctly never mentioned, because
+    only core (which owns the one real candidate) is checked."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "core" / "target" / "classes" / "Foo.class").write_bytes(b"")
+    # repository/ and api/ have no target/classes at all, and own no candidate.
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check(["core/src/main/java/com/narendra/app/core/Foo.java"])
+
+    assert res["success"] is True
+
+
+def test_reactor_compile_check_maven_failure_still_fails(tmp_path):
+    """(5) A genuine Maven compile failure (non-zero exit) must still be a
+    failure for a reactor exactly as it already is for a single-module
+    project - the reactor-awareness only changes how a returncode==0
+    result is double-checked, never bypasses a real Maven-reported error."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_failure()):
+        res = validator.run_compile_check([
+            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+        ])
+
+    assert res["success"] is False
+    assert "COMPILATION ERROR" in res["output"]
+
 
 def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path):
     # Regression test: previously a missing 'mvn' binary was silently logged at

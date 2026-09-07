@@ -47,6 +47,44 @@ def get_pom_dependencies(pom_path: str) -> List[str]:
         return []
 
 
+def get_pom_reactor_modules(pom_path: str) -> List[str]:
+    """Parses a pom.xml's <modules><module>...</module></modules> entries -
+    the declared child modules of a Maven reactor aggregator. Module-level
+    (not a PolymorphicValidator method), same style/namespace-handling as
+    get_pom_dependencies() above, so a caller needing this before/without a
+    validator instance can reuse it identically.
+
+    A genuine multi-module reactor's ROOT pom.xml (packaging=pom) has no
+    compiled output of its own - each declared module compiles into its
+    OWN <module>/target/classes, not <workspace_root>/target/classes (P7
+    production-validation, 2026-09-07: confirmed live - Maven correctly
+    reported BUILD SUCCESS for a real 3-module reactor while the compile-
+    check gate's own workspace-root-only target/classes check rejected
+    every single attempt, 16 times, regardless of code correctness, because
+    it was written assuming a single-module layout). Degrades to an empty
+    list (never raises) on any parse failure or a genuinely single-module
+    project with no <modules> block at all - callers must treat an empty
+    result as "not a reactor," not as "reactor with zero modules."""
+    if not os.path.exists(pom_path):
+        return []
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ns = ""
+        if root.tag.startswith("{"):
+            ns = root.tag.split("}")[0] + "}"
+        modules_elem = root.find(f"{ns}modules")
+        if modules_elem is None:
+            return []
+        return [
+            m.text.strip() for m in modules_elem.findall(f"{ns}module")
+            if m.text and m.text.strip()
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to parse POM reactor modules at {pom_path}: {e}")
+        return []
+
+
 def get_pom_own_coordinate(pom_path: str) -> Optional[str]:
     """Reads a pom.xml's own top-level <groupId>/<artifactId> (direct children of
     <project>, not nested inside any <dependency>) as a single 'groupId:artifactId'
@@ -178,6 +216,47 @@ class PolymorphicValidator:
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
+
+    def _java_reactor_modules_missing_compiled_output(
+        self, files: List[str], reactor_modules: List[str],
+    ) -> List[str]:
+        """P7 production-validation (2026-09-07): for a genuine Maven
+        multi-module reactor, returns the distinct OWNING module names among
+        `files`' real .java candidates whose own <module>/target/classes
+        contains no .class file - the modules that actually needed to
+        compile something for THIS candidate set, and didn't.
+
+        Deliberately does NOT require every declared reactor module to
+        contain .class files - a module can legitimately be interfaces-
+        only, resources-only, packaging=pom, or otherwise produce no
+        bytecode for this specific candidate set (confirmed live in the
+        very repo this fix was built against - modular-app's own `app`
+        aggregator module has no src/ at all). Only modules that actually
+        OWN one of the given candidate .java files are checked - a stronger,
+        more precise proof than "some declared module produced some class
+        somewhere," and one that can never be satisfied by stale output left
+        over in an unrelated module."""
+        owning_modules = set()
+        for f in files:
+            if not f.endswith(".java"):
+                continue
+            for module in reactor_modules:
+                prefix = module.rstrip("/") + "/"
+                if f.startswith(prefix):
+                    owning_modules.add(module)
+                    break
+        missing = []
+        for module in sorted(owning_modules):
+            classes_dir = os.path.join(self.workspace_path, module, "target", "classes")
+            compiled_anything = False
+            if os.path.isdir(classes_dir):
+                for _dirpath, _dirnames, filenames in os.walk(classes_dir):
+                    if any(fn.endswith(".class") for fn in filenames):
+                        compiled_anything = True
+                        break
+            if not compiled_anything:
+                missing.append(module)
+        return missing
 
     def _ensure_project_venv(self, install_args: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """Creates (if not already present) a project-local virtual environment
@@ -659,27 +738,68 @@ class PolymorphicValidator:
                         # "Could not find or load main class" - a build-layout
                         # gap this gate should have caught immediately instead
                         # of ever claiming compilation "succeeded".
+                        #
+                        # Multi-module reactor branch added (2026-09-07, P7
+                        # production-validation): a genuine Maven reactor's
+                        # ROOT pom.xml (packaging=pom, real <modules>) has no
+                        # compiled output of its own - each declared module
+                        # compiles into its OWN <module>/target/classes, not
+                        # <workspace>/target/classes. The single-module check
+                        # below unconditionally checking the workspace root
+                        # was a structural, universal false-positive for ANY
+                        # multi-module reactor, confirmed live: 16/16 rejected
+                        # attempts, all with correct generated code, all
+                        # identical "zero .class files" message. get_pom_
+                        # reactor_modules() returning [] (a genuinely single-
+                        # module project - the overwhelmingly common case)
+                        # leaves this exact single-module check completely
+                        # unchanged.
                         if any(f.endswith(".java") for f in files):
-                            classes_dir = os.path.join(self.workspace_path, "target", "classes")
-                            compiled_anything = False
-                            if os.path.isdir(classes_dir):
-                                for _dirpath, _dirnames, filenames in os.walk(classes_dir):
-                                    if any(fn.endswith(".class") for fn in filenames):
-                                        compiled_anything = True
-                                        break
-                            if not compiled_anything:
-                                return {
-                                    "success": False,
-                                    "output": (
-                                        "Maven reported compilation success, but zero .class files "
-                                        "were actually produced under target/classes. Maven's default "
-                                        "sourceDirectory (src/main/java) most likely doesn't cover "
-                                        "where this project's .java files actually live - add an "
-                                        "explicit <sourceDirectory> to pom.xml's <build> section "
-                                        "pointing at their real location, rather than assuming the "
-                                        "conventional src/main/java layout."
-                                    ),
-                                }
+                            reactor_modules = get_pom_reactor_modules(
+                                os.path.join(self.workspace_path, "pom.xml"),
+                            )
+                            if reactor_modules:
+                                missing_modules = self._java_reactor_modules_missing_compiled_output(
+                                    files, reactor_modules,
+                                )
+                                if missing_modules:
+                                    return {
+                                        "success": False,
+                                        "output": (
+                                            "Maven reported compilation success, but the reactor "
+                                            f"module(s) {', '.join(missing_modules)} produced zero "
+                                            ".class files under their own target/classes, despite "
+                                            "owning a candidate .java file in this change set. This "
+                                            f"is a Maven reactor (root pom.xml declares modules: "
+                                            f"{', '.join(reactor_modules)}) - each module compiles "
+                                            "into its own <module>/target/classes, never the "
+                                            "aggregator root's. Check the affected module's own "
+                                            "<sourceDirectory> if one is set, or whether the .java "
+                                            "file is actually under that module's conventional "
+                                            "src/main/java layout."
+                                        ),
+                                    }
+                            else:
+                                classes_dir = os.path.join(self.workspace_path, "target", "classes")
+                                compiled_anything = False
+                                if os.path.isdir(classes_dir):
+                                    for _dirpath, _dirnames, filenames in os.walk(classes_dir):
+                                        if any(fn.endswith(".class") for fn in filenames):
+                                            compiled_anything = True
+                                            break
+                                if not compiled_anything:
+                                    return {
+                                        "success": False,
+                                        "output": (
+                                            "Maven reported compilation success, but zero .class files "
+                                            "were actually produced under target/classes. Maven's default "
+                                            "sourceDirectory (src/main/java) most likely doesn't cover "
+                                            "where this project's .java files actually live - add an "
+                                            "explicit <sourceDirectory> to pom.xml's <build> section "
+                                            "pointing at their real location, rather than assuming the "
+                                            "conventional src/main/java layout."
+                                        ),
+                                    }
                         return {"success": True, "output": "Maven compilation succeeded."}
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
                     try:
