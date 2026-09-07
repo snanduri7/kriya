@@ -1140,6 +1140,10 @@ def _transitive_depends_on(plan: EngineeringPlan, subtask_id: str) -> set:
 
 def find_missing_grounded_production_artifacts(
     plan: EngineeringPlan, resolved_edges: Dict[str, List[str]],
+    *,
+    workspace_path: Optional[str] = None,
+    obligation_ledger: Optional[ObligationLedger] = None,
+    revision: object = None,
 ) -> List[Dict[str, str]]:
     """Bounded plan-completeness check (PRV-11, 2026-08-30/31): a REAL,
     grounded structural edge (see build_planning_structural_evidence's own
@@ -1208,7 +1212,13 @@ def find_missing_grounded_production_artifacts(
        authoring contradiction rejected by plan_validation.validate_plan
        (PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP), not silently
        resolved here - this function only ever sees `target not in
-       owned_paths`, so an owned target never reaches this branch at all."""
+       owned_paths`, so an owned target never reaches this branch at all.
+       When workspace_path/obligation_ledger are supplied, an accepted
+       preservation is also recorded as a SATISFIED ObligationKind.
+       PRESERVED_REFERENCE record with the target's real pre-generation
+       content hash as evidence - see that kind's own docstring (kriya/
+       workflow/obligations.py) for how the terminal sweep uses it to
+       enforce byte identity with no new gate."""
     owned_paths = {pf.path for st in plan.subtasks for pf in st.planned_files}
     owner_by_path = {pf.path: st.id for st in plan.subtasks for pf in st.planned_files}
     source_subtask_by_path = {pf.path: st for st in plan.subtasks for pf in st.planned_files}
@@ -1236,6 +1246,26 @@ def find_missing_grounded_production_artifacts(
                     continue
                 source_pf = planned_file_by_path.get(source)
                 if source_pf is not None and target in source_pf.preserved_references:
+                    if obligation_ledger is not None and workspace_path is not None:
+                        obligation_ledger.record(ObligationRecord(
+                            id=f"plan.preserved_reference.{source}->{target}",
+                            kind=ObligationKind.PRESERVED_REFERENCE,
+                            status=ObligationStatus.SATISFIED,
+                            authority=ObligationAuthority.DETERMINISTIC,
+                            description=(
+                                f"{source} references {target} without requiring it modified - "
+                                "target must remain byte-identical to its pre-generation content"
+                            ),
+                            source="workflow_controller.find_missing_grounded_production_artifacts",
+                            revision=revision,
+                            evidence={
+                                "source": source, "target": target,
+                                "baseline_hash": read_file_revision(
+                                    os.path.join(workspace_path, target)
+                                ),
+                            },
+                            terminal_required=True,
+                        ))
                     continue
                 seen.add(key)
                 gaps.append({
@@ -1278,6 +1308,42 @@ def find_missing_grounded_production_artifacts(
                     "reason": "semantic_provider_mismatch",
                 })
     return gaps
+
+
+def enforce_preserved_reference_terminal_integrity(
+    obligation_ledger: ObligationLedger, workspace_path: str,
+) -> None:
+    """PRV-11 preservation extension (2026-09-06/07, Production Validation
+    P2): the terminal half of ObligationKind.PRESERVED_REFERENCE - see that
+    kind's own docstring (kriya/workflow/obligations.py) for why this
+    re-hash, not a heuristic, is the enforcement mechanism.
+
+    Re-checks only currently-SATISFIED records: a record already VIOLATED
+    or PENDING for some other reason needs no further evidence to already
+    disqualify the run via unresolved_terminal_obligations(); this
+    function's only job is catching the case that check alone cannot -
+    a preservation that was genuinely honored at plan-acceptance time but
+    silently violated somewhere during generation."""
+    for rec in obligation_ledger.current_by_kind(ObligationKind.PRESERVED_REFERENCE):
+        if rec.status != ObligationStatus.SATISFIED:
+            continue
+        target = rec.evidence.get("target")
+        baseline_hash = rec.evidence.get("baseline_hash")
+        if not target or baseline_hash is None:
+            continue
+        current_hash = read_file_revision(os.path.join(workspace_path, target))
+        if current_hash != baseline_hash:
+            obligation_ledger.record(ObligationRecord(
+                id=rec.id, kind=ObligationKind.PRESERVED_REFERENCE,
+                status=ObligationStatus.VIOLATED,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=rec.description,
+                source="workflow_controller.enforce_preserved_reference_terminal_integrity",
+                revision="terminal",
+                evidence={**rec.evidence, "current_hash": current_hash},
+                owner_subtask_id=rec.owner_subtask_id,
+                terminal_required=True,
+            ))
 
 
 def build_approved_plan_document(
@@ -3822,6 +3888,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # possibly-disagreeing source of truth.
                     missing_artifacts = find_missing_grounded_production_artifacts(
                         plan, structural_resolved_edges,
+                        workspace_path=workspace_path, obligation_ledger=obligation_ledger,
+                        revision=repair_attempts,
                     )
                     unowned_gaps = [g for g in missing_artifacts if g["reason"] == "unowned"]
                     miswired_gaps = [g for g in missing_artifacts if g["reason"] == "not_in_dependency_chain"]
@@ -5744,6 +5812,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             log_stack_contract_boundary("terminal", terminal_stack_contract, global_stack_contract_gap)
             if global_stack_contract_gap:
                 all_completed = False
+
+        # PRV-11 preservation extension (2026-09-06/07, Production
+        # Validation P2): re-hash every currently-SATISFIED PRESERVED_
+        # REFERENCE obligation's target against its recorded pre-
+        # generation baseline, now that every subtask has finished and its
+        # output is already committed to the real workspace_path (the same
+        # "authoritative terminal state" the migration gate above re-checks
+        # against). A mismatch re-records the SAME id VIOLATED - a same-
+        # authority (DETERMINISTIC) SATISFIED->VIOLATED transition, so the
+        # ledger's own regression detection sees it too, and the generic
+        # MA8 §42/43 backstop just below fails the run with no new gate.
+        if all_completed:
+            enforce_preserved_reference_terminal_integrity(obligation_ledger, workspace_path)
 
         # MA8 (spec §42/43) - a generic backstop layered ALONGSIDE the
         # migration-specific gate above, not a replacement for it (§43's

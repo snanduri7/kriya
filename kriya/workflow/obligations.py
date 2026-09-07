@@ -166,8 +166,33 @@ class ObligationKind(str, Enum):
     the run fails closed, never silently retried forever. The invariant
     this kind exists to enforce, verbatim: 'Execution evidence may prove
     that the plan is incomplete; only a validated plan revision may
-    convert that evidence into new write authority.'"""
+    convert that evidence into new write authority.'
 
+    PRESERVED_REFERENCE (PRV-11, 2026-09-06/07, Production Validation P2):
+    the counterpart to RUNTIME_PLAN_GAP - that kind exists because
+    execution can prove a real artifact is missing from the plan; this one
+    exists because a Planner-declared PlannedFile.preserved_references
+    entry (kriya/workflow/plan_schema.py) is itself only a claim of
+    intent, made before any subtask has executed. workflow_controller.
+    find_missing_grounded_production_artifacts records one of these,
+    SATISFIED, with the target's real pre-generation content hash as
+    evidence, the moment a declared preservation is accepted (grounded
+    structural edge, target genuinely unowned) - never when merely
+    declared, since an invented declaration naming no real edge is inert
+    and records nothing. The terminal sweep re-hashes every currently-
+    SATISFIED record of this kind against the final, fully-applied
+    workspace and re-records VIOLATED on any mismatch - a same-authority
+    (DETERMINISTIC) SATISFIED->VIOLATED transition, so it is picked up by
+    both this ledger's own regression detection AND unresolved_terminal_
+    obligations()'s generic MA8 §42/43 backstop with no new gate wired by
+    hand. Deliberately DETERMINISTIC, never GROUNDED/JUDGMENT: byte
+    identity is a hard fact, not an interpretation - a target that
+    genuinely needed changing to satisfy the goal is a PLANNED_FILE
+    ownership conflict at validation time (PRESERVED_REFERENCE_CONFLICTS_
+    WITH_OWNERSHIP in plan_validation.py), never something this kind's own
+    terminal check is asked to adjudicate."""
+
+    PRESERVED_REFERENCE = "preserved_reference"
     PLAN_STRUCTURAL_VALIDITY = "plan_structural_validity"
     MIGRATION_COMPLETION = "migration_completion"
     GOAL_SPEC_REQUIREMENT = "goal_spec_requirement"

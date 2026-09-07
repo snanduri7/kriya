@@ -62,6 +62,7 @@ from kriya.workflow.workflow_controller import (
     _transitive_upstream_ids,
     build_authoritative_planner_request,
     build_planning_structural_evidence,
+    enforce_preserved_reference_terminal_integrity,
     find_missing_grounded_production_artifacts,
     build_recovery_execution_plan,
     resolve_python_module_to_candidate_artifact_path,
@@ -89,6 +90,7 @@ from kriya.workflow.workflow import (
     _record_future_owner_verification_deferred,
     _settle_future_owner_verification_obligations,
 )
+from kriya.workflow.edit_safety import read_file_revision
 
 
 @pytest.fixture(autouse=True)
@@ -2384,6 +2386,129 @@ def test_missing_grounded_production_artifact_preserved_reference_to_a_nonexiste
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
         "reason": "unowned",
     }]
+
+
+def test_missing_grounded_production_artifact_acceptance_records_satisfied_preserved_reference(tmp_path):
+    """MA8 mapping (2026-09-06/07, Production Validation P2): accepting a
+    declared preservation also records ObligationKind.PRESERVED_REFERENCE,
+    SATISFIED, with the target's real pre-generation content hash as
+    evidence - the fact the terminal integrity sweep re-checks later."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="preserved-obligation", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+    ledger = ObligationLedger()
+
+    gaps = find_missing_grounded_production_artifacts(
+        plan, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+
+    assert gaps == []
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    rec = ledger.current(obligation_id)
+    assert rec is not None
+    assert rec.kind == ObligationKind.PRESERVED_REFERENCE
+    assert rec.status == ObligationStatus.SATISFIED
+    assert rec.authority == ObligationAuthority.DETERMINISTIC
+    assert rec.terminal_required is True
+    expected_hash = read_file_revision(str(tmp_path / _CUSTOMER_CONTROLLER_PATH))
+    assert rec.evidence["baseline_hash"] == expected_hash
+
+
+def test_missing_grounded_production_artifact_no_obligation_recorded_without_ledger(tmp_path):
+    """Backward compatibility: omitting workspace_path/obligation_ledger
+    (every existing caller, and 9 pre-existing tests in this module) must
+    behave exactly as before this extension - acceptance still suppresses
+    the gap, but records nothing anywhere."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="preserved-no-ledger", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+
+    gaps = find_missing_grounded_production_artifacts(plan, edges)
+
+    assert gaps == []
+
+
+def test_enforce_preserved_reference_terminal_integrity_passes_when_target_unchanged(tmp_path):
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="terminal-unchanged", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+    ledger = ObligationLedger()
+    find_missing_grounded_production_artifacts(
+        plan, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+
+    enforce_preserved_reference_terminal_integrity(ledger, str(tmp_path))
+
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    assert ledger.current(obligation_id).status == ObligationStatus.SATISFIED
+    assert ledger.unresolved_terminal_obligations() == []
+
+
+def test_enforce_preserved_reference_terminal_integrity_flags_a_mutated_target(tmp_path):
+    """The exact P2 safety invariant this whole extension exists to
+    provide: if generation touches a file declared preserved anyway, the
+    run must not be allowed to report success. A byte-identity mismatch
+    against the recorded baseline flips the SAME obligation id VIOLATED -
+    a same-authority regression the ledger's own detection also sees -
+    and unresolved_terminal_obligations() then fails the run via the
+    existing generic MA8 backstop, with no new gate wired for this kind."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="terminal-mutated", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+    ledger = ObligationLedger()
+    find_missing_grounded_production_artifacts(
+        plan, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+
+    (tmp_path / _CUSTOMER_CONTROLLER_PATH).write_text("// generation touched this preserved file\n")
+    enforce_preserved_reference_terminal_integrity(ledger, str(tmp_path))
+
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    rec = ledger.current(obligation_id)
+    assert rec.status == ObligationStatus.VIOLATED
+    unresolved = ledger.unresolved_terminal_obligations()
+    assert obligation_id in [r.id for r in unresolved]
+    assert any(r.obligation_id == obligation_id for r in ledger.regressions)
 
 
 _WIDGET_JAVA = (
