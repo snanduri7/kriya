@@ -1662,3 +1662,218 @@ async def test_canonicalize_then_validate_plan_closes_run10_incident_without_rep
     assert ledger.current(
         "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency"
     ).status == ObligationStatus.SATISFIED
+
+
+# --- SUBTASK_SEMANTIC_CONTRACT obligation recording (PRV-17, 2026-09-07,
+# Production Validation P7) - the deterministic source layer behind the
+# repair-loop's requires/provides regression guard (workflow_controller.py's
+# _semantic_contract_must_preserve_lines / _semantic_contract_regression_
+# subtasks). validate_plan()'s own requires/provides correctness checks
+# (SUBTASK_REQUIREMENT_UNPROVIDED, SEMANTIC_DEPENDENCY_EDGE_MISSING,
+# AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER) already computed this fact every
+# round and simply never recorded it - these tests exercise the REAL
+# validate_plan() pipeline, not a hand-built ledger, the same discipline
+# test_run8_* above already established. ---
+
+def _requires_provides_plan(s3_requires):
+    s2 = _model_subtask(
+        id="s2", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/Producer.java", action=FileAction.CREATE)],
+    )
+    s3 = _model_subtask(
+        id="s3", depends_on=["s2"], requires=s3_requires,
+        planned_files=[PlannedFile(path="src/main/Consumer.java", action=FileAction.CREATE)],
+    )
+    return _plan([s2, s3])
+
+
+@pytest.mark.asyncio
+async def test_correctly_wired_requires_records_satisfied(tmp_path):
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert result.valid, result.errors
+    rec = ledger.current("plan.subtask.s3.requires.cap_a")
+    assert rec.status == ObligationStatus.SATISFIED
+    assert rec.evidence["relation"] == "requires"
+    assert rec.evidence["subtask_id"] == "s3"
+    assert rec.owner_subtask_id == "s3"
+
+
+@pytest.mark.asyncio
+async def test_unprovided_requirement_records_violated(tmp_path):
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _requires_provides_plan(["cap_ghost"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert not result.valid
+    assert "SUBTASK_REQUIREMENT_UNPROVIDED" in result.reason_codes
+    assert ledger.current(
+        "plan.subtask.s3.requires.cap_ghost"
+    ).status == ObligationStatus.VIOLATED
+
+
+@pytest.mark.asyncio
+async def test_missing_depends_on_edge_records_violated(tmp_path):
+    s2 = _model_subtask(
+        id="s2", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/Producer.java", action=FileAction.CREATE)],
+    )
+    s3 = _model_subtask(
+        id="s3", requires=["cap_a"],  # no depends_on=["s2"]
+        planned_files=[PlannedFile(path="src/main/Consumer.java", action=FileAction.CREATE)],
+    )
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _plan([s2, s3]), workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    assert not result.valid
+    assert "SEMANTIC_DEPENDENCY_EDGE_MISSING" in result.reason_codes
+    assert ledger.current(
+        "plan.subtask.s3.requires.cap_a"
+    ).status == ObligationStatus.VIOLATED
+
+
+@pytest.mark.asyncio
+async def test_unambiguous_provides_records_satisfied(tmp_path):
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert result.valid, result.errors
+    rec = ledger.current("plan.capability.cap_a.provider")
+    assert rec.status == ObligationStatus.SATISFIED
+    assert rec.evidence["relation"] == "provides"
+    assert rec.evidence["subtask_id"] == "s2"
+    assert rec.owner_subtask_id == "s2"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_provides_records_violated_with_no_single_owner(tmp_path):
+    s2a = _model_subtask(
+        id="s2a", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/ProducerA.java", action=FileAction.CREATE)],
+    )
+    s2b = _model_subtask(
+        id="s2b", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/ProducerB.java", action=FileAction.CREATE)],
+    )
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _plan([s2a, s2b]), workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    assert not result.valid
+    assert "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER" in result.reason_codes
+    rec = ledger.current("plan.capability.cap_a.provider")
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.owner_subtask_id is None
+
+
+@pytest.mark.asyncio
+async def test_requirement_silently_dropped_between_revisions_is_recorded_violated(tmp_path):
+    """The exact P7 defect: revision 0 correctly validates s3.requires=
+    ['cap_a']; revision 1's plan silently drops it to [] while fixing
+    something unrelated. The per-entry requires loop never iterates an
+    empty list, so nothing would flag this without the closing post-pass -
+    this proves that post-pass fires and produces a real regression
+    event, the same primitive ObligationLedger.record() already uses for
+    every other same-authority SATISFIED->VIOLATED transition."""
+    ledger = ObligationLedger()
+    await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert ledger.current("plan.subtask.s3.requires.cap_a").status == ObligationStatus.SATISFIED
+    before = len(ledger.regressions)
+
+    await validate_plan(
+        _requires_provides_plan([]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+
+    rec = ledger.current("plan.subtask.s3.requires.cap_a")
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.evidence.get("dropped_between_revisions") is True
+    assert rec.evidence.get("subtask_id") == "s3"
+    new_regressions = ledger.regressions[before:]
+    assert any(r.obligation_id == "plan.subtask.s3.requires.cap_a" for r in new_regressions)
+
+
+@pytest.mark.asyncio
+async def test_requirement_still_present_is_not_spuriously_flagged_as_dropped(tmp_path):
+    """Sanity counterpart to the drop test above: re-validating the SAME
+    unchanged plan across two revisions must never spuriously regress the
+    still-present requirement (the post-pass's own `pair in
+    current_requires_pairs` skip)."""
+    ledger = ObligationLedger()
+    await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    before = len(ledger.regressions)
+    result = await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+    assert result.valid, result.errors
+    assert ledger.current("plan.subtask.s3.requires.cap_a").status == ObligationStatus.SATISFIED
+    assert ledger.regressions[before:] == []
+
+
+@pytest.mark.asyncio
+async def test_capability_silently_dropped_from_every_provides_is_recorded_violated(tmp_path):
+    """Provides-side counterpart to the requires drop test: revision 0
+    correctly validates cap_a provided by s2; revision 1's plan drops
+    cap_a from EVERY subtask's provides entirely (not just made
+    ambiguous) - must be recorded VIOLATED, preserving the last known
+    owner (s2) in evidence/owner_subtask_id, not nulled out the way a
+    genuinely ambiguous capability correctly is."""
+    ledger = ObligationLedger()
+    await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    before = len(ledger.regressions)
+
+    s2_no_longer_provides = _model_subtask(
+        id="s2", planned_files=[PlannedFile(path="src/main/Producer.java", action=FileAction.CREATE)],
+    )
+    s3_no_requires = _model_subtask(
+        id="s3", depends_on=["s2"],
+        planned_files=[PlannedFile(path="src/main/Consumer.java", action=FileAction.CREATE)],
+    )
+    await validate_plan(
+        _plan([s2_no_longer_provides, s3_no_requires]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+
+    rec = ledger.current("plan.capability.cap_a.provider")
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.evidence.get("dropped_between_revisions") is True
+    assert rec.owner_subtask_id == "s2"
+    new_regressions = ledger.regressions[before:]
+    assert any(r.obligation_id == "plan.capability.cap_a.provider" for r in new_regressions)
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_capability_error_text_names_every_provider_subtask(tmp_path):
+    """AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER's error text must explicitly
+    name every contending subtask via the `subtask(s) [...]` convention -
+    the repair loop's own _subtask_ids_mentioned() exemption (workflow_
+    controller.py) depends on this to recognize a targeted provides fix as
+    legitimately implicated, not an unrelated silent regression."""
+    s2a = _model_subtask(
+        id="s2a", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/ProducerA.java", action=FileAction.CREATE)],
+    )
+    s2b = _model_subtask(
+        id="s2b", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/ProducerB.java", action=FileAction.CREATE)],
+    )
+    result = await validate_plan(_plan([s2a, s2b]), workspace_path=str(tmp_path))
+    error_text = " ".join(result.errors)
+    assert "subtask(s) ['s2a', 's2b']" in error_text or "subtask(s) ['s2b', 's2a']" in error_text

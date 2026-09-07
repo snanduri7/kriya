@@ -78,7 +78,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
@@ -633,6 +633,116 @@ def _preserved_reference_must_preserve_lines(obligation_ledger: ObligationLedger
         for rec in obligation_ledger.relevant_for_preservation(ObligationKind.PRESERVED_REFERENCE)
         if rec.evidence.get("source") and rec.evidence.get("target")
     ]
+
+
+def _semantic_contract_must_preserve_lines(obligation_ledger: ObligationLedger) -> List[str]:
+    """MUST-PRESERVE reinforcement (layer 1) for currently-SATISFIED
+    SUBTASK_SEMANTIC_CONTRACT obligations (PRV-17, 2026-09-07, Production
+    Validation P7) - see that kind's own docstring (obligations.py) for the
+    live 3-attempt oscillation this closes, and _semantic_contract_
+    regression_subtasks below for the deterministic layer-2 rejection that
+    backs this prompt-level reinforcement the same way _is_strict_
+    regression already backs must_preserve for reason-code sets. Each line
+    self-attributes its own subtask id and requirement/capability string, so
+    one subtask's already-validated contract can never be misread as
+    applying to a different one - same discipline as
+    _preserved_reference_must_preserve_lines above."""
+    lines: List[str] = []
+    for rec in obligation_ledger.relevant_for_preservation(ObligationKind.SUBTASK_SEMANTIC_CONTRACT):
+        relation = rec.evidence.get("relation")
+        subtask_id = rec.evidence.get("subtask_id")
+        if relation == "requires":
+            requirement = rec.evidence.get("requirement")
+            if subtask_id and requirement:
+                lines.append(
+                    f"subtask {subtask_id!r} must keep declaring {requirement!r} in its own "
+                    "requires (already validated - a real provider exists with a correct "
+                    "depends_on edge; do not drop this entry while fixing other reported issues)"
+                )
+        elif relation == "provides":
+            capability = rec.evidence.get("capability")
+            if subtask_id and capability:
+                lines.append(
+                    f"subtask {subtask_id!r} must keep declaring {capability!r} in its own "
+                    "provides (already validated as its sole provider; do not drop this entry "
+                    "while fixing other reported issues)"
+                )
+    return lines
+
+
+_SUBTASK_MENTION_RE = re.compile(r"subtask\(?s?\)?\s*\[?\s*((?:'[^']+'(?:,\s*)?)+)")
+_QUOTED_TOKEN_RE = re.compile(r"'([^']+)'")
+
+
+_REQUIRES_PROVIDES_ERROR_KEYWORDS = ("requires", "provide", "capabilit")
+
+
+def _subtask_ids_mentioned(texts: List[str]) -> Set[str]:
+    """Subtask ids named in a round's own validation error text, RESTRICTED
+    to lines that are themselves about a requires/provides/capability
+    relationship (PRV-17, 2026-09-07, P7) - used only to decide which
+    subtask(s) a repair round was actually asked to fix a semantic-contract
+    problem for, feeding _semantic_contract_regression_subtasks' own
+    "unless directly implicated" exemption below. The keyword filter matters:
+    P7's own attempt 0 named s3 in its ONE reported error
+    (PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP, about s3's
+    preserved_references, containing neither "requires" nor "provide" nor
+    "capabilit") - a bare subtask-id mention, unfiltered, would have wrongly
+    exempted s3 from the very requires-drop this mechanism exists to catch.
+    Every requires/provides/capability-related error string in
+    plan_validation.py and this module (SUBTASK_REQUIREMENT_UNPROVIDED,
+    SEMANTIC_DEPENDENCY_EDGE_MISSING, AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER,
+    SUBTASK_SEMANTIC_CONTRACT_MISSING, the MISSING_GROUNDED_PRODUCTION_
+    ARTIFACT/MISWIRED_GROUNDED_DEPENDENCY_EDGE/GROUNDED_SEMANTIC_PROVIDER_
+    MISMATCH family, PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED, and this
+    module's own SEMANTIC_CONTRACT_REGRESSION_REJECTED) already contains at
+    least one of these keywords AND at least one subtask id named either as
+    `subtask 'sN'` or `subtask(s) ['sN', ...]` by construction (the grounded-
+    edge family's own errors were extended, 2026-09-07, to also name the
+    CONSUMER subtask via `gap['consumer_subtask']`, not only the producer
+    that already appeared as `owning_subtask` - the consumer's own requires
+    is exactly what a targeted repair for these codes legitimately changes).
+    Deliberately reads the SAME free-text errors already shown to the
+    Planner in the repair prompt, never a separately re-derived or reworded
+    source."""
+    ids: Set[str] = set()
+    for text in texts:
+        lowered = text.lower()
+        if not any(keyword in lowered for keyword in _REQUIRES_PROVIDES_ERROR_KEYWORDS):
+            continue
+        for mention in _SUBTASK_MENTION_RE.finditer(text):
+            ids.update(_QUOTED_TOKEN_RE.findall(mention.group(1)))
+    return ids
+
+
+def _semantic_contract_regression_subtasks(
+    obligation_ledger: ObligationLedger, regressions_before: int, implicated_subtask_ids: Set[str],
+) -> List[str]:
+    """Deterministic layer 2 (PRV-17, 2026-09-07, P7): returns the subtask
+    id(s) whose previously-SATISFIED SUBTASK_SEMANTIC_CONTRACT obligation
+    just regressed to VIOLATED THIS round (i.e. was newly appended to
+    obligation_ledger.regressions since `regressions_before`), and which
+    were NOT named by the errors that prompted this round's own repair
+    prompt (`implicated_subtask_ids`). A subtask actively being repaired for
+    an unrelated reason may still legitimately touch its own requires/
+    provides as a side effect - the exemption is scoped to the SUBTASK, not
+    the exact field, matching the granularity `implicated_subtask_ids`
+    itself can support from free text (see _subtask_ids_mentioned). Reuses
+    ObligationLedger.record()'s existing SATISFIED->VIOLATED regression
+    detection rather than a second, parallel comparison - see obligations.py
+    SUBTASK_SEMANTIC_CONTRACT's own docstring. Called from
+    _run_structured_enforce; the caller ORs a non-empty result into the
+    same retained-baseline redirect _is_strict_regression already drives,
+    rather than this function rejecting anything itself - _is_strict_
+    regression's own reason-code-set semantics stay untouched."""
+    offending: List[str] = []
+    for event in obligation_ledger.regressions[regressions_before:]:
+        if event.kind != ObligationKind.SUBTASK_SEMANTIC_CONTRACT:
+            continue
+        subtask_id = event.current.evidence.get("subtask_id") or event.current.owner_subtask_id
+        if subtask_id and subtask_id not in implicated_subtask_ids:
+            offending.append(subtask_id)
+    return list(dict.fromkeys(offending))
 
 
 def build_structured_plan_repair_prompt(
@@ -1447,6 +1557,7 @@ def find_missing_grounded_production_artifacts(
                 seen.add(key)
                 gaps.append({
                     "test_file": source, "missing_production_artifact": target,
+                    "consumer_subtask": source_subtask_by_path[source].id,
                     "reason": "unowned",
                 })
                 continue
@@ -1460,7 +1571,9 @@ def find_missing_grounded_production_artifacts(
                 seen.add(key)
                 gaps.append({
                     "test_file": source, "missing_production_artifact": target,
-                    "owning_subtask": target_subtask_id, "reason": "not_in_dependency_chain",
+                    "owning_subtask": target_subtask_id,
+                    "consumer_subtask": source_subtask.id,
+                    "reason": "not_in_dependency_chain",
                 })
                 continue
             if not (
@@ -1480,6 +1593,7 @@ def find_missing_grounded_production_artifacts(
                     "test_file": source,
                     "missing_production_artifact": target,
                     "owning_subtask": target_subtask_id,
+                    "consumer_subtask": source_subtask.id,
                     "owner_provides": sorted(owner_capabilities),
                     "test_requires": sorted(source_subtask.requires),
                     "reason": "semantic_provider_mismatch",
@@ -3992,12 +4106,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         retained_reason_codes: Optional[frozenset] = None
         retained_validation_evidence: List[Dict[str, Any]] = []
         retained_invalid_subtask_ids: List[str] = []
+        # PRV-17 (2026-09-07, P7): the errors that prompted the CURRENT
+        # round's own candidate plan - i.e. what prompt_errors held on the
+        # PREVIOUS loop iteration, right before this one's plan was
+        # generated. Used only by _semantic_contract_regression_subtasks'
+        # "unless directly implicated" exemption below; empty on the first
+        # iteration (nothing prompted the initial plan), which correctly
+        # exempts nothing.
+        prior_prompt_errors: List[str] = []
         while True:
             errors: List[str] = []
             reason_codes: List[str] = []
             validation_evidence: List[Dict[str, Any]] = []
             invalid_subtask_ids: List[str] = []
             plan: Optional[EngineeringPlan] = None
+            regressions_before = len(obligation_ledger.regressions)
 
             structured_output, parse_issue = parse_planner_structured_output(plan_text)
             if structured_output is None:
@@ -4078,7 +4201,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         errors.append(
                             "grounded structural evidence shows test file(s) referencing a "
                             "production artifact no subtask owns: " + "; ".join(
-                                f"{gap['test_file']} references {gap['missing_production_artifact']}"
+                                f"{gap['test_file']} (subtask {gap['consumer_subtask']!r}) "
+                                f"references {gap['missing_production_artifact']}"
                                 for gap in unowned_gaps
                             )
                         )
@@ -4087,9 +4211,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         errors.append(
                             "grounded structural evidence shows test file(s) whose own requires/"
                             "depends_on skip past the real intermediate producer: " + "; ".join(
-                                f"{gap['test_file']} references {gap['missing_production_artifact']} "
-                                f"(owned by subtask {gap['owning_subtask']!r}, which is not in this "
-                                "test's own depends_on chain)"
+                                f"{gap['test_file']} (subtask {gap['consumer_subtask']!r}) "
+                                f"references {gap['missing_production_artifact']} (owned by "
+                                f"subtask {gap['owning_subtask']!r}, which is not in this test's "
+                                "own depends_on chain)"
                                 for gap in miswired_gaps
                             )
                         )
@@ -4099,8 +4224,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "grounded structural evidence shows test file(s) whose requires do "
                             "not resolve to the subtask owning the referenced production artifact: "
                             + "; ".join(
-                                f"{gap['test_file']} references "
-                                f"{gap['missing_production_artifact']} (owned by subtask "
+                                f"{gap['test_file']} (subtask {gap['consumer_subtask']!r}) "
+                                f"references {gap['missing_production_artifact']} (owned by subtask "
                                 f"{gap['owning_subtask']!r}, provides={gap['owner_provides']!r}, "
                                 f"test requires={gap['test_requires']!r})"
                                 for gap in semantic_gaps
@@ -4110,6 +4235,35 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
+            # PRV-17 (2026-09-07, P7): which subtask(s), if any, this round's
+            # own candidate plan silently regressed a previously-validated
+            # requires/provides fact for, unrelated to what this round was
+            # actually asked to fix - see _semantic_contract_regression_
+            # subtasks' own docstring. Computed unconditionally (harmless
+            # when plan is None or nothing regressed - both yield an empty
+            # list) so it's available below regardless of which branch set
+            # errors/reason_codes.
+            semantic_contract_regression_subtasks = _semantic_contract_regression_subtasks(
+                obligation_ledger, regressions_before, _subtask_ids_mentioned(prior_prompt_errors),
+            )
+            if semantic_contract_regression_subtasks:
+                # PRV-17 (2026-09-07, P7): folded into errors/reason_codes
+                # (rather than a separate accept/reject branch) so every
+                # existing downstream mechanism this loop already has - the
+                # "plan is not None and not errors" acceptance gate right
+                # below, is_strict_regression's own reason-code-set
+                # comparison, the next repair prompt's targeted_correction
+                # text, the terminal exhaustion report - uniformly treats
+                # this candidate as still-invalid, with no separate
+                # accept/reject path to keep in sync.
+                errors.append(
+                    "plan repair silently regressed previously-validated requires/provides "
+                    f"for unrelated subtask(s) {semantic_contract_regression_subtasks!r} while "
+                    "fixing something else - restore their previously-validated requires/"
+                    "provides entries exactly as declared before this repair round"
+                )
+                reason_codes.append("SEMANTIC_CONTRACT_REGRESSION_REJECTED")
+                reason_codes = list(dict.fromkeys(reason_codes))
             if plan is not None and not errors:
                 approved_stack_contract = derive_stack_contract(goal)
                 log_stack_contract_boundary("plan", approved_stack_contract, None)
@@ -4149,7 +4303,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # exception are redirected to the retained baseline.
             current_reason_code_set = frozenset(reason_codes)
             is_strict_regression = _is_strict_regression(retained_reason_codes, current_reason_code_set)
-            if is_strict_regression:
+            # PRV-17 (2026-09-07, P7): a candidate that silently regressed an
+            # unimplicated subtask's requires/provides is rejected the same
+            # way a strict reason-code-set regression already is - reusing
+            # the identical retained-baseline redirect below, never a second
+            # rejection path. _is_strict_regression's own semantics (and the
+            # `is_strict_regression` value fed to it) are untouched by this
+            # OR - see _semantic_contract_regression_subtasks' own docstring.
+            treat_as_regression = is_strict_regression or bool(semantic_contract_regression_subtasks)
+            if treat_as_regression:
                 prompt_plan_text = retained_plan_text
                 prompt_errors = retained_errors
                 prompt_reason_codes = list(retained_reason_codes)
@@ -4164,6 +4326,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 retained_reason_codes = current_reason_code_set
                 retained_validation_evidence = validation_evidence
                 retained_invalid_subtask_ids = invalid_subtask_ids
+            # PRV-17 (2026-09-07, P7): captured for the NEXT loop iteration's
+            # own _subtask_ids_mentioned(prior_prompt_errors) call - see that
+            # variable's own initialization comment above the while loop.
+            prior_prompt_errors = prompt_errors
             if repair_attempts < 2:
                 # MA8: everything PLAN_STRUCTURAL_VALIDITY currently reports
                 # SATISFIED (as of the validate_plan() call just above) must
@@ -4191,12 +4357,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # ledger, no new prompt section, this is the exact same
                 # must_preserve mechanism PLAN_STRUCTURAL_VALIDITY already
                 # uses, just also fed from this obligation kind.
-                must_preserve = [
-                    f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
-                    for rec in obligation_ledger.relevant_for_preservation(
-                        ObligationKind.PLAN_STRUCTURAL_VALIDITY,
-                    )
-                ] + _preserved_reference_must_preserve_lines(obligation_ledger)
+                must_preserve = (
+                    [
+                        f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
+                        for rec in obligation_ledger.relevant_for_preservation(
+                            ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+                        )
+                    ]
+                    + _preserved_reference_must_preserve_lines(obligation_ledger)
+                    + _semantic_contract_must_preserve_lines(obligation_ledger)
+                )
                 repair_prompt = build_structured_plan_repair_prompt(
                     goal, prompt_plan_text, prompt_errors, prompt_reason_codes, repair_attempts + 1,
                     route_kind=route.kind,
@@ -4244,10 +4414,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # MISSING as though it were part of the best reachable
                 # state, when the retained baseline already resolved it.
                 final_reason_codes = (
-                    list(retained_reason_codes) if is_strict_regression else list(reason_codes)
+                    list(retained_reason_codes) if treat_as_regression else list(reason_codes)
                 )
                 final_invalid_subtask_ids = (
-                    retained_invalid_subtask_ids if is_strict_regression else invalid_subtask_ids
+                    retained_invalid_subtask_ids if treat_as_regression else invalid_subtask_ids
                 )
                 final_reason_codes.append("STRUCTURED_PLAN_REPAIR_EXHAUSTED")
                 # MA8 (PRV-05 run #8): distinguish "kept oscillating between

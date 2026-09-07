@@ -54,6 +54,9 @@ from kriya.workflow.workflow_controller import (
     _StructuredPlanUnavailable,
     _is_strict_regression,
     _preserved_reference_must_preserve_lines,
+    _semantic_contract_must_preserve_lines,
+    _semantic_contract_regression_subtasks,
+    _subtask_ids_mentioned,
     ArtifactOwnerResolutionBasis,
     WorkflowController,
     _attempt_owner_recovery_self_correction,
@@ -8413,3 +8416,455 @@ def test_evaluate_integration_obligations_noop_for_unrelated_subtask_completion(
     # s3 is the PRODUCER, not a consumer of r1 - evaluating its own
     # completion must not touch the relationship at all.
     assert ledger.current("plan.integration.r1").status == ObligationStatus.PENDING
+
+
+# --- SUBTASK_SEMANTIC_CONTRACT regression guard (PRV-17, 2026-09-07,
+# Production Validation P7) - MISSING WIRING, not a new MA8/MA9 concept: a
+# live 3-attempt oscillation where the structured-plan repair loop fixed
+# one reported problem while silently dropping an unrelated, already-
+# validated requires/provides fact - first on s3 (attempt 0 -> 1), then on
+# a DIFFERENT subtask s4 one round later (attempt 1 -> 2), exhausting the
+# repair budget without ever reaching a state where both held together.
+# Two layers: _semantic_contract_must_preserve_lines (prompt reinforcement,
+# same pattern as _preserved_reference_must_preserve_lines) and
+# _semantic_contract_regression_subtasks (deterministic rejection, reusing
+# ObligationLedger.record()'s existing SATISFIED->VIOLATED regression
+# detection and the SAME retained-baseline redirect _is_strict_regression
+# already drives - never a second rejection path, never a broadened
+# _is_strict_regression). ---
+
+def _requires_obligation(subtask_id, requirement, status, revision=0, providers=None, dropped=False):
+    """dropped=True models plan_validation.py's own "silently vanished"
+    post-pass, which deliberately records terminal_required=False (unlike
+    the live per-round SATISFIED/VIOLATED recording, terminal_required=
+    True) - this exact id's own requirement string may have been
+    legitimately renamed/retired, so nothing may ever re-satisfy THIS id
+    again; the final unresolved_terminal_obligations() gate must not be
+    permanently poisoned by an obligation no longer live in the final plan.
+    Found live in this session's own direct verification (not pytest):
+    a legitimately renamed requirement left the OLD id VIOLATED+terminal_
+    required forever, failing an otherwise-successful run."""
+    return ObligationRecord(
+        id=f"plan.subtask.{subtask_id}.requires.{requirement}",
+        kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+        status=status,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description=f"subtask {subtask_id!r} requires {requirement!r} with a real provider "
+                    "correctly declared in depends_on",
+        source="plan_validation.validate_plan", revision=revision,
+        evidence={
+            "relation": "requires", "subtask_id": subtask_id, "requirement": requirement,
+            "providers": providers if providers is not None else [],
+        },
+        owner_subtask_id=subtask_id, terminal_required=not dropped,
+    )
+
+
+def _provides_obligation(subtask_id, capability, status, revision=0, dropped=False):
+    """dropped=True models plan_validation.py's own "capability vanished
+    entirely" post-pass: it spreads the PRIOR SATISFIED record's own
+    evidence forward (carrying its subtask_id along, unlike a genuinely
+    AMBIGUOUS 2+ provider VIOLATED record, which has no single subtask_id -
+    `dropped=False` with status=VIOLATED models that case instead) AND
+    records terminal_required=False, since this id's own capability string
+    may have been legitimately renamed/retired and nothing may ever
+    re-satisfy THIS id again (see _requires_obligation's own docstring for
+    the live bug this mirrors, found via this session's direct
+    verification)."""
+    known_owner = subtask_id if (status == ObligationStatus.SATISFIED or dropped) else None
+    return ObligationRecord(
+        id=f"plan.capability.{capability}.provider",
+        kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+        status=status,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description=f"capability {capability!r} must be provided by exactly one subtask",
+        source="plan_validation.validate_plan", revision=revision,
+        evidence={
+            "relation": "provides", "capability": capability,
+            "providers": [subtask_id] if status == ObligationStatus.SATISFIED else [],
+            "subtask_id": known_owner,
+        },
+        owner_subtask_id=known_owner,
+        terminal_required=not dropped,
+    )
+
+
+def test_semantic_contract_lines_surface_satisfied_requires_and_provides():
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "userServiceImpl_extended", ObligationStatus.SATISFIED))
+    ledger.record(_provides_obligation("s2", "userServiceImpl_extended", ObligationStatus.SATISFIED))
+
+    lines = _semantic_contract_must_preserve_lines(ledger)
+
+    assert any("s3" in line and "userServiceImpl_extended" in line and "requires" in line for line in lines)
+    assert any("s2" in line and "userServiceImpl_extended" in line and "provides" in line for line in lines)
+    assert len(lines) == 2
+
+
+def test_semantic_contract_lines_absent_for_violated_facts():
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED))
+    assert _semantic_contract_must_preserve_lines(ledger) == []
+
+
+def test_subtask_ids_mentioned_filters_to_requires_provides_keywords():
+    """The exact P7 discriminator: attempt 0's own reported error names s3
+    but is about preserved_references, not requires/provides - it must
+    never be read as implicating s3's semantic contract."""
+    preserved_reference_error = (
+        "subtask 's3' planned artifact 'UserServiceImplTest.java' declares "
+        "'Preserved.java' as a preserved reference, but 'Preserved.java' is itself "
+        "planned for modification by ['s3']"
+    )
+    assert _subtask_ids_mentioned([preserved_reference_error]) == set()
+
+    requires_error = "subtask 's3' requires 'x' but no subtask provides it"
+    assert _subtask_ids_mentioned([requires_error]) == {"s3"}
+
+
+def test_subtask_ids_mentioned_extracts_list_form_and_grounded_consumer():
+    contract_missing_error = (
+        "subtask(s) ['s4'] declare neither provides nor requires; authoritative "
+        "multi-stage plans require explicit semantic contracts"
+    )
+    assert _subtask_ids_mentioned([contract_missing_error]) == {"s4"}
+
+    ambiguous_error = (
+        "semantic capabilities must have exactly one provider: 'userServiceImpl_extended' "
+        "is provided by subtask(s) ['s2', 's5']"
+    )
+    assert _subtask_ids_mentioned([ambiguous_error]) == {"s2", "s5"}
+
+    grounded_error = (
+        "grounded structural evidence shows test file(s) whose requires do not resolve to "
+        "the subtask owning the referenced production artifact: UserServiceImplTest.java "
+        "(subtask 's3') references UserServiceImpl.java (owned by subtask 's2', "
+        "provides=['userServiceImpl_extended'], test requires=[])"
+    )
+    assert _subtask_ids_mentioned([grounded_error]) == {"s2", "s3"}
+
+
+def test_semantic_contract_regression_subtasks_rejects_unimplicated_drop():
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.SATISFIED, revision=0))
+    before = len(ledger.regressions)
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED, revision=1))
+
+    offending = _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids=set())
+    assert offending == ["s3"]
+
+
+def test_semantic_contract_regression_subtasks_exempts_implicated_subtask():
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.SATISFIED, revision=0))
+    before = len(ledger.regressions)
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED, revision=1))
+
+    offending = _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids={"s3"})
+    assert offending == []
+
+
+def test_semantic_contract_regression_subtasks_multiple_subtasks_mixed():
+    """The exact required shape: one subtask's contract change is
+    legitimate (implicated this round), an UNRELATED subtask's silent drop
+    in the same round is not."""
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.SATISFIED, revision=0))
+    ledger.record(_provides_obligation("s4", "y", ObligationStatus.SATISFIED, revision=0))
+    before = len(ledger.regressions)
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED, revision=1))
+    ledger.record(_provides_obligation("s4", "y", ObligationStatus.VIOLATED, revision=1, dropped=True))
+
+    offending = _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids={"s3"})
+    assert offending == ["s4"]
+
+
+def test_semantic_contract_regression_subtasks_ignores_other_obligation_kinds():
+    """Only SUBTASK_SEMANTIC_CONTRACT regressions are in scope here -
+    PRESERVED_REFERENCE has its own, separate reinforcement mechanism and
+    must never be double-counted by this guard."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation("Test.java", "Foo.java", revision=0))
+    before = len(ledger.regressions)
+    ledger.record(ObligationRecord(
+        id="plan.preserved_reference.Test.java->Foo.java",
+        kind=ObligationKind.PRESERVED_REFERENCE, status=ObligationStatus.VIOLATED,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description="regressed", source="test", revision=1,
+        evidence={"source": "Test.java", "target": "Foo.java"}, terminal_required=True,
+    ))
+    assert len(ledger.regressions) == before + 1  # sanity: a regression WAS recorded
+    assert _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids=set()) == []
+
+
+def _p7_oscillation_plan():
+    return EngineeringPlan(
+        plan_id="p7-oscillation", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s2", description="UserService port", execution_method=ExecutionMethod.MODEL,
+                provides=["userServiceImpl_extended"],
+                planned_files=[PlannedFile(path="core/UserService.java", action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="s3", description="UserServiceImpl", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s2"], requires=["userServiceImpl_extended"],
+                planned_files=[PlannedFile(path="repository/UserServiceImpl.java", action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="s4", description="UserServiceImplTest", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s3"], provides=["userServiceImpl_extended_tested"],
+                planned_files=[PlannedFile(
+                    path="repository/UserServiceImplTest.java", action=FileAction.MODIFY,
+                )],
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_enforce_reproduces_p7_oscillation_and_rejects_both_silent_drops(tmp_path):
+    """The exact required reproduction (categories 1 and 2 together, since
+    this is how the incident actually unfolded as one 3-attempt sequence):
+    attempt 0 fails on PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP (s3,
+    unrelated to requires/provides); attempt 1 "fixes" that but silently
+    drops s3's already-validated requires; attempt 2 restores s3 but
+    silently drops s4's already-validated provides instead. Neither silent
+    drop may be accepted as the new retained baseline, and the terminal
+    report must reflect attempt 0's original state, not either regressed
+    candidate's."""
+    plan = _p7_oscillation_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text", "attempt2 text"])
+    we.run_generation_workflow = AsyncMock(
+        side_effect=AssertionError("must never reach generation - planning never converges"),
+    )
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_requires_obligation(
+                "s3", "userServiceImpl_extended", ObligationStatus.SATISFIED,
+                revision=0, providers=["s2"],
+            ))
+            obligation_ledger.record(_provides_obligation(
+                "s4", "userServiceImpl_extended_tested", ObligationStatus.SATISFIED, revision=0,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    "subtask 's3' planned artifact 'UserServiceImplTest.java' declares "
+                    "'Preserved.java' as a preserved reference, but 'Preserved.java' is "
+                    "itself planned for modification by ['s3']"
+                ],
+                reason_codes=["PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP"],
+            )
+        if revision == 1:
+            # s3.requires silently dropped while fixing the round-0 issue.
+            obligation_ledger.record(_requires_obligation(
+                "s3", "userServiceImpl_extended", ObligationStatus.VIOLATED, revision=1,
+                dropped=True,
+            ))
+            obligation_ledger.record(_provides_obligation(
+                "s4", "userServiceImpl_extended_tested", ObligationStatus.SATISFIED, revision=1,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    "grounded structural evidence shows test file(s) whose requires do not "
+                    "resolve to the subtask owning the referenced production artifact: "
+                    "UserServiceImplTest.java (subtask 's4') references UserServiceImpl.java "
+                    "(owned by subtask 's2', provides=['userServiceImpl_extended'], "
+                    "test requires=[])"
+                ],
+                reason_codes=["GROUNDED_SEMANTIC_PROVIDER_MISMATCH"],
+            )
+        assert revision == 2
+        # s3.requires restored, but s4.provides silently dropped instead.
+        obligation_ledger.record(_requires_obligation(
+            "s3", "userServiceImpl_extended", ObligationStatus.SATISFIED,
+            revision=2, providers=["s2"],
+        ))
+        obligation_ledger.record(_provides_obligation(
+            "s4", "userServiceImpl_extended_tested", ObligationStatus.VIOLATED, revision=2,
+            dropped=True,
+        ))
+        return PlanValidationResult(
+            valid=False,
+            errors=[
+                "subtask(s) ['s4'] declare neither provides nor requires; authoritative "
+                "multi-stage plans require explicit semantic contracts"
+            ],
+            reason_codes=["SUBTASK_SEMANTIC_CONTRACT_MISSING"],
+        )
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    # Neither silent drop (attempt 1's s3 regression, attempt 2's s4
+    # regression) may be reported as though it were the best reachable
+    # state - the terminal report reflects attempt 0's original, unrelated
+    # problem.
+    assert result.legacy_result["reason_codes"] == [
+        "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP",
+        "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+        "PLAN_REPAIR_NON_CONVERGENCE",
+    ]
+    assert "GROUNDED_SEMANTIC_PROVIDER_MISMATCH" not in result.legacy_result["reason_codes"]
+    assert "SUBTASK_SEMANTIC_CONTRACT_MISSING" not in result.legacy_result["reason_codes"]
+    assert result.legacy_result["plan_repair_attempts"] == 2
+    # Budget is unchanged - exactly 3 Planner calls, nothing refunded or
+    # added because of the rejected regressions.
+    assert we.planner.run.await_count == 3
+    we.run_generation_workflow.assert_not_called()
+
+    # Both repair prompts (for attempt 1 and attempt 2) were built from the
+    # RETAINED (attempt 0) state, never from a regressed candidate's own.
+    repair_prompt_for_attempt_1 = we.planner.run.await_args_list[1].args[0]
+    repair_prompt_for_attempt_2 = we.planner.run.await_args_list[2].args[0]
+    assert "Preserved.java" in repair_prompt_for_attempt_1
+    assert "Preserved.java" in repair_prompt_for_attempt_2
+
+
+@pytest.mark.asyncio
+async def test_enforce_accepts_targeted_requires_change_for_implicated_subtask(tmp_path):
+    """The required counter-case to the regression test above: a
+    GROUNDED_SEMANTIC_PROVIDER_MISMATCH naming s3 (via the grounded-edge
+    error's own consumer_subtask attribution) legitimately changes s3's
+    requires the very next round - this must converge normally, never be
+    rejected as a regression."""
+    plan = _p7_oscillation_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text"])
+    # "files": [] sidesteps the (unrelated) per-subtask declared-scope check
+    # in the real subtask-execution loop below planning - this test is only
+    # about the PLANNING loop's own acceptance of a legitimate, implicated
+    # requires change, not full multi-subtask execution fidelity.
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_requires_obligation(
+                "s3", "userServiceImpl_extended", ObligationStatus.SATISFIED,
+                revision=0, providers=["s2"],
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    "grounded structural evidence shows test file(s) whose requires do not "
+                    "resolve to the subtask owning the referenced production artifact: "
+                    "UserServiceImplTest.java (subtask 's3') references UserServiceImpl.java "
+                    "(owned by subtask 's2', provides=['userServiceImpl_extended'], "
+                    "test requires=['userServiceImpl_extended_v2'])"
+                ],
+                reason_codes=["GROUNDED_SEMANTIC_PROVIDER_MISMATCH"],
+            )
+        assert revision == 1
+        # s3's own requires legitimately CHANGED (not just re-asserted) in
+        # direct response to the error that named it: the old fact really
+        # is dropped (VIOLATED, same as any other silent drop would be),
+        # but because s3 is implicated by attempt 0's own error text, this
+        # must converge normally rather than being rejected as a
+        # regression - the new value is validated separately.
+        obligation_ledger.record(_requires_obligation(
+            "s3", "userServiceImpl_extended", ObligationStatus.VIOLATED, revision=1,
+            dropped=True,
+        ))
+        obligation_ledger.record(_requires_obligation(
+            "s3", "userServiceImpl_extended_v2", ObligationStatus.SATISFIED,
+            revision=1, providers=["s2"],
+        ))
+        return PlanValidationResult(valid=True)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_enforce_accepts_targeted_provides_change_for_implicated_subtask(tmp_path):
+    """Provides-side counterpart: a GROUNDED_SEMANTIC_PROVIDER_MISMATCH
+    naming the PRODUCER subtask (via the grounded-edge error's own
+    `owning_subtask` attribution, already present before this fix)
+    legitimately renames that subtask's provides the very next round -
+    never rejected as an unrelated regression. Symmetric to the requires-
+    side test above, which exercises the CONSUMER attribution
+    (`consumer_subtask`) instead."""
+    plan = _p7_oscillation_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text"])
+    # "files": [] sidesteps the (unrelated) per-subtask declared-scope check
+    # in the real subtask-execution loop - this test is only about the
+    # PLANNING loop's own acceptance of a legitimate, implicated provides
+    # change.
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_provides_obligation(
+                "s2", "userServiceImpl_extended_v1", ObligationStatus.SATISFIED, revision=0,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    "grounded structural evidence shows test file(s) whose requires do not "
+                    "resolve to the subtask owning the referenced production artifact: "
+                    "UserServiceImplTest.java references UserServiceImpl.java (owned by "
+                    "subtask 's2', provides=['userServiceImpl_extended_v1'], "
+                    "test requires=['userServiceImpl_extended_v2'])"
+                ],
+                reason_codes=["GROUNDED_SEMANTIC_PROVIDER_MISMATCH"],
+            )
+        assert revision == 1
+        # s2's own provides legitimately CHANGED (old value really dropped,
+        # new value added) in direct response to the error that named it
+        # (via owning_subtask) as the producer - must converge normally.
+        obligation_ledger.record(_provides_obligation(
+            "s2", "userServiceImpl_extended_v1", ObligationStatus.VIOLATED, revision=1,
+            dropped=True,
+        ))
+        obligation_ledger.record(_provides_obligation(
+            "s2", "userServiceImpl_extended_v2", ObligationStatus.SATISFIED, revision=1,
+        ))
+        return PlanValidationResult(valid=True)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2

@@ -541,8 +541,41 @@ async def validate_plan(
         if len(providers) != 1
     }
     if ambiguous_capabilities:
-        errors.append(f"semantic capabilities must have exactly one provider: {ambiguous_capabilities}")
+        errors.append(
+            "semantic capabilities must have exactly one provider: " + "; ".join(
+                f"{capability!r} is provided by subtask(s) {providers!r}"
+                for capability, providers in ambiguous_capabilities.items()
+            )
+        )
         reason_codes.append("AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER")
+    if obligation_ledger is not None:
+        # PRV-17 (2026-09-07, P7): records the SAME ambiguity check above as
+        # a per-capability SUBTASK_SEMANTIC_CONTRACT fact - see that kind's
+        # own docstring (obligations.py) for the live oscillation this
+        # closes. A capability that silently vanishes from every subtask's
+        # `provides` between repair rounds (rather than staying ambiguous or
+        # unambiguous) is caught below, after the main subtask loop, by
+        # re-recording VIOLATED against this same id when the capability key
+        # is absent from `capability_providers` entirely.
+        for capability, providers in capability_providers.items():
+            obligation_ledger.record(ObligationRecord(
+                id=f"plan.capability.{capability}.provider",
+                kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+                status=(
+                    ObligationStatus.VIOLATED if capability in ambiguous_capabilities
+                    else ObligationStatus.SATISFIED
+                ),
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=f"capability {capability!r} must be provided by exactly one subtask",
+                source="plan_validation.validate_plan", revision=revision,
+                evidence={
+                    "relation": "provides", "capability": capability,
+                    "providers": list(providers),
+                    "subtask_id": providers[0] if len(providers) == 1 else None,
+                },
+                owner_subtask_id=providers[0] if len(providers) == 1 else None,
+                terminal_required=True,
+            ))
 
     # PRV-06 (2026-08-28): checked by id, never by re-matching free text -
     # see GlobalInvariant's own docstring (plan_schema.py) for why a
@@ -586,17 +619,46 @@ async def validate_plan(
                 ))
         for requirement in st.requires:
             providers = capability_providers.get(requirement, [])
+            requirement_violated = False
             if not providers:
                 errors.append(
                     f"subtask {st.id!r} requires {requirement!r} but no subtask provides it"
                 )
                 reason_codes.append("SUBTASK_REQUIREMENT_UNPROVIDED")
+                requirement_violated = True
             elif len(providers) == 1 and providers[0] not in st.depends_on:
                 errors.append(
                     f"subtask {st.id!r} requires {requirement!r} from {providers[0]!r} "
                     "but does not declare that provider in depends_on"
                 )
                 reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
+                requirement_violated = True
+            if obligation_ledger is not None:
+                # PRV-17 (2026-09-07, P7): same SUBTASK_SEMANTIC_CONTRACT
+                # kind as the provides recording above, for the `requires`
+                # side - see obligations.py's own docstring for the live
+                # incident. Recorded only for requirement strings PRESENT
+                # this round; a requirement that silently disappears from
+                # st.requires entirely (rather than staying present-but-
+                # unresolved) is caught by the post-pass below, since this
+                # per-entry loop never iterates over what isn't there.
+                obligation_ledger.record(ObligationRecord(
+                    id=f"plan.subtask.{st.id}.requires.{requirement}",
+                    kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+                    status=(
+                        ObligationStatus.VIOLATED if requirement_violated else ObligationStatus.SATISFIED
+                    ),
+                    authority=ObligationAuthority.DETERMINISTIC,
+                    description=f"subtask {st.id!r} requires {requirement!r} with a real "
+                                "provider correctly declared in depends_on",
+                    source="plan_validation.validate_plan", revision=revision,
+                    evidence={
+                        "relation": "requires", "subtask_id": st.id,
+                        "requirement": requirement, "providers": list(providers),
+                    },
+                    owner_subtask_id=st.id,
+                    terminal_required=True,
+                ))
 
         # PRV-12: artifact prerequisites are enforced only when the planned
         # artifact explicitly declares them. This deliberately does not infer
@@ -660,6 +722,74 @@ async def validate_plan(
                         f"is itself planned for modification by {file_owners[preserved_target]!r}"
                     )
                     reason_codes.append("PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP")
+
+    if obligation_ledger is not None:
+        # PRV-17 (2026-09-07, P7): the per-entry requires/provides recording
+        # above only ever records an id for a requirement/capability that is
+        # PRESENT this round - a requirement string silently dropped from
+        # st.requires entirely (not replaced, not left-but-unresolved, just
+        # gone) never reaches that loop at all, so its previously-SATISFIED
+        # record would otherwise sit unchanged and stale, hiding the exact
+        # regression obligations.py's SUBTASK_SEMANTIC_CONTRACT kind exists
+        # to catch. This closing pass explicitly re-records VIOLATED against
+        # each such id, which is what makes ObligationLedger.record()'s
+        # existing SATISFIED->VIOLATED regression detection fire for a
+        # silent drop exactly like it already does for any other same-
+        # authority regression - no new detection mechanism, only ensuring
+        # every previously-tracked id gets a fresh record every round.
+        current_requires_pairs = {
+            (st.id, requirement) for st in plan.subtasks for requirement in st.requires
+        }
+        for oid in obligation_ledger.ids_by_kind(ObligationKind.SUBTASK_SEMANTIC_CONTRACT):
+            rec = obligation_ledger.current(oid)
+            if rec is None or rec.status != ObligationStatus.SATISFIED:
+                continue
+            relation = rec.evidence.get("relation")
+            if relation == "requires":
+                pair = (rec.evidence.get("subtask_id"), rec.evidence.get("requirement"))
+                if pair in current_requires_pairs:
+                    continue
+                obligation_ledger.record(ObligationRecord(
+                    id=oid, kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+                    status=ObligationStatus.VIOLATED,
+                    authority=ObligationAuthority.DETERMINISTIC,
+                    description=f"subtask {pair[0]!r} previously validated requires "
+                                f"{pair[1]!r} is no longer declared by that subtask",
+                    source="plan_validation.validate_plan", revision=revision,
+                    evidence={**rec.evidence, "dropped_between_revisions": True},
+                    owner_subtask_id=pair[0],
+                    # terminal_required=False (unlike the live per-round
+                    # recording above): this id's own requirement string may
+                    # have been legitimately renamed/retired, in which case
+                    # nothing will ever re-satisfy THIS exact id again - the
+                    # unconditional final-gate check this drives
+                    # (ObligationLedger.unresolved_terminal_obligations())
+                    # must not permanently fail a run over an obligation that
+                    # is no longer a live requirement of the final plan.
+                    # record()'s SATISFIED->VIOLATED regression detection
+                    # (this record's actual purpose) fires regardless of
+                    # terminal_required - only the final aggregation gate
+                    # reads that flag.
+                    terminal_required=False,
+                ))
+            elif relation == "provides":
+                capability = rec.evidence.get("capability")
+                if capability in capability_providers:
+                    continue
+                obligation_ledger.record(ObligationRecord(
+                    id=oid, kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+                    status=ObligationStatus.VIOLATED,
+                    authority=ObligationAuthority.DETERMINISTIC,
+                    description=f"capability {capability!r} previously validated as provided "
+                                f"by {rec.owner_subtask_id!r} is no longer provided by any subtask",
+                    source="plan_validation.validate_plan", revision=revision,
+                    evidence={**rec.evidence, "dropped_between_revisions": True},
+                    owner_subtask_id=rec.owner_subtask_id,
+                    # See the requires-side comment above: a legitimately
+                    # renamed/retired capability must not permanently fail
+                    # the final terminal-obligations gate.
+                    terminal_required=False,
+                ))
 
     prerequisite_records = _planned_artifact_prerequisite_evidence(plan.subtasks)
     evidence.extend(prerequisite_records)

@@ -190,9 +190,47 @@ class ObligationKind(str, Enum):
     genuinely needed changing to satisfy the goal is a PLANNED_FILE
     ownership conflict at validation time (PRESERVED_REFERENCE_CONFLICTS_
     WITH_OWNERSHIP in plan_validation.py), never something this kind's own
-    terminal check is asked to adjudicate."""
+    terminal check is asked to adjudicate.
+
+    SUBTASK_SEMANTIC_CONTRACT (PRV-17, 2026-09-07, Production Validation
+    P7): a live incident where a structured-plan repair loop oscillated
+    across all 3 attempts of a single run - attempt 0 failed on
+    PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP (s3's preserved_references,
+    nothing to do with requires/provides); attempt 1 correctly fixed that,
+    but silently dropped s3.requires from ['userServiceImpl_extended'] to
+    [], producing a NEW failure (GROUNDED_SEMANTIC_PROVIDER_MISMATCH);
+    attempt 2 restored s3.requires but silently dropped s4's own contract
+    instead, producing SUBTASK_SEMANTIC_CONTRACT_MISSING, and the repair
+    budget (2 attempts) exhausted. Each individual round's fix was correct
+    in isolation - what was missing is preservation of previously-validated
+    semantic wiring (a subtask's own requires/provides entries, already
+    proven to resolve to a real provider with a correct depends_on edge, or
+    already proven to be the sole unambiguous provider of a capability)
+    while an UNRELATED part of the plan is being repaired. This is not a
+    new validation concept - plan_validation.py's own requires/provides
+    correctness checks (SUBTASK_REQUIREMENT_UNPROVIDED,
+    SEMANTIC_DEPENDENCY_EDGE_MISSING, AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER)
+    already computed this fact every round and simply never recorded it -
+    this kind makes that existing deterministic computation ledger-visible,
+    the same way PLAN_STRUCTURAL_VALIDITY already does for planned-file
+    ownership. A currently-valid (subtask, relation, capability) fact is
+    recorded SATISFIED on every validate_plan() call that still finds it
+    present and correct; a fact that silently disappears from a subtask's
+    requires/provides between rounds (the requirement/capability string is
+    no longer declared at all, so the ordinary per-entry check never even
+    runs) is explicitly re-recorded VIOLATED against its OWN prior id,
+    which is what lets ObligationLedger.record()'s existing SATISFIED->
+    VIOLATED regression detection catch a silent drop exactly like any
+    other regression - no separate detection mechanism was built for this.
+    Deliberately DETERMINISTIC and bounded to requires/provides only (not
+    descriptions, acceptance criteria, execution methods, or planned-file
+    ordering) - see workflow_controller.py's own _semantic_contract_must_
+    preserve_lines and the regression-guard call site in
+    _run_structured_enforce for how this is surfaced to the repair prompt
+    and deterministically enforced."""
 
     PRESERVED_REFERENCE = "preserved_reference"
+    SUBTASK_SEMANTIC_CONTRACT = "subtask_semantic_contract"
     PLAN_STRUCTURAL_VALIDITY = "plan_structural_validity"
     MIGRATION_COMPLETION = "migration_completion"
     GOAL_SPEC_REQUIREMENT = "goal_spec_requirement"
