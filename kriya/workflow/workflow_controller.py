@@ -807,6 +807,31 @@ def build_structured_plan_repair_prompt(
             "The grounded evidence names the file the test actually references; requires/depends_on "
             "must route through whichever subtask really owns that exact file.\n"
         )
+    if "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" in reason_codes:
+        # P6 production-validation run 1 (2026-09-07): the Planner correctly
+        # identified every grounded edge on attempt 1, but wrongly declared
+        # an actively-owned production file (owned by a DIFFERENT subtask)
+        # as its own preserved_references target too. On the final repair
+        # attempt it fixed the other reported issue but left this exact
+        # entry untouched, because - unlike MISSING_GROUNDED_PRODUCTION_
+        # ARTIFACT/MISWIRED_GROUNDED_DEPENDENCY_EDGE above - this reason
+        # code had no targeted correction at all, only the generic error
+        # string. Point 3 below ("retain every other already-validated
+        # preserved_references entry") is not duplicated here: it is
+        # already covered by _preserved_reference_must_preserve_lines()'s
+        # own MUST PRESERVE reinforcement (P5 fix) for every entry the
+        # ledger has already validated as SATISFIED.
+        targeted_correction += (
+            "- For each conflict the errors name (a file declared in one subtask's "
+            "preserved_references, but planned for modification by a different subtask - the "
+            "owning subtask id is given in the error text itself): remove ONLY that specific "
+            "conflicting target from the declaring subtask's preserved_references; do not touch "
+            "any other preserved_references entry, on that subtask or any other. Do not take "
+            "modification ownership of the conflicting file yourself - it already has a real "
+            "owner. If the declaring subtask genuinely needs that file's output to exist first, "
+            "add the named owning subtask's id to the declaring subtask's own depends_on instead "
+            "of declaring the file preserved.\n"
+        )
     if "GROUNDED_SEMANTIC_PROVIDER_MISMATCH" in reason_codes:
         targeted_correction += (
             "- For each grounded test-to-production relationship whose production owner is already "

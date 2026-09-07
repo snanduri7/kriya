@@ -5,13 +5,18 @@ run_generation_workflow() once per subtask (the same real pattern
 kriya/workflow/milestones.py::run_milestones() already uses per milestone)
 rather than reimplementing edit-application/verification/approval."""
 
+import inspect
 import json
 import os
+import re
 import shutil
 from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+import kriya.workflow.plan_validation as plan_validation_module
+import kriya.workflow.workflow_controller as workflow_controller_module
 
 from kriya.control.persistence import load_approved_plan, load_control_state
 from kriya.control.state import ControlState
@@ -6583,6 +6588,289 @@ def test_p5_reproduction_repair_prompt_retains_prior_preserved_reference():
     # preserved_references containing both entries at once.
     must_preserve_section = prompt.split("MUST FIX")[0]
     assert "BaseEntity.java" in must_preserve_section
+
+
+def test_preserved_reference_conflict_repair_guidance_names_the_conflict():
+    """PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP must produce real
+    targeted-correction guidance, not just the bare reason code + generic
+    error text - the exact P6 gap: this code previously had zero dedicated
+    guidance in build_structured_plan_repair_prompt, unlike every sibling
+    grounded-evidence code (MISSING_GROUNDED_PRODUCTION_ARTIFACT,
+    MISWIRED_GROUNDED_DEPENDENCY_EDGE) right next to it."""
+    prompt_with_guidance = build_structured_plan_repair_prompt(
+        "goal", "plan text",
+        ["subtask 's2' planned artifact 'Test.java' declares 'Production.java' as a preserved "
+         "reference, but 'Production.java' is itself planned for modification by ['s1']"],
+        ["PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP"], 1,
+    )
+    prompt_without_guidance = build_structured_plan_repair_prompt(
+        "goal", "plan text", ["some other unrelated error"], ["SOME_UNKNOWN_CODE_WITH_NO_BLOCK"], 1,
+    )
+
+    assert "remove ONLY that specific conflicting target" in prompt_with_guidance
+    assert "depends_on instead of declaring the file preserved" in prompt_with_guidance
+    assert "remove ONLY that specific conflicting target" not in prompt_without_guidance
+
+
+def test_p6_reproduction_repair_prompt_instructs_removing_only_the_owned_target():
+    """The exact required P6 reproduction: s1 owns ClinicServiceImpl.java
+    (a real grounded target); s2 (the ordering test) wrongly declares
+    preserved_references=[BaseEntity.java, Person.java, Vet.java,
+    ClinicServiceImpl.java] - the first three are genuinely unowned and
+    already validated (SATISFIED in the ledger from a prior round), the
+    fourth is the live conflict. The repair prompt must instruct removing
+    ONLY ClinicServiceImpl.java while every other, already-validated entry
+    is reinforced as MUST PRESERVE - production code names no P6-specific
+    file; this test alone carries the real names, for reproduction
+    fidelity."""
+    test_file = (
+        "src/test/java/org/springframework/samples/petclinic/service/VetServiceOrderingTests.java"
+    )
+    ledger = ObligationLedger()
+    for target in (
+        "src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java",
+        "src/main/java/org/springframework/samples/petclinic/model/Person.java",
+        "src/main/java/org/springframework/samples/petclinic/model/Vet.java",
+    ):
+        ledger.record(_preserved_reference_obligation(test_file, target))
+    must_preserve = _preserved_reference_must_preserve_lines(ledger)
+    assert len(must_preserve) == 3
+
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "attempt1 plan text",
+        [
+            f"subtask 's2' planned artifact {test_file!r} declares "
+            "'src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java' "
+            "as a preserved reference, but "
+            "'src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java' "
+            "is itself planned for modification by ['s1']"
+        ],
+        ["PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP"], 2,
+        must_preserve=must_preserve,
+    )
+
+    # The three genuinely unowned entries are reinforced, unconditionally.
+    assert "BaseEntity.java" in prompt
+    assert "Person.java" in prompt
+    assert "Vet.java" in prompt
+    # The corrective instruction is present and does not itself name the
+    # conflicting file - the Planner must read that from the error text,
+    # exactly like MISWIRED_GROUNDED_DEPENDENCY_EDGE's own established
+    # pattern above.
+    assert "remove ONLY that specific conflicting target" in prompt
+    assert "ClinicServiceImpl.java" in prompt  # present via the error text itself
+
+
+# --- Repair-guidance completeness check (P6 follow-up, 2026-09-07) --------
+# P2 (missing preservation representation), P5 (missing projection of
+# already-satisfied obligations back into the repair prompt), and P6
+# (PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP firing with zero targeted
+# correction at all) were three independent live instances of the same
+# systemic gap: the structured-plan validation side emits rich, per-code
+# evidence, but the repair-prompt side that consumes it is a hand-maintained
+# if/elif chain with no completeness check - a reason code can be added to
+# validate_plan()/find_missing_grounded_production_artifacts() with no
+# matching repair guidance, and nothing notices until a live run burns real
+# wall-clock time discovering it (P6: one full attempt, ~9 minutes). This is
+# NOT the full "Repair Guidance Registry" architecture (reason_code ->
+# evidence extractor + repair directive builder) the user scoped as a
+# separate, later piece of work, nor the full audit of every code's
+# repairability status - both stay deferred. This is the narrow, test-only
+# piece: a completeness test enumerating every reason code the structured-
+# plan loop can actually emit (scanned from source, so the enumeration
+# itself cannot silently drift from the real code - the exact bug class this
+# exists to catch) and asserting each one falls into exactly one of three
+# explicit buckets, with the "has guidance" bucket verified BEHAVIORALLY
+# (by actually calling build_structured_plan_repair_prompt), not merely
+# declared in a second, independently-drifting list.
+
+_REASON_CODE_APPEND_RE = re.compile(r'reason_codes\.append\("([A-Z][A-Z0-9_]*)"\)')
+
+
+def _scan_structured_plan_reason_codes():
+    """Every literal reason code the structured-plan validation/repair loop
+    can emit, scanned directly out of validate_plan()'s own source
+    (plan_validation.py) and the enforce loop's own source
+    (workflow_controller.py) - not a hand-maintained list, so this
+    enumeration cannot drift from the real code the way the guidance gap it
+    exists to catch did."""
+    codes = set()
+    for module in (plan_validation_module, workflow_controller_module):
+        codes.update(_REASON_CODE_APPEND_RE.findall(inspect.getsource(module)))
+    return codes
+
+
+# Bucket 1: codes with real targeted repair guidance in
+# build_structured_plan_repair_prompt - verified BEHAVIORALLY below, not
+# just declared here.
+_CODES_WITH_TARGETED_GUIDANCE = {
+    "TOOL_SUBTASK_MISSING_TOOL_NAME",
+    "MODEL_SUBTASK_MISSING_PLANNED_FILES",
+    "STRUCTURED_PLAN_SCHEMA_INVALID",
+    "SUBTASK_REQUIREMENT_UNPROVIDED",
+    "AMBIGUOUS_PLANNED_FILE_OWNERSHIP",
+    "EXTENSION_POINT_REQUIRED",
+    "REFACTOR_BASELINE_MISSING",
+    "PLANNED_FILE_ACTION_MISMATCH",
+    "VERIFICATION_EVIDENCE_PATH_MISSING",
+    "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
+    "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
+    "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
+    "VERIFICATION_PREREQUISITE_MANIFEST_MISSING",
+    "UNKNOWN_GLOBAL_INVARIANT",
+    "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP",
+    "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED",
+}
+
+# Bucket 2: codes that only ever appear in the TERMINAL branch, appended
+# after the repair loop has already exhausted its bounded attempts and is
+# about to raise - structurally incapable of ever reaching build_
+# structured_plan_repair_prompt again, so "repair guidance" does not apply
+# to them by construction, not by omission.
+_CODES_TERMINAL_NON_REPAIRABLE = {
+    "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+    "PLAN_REPAIR_OSCILLATION",
+    "PLAN_REPAIR_NON_CONVERGENCE",
+}
+
+# Bucket 3: real gaps, same class P6 just hit, not fixed here - each of
+# these reaches build_structured_plan_repair_prompt today with nothing but
+# the bare reason code and generic error text, exactly what PRESERVED_
+# REFERENCE_CONFLICTS_WITH_OWNERSHIP did before this fix. Deliberately not
+# fixed in this pass: the user scoped filling these in as one bounded audit
+# task ("before P7"), not another one-off patch discovered mid-P-step. This
+# set is that audit's starting input, not a backlog note that lives only in
+# memory - a new reason code added anywhere else that isn't triaged into one
+# of the three buckets fails test_every_structured_plan_reason_code_is_
+# classified immediately.
+_CODES_KNOWN_UNWIRED_PENDING_AUDIT = {
+    "PLAN_GLOBAL_INVARIANTS_MISSING",
+    "SUBTASK_SEMANTIC_CONTRACT_MISSING",
+    "SUBTASK_GLOBAL_INVARIANTS_MISSING",
+    "APPLICATION_RUNTIME_OWNER_MISSING",
+    "AUTHORITATIVE_STACK_SUBSTITUTION",
+    "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER",
+    "SEMANTIC_DEPENDENCY_EDGE_MISSING",
+    "PLANNED_ARTIFACT_PREREQUISITE_INVALID",
+    "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK",
+    "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM",
+    "PLAN_VALIDATION_FAILED",
+    "STRUCTURED_PLAN_PARSE_FAILED",
+    "STRUCTURED_PLAN_EMPTY",
+    "TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE",
+}
+
+# A handful of guided codes gate their text on evidence SHAPE, not a bare
+# reason-code string match (the function's own top prerequisite_evidence
+# block, and VERIFICATION_PREREQUISITE_MANIFEST_MISSING's own evidence
+# filter) - real validate_plan() runs always attach matching evidence
+# alongside these codes, but a bare reason-code-only call needs a
+# representative fixture to actually exercise that path.
+_EVIDENCE_GATED_CODE_FIXTURES = {
+    "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED": [{
+        "consumer_subtask": "s2", "consumer_file": "Foo.java",
+        "prerequisite_capability": "cap", "provider_subtask": "s1",
+        "provider_file": "Bar.java", "missing_requires_edge": True,
+        "missing_depends_on_edge": True,
+    }],
+    "VERIFICATION_PREREQUISITE_MANIFEST_MISSING": [{
+        "consumer_subtask": "s3", "required_tool": "npm",
+        "candidate_manifests": ["package.json"],
+    }],
+}
+
+# The two fixed, static strings build_structured_plan_repair_prompt always
+# emits immediately before and after its targeted_correction block - used
+# to isolate exactly the reason-code-driven portion of the prompt from
+# everything else (goal text, error text, reason-code JSON dump) that would
+# otherwise differ between calls for reasons having nothing to do with
+# guidance. If these markers are ever edited, isolation raises loudly
+# (ValueError) rather than silently passing.
+_TARGETED_CORRECTION_START_MARKER = (
+    "never a fake planned_files path invented just to pass validation.\n"
+)
+_TARGETED_CORRECTION_END_MARKER = (
+    "- Do not emit TOOL subtasks: authoritative enforce mode has no "
+    "policy-mediated TOOL router yet.\n"
+)
+
+
+def _extract_targeted_correction(prompt: str) -> str:
+    start = prompt.index(_TARGETED_CORRECTION_START_MARKER) + len(_TARGETED_CORRECTION_START_MARKER)
+    end = prompt.index(_TARGETED_CORRECTION_END_MARKER)
+    return prompt[start:end]
+
+
+def test_structured_plan_reason_code_enumeration_is_non_empty():
+    """Sanity check on the scanner itself - if this ever returns an empty or
+    suspiciously small set, the regex stopped matching real code (e.g. after
+    a refactor) and every other test in this section would pass vacuously
+    without it."""
+    codes = _scan_structured_plan_reason_codes()
+    assert len(codes) >= 30
+    assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" in codes
+
+
+def test_every_structured_plan_reason_code_is_classified():
+    """The completeness check itself: every reason code the structured-plan
+    loop can actually emit today must fall into exactly one of the three
+    buckets above. A new, unclassified reason code fails this immediately -
+    this is the test that would have caught P6's gap before the live run,
+    per the user's own diagnosis."""
+    codes = _scan_structured_plan_reason_codes()
+    classified = (
+        _CODES_WITH_TARGETED_GUIDANCE
+        | _CODES_TERMINAL_NON_REPAIRABLE
+        | _CODES_KNOWN_UNWIRED_PENDING_AUDIT
+    )
+    unclassified = codes - classified
+    assert unclassified == set(), (
+        f"reason code(s) {sorted(unclassified)} appear in the structured-plan "
+        "loop's real source but are not classified into any of "
+        "_CODES_WITH_TARGETED_GUIDANCE / _CODES_TERMINAL_NON_REPAIRABLE / "
+        "_CODES_KNOWN_UNWIRED_PENDING_AUDIT - classify it before merging"
+    )
+    assert _CODES_WITH_TARGETED_GUIDANCE.isdisjoint(_CODES_TERMINAL_NON_REPAIRABLE)
+    assert _CODES_WITH_TARGETED_GUIDANCE.isdisjoint(_CODES_KNOWN_UNWIRED_PENDING_AUDIT)
+    assert _CODES_TERMINAL_NON_REPAIRABLE.isdisjoint(_CODES_KNOWN_UNWIRED_PENDING_AUDIT)
+
+
+def test_every_code_with_targeted_guidance_actually_produces_guidance():
+    """Behavioral verification, not a parallel declaration: for every code in
+    _CODES_WITH_TARGETED_GUIDANCE, actually CALL build_structured_plan_
+    repair_prompt with that code (plus its evidence fixture, if it needs
+    one) and assert the isolated targeted_correction section is non-empty.
+    A hand-maintained set alone could drift from the real if/elif chain (a
+    code added to the set without a matching block, or a block deleted
+    without touching the set) - this closes that gap by exercising the real
+    code path every time the suite runs."""
+    for code in sorted(_CODES_WITH_TARGETED_GUIDANCE):
+        evidence = _EVIDENCE_GATED_CODE_FIXTURES.get(code)
+        prompt = build_structured_plan_repair_prompt(
+            "goal", "plan text", ["some error"], [code], 1,
+            validation_evidence=evidence,
+        )
+        correction = _extract_targeted_correction(prompt)
+        assert correction.strip() != "", (
+            f"{code} is declared in _CODES_WITH_TARGETED_GUIDANCE but calling "
+            "build_structured_plan_repair_prompt with it alone produced no "
+            "targeted_correction text - the guidance block for this code is "
+            "missing, gated on evidence this test's fixture doesn't supply, "
+            "or was removed"
+        )
+
+
+def test_unguided_baseline_code_produces_no_targeted_correction():
+    """Control for the behavioral check above: an unrelated code with no
+    guidance block must produce an EMPTY targeted_correction section -
+    proving _extract_targeted_correction actually isolates the right
+    portion of the prompt, rather than something that's always non-empty
+    regardless of guidance."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "plan text", ["some error"],
+        ["SOME_UNGUIDED_CODE_WITH_NO_BLOCK"], 1,
+    )
+    assert _extract_targeted_correction(prompt).strip() == ""
 
 
 # --- MA8.1 (PRV-06, 2026-08-29): Cross-Owner Requirement-Preserving Recovery
