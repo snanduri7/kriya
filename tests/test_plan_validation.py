@@ -384,6 +384,45 @@ async def test_planned_artifact_prerequisite_ambiguous_provider_is_not_self_sati
     assert "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER" in result.reason_codes
 
 
+def _preserved_reference_plan(*, target_owned):
+    """PRV-11 preservation extension (2026-09-06, Production Validation
+    P2): s1's own planned artifact declares Production.java a preserved
+    reference. When target_owned is True, a second subtask also plans to
+    modify that same path - a genuine plan-authoring contradiction that
+    must be rejected, never silently resolved in favor of either claim."""
+    subtasks = [
+        _model_subtask(
+            id="s1", description="test file referencing an existing dependency",
+            planned_files=[PlannedFile(
+                path="Test.java", action=FileAction.CREATE,
+                preserved_references=["Production.java"],
+            )],
+        ),
+    ]
+    if target_owned:
+        subtasks.append(_model_subtask(
+            id="s2", description="also plans to modify the preserved target",
+            planned_files=[PlannedFile(path="Production.java", action=FileAction.CREATE)],
+        ))
+    return _plan(subtasks)
+
+
+@pytest.mark.asyncio
+async def test_preserved_reference_to_an_unowned_target_is_not_a_conflict(tmp_path):
+    plan = _preserved_reference_plan(target_owned=False)
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+    assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_preserved_reference_to_a_target_also_owned_for_modification_is_rejected(tmp_path):
+    plan = _preserved_reference_plan(target_owned=True)
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" in result.reason_codes
+
+
 def _p2_grounded_owner_merge_plan():
     """The exact s1/s2/s3 shape from the P2 production-validation run
     (spring-ignite-demo, 2026-09-05, run 20260905T050205Z's approved plan) -

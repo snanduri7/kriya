@@ -216,13 +216,31 @@ class PlannedFile(BaseModel):
     # the Planner names that owner's exact capability here. Plan validation
     # then proves the enclosing subtask declares and orders the prerequisite.
     requires_capabilities: List[str] = Field(default_factory=list)
+    # PRV-11 preservation extension (2026-09-06, Production Validation P2):
+    # real, pre-existing production paths THIS artifact grounds a
+    # structural edge to (an import, call, or constructor instantiation -
+    # the same relation find_missing_grounded_production_artifacts already
+    # detects) but does not require to be modified. The opposite direction
+    # of requires_capabilities: that field says "this artifact needs
+    # something FROM another planned owner"; this one says "this artifact
+    # references something that is intentionally staying as it already is."
+    # Declared per-artifact (this PlannedFile's own path is the edge's
+    # SOURCE), never plan-wide - a different artifact referencing the same
+    # target must declare its own entry, so one file's correct preservation
+    # claim can never silently suppress a genuine omitted-owner gap on an
+    # unrelated file. See find_missing_grounded_production_artifacts's own
+    # docstring for how this is validated against real structural evidence
+    # before it is honored, and plan_validation.validate_plan for the
+    # PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP check when a target
+    # named here is also planned for modification elsewhere.
+    preserved_references: List[str] = Field(default_factory=list)
 
     @field_validator("path")
     @classmethod
     def _validate_path(cls, v: str) -> str:
         return _non_blank_relative_path(v, label="planned file path")
 
-    @field_validator("requires_capabilities", "environment_requirements")
+    @field_validator("requires_capabilities", "environment_requirements", "preserved_references")
     @classmethod
     def _normalize_required_capabilities(cls, values: List[str]) -> List[str]:
         return [(value or "").strip() for value in values]

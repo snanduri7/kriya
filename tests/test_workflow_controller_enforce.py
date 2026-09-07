@@ -2235,13 +2235,16 @@ def _seed_structural_customer_repo(tmp_path):
 
 
 def _structural_customer_subtask(
-    sid, path, *, depends_on=(), requires=(), provides=(),
+    sid, path, *, depends_on=(), requires=(), provides=(), preserved_references=(),
 ):
     return Subtask(
         id=sid, description=f"work on {path}", execution_method=ExecutionMethod.MODEL,
         depends_on=list(depends_on),
         requires=list(requires), provides=list(provides),
-        planned_files=[PlannedFile(path=path, action=FileAction.MODIFY)],
+        planned_files=[PlannedFile(
+            path=path, action=FileAction.MODIFY,
+            preserved_references=list(preserved_references),
+        )],
     )
 
 
@@ -2287,6 +2290,94 @@ def test_missing_grounded_production_artifact_flags_the_exact_omitted_file(tmp_p
     )
 
     gaps = find_missing_grounded_production_artifacts(incomplete_plan, edges)
+
+    assert gaps == [{
+        "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
+        "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "reason": "unowned",
+    }]
+
+
+def test_missing_grounded_production_artifact_is_silent_when_target_declared_preserved(tmp_path):
+    """PRV-11 preservation extension (2026-09-06, Production Validation P2):
+    the exact P2 shape - a test file grounds a real edge to an unowned
+    production file the goal does not require changing. Declaring it under
+    the test's own planned_files[].preserved_references suppresses the gap
+    with no other plan change."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="preserved", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+
+    assert find_missing_grounded_production_artifacts(plan, edges) == []
+
+
+def test_missing_grounded_production_artifact_preservation_is_per_source_not_path(tmp_path):
+    """A preserved_references declaration on one source's PlannedFile must
+    never suppress the SAME target's gap for a DIFFERENT, undeclared
+    source - otherwise one correct preservation claim could mask an
+    unrelated genuine omitted-owner defect on another file entirely."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    # A second test file with its own real edge to the same unowned
+    # target, added directly to resolved_edges (no second on-disk fixture
+    # needed - this function only ever consults resolved_edges + the
+    # plan, never re-derives structural evidence itself).
+    second_test_path = "src/test/java/com/example/customer/CustomerControllerOtherTest.java"
+    edges_with_second_source = dict(edges)
+    edges_with_second_source[second_test_path] = [_CUSTOMER_CONTROLLER_PATH]
+    plan = EngineeringPlan(
+        plan_id="per-source-preservation", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+            _structural_customer_subtask("s4", second_test_path, depends_on=["s2"]),
+        ],
+    )
+
+    gaps = find_missing_grounded_production_artifacts(plan, edges_with_second_source)
+
+    assert gaps == [{
+        "test_file": second_test_path,
+        "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "reason": "unowned",
+    }]
+
+
+def test_missing_grounded_production_artifact_preserved_reference_to_a_nonexistent_edge_is_inert(tmp_path):
+    """A preserved_references entry naming a target with no real resolved
+    edge from that source has nothing to suppress - it is simply never
+    consulted (this function only ever iterates real resolved_edges), so
+    an invented/mistaken declaration can never hide a genuine gap on an
+    unrelated real edge from the same source."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="inert-preservation", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=["src/main/java/com/example/customer/NoSuchFile.java"],
+            ),
+        ],
+    )
+
+    gaps = find_missing_grounded_production_artifacts(plan, edges)
 
     assert gaps == [{
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,

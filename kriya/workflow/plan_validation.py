@@ -625,6 +625,26 @@ async def validate_plan(
                         "that capability in requires"
                     )
                     reason_codes.append("PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED")
+            # PRV-11 preservation extension (2026-09-06, Production
+            # Validation P2): a preserved_references target is only ever
+            # legal when NO subtask actually plans to modify it - a target
+            # that is both declared preserved AND owned for modification
+            # (by this same subtask or any other) is a genuine plan-
+            # authoring contradiction, not something one interpretation can
+            # silently win. Checked here (every planned file, against the
+            # already-computed file_owners map) rather than in find_missing_
+            # grounded_production_artifacts, because that function's own
+            # UNOWNED branch only ever sees `target not in owned_paths` -
+            # an owned target never reaches it, so the conflict would be
+            # invisible if checked there instead.
+            for preserved_target in planned_file.preserved_references:
+                if preserved_target in file_owners:
+                    errors.append(
+                        f"subtask {st.id!r} planned artifact {planned_file.path!r} declares "
+                        f"{preserved_target!r} as a preserved reference, but {preserved_target!r} "
+                        f"is itself planned for modification by {file_owners[preserved_target]!r}"
+                    )
+                    reason_codes.append("PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP")
 
     prerequisite_records = _planned_artifact_prerequisite_evidence(plan.subtasks)
     evidence.extend(prerequisite_records)

@@ -466,7 +466,8 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     '{"global_invariants": [{"id": "gi1", "statement": "..."}], "subtasks": [{"id": "s1", '
     '"description": "...", "execution_method": "model", "execution_role": "implementation", '
     '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete", '
-    '"environment_requirements": ["..."], "requires_capabilities": ["..."]}], '
+    '"environment_requirements": ["..."], "requires_capabilities": ["..."], '
+    '"preserved_references": ["..."]}], '
     '"provides": ["..."], "requires": [], "relevant_global_invariant_ids": ["gi1"], "verification": '
     '[{"type": "tool", "description": "...", "tool_name": "compile", '
     '"verifier_kind": "compile", '
@@ -514,6 +515,10 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "planned_files[].environment_requirements, never in subtask requires/provides. "
     "planned_files[].requires_capabilities names only an exact capability supplied by another "
     "planned subtask. "
+    "If a test or other planned artifact references a real, pre-existing production file that "
+    "the goal does not require changing, do not invent a subtask to own it - list its exact "
+    "existing path in that artifact's own planned_files[].preserved_references instead, to "
+    "declare the reference is intentional and the file stays unchanged. "
     "If a stage's entrypoint may terminate the running process (an explicit exit/return-code "
     "path, not just falling off the end of a function) and another stage's tests are expected to "
     "exercise that entrypoint directly, plan them so the process-terminating behavior stays "
@@ -748,7 +753,10 @@ def build_structured_plan_repair_prompt(
             "action=modify. Ensure the downstream verification subtask's depends_on and requires "
             "route through the responsible production owner and one of that owner's provides "
             "capabilities. Do not infer that the artifact must be modified solely because the "
-            "structural edge exists.\n"
+            "structural edge exists. If the authoritative goal and repository evidence do NOT "
+            "require changing it, do not invent an owner for it at all - instead add its exact "
+            "existing path to the referencing test file's own planned_files[].preserved_references "
+            "list, to declare that this reference is intentional and the file stays unchanged.\n"
         )
     if "MISWIRED_GROUNDED_DEPENDENCY_EDGE" in reason_codes:
         targeted_correction += (
@@ -1181,10 +1189,30 @@ def find_missing_grounded_production_artifacts(
     edge that IS already correctly wired (the referencing subtask's own
     planned_files, or any subtask already in its own depends_on closure,
     are never flagged for owning the SAME grounded target). A target
-    itself test/documentation is never flagged."""
+    itself test/documentation is never flagged.
+
+    4. PRESERVE (accepted, not a gap - 2026-09-06, Production Validation
+       P2): the referencing source's OWN PlannedFile lists the target in
+       preserved_references. Requires no further grounding check here -
+       `target` is only ever reached by iterating resolved_edges[source]
+       in the first place, so it is already a real structural edge (never
+       an invented one: an entry naming a target with no real edge from
+       that source is simply never consulted) and build_planning_
+       structural_evidence only ever indexes candidates that already
+       exist on disk (see its own docstring), so `target` already exists.
+       Declaration is per-source (this function keys the check off
+       `source`'s own PlannedFile, never a plan-wide path list), so one
+       artifact's correct preservation claim never suppresses a genuine
+       gap on a DIFFERENT source referencing the same target. A target
+       that is ALSO planned for modification elsewhere is a plan-
+       authoring contradiction rejected by plan_validation.validate_plan
+       (PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP), not silently
+       resolved here - this function only ever sees `target not in
+       owned_paths`, so an owned target never reaches this branch at all."""
     owned_paths = {pf.path for st in plan.subtasks for pf in st.planned_files}
     owner_by_path = {pf.path: st.id for st in plan.subtasks for pf in st.planned_files}
     source_subtask_by_path = {pf.path: st for st in plan.subtasks for pf in st.planned_files}
+    planned_file_by_path = {pf.path: pf for st in plan.subtasks for pf in st.planned_files}
     upstream_cache: Dict[str, set] = {}
     gaps: List[Dict[str, str]] = []
     seen = set()
@@ -1205,6 +1233,9 @@ def find_missing_grounded_production_artifacts(
                 continue
             if target not in owned_paths:
                 if not is_runnable_test_file(source):
+                    continue
+                source_pf = planned_file_by_path.get(source)
+                if source_pf is not None and target in source_pf.preserved_references:
                     continue
                 seen.add(key)
                 gaps.append({
