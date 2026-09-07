@@ -92,6 +92,8 @@ from kriya.workflow.file_resolution import (
     find_brownfield_public_api_changes,
     classify_api_recovery_file_roles,
     discover_response_construction_owners,
+    include_response_construction_owners,
+    _goal_expresses_positive_response_mutation_intent,
     find_explanatory_prose_contamination,
     find_protected_api_reference_changes,
     find_unrequested_architectural_surfaces,
@@ -650,6 +652,120 @@ def test_response_shape_owner_discovery_finds_existing_controller(tmp_path):
     )
 
     assert owners == ["src/main/java/com/example/customer/CustomerController.java"]
+
+
+# --- discover_response_construction_owners / include_response_construction_owners
+# positive-intent gate (Production Validation P4, 2026-09-07) ---
+#
+# Live incident: the previous entry gate (_RESPONSE_SHAPE_GOAL_RE, a bare
+# "response|payload|endpoint|json|..." match anywhere in the goal) fired on
+# ANY mention of "response," including explicit PRESERVATION language. P4's
+# own goal.md said "the response type... must not change"/"response shape
+# must remain unchanged" to protect an existing HTTP contract - that alone
+# triggered a repo-wide scan that pulled in an unrelated file
+# (BindingErrorsResponse.java, a Spring MVC validation-error wrapper with no
+# relationship to the actual task) into the authorized write scope, purely
+# because its path/name matched response-owner vocabulary and it shared the
+# token "response" with the goal text. The Developer regenerated it, got its
+# real API wrong, and Kriya's own brownfield-API safety net correctly
+# rejected the write - but only after real damage (a wrongly-widened
+# PLAN_SCOPE_DEFECT on one subtask, a stop on another).
+
+def _seed_unrelated_response_named_file(tmp_path):
+    """The exact live shape: an unrelated file living in a controller-ish
+    path, named with 'Response', with a construction-call-shaped method -
+    matches every axis of the OLD heuristic's own matching criteria, so a
+    fix that still matches this shape would be a real regression, not a
+    false alarm caught by an over-broad fixture."""
+    unrelated = tmp_path / "src/main/java/com/example/app/rest/controller/BindingErrorsResponse.java"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_text(
+        "class BindingErrorsResponse { void addAllErrors(BindingResult r) { } "
+        "public String toString() { return \"\"; } }"
+    )
+    (tmp_path / "src/main/java/com/example/app/service").mkdir(parents=True)
+    (tmp_path / "src/main/java/com/example/app/service/ClinicServiceImpl.java").write_text(
+        "class ClinicServiceImpl { List findAllPetTypes() { return null; } }"
+    )
+
+
+def test_response_construction_discovery_does_not_expand_for_p4_style_preservation_goal(tmp_path):
+    """The exact live P4 incident, reproduced: a goal explicitly preserving
+    an existing HTTP response contract must not pull in an unrelated
+    response-named file."""
+    _seed_unrelated_response_named_file(tmp_path)
+    goal = (
+        "Modify the internal behavior of one existing method. The existing "
+        "public HTTP contract must not change: the route, the HTTP method, "
+        "the response type, and the status semantics all stay exactly as "
+        "they are today. Response shape must remain unchanged."
+    )
+
+    owners = discover_response_construction_owners(
+        str(tmp_path), goal,
+        ["src/main/java/com/example/app/service/ClinicServiceImpl.java"],
+    )
+
+    assert owners == []
+
+
+def test_response_construction_discovery_does_not_expand_for_bare_preservation_statements():
+    for goal in (
+        "Do not change the response type or response shape.",
+        "Preserve the existing HTTP response contract.",
+        "The endpoint returns the same response as before.",
+        "No response-model changes are required.",
+        "The response from the service layer is logged for debugging.",
+    ):
+        assert not _goal_expresses_positive_response_mutation_intent(goal), goal
+
+
+def test_response_construction_discovery_still_expands_for_genuine_positive_intent(tmp_path):
+    controller = tmp_path / "src/main/java/com/example/customer/CustomerController.java"
+    controller.parent.mkdir(parents=True)
+    controller.write_text(
+        'class CustomerController { Map details(Customer c) { Map m = new HashMap(); '
+        'm.put("id", c.id()); return m; } }'
+    )
+    (controller.parent / "CustomerService.java").write_text(
+        "class CustomerService { Customer find(long id) { return null; } }"
+    )
+    for goal in (
+        "Change the response body to include validation details for the customer-details endpoint.",
+        "Add a field to the returned customer-details endpoint response.",
+        "Modify the API response mapping for the customer-details endpoint so that dates use ISO-8601.",
+    ):
+        owners = discover_response_construction_owners(
+            str(tmp_path), goal, ["src/main/java/com/example/customer/CustomerService.java"],
+        )
+        assert owners == ["src/main/java/com/example/customer/CustomerController.java"], goal
+
+
+def test_response_construction_discovery_conservative_for_mixed_polarity_goal():
+    """Documented, deliberately conservative limitation: a goal that both
+    preserves one response surface and genuinely mutates a different one is
+    not locally disambiguated - this bounded whole-text detector treats the
+    presence of preservation language anywhere as suppressing expansion,
+    rather than guessing which surface a negation refers to. Under-
+    triggering here is the safe direction; inventing authorization is not."""
+    goal = (
+        "Keep the existing success response unchanged, but change the "
+        "validation-error response to include errorCode."
+    )
+    assert not _goal_expresses_positive_response_mutation_intent(goal)
+
+
+def test_include_response_construction_owners_does_not_widen_scope_for_preservation_goal(tmp_path):
+    """The actual call path run_generation_workflow uses - proves the fix
+    holds at the function the live incident actually went through, not
+    just the lower-level helper."""
+    _seed_unrelated_response_named_file(tmp_path)
+    goal = "The response type must not change - only internal behavior may be modified."
+    planned = ["src/main/java/com/example/app/service/ClinicServiceImpl.java"]
+
+    result = include_response_construction_owners(planned, goal, str(tmp_path))
+
+    assert result == planned
 
 
 def test_required_compile_verification_uses_authoritative_gate_outcome():

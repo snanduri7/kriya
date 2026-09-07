@@ -305,10 +305,75 @@ def prefer_existing_artifact_owners(
     return resolved
 
 
-_RESPONSE_SHAPE_GOAL_RE = re.compile(
-    r"\b(?:endpoint|response|payload|json|serializ\w*|present\w*|render\w*)\b",
+# Bounded deterministic positive-intent gate (Production Validation P4,
+# 2026-09-07). The previous entry check (_RESPONSE_SHAPE_GOAL_RE, a bare
+# `response|payload|endpoint|json|...` match anywhere in the goal) fired on
+# ANY mention of "response," including a goal explicitly PRESERVING one -
+# found live: P4's own goal.md said "the response type... must not
+# change"/"response shape must remain unchanged" to protect an existing
+# HTTP contract, and that preservation language alone was enough to trigger
+# a repo-wide scan that pulled in BindingErrorsResponse.java (an unrelated
+# validation-error wrapper matching on path + a construction-call-shaped
+# method + the shared token "response") as an authorized target - the
+# Developer regenerated it, got its real API wrong, and Kriya's own
+# brownfield-API safety net correctly rejected the write, but only after
+# real damage (a wrongly-widened PLAN_SCOPE_DEFECT on one subtask, a
+# NO_AUTHORIZED_REPAIR_TARGET stop on another).
+#
+# Redesigned as positive-intent-first, not negation-first: ordinary
+# preservation prose ("response type," "response shape," "HTTP response
+# contract") must be safe WITHOUT needing to match any negation pattern at
+# all - it simply never contains a mutation verb adjacent to a response
+# noun, so it never reaches the preservation check in the first place. Only
+# text pairing an explicit mutation verb (change/modify/update/alter/add/
+# extend/include/construct/build/create/introduce/enhance) with a response-
+# shape noun (response/payload/endpoint/json) within a short span, in
+# either order, counts as positive intent - and an explicit preservation/
+# negation statement anywhere in the goal (checked whole-text, not locally
+# scoped to the matched clause - same deliberate simplification
+# goal_requires_runtime_behavior's own negation check uses, kriya/workflow/
+# acceptance.py, for the same reason: this bounded detector cannot safely
+# attribute which specific mutation a negation elsewhere in the goal refers
+# to) suppresses it. A goal that both preserves one response surface and
+# genuinely mutates a different one (e.g. "keep the success response
+# unchanged, but change the error response to include errorCode") is a
+# known, accepted limitation of this whole-text scoping - conservatively
+# treated as no expansion rather than guessing which surface the negation
+# was about; inventing authorization here would be worse than under-
+# triggering.
+_RESPONSE_MUTATION_INTENT_RE = re.compile(
+    r"\b(?:change|modify|update|alter|add|extend|include|construct|build|create|introduce|enhance)\w*\b"
+    r"(?:\s+\S+){0,6}?\s+\b(?:response|payload|endpoint|json)\b"
+    r"|\b(?:response|payload|endpoint|json)\b(?:\s+\S+){0,6}?"
+    r"\s+\b(?:change|modify|update|alter|add|extend|include|construct|build|create|introduce|enhance)\w*\b",
     re.IGNORECASE,
 )
+_RESPONSE_PRESERVATION_RE = re.compile(
+    r"\b(?:do\s+not|does\s+not|don'?t|doesn'?t|never|must\s+not|should\s+not|need\s+not)\b"
+    r"(?:\s+\S+){0,4}?\s+(?:change|modify|update|alter)\w*\b"
+    r"|\b(?:change|modify|update|alter)\w*\b(?:\s+\S+){0,4}?\s+(?:is|are)\s+not\s+(?:required|needed|necessary)\b"
+    r"|\bno\b(?:\s+\S+){0,6}?\s+(?:change|modification|update)s?\b(?:\s+\S+){0,4}?"
+    r"\s+(?:is|are)\s+(?:required|needed|necessary)\b"
+    r"|\b(?:must|should)\s+(?:remain|stay)\s+unchanged\b"
+    r"|\bunchanged\b",
+    re.IGNORECASE,
+)
+
+
+def _goal_expresses_positive_response_mutation_intent(goal: str) -> bool:
+    """True only when the goal pairs an explicit mutation verb with a
+    response-shape noun, with no preservation/negation statement anywhere
+    in the goal - see the comment above these two patterns for the exact
+    live false positive (P4) this replaces and the documented mixed-
+    polarity limitation."""
+    text = goal or ""
+    if not _RESPONSE_MUTATION_INTENT_RE.search(text):
+        return False
+    if _RESPONSE_PRESERVATION_RE.search(text):
+        return False
+    return True
+
+
 _RESPONSE_OWNER_PATH_RE = re.compile(
     r"(?:controller|handler|resource|presenter|serializer|view|response|endpoint)",
     re.IGNORECASE,
@@ -334,7 +399,7 @@ def discover_response_construction_owners(
     must have both an architectural owner signal and response-construction
     syntax; goal/planned-file vocabulary then grounds them to this request.
     """
-    if not _RESPONSE_SHAPE_GOAL_RE.search(goal or ""):
+    if not _goal_expresses_positive_response_mutation_intent(goal):
         return []
     vocabulary = _semantic_tokens(goal or "")
     for path in planned_files:
