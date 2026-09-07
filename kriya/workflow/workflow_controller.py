@@ -703,12 +703,20 @@ def build_structured_plan_repair_prompt(
                     f"{item['consumer_subtask']}.depends_on\n"
                 )
             targeted_correction += "  Preserve unrelated valid plan edges.\n"
-    if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes:
+    if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes or "TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE" in reason_codes:
+        # Repair Guidance audit (2026-09-07, before P7): TOOL_SUBTASK_
+        # UNSUPPORTED_IN_ENFORCE is the SAME underlying defect (a TOOL-
+        # execution-method subtask exists in enforce mode at all, which is
+        # never supported) reached via a different path than TOOL_SUBTASK_
+        # MISSING_TOOL_NAME (that one specifically has no tool_name; this
+        # one can have one and is still unsupported) - the identical fix
+        # applies either way, so both codes share this one block rather
+        # than duplicating it.
         targeted_correction += (
-            "- A TOOL subtask with no tool_name is not executable. If it is a non-editing check, "
-            "REMOVE it from subtasks and move its acceptance_criteria_ids plus an equivalent "
-            "verification entry onto its nearest declared implementation dependency. Do not relabel "
-            "it MODEL.\n"
+            "- A TOOL-execution-method subtask is not supported in enforce mode. If it is a "
+            "non-editing check, REMOVE it from subtasks and move its acceptance_criteria_ids plus "
+            "an equivalent verification entry onto its nearest declared implementation dependency. "
+            "Do not relabel it MODEL.\n"
         )
     if "MODEL_SUBTASK_MISSING_PLANNED_FILES" in reason_codes:
         targeted_correction += (
@@ -905,6 +913,112 @@ def build_structured_plan_repair_prompt(
             "into a new id or a partial statement. Existing global invariant ids from the previous "
             "draft must be preserved unchanged (same id, same statement) unless the invariant "
             "itself is being genuinely removed or replaced.\n"
+        )
+    # Repair Guidance audit (2026-09-07, before P7): the user's own P6
+    # diagnosis - three independent live incidents (P2, P5, P6) all being
+    # the same systemic gap between the validation side's rich reason
+    # codes and this function's ad-hoc, one-at-a-time-discovered guidance -
+    # prompted a bounded audit of every structured-plan reason code BEFORE
+    # starting P7, rather than continuing to find the next gap only when a
+    # live run burns wall-clock time on it. These ten blocks are that
+    # audit's real findings: reason codes that were already produced by
+    # validate_plan()/find_missing_grounded_production_artifacts() (or, for
+    # the three DUPLICATE_SUBTASK_ID/SUBTASK_DEPENDS_ON_UNKNOWN_ID/
+    # SUBTASK_DEPENDENCY_CYCLE codes, newly given a reason code in the same
+    # audit - see plan_validation.py) with no targeted correction at all.
+    # Every block below follows the same established pattern already used
+    # throughout this function: read the specific detail (subtask id, file
+    # path, capability name) straight out of the deterministic error text
+    # rather than re-deriving it, exactly like MISWIRED_GROUNDED_DEPENDENCY_
+    # EDGE already does above. No new evidence plumbing was needed for any
+    # of these - the existing error strings already name everything a
+    # correction needs.
+    if "SEMANTIC_DEPENDENCY_EDGE_MISSING" in reason_codes:
+        targeted_correction += (
+            "- For each subtask the errors name as requiring a capability from a single, named "
+            "provider subtask but not declaring that provider in depends_on (the provider's exact "
+            "subtask id is given in the error text): add that provider's id to the consumer "
+            "subtask's own depends_on. Do not change requires/provides values themselves, only add "
+            "the missing dependency edge.\n"
+        )
+    if "SUBTASK_SEMANTIC_CONTRACT_MISSING" in reason_codes:
+        targeted_correction += (
+            "- For each subtask the errors name as declaring neither provides nor requires: give it "
+            "at least one of the two. If it consumes another subtask's output, add the exact "
+            "provides string that subtask exports to this subtask's own requires (and add that "
+            "subtask to depends_on if not already present). If it produces something a later "
+            "subtask consumes (or is the terminal verification stage), add a stable provides "
+            "capability string describing what it produces. Do not invent a contract for a subtask "
+            "that is genuinely self-contained and consumed by nothing - only the subtasks the "
+            "errors actually name need this.\n"
+        )
+    if "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER" in reason_codes:
+        targeted_correction += (
+            "- For each capability the errors name as provided by more than one subtask: keep that "
+            "exact capability string in provides on only ONE of those subtasks - the one that "
+            "actually produces it - and remove it from every other subtask's provides. If two "
+            "subtasks genuinely each produce something related but distinct, give each its own, "
+            "differently-named capability string instead of sharing one.\n"
+        )
+    if "APPLICATION_RUNTIME_OWNER_MISSING" in reason_codes:
+        targeted_correction += (
+            "- The authoritative goal requires observing the real running application, but no "
+            "subtask's verification currently sets requires_runtime_execution=true with "
+            "verifier_kind=application_runtime. Identify the subtask whose verification is meant to "
+            "prove this (typically the final, runnable-entrypoint stage) and set exactly that "
+            "combination on its own verification entry - compile/test verifiers cannot satisfy this "
+            "requirement, only a real application_runtime verifier can.\n"
+        )
+    if "AUTHORITATIVE_STACK_SUBSTITUTION" in reason_codes:
+        targeted_correction += (
+            "- The errors name a specific planned file (STACK_CONTRACT_VIOLATION: <path> belongs to "
+            "<wrong family>, but the authoritative USER_GOAL requests <required family>) that "
+            "belongs to the wrong language/ecosystem for this goal. Remove that exact planned file "
+            "if it is not genuinely required, or replace it with the equivalent artifact in the "
+            "authoritative stack the error names - never introduce a second language/ecosystem "
+            "alongside the one the goal actually requires.\n"
+        )
+    if "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK" in reason_codes:
+        targeted_correction += (
+            "- For each integration_relationships entry the errors name as referencing an unknown "
+            "producer or consumer subtask id: replace that id with a real subtask id from this "
+            "plan's own subtasks, or remove the relationship entirely if it no longer applies. Do "
+            "not invent a new subtask solely to satisfy a stale relationship id.\n"
+        )
+    if "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM" in reason_codes:
+        targeted_correction += (
+            "- For each integration_relationships entry the errors name as having a consumer that "
+            "can execute before its provider(s) (the specific relationship id, consumer id, and "
+            "missing-upstream provider id(s) are given in the error text): add the named provider "
+            "subtask id(s) to the consumer subtask's own depends_on, so the provider is guaranteed "
+            "to run first. Do not remove the relationship or change its participating_artifacts.\n"
+        )
+    if "PLANNED_ARTIFACT_PREREQUISITE_INVALID" in reason_codes:
+        targeted_correction += (
+            "- For each planned file the errors name as declaring a blank requires_capabilities "
+            "entry: remove that blank entry. If the file genuinely has a real prerequisite, name "
+            "the actual capability string instead of leaving it empty.\n"
+        )
+    if "DUPLICATE_SUBTASK_ID" in reason_codes:
+        targeted_correction += (
+            "- The errors name subtask id(s) used more than once. Give each subtask a distinct id; "
+            "do not merge or delete a subtask's own real content just to resolve the collision - "
+            "rename one of the colliding ids and update every depends_on/requires reference to it "
+            "accordingly.\n"
+        )
+    if "SUBTASK_DEPENDS_ON_UNKNOWN_ID" in reason_codes:
+        targeted_correction += (
+            "- The errors name a subtask whose depends_on references an id that does not exist in "
+            "this plan (the exact unknown id is given in the error text). Replace it with the real "
+            "id of the subtask it was meant to reference, or remove the reference if no such "
+            "subtask is actually needed.\n"
+        )
+    if "SUBTASK_DEPENDENCY_CYCLE" in reason_codes:
+        targeted_correction += (
+            "- The subtask dependency graph (depends_on edges) contains a cycle. Break it by "
+            "removing or reversing whichever depends_on edge does not reflect genuine execution "
+            "order - two subtasks that each require the other's output cannot both run; split the "
+            "shared work so one genuinely completes before the other starts.\n"
         )
     must_fix_section = ""
     if must_preserve:

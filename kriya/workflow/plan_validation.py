@@ -464,20 +464,35 @@ async def validate_plan(
         errors.append(stack_violation)
         reason_codes.append("AUTHORITATIVE_STACK_SUBSTITUTION")
 
+    # Repair Guidance audit (2026-09-07, before P7): these three structural
+    # checks had NO reason code at all - not merely unwired, genuinely
+    # invisible to the entire reason-code-based repair-guidance system.
+    # Any errors.append() below with no matching reason_codes.append()
+    # silently falls through to the generic PLAN_VALIDATION_FAILED
+    # catch-all at this function's own return (only when no OTHER check
+    # also fired a real code, which happens to have been true every time
+    # this exact path has fired live so far - but that was luck, not a
+    # guarantee). Found by direct code reading during the bounded audit,
+    # not a live incident - fixed here to close the gap before it becomes
+    # one, the same "explicit, testable repair contract for every code"
+    # bar every other check in this function already meets.
     ids = [st.id for st in plan.subtasks]
     duplicate_ids = sorted({sid for sid in ids if ids.count(sid) > 1})
     if duplicate_ids:
         errors.append(f"duplicate subtask ids: {duplicate_ids}")
+        reason_codes.append("DUPLICATE_SUBTASK_ID")
     id_set = set(ids)
 
     for st in plan.subtasks:
         for dep in st.depends_on:
             if dep not in id_set:
                 errors.append(f"subtask {st.id!r} depends_on unknown subtask id {dep!r}")
+                reason_codes.append("SUBTASK_DEPENDS_ON_UNKNOWN_ID")
 
     graph_is_acyclic = _acyclic(plan.subtasks)
     if not graph_is_acyclic:
         errors.append("subtask dependency graph contains a cycle")
+        reason_codes.append("SUBTASK_DEPENDENCY_CYCLE")
 
     file_owners: Dict[str, List[str]] = {}
     capability_providers: Dict[str, List[str]] = {}

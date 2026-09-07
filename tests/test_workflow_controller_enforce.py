@@ -6702,7 +6702,15 @@ def _scan_structured_plan_reason_codes():
 
 # Bucket 1: codes with real targeted repair guidance in
 # build_structured_plan_repair_prompt - verified BEHAVIORALLY below, not
-# just declared here.
+# just declared here. Repair Guidance audit (2026-09-07, before P7): the
+# twelve entries below the P1-P6 baseline are this audit's own findings -
+# real gaps proven necessary (TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE now
+# shares TOOL_SUBTASK_MISSING_TOOL_NAME's existing block rather than
+# duplicating it; DUPLICATE_SUBTASK_ID/SUBTASK_DEPENDS_ON_UNKNOWN_ID/
+# SUBTASK_DEPENDENCY_CYCLE are reason codes that did not exist before this
+# audit at all - three structural checks in plan_validation.py had error
+# text but genuinely no reason code, invisible to this entire completeness
+# mechanism until now).
 _CODES_WITH_TARGETED_GUIDANCE = {
     "TOOL_SUBTASK_MISSING_TOOL_NAME",
     "MODEL_SUBTASK_MISSING_PLANNED_FILES",
@@ -6720,6 +6728,18 @@ _CODES_WITH_TARGETED_GUIDANCE = {
     "UNKNOWN_GLOBAL_INVARIANT",
     "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP",
     "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED",
+    "TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE",
+    "SEMANTIC_DEPENDENCY_EDGE_MISSING",
+    "SUBTASK_SEMANTIC_CONTRACT_MISSING",
+    "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER",
+    "APPLICATION_RUNTIME_OWNER_MISSING",
+    "AUTHORITATIVE_STACK_SUBSTITUTION",
+    "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK",
+    "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM",
+    "PLANNED_ARTIFACT_PREREQUISITE_INVALID",
+    "DUPLICATE_SUBTASK_ID",
+    "SUBTASK_DEPENDS_ON_UNKNOWN_ID",
+    "SUBTASK_DEPENDENCY_CYCLE",
 }
 
 # Bucket 2: codes that only ever appear in the TERMINAL branch, appended
@@ -6733,32 +6753,50 @@ _CODES_TERMINAL_NON_REPAIRABLE = {
     "PLAN_REPAIR_NON_CONVERGENCE",
 }
 
-# Bucket 3: real gaps, same class P6 just hit, not fixed here - each of
-# these reaches build_structured_plan_repair_prompt today with nothing but
-# the bare reason code and generic error text, exactly what PRESERVED_
-# REFERENCE_CONFLICTS_WITH_OWNERSHIP did before this fix. Deliberately not
-# fixed in this pass: the user scoped filling these in as one bounded audit
-# task ("before P7"), not another one-off patch discovered mid-P-step. This
-# set is that audit's starting input, not a backlog note that lives only in
-# memory - a new reason code added anywhere else that isn't triaged into one
-# of the three buckets fails test_every_structured_plan_reason_code_is_
-# classified immediately.
-_CODES_KNOWN_UNWIRED_PENDING_AUDIT = {
+# Bucket 3 (Repair Guidance audit, 2026-09-07): codes deliberately left
+# with NO dedicated targeted_correction block because the ALWAYS-PRESENT
+# generic correction rules (the fixed text every call to build_structured_
+# plan_repair_prompt emits regardless of reason_codes - "Preserve or add
+# goal-derived global_invariants...", "Return only one complete JSON
+# object...", etc.) already give the model everything it needs, confirmed
+# directly per code below, not assumed:
+# - PLAN_GLOBAL_INVARIANTS_MISSING / SUBTASK_GLOBAL_INVARIANTS_MISSING: the
+#   generic rules explicitly require goal-derived global_invariants AND
+#   per-subtask relevant_global_invariant_ids.
+# - STRUCTURED_PLAN_PARSE_FAILED: the generic preamble already states the
+#   exact output-format contract ("one complete JSON object", "no
+#   Markdown/code fences"), and the raw parse_issue text is always
+#   included verbatim in the errors list.
+# - STRUCTURED_PLAN_EMPTY: the generic rules require "a complete corrected
+#   plan, preserving every valid subtask" and the error text itself
+#   already says plainly "produced zero subtasks" - unambiguous.
+# - PLAN_VALIDATION_FAILED: a pure catch-all by construction (validate_plan
+#   only appends it when `errors and not reason_codes` - i.e. some future,
+#   not-yet-classified check produced an error with no dedicated code of
+#   its own) - it cannot be specialized without becoming a dedicated code,
+#   which defeats its purpose as a defensive fallback. The three
+#   structural checks that used to fall through to this catch-all
+#   silently (DUPLICATE_SUBTASK_ID/SUBTASK_DEPENDS_ON_UNKNOWN_ID/
+#   SUBTASK_DEPENDENCY_CYCLE) were given real reason codes of their own by
+#   this same audit, so this catch-all's real exposure is now much
+#   smaller than before - the residual risk is accepted, not unmeasured.
+_CODES_ADEQUATE_VIA_GENERIC_CORRECTION_RULES = {
     "PLAN_GLOBAL_INVARIANTS_MISSING",
-    "SUBTASK_SEMANTIC_CONTRACT_MISSING",
     "SUBTASK_GLOBAL_INVARIANTS_MISSING",
-    "APPLICATION_RUNTIME_OWNER_MISSING",
-    "AUTHORITATIVE_STACK_SUBSTITUTION",
-    "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER",
-    "SEMANTIC_DEPENDENCY_EDGE_MISSING",
-    "PLANNED_ARTIFACT_PREREQUISITE_INVALID",
-    "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK",
-    "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM",
-    "PLAN_VALIDATION_FAILED",
     "STRUCTURED_PLAN_PARSE_FAILED",
     "STRUCTURED_PLAN_EMPTY",
-    "TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE",
+    "PLAN_VALIDATION_FAILED",
 }
+
+# Bucket 4: real gaps not yet fixed, discovered after this audit. Kept
+# deliberately empty right now - the audit resolved every code found in
+# it (see the three buckets above) rather than leaving anything here. Not
+# deleted: this is the landing zone the completeness test routes a
+# genuinely new, not-yet-triaged reason code to, so removing this set
+# would just make test_every_structured_plan_reason_code_is_classified
+# fail for the wrong reason (KeyError instead of a clear assertion) the
+# next time one appears.
+_CODES_KNOWN_UNWIRED_PENDING_AUDIT = set()
 
 # A handful of guided codes gate their text on evidence SHAPE, not a bare
 # reason-code string match (the function's own top prerequisite_evidence
@@ -6811,28 +6849,38 @@ def test_structured_plan_reason_code_enumeration_is_non_empty():
     assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" in codes
 
 
+_ALL_CLASSIFICATION_BUCKETS = (
+    _CODES_WITH_TARGETED_GUIDANCE,
+    _CODES_TERMINAL_NON_REPAIRABLE,
+    _CODES_ADEQUATE_VIA_GENERIC_CORRECTION_RULES,
+    _CODES_KNOWN_UNWIRED_PENDING_AUDIT,
+)
+
+
 def test_every_structured_plan_reason_code_is_classified():
     """The completeness check itself: every reason code the structured-plan
-    loop can actually emit today must fall into exactly one of the three
+    loop can actually emit today must fall into exactly one of the four
     buckets above. A new, unclassified reason code fails this immediately -
     this is the test that would have caught P6's gap before the live run,
-    per the user's own diagnosis."""
+    per the user's own diagnosis, and is now the standing stopping condition
+    the Repair Guidance audit (2026-09-07) exists to maintain: every reason
+    code that can legally trigger another repair attempt must have an
+    explicit, testable repair contract - either dedicated guidance, a
+    documented reliance on the always-present generic rules, or an honest
+    "not yet triaged" landing zone, never silence."""
     codes = _scan_structured_plan_reason_codes()
-    classified = (
-        _CODES_WITH_TARGETED_GUIDANCE
-        | _CODES_TERMINAL_NON_REPAIRABLE
-        | _CODES_KNOWN_UNWIRED_PENDING_AUDIT
-    )
+    classified = set().union(*_ALL_CLASSIFICATION_BUCKETS)
     unclassified = codes - classified
     assert unclassified == set(), (
         f"reason code(s) {sorted(unclassified)} appear in the structured-plan "
         "loop's real source but are not classified into any of "
         "_CODES_WITH_TARGETED_GUIDANCE / _CODES_TERMINAL_NON_REPAIRABLE / "
+        "_CODES_ADEQUATE_VIA_GENERIC_CORRECTION_RULES / "
         "_CODES_KNOWN_UNWIRED_PENDING_AUDIT - classify it before merging"
     )
-    assert _CODES_WITH_TARGETED_GUIDANCE.isdisjoint(_CODES_TERMINAL_NON_REPAIRABLE)
-    assert _CODES_WITH_TARGETED_GUIDANCE.isdisjoint(_CODES_KNOWN_UNWIRED_PENDING_AUDIT)
-    assert _CODES_TERMINAL_NON_REPAIRABLE.isdisjoint(_CODES_KNOWN_UNWIRED_PENDING_AUDIT)
+    for i, bucket_a in enumerate(_ALL_CLASSIFICATION_BUCKETS):
+        for bucket_b in _ALL_CLASSIFICATION_BUCKETS[i + 1:]:
+            assert bucket_a.isdisjoint(bucket_b), f"a code appears in two buckets at once: {bucket_a & bucket_b}"
 
 
 def test_every_code_with_targeted_guidance_actually_produces_guidance():
@@ -6871,6 +6919,43 @@ def test_unguided_baseline_code_produces_no_targeted_correction():
         ["SOME_UNGUIDED_CODE_WITH_NO_BLOCK"], 1,
     )
     assert _extract_targeted_correction(prompt).strip() == ""
+
+
+# --- Generic-adequate coverage (Repair Guidance audit, 2026-09-07) --------
+
+_GENERIC_CORRECTION_RULES_MARKERS = (
+    "Preserve or add goal-derived global_invariants",
+    "relevant_global_invariant_ids",
+    "Return only one complete JSON object",
+    "Return a complete corrected plan, preserving every valid subtask",
+)
+
+
+def test_generic_adequate_codes_produce_no_dedicated_block_but_generic_rules_survive():
+    """Behavioral verification for Bucket 3: each code in _CODES_ADEQUATE_
+    VIA_GENERIC_CORRECTION_RULES must produce an EMPTY targeted_correction
+    (proving no dedicated block was silently left behind, which would make
+    the "adequate via generic rules" classification a stale claim) AND the
+    always-present generic correction-rules text this bucket's whole
+    argument depends on must actually be present in the same prompt - the
+    behavioral proof that the deliberate non-specialization is safe, not
+    an assumption."""
+    for code in sorted(_CODES_ADEQUATE_VIA_GENERIC_CORRECTION_RULES):
+        prompt = build_structured_plan_repair_prompt(
+            "goal", "plan text", ["some error"], [code], 1,
+        )
+        assert _extract_targeted_correction(prompt).strip() == "", (
+            f"{code} is classified as adequate-via-generic-rules (no dedicated block "
+            "expected) but calling build_structured_plan_repair_prompt with it alone "
+            "produced non-empty targeted_correction text - a dedicated block exists "
+            "now and this code should move to _CODES_WITH_TARGETED_GUIDANCE instead"
+        )
+        for marker in _GENERIC_CORRECTION_RULES_MARKERS:
+            assert marker in prompt, (
+                f"expected always-present generic correction-rules text {marker!r} "
+                f"missing from the prompt for {code!r} - the bucket's own premise "
+                "(generic rules are always present) no longer holds"
+            )
 
 
 # --- MA8.1 (PRV-06, 2026-08-29): Cross-Owner Requirement-Preserving Recovery

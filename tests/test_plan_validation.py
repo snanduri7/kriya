@@ -47,6 +47,46 @@ async def test_valid_single_subtask_plan_passes(tmp_path):
     assert result.errors == []
 
 
+# --- Repair Guidance audit (2026-09-07, before P7) -------------------------
+# Three structural checks had error text but genuinely no reason code at
+# all - not merely unwired, invisible to the entire reason-code-based
+# repair-guidance system until this audit gave each its own code.
+
+@pytest.mark.asyncio
+async def test_duplicate_subtask_id_reports_dedicated_reason_code(tmp_path):
+    a = _model_subtask(id="s1", description="first")
+    b = _model_subtask(id="s1", description="second, same id")
+
+    result = await validate_plan(_plan([a, b]), workspace_path=str(tmp_path))
+
+    assert result.valid is False
+    assert "DUPLICATE_SUBTASK_ID" in result.reason_codes
+    assert any("duplicate subtask ids" in e for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_depends_on_unknown_id_reports_dedicated_reason_code(tmp_path):
+    a = _model_subtask(id="s1", description="depends on a subtask that does not exist", depends_on=["s99"])
+
+    result = await validate_plan(_plan([a]), workspace_path=str(tmp_path))
+
+    assert result.valid is False
+    assert "SUBTASK_DEPENDS_ON_UNKNOWN_ID" in result.reason_codes
+    assert any("depends_on unknown subtask id" in e for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_dependency_cycle_reports_dedicated_reason_code(tmp_path):
+    a = _model_subtask(id="s1", description="first", depends_on=["s2"])
+    b = _model_subtask(id="s2", description="second", depends_on=["s1"])
+
+    result = await validate_plan(_plan([a, b]), workspace_path=str(tmp_path))
+
+    assert result.valid is False
+    assert "SUBTASK_DEPENDENCY_CYCLE" in result.reason_codes
+    assert any("cycle" in e for e in result.errors)
+
+
 @pytest.mark.asyncio
 async def test_runtime_behavior_requires_an_application_runtime_owner(tmp_path):
     tests = _model_subtask(
