@@ -2285,6 +2285,78 @@ def test_structural_evidence_is_empty_for_candidates_with_no_real_relationship()
     assert edges == {}
 
 
+# --- P7 reproduction: interface-based cross-module edge (2026-09-07) -------
+# The exact shape a live P7 preflight found: a real multi-module Maven repo
+# where the module boundary is a Java interface (a hexagonal-architecture
+# "port") - core/UserService.java (interface) declared in one module,
+# repository/UserServiceImpl.java (class, implements it) in another. Before
+# the interface-indexing fix, this edge silently failed to resolve even
+# though a class-to-class edge in the SAME candidate set (to the shared DTO)
+# resolved fine - the module boundary itself was invisible.
+
+_PORT_PATH = "core/src/main/java/com/example/core/ports/UserService.java"
+_DTO_PATH = "core/src/main/java/com/example/core/dto/User.java"
+_IMPL_PATH = "repository/src/main/java/com/example/repository/UserServiceImpl.java"
+
+_PORT_JAVA = """package com.example.core.ports;
+
+import com.example.core.dto.User;
+import java.util.Collection;
+
+public interface UserService {
+    Collection<User> getAllUsers();
+    void saveUser(User user);
+}
+"""
+
+_DTO_JAVA = """package com.example.core.dto;
+
+public class User {
+    private Long id;
+    private String name;
+}
+"""
+
+_IMPL_JAVA = """package com.example.repository;
+
+import com.example.core.dto.User;
+import com.example.core.ports.UserService;
+import java.util.Collection;
+
+public class UserServiceImpl implements UserService {
+    public Collection<User> getAllUsers() { return null; }
+    public void saveUser(User user) {}
+}
+"""
+
+
+def _seed_p7_shaped_repo(tmp_path):
+    files = {_PORT_PATH: _PORT_JAVA, _DTO_PATH: _DTO_JAVA, _IMPL_PATH: _IMPL_JAVA}
+    for relpath, content in files.items():
+        full = tmp_path / relpath
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    return list(files.keys())
+
+
+def test_p7_reproduction_structural_evidence_resolves_interface_module_boundary(tmp_path):
+    """The real, required P7 reproduction: an interface declared in one
+    Maven module, implemented by a class in another, must now resolve as a
+    grounded cross-module edge - the class-to-DTO edges (already working
+    before this fix) are asserted too, proving nothing regressed while the
+    interface edge was closed."""
+    candidates = _seed_p7_shaped_repo(tmp_path)
+
+    text, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+
+    assert _PORT_PATH in edges[_IMPL_PATH], (
+        "the interface module-boundary edge (impl -> port) did not resolve"
+    )
+    assert _DTO_PATH in edges[_IMPL_PATH]
+    assert _DTO_PATH in edges[_PORT_PATH]
+    assert f"{_IMPL_PATH} references -> {_PORT_PATH}" in text
+
+
 def test_missing_grounded_production_artifact_flags_the_exact_omitted_file(tmp_path):
     candidates = _seed_structural_customer_repo(tmp_path)
     _, edges = build_planning_structural_evidence(str(tmp_path), candidates)

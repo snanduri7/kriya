@@ -256,6 +256,106 @@ def test_get_class_symbol_locations_scopes_by_extension_not_just_simple_name(tmp
     assert index[".py:Protocol"] == ["protocol.py"]
 
 
+# --- Java interface symbol indexing (2026-09-07, P7 preflight) ------------
+# A live P7 preflight against a real hexagonal-architecture Maven repo found
+# _parse_java()'s class_regex matched only the literal `class` keyword - an
+# `interface UserService {...}` port declaration was never added to the
+# symbols table at all, so build_planning_structural_evidence() resolved
+# every OTHER cross-module edge in the repo except the one that WAS the
+# module boundary (a class `implements` an interface declared in a
+# different Maven module). The `implements`/`inherits` RELATION was already
+# recorded correctly - only the interface's own SYMBOL LOCATION was
+# missing, making that relation's target unresolvable to a real file.
+
+def test_interface_symbol_location_is_discovered(tmp_path):
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    graph.index_file(
+        "core/UserService.java",
+        "package com.example.core;\npublic interface UserService {\n    void save();\n}\n",
+        1.0,
+    )
+
+    index = graph.get_class_symbol_locations()
+
+    assert index[".java:UserService"] == ["core/UserService.java"]
+
+
+def test_class_symbol_discovery_is_unchanged_by_interface_support(tmp_path):
+    """Existing class behavior must be completely unaffected - same
+    extension-scoped key, same collapsing-on-simple-name behavior already
+    covered above, now proven to hold with an interface also present in
+    the same file set."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    graph.index_file("core/UserService.java", "package p;\npublic interface UserService {}\n", 1.0)
+    graph.index_file("repo/UserServiceImpl.java", "package q;\npublic class UserServiceImpl implements UserService {}\n", 1.0)
+
+    index = graph.get_class_symbol_locations()
+
+    assert index[".java:UserService"] == ["core/UserService.java"]
+    assert index[".java:UserServiceImpl"] == ["repo/UserServiceImpl.java"]
+
+
+def test_interface_extends_and_implements_relations_are_unaffected():
+    """The interface/class distinction only changes symbol-table
+    membership - the existing `implements` relation (already correctly
+    recorded before this fix; only its target's symbol location was
+    missing) is untouched."""
+    db_path = ":memory:"
+    graph = DependencyGraph(db_path)
+    src = (
+        "package p;\n"
+        "public class UserServiceImpl implements UserService {\n"
+        "    public void save(){}\n"
+        "}\n"
+    )
+    graph.index_file("UserServiceImpl.java", src, 1.0)
+    symbols, relations = graph._parse_java("UserServiceImpl.java", src)
+    assert {"name": "p.UserServiceImpl", "type": "class", "start_line": 2, "end_line": 7} in symbols
+    assert any(
+        r["source"] == "p.UserServiceImpl" and r["target"] == "UserService" and r["type"] == "implements"
+        for r in relations
+    )
+
+
+def test_duplicate_simple_name_collision_still_detected_across_class_and_interface(tmp_path):
+    """Same simple name in different packages must still be visible as a
+    collision - the exact duplicate-type Quality Gate this index exists
+    for - now proven across a class/interface pair, not just class/class."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    graph.index_file("a/Protocol.java", "package a;\ninterface Protocol {}\n", 1.0)
+    graph.index_file("b/Protocol.java", "package b;\nclass Protocol {}\n", 1.0)
+
+    index = graph.get_class_symbol_locations()
+
+    assert set(index[".java:Protocol"]) == {"a/Protocol.java", "b/Protocol.java"}
+
+
+def test_comment_or_string_containing_interface_keyword_is_not_indexed(tmp_path):
+    """A commented-out or string-embedded 'interface Foo' must never become
+    a real symbol - matches this parser's existing, unchanged safety for
+    'class Foo' in the same position (line-start-anchored matching, never
+    a bare substring search)."""
+    db_path = tmp_path / "dep_graph.db"
+    graph = DependencyGraph(str(db_path))
+    src = (
+        "package p;\n"
+        "// interface Foo {}\n"
+        "/* interface Foo {} */\n"
+        "public class Real {\n"
+        '    String s = "interface Foo {}";\n'
+        "}\n"
+    )
+    graph.index_file("Real.java", src, 1.0)
+
+    index = graph.get_class_symbol_locations()
+
+    assert ".java:Foo" not in index
+    assert index[".java:Real"] == ["Real.java"]
+
+
 def test_extract_class_names_covers_python_java_ruby(tmp_path):
     db_path = tmp_path / "dep_graph.db"
     graph = DependencyGraph(str(db_path))

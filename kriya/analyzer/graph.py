@@ -302,9 +302,16 @@ class DependencyGraph:
         any polyglot repo (a frontend `User` and a backend `User` are
         typically different concepts, not a duplicate). extract_class_names()
         below produces keys in this same "ext:name" format so the two never
-        drift apart."""
+        drift apart.
+
+        type IN ('class', 'interface') (2026-09-07, P7 preflight): an
+        interface declaration is exactly as real a type symbol for this
+        index's own purpose (a duplicate/collision hazard, and a resolvable
+        target for a cross-file reference) as a class - see _parse_java()'s
+        own docstring comment at its class_regex definition for the live
+        incident this closes."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT DISTINCT name, filepath FROM symbols WHERE type = 'class'")
+        cursor.execute("SELECT DISTINCT name, filepath FROM symbols WHERE type IN ('class', 'interface')")
         index: Dict[str, List[str]] = {}
         for name, filepath in cursor.fetchall():
             if not name:
@@ -352,7 +359,7 @@ class DependencyGraph:
         names = {
             sym["name"].rsplit(".", 1)[-1]
             for sym in symbols
-            if sym.get("type") == "class" and sym.get("name")
+            if sym.get("type") in ("class", "interface") and sym.get("name")
         }
         return sorted(f"{ext}:{n}" for n in names if n)
 
@@ -563,8 +570,23 @@ class DependencyGraph:
         package_prefix = pkg_match.group(1) + "." if pkg_match else ""
         
         # Regex mappings for Java classes, methods and fields
+        # Java symbol indexing (2026-09-07, P7 preflight): interface
+        # declarations were previously invisible to this parser entirely -
+        # `class_regex` matched only the literal `class` keyword, so
+        # get_class_symbol_locations()/extract_class_names() (both filter
+        # on type == "class") never saw a hexagonal-architecture "port"
+        # (interface UserService {...}) as a resolvable symbol at all, even
+        # though a real `implements`/`import` relation to it was correctly
+        # recorded - confirmed live: build_planning_structural_evidence()
+        # resolved every OTHER cross-module edge in a real multi-module
+        # repo except the one that WAS the module boundary, because it was
+        # interface-based. The keyword itself is now captured (group 1:
+        # "class" or "interface") so both symbol types share the exact same
+        # extends/implements handling below - existing class behavior is
+        # completely unchanged (same groups, same order, same relation
+        # types), interfaces are simply no longer skipped.
         class_regex = re.compile(
-            r"(?:public|protected|private|static|\s)*class\s+(\w+)"
+            r"(?:public|protected|private|static|\s)*(class|interface)\s+(\w+)"
             r"(?:\s+extends\s+(\w+))?"
             r"(?:\s+implements\s+([\w\s,]+))?"
         )
@@ -596,17 +618,18 @@ class DependencyGraph:
                 })
                 continue
                 
-            # Class definitions
+            # Class/interface definitions
             class_match = class_regex.match(line_strip)
             if class_match:
-                class_name = package_prefix + class_match.group(1)
+                keyword = class_match.group(1)
+                class_name = package_prefix + class_match.group(2)
                 symbols.append({
                     "name": class_name,
-                    "type": "class",
+                    "type": keyword,
                     "start_line": idx,
                     "end_line": idx + 5
                 })
-                
+
                 # Add class annotation relations
                 for anno in pending_annotations:
                     relations.append({
@@ -615,18 +638,18 @@ class DependencyGraph:
                         "type": "annotated_with"
                     })
                 pending_annotations = []
-                
+
                 # Handle extends
-                base_class = class_match.group(2)
+                base_class = class_match.group(3)
                 if base_class:
                     relations.append({
                         "source": class_name,
                         "target": base_class,
                         "type": "inherits"
                     })
-                    
+
                 # Handle implements
-                impl_interfaces = class_match.group(3)
+                impl_interfaces = class_match.group(4)
                 if impl_interfaces:
                     for interface in impl_interfaces.split(","):
                         interface = interface.strip()
