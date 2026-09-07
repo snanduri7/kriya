@@ -76,9 +76,65 @@ _MISSING_ENTRYPOINT_PATTERNS = (
     re.compile(r"\bcannot load such file\b", re.IGNORECASE),
     re.compile(r"\bLoadError\b"),
 )
-_RUNTIME_BEHAVIOR_RE = re.compile(
-    r"\b(?:run|start|launch|execute|print|connect|send|receive|publish|consume|"
-    r"put|get|read\s+back|round[- ]trip|exit\s+(?:normally|cleanly)|shut\s*down)\b",
+# Deterministic, bounded runtime-execution INTENT detector (Production
+# Validation P3, 2026-09-07). The previous version matched any bare
+# occurrence of run/start/launch/execute/print/get/put/etc ANYWHERE in the
+# goal text, no context or negation awareness at all. Found live, checking
+# real frozen production-validation goal texts directly (not assumed):
+# P2's own goal.md false-positived on ordinary prose ("...which employees
+# get their fields changed and get saved..."); P3's own goal.md false-
+# positived on BOTH ordinary prose ("before any location check would even
+# run") AND, worse, its own explicit denial ("No live application run is
+# required to verify this change") - the sentence REFUSING runtime
+# verification was the literal text that triggered Kriya's demand for it.
+# P1's goal.md had zero matches and passed cleanly - the only reason this
+# defect went unnoticed for two full runs of this track.
+#
+# Two-stage, bounded (not general NLP) redesign:
+#  1. An explicit negative runtime-verification statement ("no ... run ...
+#     is required", "do not run/start/launch/execute", "execution is not
+#     required") is checked FIRST and wins unconditionally - matches this
+#     codebase's own repeated "explicit goal text is ground truth, never
+#     overridden by a generic-looking match" convention (see
+#     MISSING_GROUNDED_PRODUCTION_ARTIFACT's own "do not infer... solely
+#     because" repair guidance for the same principle applied elsewhere).
+#     Scoped to the whole goal text, not locally to the matched clause -
+#     deliberately simple: this function does not attempt to determine
+#     WHICH runtime action a negation refers to when a goal mentions
+#     several; an authoritative requirement that both denies one runtime
+#     action and genuinely requires a different one is expected to state
+#     the positive requirement unambiguously enough to be a real, separate
+#     concern for whichever caller needs that distinction, not something
+#     this bounded detector untangles.
+#  2. Otherwise, a positive match requires CONTEXT, never an isolated verb:
+#     either a runtime-action verb next to a runtime noun (run/start/
+#     launch/execute/connect/send/receive/publish/consume within a few
+#     words of application/service/process/program/server), or explicit
+#     process-output/exit-code language (exit code/status, "exits
+#     non-zero", stdout/stderr, process exit/output) - inherently specific
+#     enough to stand alone with no extra context needed. Bare "get"/
+#     "put"/"run"/"print" with none of this context are no longer
+#     sufficient evidence - every real false positive found above lacked
+#     this context entirely.
+_RUNTIME_VERIFICATION_NEGATED_RE = re.compile(
+    r"\bno\b(?:\s+\S+){0,6}?\s+(?:run|execution|launch(?:ing)?|start(?:up)?)\b"
+    r"(?:\s+\S+){0,6}?\s+(?:is|are)\s+(?:required|needed|necessary)\b"
+    r"|\b(?:do\s+not|does\s+not|don'?t|doesn'?t|never)\b(?:\s+\S+){0,3}?"
+    r"\s+(?:run|start|launch|execute)\b"
+    r"|\b(?:execution|running|startup|launching)\b(?:\s+\S+){0,4}?"
+    r"\s+(?:is|are|was|were)\s+not\s+(?:required|needed|necessary)\b",
+    re.IGNORECASE,
+)
+_RUNTIME_EXECUTION_CONTEXT_RE = re.compile(
+    r"\b(?:run|start|launch|execute|connect|send|receive|publish|consume)\b"
+    r"(?:\s+\S+){0,3}?\s+(?:the\s+|a\s+|an\s+)?(?:application|app|service|program|server|process)\b"
+    r"|\b(?:application|app|service|program|process)\b(?:\s+\S+){0,3}?"
+    r"\s+(?:is\s+|the\s+)?(?:launched|started|executed|running)\b"
+    r"|\bexit\s*(?:code|status)\b"
+    r"|\bexits?\s+(?:non-?zero|with\s+(?:code|status)\s+\d+|normally|cleanly)\b"
+    r"|\bprocess\s+(?:exit|output|stdout|stderr)\b"
+    r"|\b(?:stdout|stderr)\b"
+    r"|\bshut\s*down\b",
     re.IGNORECASE,
 )
 
@@ -156,8 +212,14 @@ def subtask_owns_test_obligation(
 
 
 def goal_requires_runtime_behavior(goal: str) -> bool:
-    """Conservative deterministic signal that observable execution is required."""
-    return bool(_RUNTIME_BEHAVIOR_RE.search(goal or ""))
+    """Bounded deterministic signal that observable execution is required -
+    see the comment above _RUNTIME_VERIFICATION_NEGATED_RE/_RUNTIME_
+    EXECUTION_CONTEXT_RE for the exact live false positives (P2, P3) this
+    two-stage design fixes and why negation is checked first."""
+    text = goal or ""
+    if _RUNTIME_VERIFICATION_NEGATED_RE.search(text):
+        return False
+    return bool(_RUNTIME_EXECUTION_CONTEXT_RE.search(text))
 
 
 def output_confirms_nonzero_test_execution(output: str) -> bool:
