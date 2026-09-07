@@ -2377,6 +2377,7 @@ def test_missing_grounded_production_artifact_flags_the_exact_omitted_file(tmp_p
     assert gaps == [{
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "consumer_subtask": "s3",
         "reason": "unowned",
     }]
 
@@ -2436,6 +2437,7 @@ def test_missing_grounded_production_artifact_preservation_is_per_source_not_pat
     assert gaps == [{
         "test_file": second_test_path,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "consumer_subtask": "s4",
         "reason": "unowned",
     }]
 
@@ -2465,6 +2467,7 @@ def test_missing_grounded_production_artifact_preserved_reference_to_a_nonexiste
     assert gaps == [{
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "consumer_subtask": "s3",
         "reason": "unowned",
     }]
 
@@ -2701,6 +2704,7 @@ def test_missing_grounded_production_artifact_flags_edge_miswiring_when_owner_ex
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
         "owning_subtask": "s3",
+        "consumer_subtask": "s4",
         "reason": "not_in_dependency_chain",
     }]
 
@@ -2735,6 +2739,7 @@ def test_grounded_edge_rejects_semantic_provider_mismatch_even_with_both_depende
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
         "owning_subtask": "s3",
+        "consumer_subtask": "s4",
         "owner_provides": ["controller_cap"],
         "test_requires": ["service_cap"],
         "reason": "semantic_provider_mismatch",
@@ -6817,15 +6822,24 @@ _CODES_WITH_TARGETED_GUIDANCE = {
     "SUBTASK_DEPENDENCY_CYCLE",
 }
 
-# Bucket 2: codes that only ever appear in the TERMINAL branch, appended
-# after the repair loop has already exhausted its bounded attempts and is
-# about to raise - structurally incapable of ever reaching build_
-# structured_plan_repair_prompt again, so "repair guidance" does not apply
-# to them by construction, not by omission.
+# Bucket 2: codes structurally incapable of ever reaching build_structured_
+# plan_repair_prompt again, so "repair guidance" does not apply to them by
+# construction, not by omission. Most only ever appear in the TERMINAL
+# branch after the repair loop has already exhausted its bounded attempts
+# and is about to raise. SEMANTIC_CONTRACT_REGRESSION_REJECTED (PRV-17,
+# 2026-09-07, P7) reaches the same guarantee by a different mechanism: it is
+# appended mid-loop, but its presence unconditionally sets treat_as_
+# regression=True, which ALWAYS redirects prompt_reason_codes to the
+# retained baseline (excluding this synthetic code) before build_
+# structured_plan_repair_prompt is ever called - it is visible only in
+# forensic logging/diagnostics, never in a live repair prompt or (since
+# treat_as_regression also drives the terminal report's own retained-vs-
+# candidate choice) the terminal reason-code list.
 _CODES_TERMINAL_NON_REPAIRABLE = {
     "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
     "PLAN_REPAIR_OSCILLATION",
     "PLAN_REPAIR_NON_CONVERGENCE",
+    "SEMANTIC_CONTRACT_REGRESSION_REJECTED",
 }
 
 # Bucket 3 (Repair Guidance audit, 2026-09-07): codes deliberately left
