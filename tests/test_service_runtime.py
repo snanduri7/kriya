@@ -368,6 +368,11 @@ def test_managed_service_result_maps_to_zero_developer_calls_for_infrastructure_
     future wiring step needs, without this module reaching into
     kriya/workflow/* itself."""
     infrastructure_outcomes = {
+        # Artifact Preparation (P6 production-validation, 2026-09-07): the
+        # application was never even launched here either - same shape as
+        # every other member of this set.
+        ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+        ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED,
         ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
         ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
         ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
