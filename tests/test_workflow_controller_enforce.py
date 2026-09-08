@@ -54,6 +54,8 @@ from kriya.workflow.workflow_controller import (
     _StructuredPlanUnavailable,
     _is_strict_regression,
     _preserved_reference_must_preserve_lines,
+    _preserved_reference_pairs_mentioned,
+    _preserved_reference_regressions,
     _semantic_contract_must_preserve_lines,
     _semantic_contract_regression_subtasks,
     _subtask_ids_mentioned,
@@ -2530,6 +2532,79 @@ def test_missing_grounded_production_artifact_no_obligation_recorded_without_led
     gaps = find_missing_grounded_production_artifacts(plan, edges)
 
     assert gaps == []
+
+
+def _preserved_customer_plan(tmp_path, preserved_references):
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="preserved-drop", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=preserved_references,
+            ),
+        ],
+    )
+    return plan, edges
+
+
+def test_preserved_reference_silently_dropped_between_revisions_is_recorded_violated(tmp_path):
+    """PRV-17 (2026-09-08, P5 audit) closing-pass counterpart to plan_
+    validation.py's requires/provides drop test: revision 0 correctly
+    accepts and records SATISFIED preservation of _CUSTOMER_CONTROLLER_PATH;
+    revision 1's plan drops the declaration entirely while touching
+    something unrelated. The per-edge acceptance branch never re-visits a
+    (source, target) pair it doesn't see this round, so nothing would flag
+    this without the new closing post-pass - proves that post-pass fires
+    and produces a real regression event via the same
+    ObligationLedger.record() primitive every other same-authority
+    SATISFIED->VIOLATED transition already uses."""
+    plan0, edges = _preserved_customer_plan(tmp_path, [_CUSTOMER_CONTROLLER_PATH])
+    ledger = ObligationLedger()
+    gaps0 = find_missing_grounded_production_artifacts(
+        plan0, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    assert gaps0 == []
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    assert ledger.current(obligation_id).status == ObligationStatus.SATISFIED
+    before = len(ledger.regressions)
+
+    plan1, _ = _preserved_customer_plan(tmp_path, [])
+    gaps1 = find_missing_grounded_production_artifacts(
+        plan1, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=1,
+    )
+
+    assert any(g["missing_production_artifact"] == _CUSTOMER_CONTROLLER_PATH for g in gaps1)
+    rec = ledger.current(obligation_id)
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.evidence.get("dropped_between_revisions") is True
+    assert rec.terminal_required is False
+    new_regressions = ledger.regressions[before:]
+    assert any(r.obligation_id == obligation_id for r in new_regressions)
+
+
+def test_preserved_reference_still_declared_is_not_spuriously_flagged_as_dropped(tmp_path):
+    """Sanity counterpart: re-validating the SAME unchanged preservation
+    declaration across two revisions must never spuriously regress it."""
+    plan0, edges = _preserved_customer_plan(tmp_path, [_CUSTOMER_CONTROLLER_PATH])
+    ledger = ObligationLedger()
+    find_missing_grounded_production_artifacts(
+        plan0, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    before = len(ledger.regressions)
+
+    plan1, _ = _preserved_customer_plan(tmp_path, [_CUSTOMER_CONTROLLER_PATH])
+    gaps1 = find_missing_grounded_production_artifacts(
+        plan1, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=1,
+    )
+
+    assert gaps1 == []
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    assert ledger.current(obligation_id).status == ObligationStatus.SATISFIED
+    assert ledger.regressions[before:] == []
 
 
 def test_enforce_preserved_reference_terminal_integrity_passes_when_target_unchanged(tmp_path):
@@ -6572,6 +6647,238 @@ def test_preserved_reference_lines_do_not_leak_across_sources():
     assert "Bar.java" in b_line and "Foo.java" not in b_line
 
 
+def _p5_two_preserved_references_plan():
+    return EngineeringPlan(
+        plan_id="p5-preserved-reference-oscillation", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s3", description="PetTests", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="src/test/.../PetTests.java", action=FileAction.MODIFY,
+                )],
+            ),
+        ],
+    )
+
+
+def _p5_drop_case(first_target, second_target):
+    """Builds the fake_validate_plan side-effect sequence for the P5
+    oscillation shape, parameterized so the ordering can be inverted:
+    revision 0 satisfies `first_target`, missing `second_target`; revision 1
+    satisfies `second_target` but silently drops `first_target` again -
+    same single-element reason-code set both times, so only the
+    obligation-ledger-based check (not _is_strict_regression) can catch
+    it. Returns (fake_validate_plan, source_path)."""
+    source = "src/test/.../PetTests.java"
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_preserved_reference_obligation(
+                source, f"src/main/.../{first_target}", revision=0,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    f"grounded structural evidence shows test file(s) referencing a production "
+                    f"artifact no subtask owns: PetTests.java (subtask 's3') references "
+                    f"{second_target}"
+                ],
+                reason_codes=["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+            )
+        if revision == 2:
+            # Terminal round - the loop exhausts its 2-repair budget
+            # regardless of what this returns; content is irrelevant to
+            # this test, which only inspects the repair prompt BUILT FOR
+            # this round (await_args_list[2]), not its own outcome.
+            return PlanValidationResult(
+                valid=False,
+                errors=["irrelevant - loop exhausts after this attempt"],
+                reason_codes=["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+            )
+        assert revision == 1
+        # second_target now declared preserved, but first_target's already-
+        # SATISFIED obligation is silently dropped this round - mirrors
+        # exactly what find_missing_grounded_production_artifacts' own
+        # closing pass records in production (same id, VIOLATED,
+        # dropped_between_revisions=True, terminal_required=False).
+        obligation_ledger.record(ObligationRecord(
+            id=f"plan.preserved_reference.{source}->src/main/.../{first_target}",
+            kind=ObligationKind.PRESERVED_REFERENCE, status=ObligationStatus.VIOLATED,
+            authority=ObligationAuthority.DETERMINISTIC,
+            description="no longer declared this round", source="test", revision=1,
+            evidence={
+                "source": source, "target": f"src/main/.../{first_target}",
+                "dropped_between_revisions": True,
+            },
+            terminal_required=False,
+        ))
+        obligation_ledger.record(_preserved_reference_obligation(
+            source, f"src/main/.../{second_target}", revision=1,
+        ))
+        return PlanValidationResult(
+            valid=False,
+            errors=[
+                f"grounded structural evidence shows test file(s) referencing a production "
+                f"artifact no subtask owns: PetTests.java (subtask 's3') references "
+                f"{first_target}"
+            ],
+            reason_codes=["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+        )
+
+    return fake_validate_plan
+
+
+async def _run_p5_drop_case(tmp_path, first_target, second_target):
+    plan = _p5_two_preserved_references_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text", "attempt2 text"])
+    we.run_generation_workflow = AsyncMock(
+        side_effect=AssertionError("must never reach generation - planning never converges"),
+    )
+    fake_validate_plan = _p5_drop_case(first_target, second_target)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ), patch(
+        # find_missing_grounded_production_artifacts is a REAL, separate call
+        # in the enforce loop (not part of validate_plan) - its own closing
+        # pass is exercised directly by test_preserved_reference_silently_
+        # dropped_between_revisions_is_recorded_violated instead; here it
+        # would otherwise immediately "drop" every obligation
+        # fake_validate_plan records above, since this test's synthetic plan
+        # never sets real preserved_references/structural edges. Neutralized
+        # exactly like #17's own oscillation test neutralizes it implicitly
+        # (an empty structural_resolved_edges there is a natural no-op; here
+        # it must be explicit since a non-empty ledger is what's under test).
+        "kriya.workflow.workflow_controller.find_missing_grounded_production_artifacts",
+        return_value=[],
+    ):
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    return we
+
+
+@pytest.mark.asyncio
+async def test_enforce_p5_preserved_reference_oscillation_is_not_silently_accepted(tmp_path):
+    """The real P5 shape, driven through the actual enforce loop rather than
+    _preserved_reference_must_preserve_lines()/_preserved_reference_
+    regressions() called directly (the unit tests above do that, proving
+    each piece is correct in isolation, but never proving the repair LOOP
+    actually rejects the drop): PetTests.java genuinely needs BOTH
+    BaseEntity.java and Visit.java preserved simultaneously. Revision 0
+    satisfies BaseEntity.java, missing Visit.java; revision 1 satisfies
+    Visit.java but SILENTLY DROPS BaseEntity.java. Both revisions report
+    the IDENTICAL single-element reason-code set
+    {MISSING_GROUNDED_PRODUCTION_ARTIFACT} - by the documented partial-order
+    rule, equal sets are never a strict regression, so
+    _is_strict_regression() alone cannot see this; only
+    _preserved_reference_regressions() (PRV-17, 2026-09-08, P5 audit) can.
+    Proven via the repair prompt built for the NEXT round (revision 2):
+    if the drop were accepted, that prompt would ask the Planner to fix
+    BaseEntity.java (revision 1's own, regressed complaint); the fix
+    requires it to instead still ask about Visit.java (revision 0's
+    retained, correct complaint) and never mention BaseEntity.java at all
+    (no longer SATISFIED in the ledger, so not even a must_preserve
+    reminder)."""
+    we = await _run_p5_drop_case(tmp_path, "BaseEntity.java", "Visit.java")
+
+    repair_prompt_for_revision_2 = we.planner.run.await_args_list[2].args[0]
+    assert "Visit.java" in repair_prompt_for_revision_2
+    assert "BaseEntity.java" not in repair_prompt_for_revision_2
+
+
+@pytest.mark.asyncio
+async def test_enforce_p5_preserved_reference_oscillation_inverse_ordering(tmp_path):
+    """Symmetric counterpart: the file that gets satisfied first and the
+    file that gets silently dropped are swapped, proving the mechanism is
+    not accidentally order-dependent (e.g. hardcoded to whichever target
+    happens to be declared first)."""
+    we = await _run_p5_drop_case(tmp_path, "Visit.java", "BaseEntity.java")
+
+    repair_prompt_for_revision_2 = we.planner.run.await_args_list[2].args[0]
+    assert "BaseEntity.java" in repair_prompt_for_revision_2
+    assert "Visit.java" not in repair_prompt_for_revision_2
+
+
+@pytest.mark.asyncio
+async def test_enforce_preserved_reference_legitimate_correction_is_not_rejected(tmp_path):
+    """The intentionally-no-longer-applicable case, at the full loop level
+    (unit coverage already exists in test_preserved_reference_regressions_
+    exempts_implicated_pair - this proves the real error-text format
+    plan_validation.py actually emits for PRESERVED_REFERENCE_CONFLICTS_
+    WITH_OWNERSHIP is correctly parsed by _preserved_reference_pairs_
+    mentioned() and correctly exempts the round that legitimately removes
+    a WRONG preservation claim). Revision 0 satisfies BaseEntity.java
+    preserved. Revision 1 correctly discovers that declaration was WRONG
+    (BaseEntity.java is actually planned for modification by this same
+    subtask) and removes it, exactly as PRESERVED_REFERENCE_CONFLICTS_WITH_
+    OWNERSHIP's own repair guidance instructs - this must converge
+    normally, never be rejected as an unrelated silent drop."""
+    source = "src/test/.../PetTests.java"
+    plan = _p5_two_preserved_references_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text"])
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_preserved_reference_obligation(
+                source, "src/main/.../BaseEntity.java", revision=0,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    f"subtask 's3' planned artifact {source!r} declares "
+                    "'src/main/.../BaseEntity.java' as a preserved reference, but "
+                    "'src/main/.../BaseEntity.java' is itself planned for modification by ['s3']"
+                ],
+                reason_codes=["PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP"],
+            )
+        assert revision == 1
+        # The wrong declaration is correctly removed - same id, VIOLATED,
+        # but THIS round's own error explicitly named this exact pair, so
+        # it must be exempted from the regression check.
+        obligation_ledger.record(ObligationRecord(
+            id=f"plan.preserved_reference.{source}->src/main/.../BaseEntity.java",
+            kind=ObligationKind.PRESERVED_REFERENCE, status=ObligationStatus.VIOLATED,
+            authority=ObligationAuthority.DETERMINISTIC,
+            description="correctly retracted - was never a legal preservation claim",
+            source="test", revision=1,
+            evidence={"source": source, "target": "src/main/.../BaseEntity.java"},
+            terminal_required=False,
+        ))
+        return PlanValidationResult(valid=True)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ), patch(
+        "kriya.workflow.workflow_controller.find_missing_grounded_production_artifacts",
+        return_value=[],
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2
+
+
 def test_preserved_reference_reinforcement_does_not_override_ownership_conflict():
     """A satisfied PRESERVED_REFERENCE obligation must never be used to
     excuse or override a genuine PRESERVED_REFERENCE_CONFLICTS_WITH_
@@ -6840,6 +7147,13 @@ _CODES_TERMINAL_NON_REPAIRABLE = {
     "PLAN_REPAIR_OSCILLATION",
     "PLAN_REPAIR_NON_CONVERGENCE",
     "SEMANTIC_CONTRACT_REGRESSION_REJECTED",
+    # PRV-17 (2026-09-08, P5 audit): same reasoning as SEMANTIC_CONTRACT_
+    # REGRESSION_REJECTED above - appended mid-loop by _preserved_reference_
+    # regressions' own caller, not something a dedicated targeted_correction
+    # block could usefully add to; the retained-baseline redirect (not more
+    # repair guidance) is what actually resolves it, matching that sibling
+    # code's own precedent exactly.
+    "PRESERVED_REFERENCE_REGRESSION_REJECTED",
 }
 
 # Bucket 3 (Repair Guidance audit, 2026-09-07): codes deliberately left
@@ -8595,8 +8909,11 @@ def test_semantic_contract_regression_subtasks_multiple_subtasks_mixed():
 
 def test_semantic_contract_regression_subtasks_ignores_other_obligation_kinds():
     """Only SUBTASK_SEMANTIC_CONTRACT regressions are in scope here -
-    PRESERVED_REFERENCE has its own, separate reinforcement mechanism and
-    must never be double-counted by this guard."""
+    PRESERVED_REFERENCE has its own, separate regression-rejection
+    mechanism (_preserved_reference_regressions, PRV-17 2026-09-08, P5
+    audit - see that function's own docstring) keyed by (source, target)
+    file pair rather than subtask id, and must never be double-counted by
+    this guard."""
     ledger = ObligationLedger()
     ledger.record(_preserved_reference_obligation("Test.java", "Foo.java", revision=0))
     before = len(ledger.regressions)
@@ -8609,6 +8926,126 @@ def test_semantic_contract_regression_subtasks_ignores_other_obligation_kinds():
     ))
     assert len(ledger.regressions) == before + 1  # sanity: a regression WAS recorded
     assert _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids=set()) == []
+
+
+def _preserved_reference_regression_record(source, target, status, revision=0):
+    return ObligationRecord(
+        id=f"plan.preserved_reference.{source}->{target}",
+        kind=ObligationKind.PRESERVED_REFERENCE, status=status,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description="test", source="test", revision=revision,
+        evidence={"source": source, "target": target}, terminal_required=(status == ObligationStatus.SATISFIED),
+    )
+
+
+def test_preserved_reference_pairs_mentioned_extracts_source_and_target():
+    conflict_error = (
+        "subtask 's3' planned artifact 'PetTests.java' declares "
+        "'BaseEntity.java' as a preserved reference, but 'BaseEntity.java' "
+        "is itself planned for modification by ['s3']"
+    )
+    assert _preserved_reference_pairs_mentioned([conflict_error]) == {
+        ("PetTests.java", "BaseEntity.java"),
+    }
+
+
+def test_preserved_reference_pairs_mentioned_ignores_unrelated_errors():
+    unrelated_error = "grounded structural evidence shows test file(s) referencing an unowned artifact"
+    assert _preserved_reference_pairs_mentioned([unrelated_error]) == set()
+
+
+def test_preserved_reference_regressions_rejects_unimplicated_drop():
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    before = len(ledger.regressions)
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.VIOLATED, revision=1,
+    ))
+
+    offending = _preserved_reference_regressions(ledger, before, implicated_pairs=set())
+    assert offending == [("PetTests.java", "BaseEntity.java")]
+
+
+def test_preserved_reference_regressions_exempts_implicated_pair():
+    """The intentionally-no-longer-applicable case: a round that legitimately
+    corrects a WRONG preservation claim (e.g. resolving a
+    PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP naming this exact pair)
+    must never have that correction itself flagged as a silent drop - this
+    is what prevents the mechanism from over-freezing stale state."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    before = len(ledger.regressions)
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.VIOLATED, revision=1,
+    ))
+
+    offending = _preserved_reference_regressions(
+        ledger, before, implicated_pairs={("PetTests.java", "BaseEntity.java")},
+    )
+    assert offending == []
+
+
+def test_preserved_reference_regressions_multiple_pairs_mixed():
+    """One pair's drop is legitimate (implicated this round); a DIFFERENT,
+    unrelated pair's silent drop in the same round is not."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "Visit.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    before = len(ledger.regressions)
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.VIOLATED, revision=1,
+    ))
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "Visit.java", ObligationStatus.VIOLATED, revision=1,
+    ))
+
+    offending = _preserved_reference_regressions(
+        ledger, before, implicated_pairs={("PetTests.java", "BaseEntity.java")},
+    )
+    assert offending == [("PetTests.java", "Visit.java")]
+
+
+def test_preserved_reference_regressions_ignores_other_obligation_kinds():
+    """Only PRESERVED_REFERENCE regressions are in scope here -
+    SUBTASK_SEMANTIC_CONTRACT has its own, separate mechanism
+    (_semantic_contract_regression_subtasks) and must never be
+    double-counted by this guard."""
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.SATISFIED, revision=0))
+    before = len(ledger.regressions)
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED, revision=1))
+    assert len(ledger.regressions) == before + 1  # sanity: a regression WAS recorded
+    assert _preserved_reference_regressions(ledger, before, implicated_pairs=set()) == []
+
+
+def test_preserved_reference_regressions_a_still_unresolved_pair_is_not_a_regression():
+    """Multiple preserved references where one legitimately remains
+    unresolved (never SATISFIED to begin with) while another is repaired -
+    the never-satisfied pair must not itself be reported as a regression
+    (there is nothing to regress FROM); only an actual SATISFIED->VIOLATED
+    transition counts, which ObligationLedger.record() already restricts
+    this to by construction."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    before = len(ledger.regressions)
+    # Visit.java was never SATISFIED - only BaseEntity.java's own repair
+    # round is recorded here.
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=1,
+    ))
+
+    assert ledger.regressions[before:] == []
+    assert _preserved_reference_regressions(ledger, before, implicated_pairs=set()) == []
 
 
 def _p7_oscillation_plan():
@@ -8634,6 +9071,62 @@ def _p7_oscillation_plan():
             ),
         ],
     )
+
+
+def _single_subtask_plan():
+    return EngineeringPlan(
+        plan_id="p10-runtime-wiring", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="cap the raise", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="EmployeeService.java", action=FileAction.MODIFY)],
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_enforce_wires_goal_text_runtime_negation_to_validate_plan_as_false(tmp_path):
+    """Vertical counterpart to test_acceptance.py's goal_requires_runtime_
+    behavior unit tests, which call that pure function directly with a
+    literal string - those prove the regex predicate is correct, but not
+    that _run_structured_enforce (kriya/workflow/workflow_controller.py,
+    the real P2/P3 caller) actually forwards its result into
+    validate_plan()'s runtime_verification_required kwarg for a real goal
+    string flowing through the real enforce loop. Uses P3's own real,
+    frozen goal sentence verbatim (the one that previously false-positived
+    BECAUSE it explicitly denies runtime verification)."""
+    goal = (
+        "Cap the raise at 150000.0. No live application run is required "
+        "to verify this change; the existing unit tests are sufficient."
+    )
+    plan = _single_subtask_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value="plan text")
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+    captured_kwargs = {}
+
+    async def fake_validate_plan(plan_arg, **kwargs):
+        captured_kwargs.update(kwargs)
+        return PlanValidationResult(valid=True)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute(goal, str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert captured_kwargs["runtime_verification_required"] is False
 
 
 @pytest.mark.asyncio

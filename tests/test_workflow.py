@@ -69,7 +69,13 @@ from kriya.workflow.plan_schema import (
     PlannedFile,
     Subtask,
 )
-from kriya.workflow.triage import ChangeKind
+from kriya.workflow.triage import (
+    ChangeKind,
+    EngineeringRoute,
+    ExecutionWeight,
+    ImpactVector,
+    RiskClass,
+)
 from kriya.workflow.repair_contract import (
     RepairContract,
     RepairContractStatus,
@@ -12494,6 +12500,66 @@ async def test_handle_attempt_failure_scope_denial_with_real_existing_test_owner
     assert state.plan_scope_conflict["grounded_owner_files"] == [owner]
 
 
+_EMPLOYEE_SERVICE_PATH_P1 = "src/main/java/com/example/ignite/service/EmployeeService.java"
+_EMPLOYEE_SERVICE_TEST_PATH_P1 = "src/test/java/com/example/ignite/service/EmployeeServiceTest.java"
+
+_HIRE_GUARD_TRACE_P1 = (
+    "java.lang.IllegalArgumentException: Department id=101 does not exist\n"
+    "\tat com.example.ignite.service.EmployeeService.hire(EmployeeService.java:3)\n"
+    "\tat com.example.ignite.service.EmployeeServiceTest."
+    "findByEmailDomain_nonMatchingDomain_returnsEmptyList(EmployeeServiceTest.java:10)\n"
+    "\tat java.base/java.lang.reflect.Method.invoke(Method.java:568)\n"
+)
+
+_EMPLOYEE_SERVICE_UNCHANGED_P1 = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) { if (!deptRepo.existsById(e.getDepartmentId())) "
+    "throw new IllegalArgumentException(\"x\"); return e; }\n"
+    "}\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_handle_attempt_failure_redirects_fixture_precondition_to_test_not_production(tmp_path):
+    """Vertical counterpart to test_attribution.py's
+    test_test_fixture_precondition_failure_attributes_to_test_not_production_guard,
+    which calls attribute_failure() directly with hand-picked arguments -
+    that proves the fixture-precondition predicate itself is correct, but
+    not that handle_attempt_failure() (the real P1 caller,
+    kriya/workflow/retry_strategy.py) actually assembles
+    known_attribution_files/original_contents in the shape that predicate
+    expects. Reproduces the real P1 incident (2026-09-04, spring-ignite-
+    demo) through the actual production entrypoint: an unstubbed mock made
+    an existing, unmodified production guard throw during the test's own
+    fixture setup - attribution must land on the test file, not
+    EmployeeService.java, with zero LLM involvement (deterministic tier)."""
+    (tmp_path / "src" / "main" / "java" / "com" / "example" / "ignite" / "service").mkdir(parents=True)
+    (tmp_path / "src" / "test" / "java" / "com" / "example" / "ignite" / "service").mkdir(parents=True)
+    (tmp_path / _EMPLOYEE_SERVICE_PATH_P1).write_text(_EMPLOYEE_SERVICE_UNCHANGED_P1)
+    (tmp_path / _EMPLOYEE_SERVICE_TEST_PATH_P1).write_text("class EmployeeServiceTest {}\n")
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    state.all_original_contents = {_EMPLOYEE_SERVICE_PATH_P1: _EMPLOYEE_SERVICE_UNCHANGED_P1}
+    ctx = _minimal_attempt_ctx(
+        tmp_path, max_retries=4,
+        established_files=[_EMPLOYEE_SERVICE_PATH_P1, _EMPLOYEE_SERVICE_TEST_PATH_P1],
+    )
+    exc = QualityGateFailure(Failure(
+        type="targeted_test", message="targeted test failed",
+        raw_output=_HIRE_GUARD_TRACE_P1,
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is False
+    assert state.last_attribution.files == [_EMPLOYEE_SERVICE_TEST_PATH_P1]
+    assert _EMPLOYEE_SERVICE_PATH_P1 not in state.last_attribution.files
+    assert state.last_attribution.tier == "locator"
+    ctx.developer.llm.complete.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_missing_planned_prerequisite_outside_scope_immediately_routes_to_plan_scope_defect(tmp_path):
     """A compiler-grounded missing prerequisite owned by another planned
@@ -15400,6 +15466,68 @@ async def test_predetermined_plan_and_design_use_the_real_architect_files_list(t
 
     assert res["quality_gates_passed"] is True
     assert "math.py" in res["files"]
+
+
+@pytest.mark.asyncio
+async def test_response_construction_owner_false_positive_never_reaches_architect_files(tmp_path):
+    """Vertical counterpart to test_file_resolution.py's unit tests for
+    include_response_construction_owners/discover_response_construction_
+    owners, which call those functions directly with hand-picked
+    arguments - those prove the P4 regex fix itself is correct, but not
+    that run_generation_workflow (kriya/workflow/workflow.py, the real
+    caller) actually reaches this branch with the real goal string for a
+    TASK-kind route, and that its result really governs what the Developer
+    is asked to produce. Reproduces the P4 incident shape: an existing,
+    unrelated response-owner file (bare 'response' keyword, real
+    response-construction syntax) sits in the repo; the goal mentions
+    'response' only in a preservation/negation context, never requesting
+    new response-shape work. The false-positive file must never enter
+    architect_files, never be sent to the Developer, and stay byte-
+    identical on disk."""
+    _init_git_repo(tmp_path)
+    views_path = tmp_path / "views.py"
+    original_views_content = "def render(request):\n    response.set(request, 'ok')\n    return response\n"
+    views_path.write_text(original_views_content)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.engineering_triage.enabled = True
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        '[{"filepath": "audit_logger.py", "content": "def log(event):\\n    pass"}]',  # Developer
+        "Review: Approved",  # Reviewer
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.engineering_triage.classify = AsyncMock(return_value=EngineeringRoute(
+        kind=ChangeKind.TASK, impact=ImpactVector(),
+        initial_risk_class=RiskClass.LOW, current_risk_class=RiskClass.LOW,
+        max_observed_risk_class=RiskClass.LOW, execution_weight=ExecutionWeight.LIGHT,
+    ))
+    goal = (
+        "Add a new audit_logger.py that changes how audit events are "
+        "recorded. The existing response payload must remain "
+        "unchanged for all current endpoints."
+    )
+    with patch(
+        "kriya.workflow.workflow.include_response_construction_owners",
+        wraps=include_response_construction_owners,
+    ) as spy:
+        res = await we.run_generation_workflow(
+            goal=goal,
+            workspace_path=str(tmp_path),
+            predetermined_plan="Add audit_logger.py",
+            predetermined_design="Add audit_logger.py",
+            predetermined_architect_files=["audit_logger.py"],
+        )
+
+    # The real function ran, with the real goal - not skipped because
+    # engineering_route.kind ended up outside (TASK, ENHANCEMENT).
+    spy.assert_called_once_with(["audit_logger.py"], goal, str(tmp_path))
+    assert res["quality_gates_passed"] is True
+    assert "views.py" not in res["files"]
+    assert views_path.read_text() == original_views_content
 
 
 @pytest.mark.asyncio

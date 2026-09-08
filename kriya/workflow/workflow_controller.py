@@ -746,6 +746,80 @@ def _semantic_contract_regression_subtasks(
     return list(dict.fromkeys(offending))
 
 
+_PRESERVED_REFERENCE_CONFLICT_RE = re.compile(
+    r"artifact '([^']+)' declares '([^']+)' as a preserved reference"
+)
+
+
+def _preserved_reference_pairs_mentioned(texts: List[str]) -> Set[Tuple[str, str]]:
+    """(source, target) pairs named by THIS round's own
+    PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP error text (plan_validation.
+    py's own wording: "artifact '<source>' declares '<target>' as a
+    preserved reference, but '<target>' is itself planned for modification
+    by [...]") - used only to decide which preservation pair(s) a round was
+    actually asked to correct, feeding _preserved_reference_regressions'
+    own "unless directly implicated" exemption below (PRV-17, 2026-09-08, P5
+    audit, mirrors _subtask_ids_mentioned's exact rationale for the sibling
+    requires/provides mechanism: a round legitimately asked to REMOVE a
+    wrong preservation claim (this exact conflict) must not have that
+    correction itself flagged as a silent, unrelated drop)."""
+    pairs: Set[Tuple[str, str]] = set()
+    for text in texts:
+        for match in _PRESERVED_REFERENCE_CONFLICT_RE.finditer(text):
+            pairs.add((match.group(1), match.group(2)))
+    return pairs
+
+
+def _preserved_reference_regressions(
+    obligation_ledger: ObligationLedger, regressions_before: int,
+    implicated_pairs: Set[Tuple[str, str]],
+) -> List[Tuple[str, str]]:
+    """Deterministic sibling to _semantic_contract_regression_subtasks
+    (PRV-17, 2026-09-08, P5 audit): returns the (source, target) pair(s)
+    whose previously-SATISFIED PRESERVED_REFERENCE obligation just
+    regressed to VIOLATED THIS round (newly appended to obligation_ledger.
+    regressions since `regressions_before` by find_missing_grounded_
+    production_artifacts' own closing pass), and which were NOT named by
+    the errors that prompted this round's own repair prompt
+    (`implicated_pairs`).
+
+    A separate function, not a broadened SUBTASK_SEMANTIC_CONTRACT filter,
+    deliberately - PRESERVED_REFERENCE's real identity is the (source,
+    target) FILE pair (an edge-level fact, matching preserved_references'
+    own edge-level design - see that field's own docstring), not a subtask
+    id; forcing it through subtask identity would be wrong when a single
+    subtask's PlannedFile legitimately drops one preserved target while
+    correctly retaining another on the SAME file. Reuses ObligationLedger.
+    record()'s existing SATISFIED->VIOLATED regression detection rather
+    than a second, parallel comparison - see ObligationKind.
+    PRESERVED_REFERENCE's own docstring. Called from _run_structured_
+    enforce; the caller ORs a non-empty result into the same retained-
+    baseline redirect _is_strict_regression and
+    _semantic_contract_regression_subtasks already drive, rather than this
+    function rejecting anything itself - _is_strict_regression's own
+    reason-code-set semantics stay untouched.
+
+    Live incident this closes (P5, PetTests.java): attempt 1 satisfies
+    BaseEntity.java, leaving Visit.java missing (reason_codes=
+    {MISSING_GROUNDED_PRODUCTION_ARTIFACT}); attempt 2 satisfies
+    Visit.java but silently drops BaseEntity.java, again leaving exactly
+    one file missing (reason_codes={MISSING_GROUNDED_PRODUCTION_ARTIFACT} -
+    an IDENTICAL single-element set). _is_strict_regression's reason-code-
+    set comparison requires a proper subset relationship; two equal sets
+    are never a proper subset of each other, so it cannot see this
+    oscillation - exactly the class of gap _semantic_contract_regression_
+    subtasks already closed for requires/provides, left open here until
+    now."""
+    offending: List[Tuple[str, str]] = []
+    for event in obligation_ledger.regressions[regressions_before:]:
+        if event.kind != ObligationKind.PRESERVED_REFERENCE:
+            continue
+        pair = (event.current.evidence.get("source"), event.current.evidence.get("target"))
+        if pair[0] and pair[1] and pair not in implicated_pairs:
+            offending.append(pair)
+    return list(dict.fromkeys(offending))
+
+
 def build_structured_plan_repair_prompt(
     goal: str,
     previous_plan_text: str,
@@ -1599,6 +1673,73 @@ def find_missing_grounded_production_artifacts(
                     "test_requires": sorted(source_subtask.requires),
                     "reason": "semantic_provider_mismatch",
                 })
+    if obligation_ledger is not None:
+        # PRV-17 (2026-09-08, Production Validation P5 audit): mirrors
+        # plan_validation.py's own SUBTASK_SEMANTIC_CONTRACT closing pass
+        # exactly (same rationale, same mechanism) - the SATISFIED-recording
+        # branch above only ever (re-)records an id for a (source, target)
+        # pair that is STILL a real edge with a STILL-declared
+        # preserved_references entry this round. A pair silently dropped
+        # from a later draft (the source no longer declares that target
+        # preserved - whether because the edge disappeared or the
+        # declaration was simply removed) never reaches that branch again,
+        # so its previously-SATISFIED record would otherwise sit stale,
+        # hiding the exact live incident this closes: P5's PetTests.java
+        # needed BaseEntity.java and Visit.java preserved simultaneously;
+        # one attempt satisfied only the first, the next satisfied only the
+        # second while silently dropping the first - both attempts reported
+        # the IDENTICAL single-element reason-code set
+        # {MISSING_GROUNDED_PRODUCTION_ARTIFACT}, so _is_strict_regression's
+        # reason-code-set comparison could not see it (equal sets are never
+        # a proper subset of each other). This closing pass re-records
+        # VIOLATED against each dropped id, which is what makes
+        # ObligationLedger.record()'s own SATISFIED->VIOLATED regression
+        # detection fire - no new detection mechanism, only ensuring every
+        # previously-tracked id gets a fresh record every round, exactly
+        # like the requires/provides closing pass already does.
+        current_preserved_pairs = {
+            (source, target)
+            for source, targets in resolved_edges.items()
+            for target in targets
+            if (planned_file_by_path.get(source) is not None
+                and target in planned_file_by_path[source].preserved_references)
+        }
+        for oid in obligation_ledger.ids_by_kind(ObligationKind.PRESERVED_REFERENCE):
+            rec = obligation_ledger.current(oid)
+            if rec is None or rec.status != ObligationStatus.SATISFIED:
+                continue
+            pair = (rec.evidence.get("source"), rec.evidence.get("target"))
+            if pair in current_preserved_pairs:
+                continue
+            obligation_ledger.record(ObligationRecord(
+                id=oid, kind=ObligationKind.PRESERVED_REFERENCE,
+                status=ObligationStatus.VIOLATED,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=(
+                    f"{pair[0]!r} previously validated preservation of {pair[1]!r} is no "
+                    "longer declared this round"
+                ),
+                source="workflow_controller.find_missing_grounded_production_artifacts",
+                revision=revision,
+                evidence={**rec.evidence, "dropped_between_revisions": True},
+                # terminal_required=False (unlike the live per-round
+                # recording above): the source/target pair may have been
+                # legitimately retired (e.g. the Planner correctly removed a
+                # WRONG preservation claim after a
+                # PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP correction -
+                # see _preserved_reference_regressions()'s own implicated-
+                # pair exemption for how a round that explicitly corrects
+                # this exact pair is never treated as a silent drop in the
+                # first place), in which case nothing will ever re-satisfy
+                # THIS exact id again - the unconditional final-gate check
+                # this drives (unresolved_terminal_obligations()) must not
+                # permanently fail a run over an obligation no longer live.
+                # record()'s SATISFIED->VIOLATED regression detection (this
+                # record's actual purpose) fires regardless of
+                # terminal_required - only the final aggregation gate reads
+                # that flag.
+                terminal_required=False,
+            ))
     return gaps
 
 
@@ -4273,6 +4414,24 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 reason_codes.append("SEMANTIC_CONTRACT_REGRESSION_REJECTED")
                 reason_codes = list(dict.fromkeys(reason_codes))
+            # PRV-17 (2026-09-08, P5 audit): sibling check to the requires/
+            # provides one above, same rationale, different identity (a
+            # (source, target) file pair rather than a subtask id) - see
+            # _preserved_reference_regressions' own docstring for the P5
+            # oscillation this closes.
+            preserved_reference_regressions = _preserved_reference_regressions(
+                obligation_ledger, regressions_before,
+                _preserved_reference_pairs_mentioned(prior_prompt_errors),
+            )
+            if preserved_reference_regressions:
+                errors.append(
+                    "plan repair silently regressed previously-validated preserved "
+                    f"reference(s) {preserved_reference_regressions!r} while fixing something "
+                    "else - restore these preserved_references declarations exactly as declared "
+                    "before this repair round"
+                )
+                reason_codes.append("PRESERVED_REFERENCE_REGRESSION_REJECTED")
+                reason_codes = list(dict.fromkeys(reason_codes))
             if plan is not None and not errors:
                 approved_stack_contract = derive_stack_contract(goal)
                 log_stack_contract_boundary("plan", approved_stack_contract, None)
@@ -4319,7 +4478,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # rejection path. _is_strict_regression's own semantics (and the
             # `is_strict_regression` value fed to it) are untouched by this
             # OR - see _semantic_contract_regression_subtasks' own docstring.
-            treat_as_regression = is_strict_regression or bool(semantic_contract_regression_subtasks)
+            treat_as_regression = (
+                is_strict_regression
+                or bool(semantic_contract_regression_subtasks)
+                or bool(preserved_reference_regressions)
+            )
             if treat_as_regression:
                 prompt_plan_text = retained_plan_text
                 prompt_errors = retained_errors
