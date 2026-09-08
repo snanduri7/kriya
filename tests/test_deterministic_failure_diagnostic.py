@@ -17,6 +17,7 @@ own module docstring for the full incident. Two layers of tests:
 """
 import hashlib
 import os
+import subprocess
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -24,6 +25,7 @@ import pytest
 
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
+from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import AttemptContext
 from kriya.workflow.deterministic_failure_diagnostic import (
     DeterministicFailureCorrectability,
@@ -33,6 +35,7 @@ from kriya.workflow.deterministic_failure_diagnostic import (
     replay_deterministic_verification_against_baseline,
 )
 from kriya.workflow.failure import Failure, QualityGateFailure
+from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.state import GenerationState
 
@@ -45,12 +48,20 @@ def _call(store, **overrides):
         store=store,
         fail_type="compile",
         current_failure_signature=_SIG_A,
+        # Matches whatever the mocked replay's own "output" is set to in
+        # each test below (real callers pass retry_strategy.py's own
+        # raw_error_context, which typically WRAPS the validator's raw
+        # output - see evaluate_candidate_independent_failure's own
+        # docstring for why substring containment, not signature equality,
+        # is the comparison basis).
+        current_error_text="COMPILATION FAILURE:\nsame failure text",
         previous_failure_signature=_SIG_A,
         workspace_changed=True,
         has_implicated_files=False,
         authoritative_workspace_path="/nonexistent",
         known_files=["Foo.java"],
         autonomy_cfg=None,
+        subtask_id="s1",
     )
     kwargs.update(overrides)
     return evaluate_candidate_independent_failure(**kwargs)
@@ -67,14 +78,11 @@ def test_baseline_reproduces_failure_classifies_non_candidate_correctable():
     with patch(
         "kriya.workflow.deterministic_failure_diagnostic.replay_deterministic_verification_against_baseline",
         return_value={"success": False, "output": "same failure text"},
-    ), patch(
-        "kriya.workflow.failure_grounding.build_failure_signature",
-        return_value=_SIG_A,
     ):
         rec = _call(store)
     assert rec is not None
     assert rec.correctability == DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE
-    assert store.get(_SIG_A) is rec
+    assert store.get("s1", _SIG_A) is rec
 
 
 def test_baseline_succeeds_classifies_candidate_correctable_and_retry_continues():
@@ -138,11 +146,8 @@ def test_broken_baseline_is_classified_as_a_blocker():
     with patch(
         "kriya.workflow.deterministic_failure_diagnostic.replay_deterministic_verification_against_baseline",
         return_value={"success": False, "output": "broken baseline output"},
-    ), patch(
-        "kriya.workflow.failure_grounding.build_failure_signature",
-        return_value=_SIG_A,
     ):
-        rec = _call(store)
+        rec = _call(store, current_error_text="COMPILATION FAILURE:\nbroken baseline output")
     assert rec.correctability == DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE
     assert rec.baseline_output == "broken baseline output"
 
@@ -156,9 +161,6 @@ def test_retry_family_switch_does_not_erase_cached_evidence():
     with patch(
         "kriya.workflow.deterministic_failure_diagnostic.replay_deterministic_verification_against_baseline",
         return_value={"success": False, "output": "same failure text"},
-    ), patch(
-        "kriya.workflow.failure_grounding.build_failure_signature",
-        return_value=_SIG_A,
     ):
         first = _call(store)
     # A later call for the exact same signature, simulating a different
@@ -182,9 +184,6 @@ def test_plan_scope_recovery_reset_does_not_erase_proven_diagnostic():
     with patch(
         "kriya.workflow.deterministic_failure_diagnostic.replay_deterministic_verification_against_baseline",
         return_value={"success": False, "output": "same failure text"},
-    ), patch(
-        "kriya.workflow.failure_grounding.build_failure_signature",
-        return_value=_SIG_A,
     ):
         _call(store)  # round 1, pre-reset
 
@@ -197,6 +196,37 @@ def test_plan_scope_recovery_reset_does_not_erase_proven_diagnostic():
         rec_round2 = _call(store)
     assert rec_round2.correctability == DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE
     mock_replay_round2.assert_not_called()
+
+
+def test_different_subtasks_do_not_share_a_cached_conclusion():
+    """Edge case flagged for review: the store key is (subtask_id,
+    failure_signature), not failure_signature alone - the byte-identical
+    Kriya-synthesized message colliding for two UNRELATED subtasks must not
+    let one subtask's proven baseline-replay conclusion silently apply to
+    the other's genuinely different validation context. A fresh subtask
+    with no cached record must still trigger its OWN replay."""
+    store = DeterministicFailureDiagnosticStore()
+    with patch(
+        "kriya.workflow.deterministic_failure_diagnostic.replay_deterministic_verification_against_baseline",
+        return_value={"success": False, "output": "same failure text"},
+    ):
+        rec_s1 = _call(store, subtask_id="s1")
+    assert rec_s1.correctability == DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE
+
+    # s2 shares the exact same failure_signature by coincidence but has
+    # never been evaluated - must trigger its own fresh replay, not inherit
+    # s1's conclusion.
+    with patch(
+        "kriya.workflow.deterministic_failure_diagnostic.replay_deterministic_verification_against_baseline",
+        return_value={"success": True, "output": "compiles fine for s2's own baseline"},
+    ) as mock_replay_s2:
+        rec_s2 = _call(store, subtask_id="s2")
+    mock_replay_s2.assert_called_once()
+    assert rec_s2.correctability == DeterministicFailureCorrectability.CANDIDATE_CORRECTABLE
+    # Both conclusions coexist independently in the same store.
+    assert store.get("s1", _SIG_A) is rec_s1
+    assert store.get("s2", _SIG_A) is rec_s2
+    assert store.get("s1", _SIG_A) is not store.get("s2", _SIG_A)
 
 
 def test_replayable_fail_types_are_bounded_to_compile():
@@ -410,11 +440,11 @@ async def test_handle_attempt_failure_stops_the_loop_when_baseline_reproduces_fa
         "kriya.workflow.retry_strategy.classify_environment_failure", return_value=None,
     ), patch(
         "kriya.workflow.deterministic_failure_diagnostic.replay_deterministic_verification_against_baseline",
-        # The REAL build_failure_signature() runs unmocked on both sides
-        # (retry_strategy.py's own computation of current_failure_signature,
-        # and this module's baseline comparison) - identical message text
-        # naturally normalizes to the identical signature, exactly the real
-        # incident's own shape (a byte-identical Kriya-synthesized message).
+        # The baseline's raw "output" is a plain substring of exc2's own
+        # message (this fixture uses the identical string for both, exactly
+        # the real incident's own shape - a byte-identical Kriya-synthesized
+        # message) - the substring-containment comparison in
+        # evaluate_candidate_independent_failure holds trivially here.
         return_value={"success": False, "output": message},
     ):
         should_break = await handle_attempt_failure(state, ctx, exc2)
@@ -495,3 +525,72 @@ async def test_handle_attempt_failure_with_implicated_file_never_terminates(tmp_
 
     mock_replay.assert_not_called()
     assert not state.environment_failure
+
+
+# --- Category 4: the real behavioral contract - the retry LOOP itself stops,
+# not merely that evaluate_candidate_independent_failure() classifies
+# correctly in isolation. Same WorkflowEngine.run_generation_workflow()
+# fixture style as tests/test_workflow.py's own
+# test_workflow_fallback_targeted_fix_succeeds_before_full_set_regeneration
+# (mock PolymorphicValidator.run_compile_check + we.developer.run_generation,
+# let the REAL retry loop/decide_for_state run end to end). ---
+
+def _init_git_repo(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("placeholder\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True)
+
+
+@pytest.mark.asyncio
+async def test_real_retry_loop_stops_before_a_third_developer_call(tmp_path):
+    """The key behavioral contract of this whole architecture extension,
+    reproducing the actual P7 attempt-1 shape end to end: Developer attempt 1
+    and attempt 2 each write MATERIALLY DIFFERENT candidate content, but the
+    SAME deterministic, unattributed Kriya compile-check message rejects
+    both. On attempt 2's failure, the baseline replay (also going through
+    the same globally-mocked run_compile_check) reproduces the identical
+    failure -> the run must stop BEFORE a third Developer call, with
+    failure_category correctly reported as the new candidate-independent
+    category, never a bare "quality_gates_exhausted" or "environment_failure"
+    label."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write App.java",
+        "Review: not approved - compilation kept failing",
+    ])
+
+    zero_class_files_message = (
+        "Maven reported compilation success, but zero .class files were actually "
+        "produced under target/classes. Maven's default sourceDirectory (src/main/java) "
+        "most likely doesn't cover where this project's .java files actually live - add "
+        "an explicit <sourceDirectory> to pom.xml's <build> section pointing at their "
+        "real location, rather than assuming the conventional src/main/java layout."
+    )
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": zero_class_files_message},  # attempt 1's own check
+            {"success": False, "output": zero_class_files_message},  # attempt 2's own check
+            {"success": False, "output": zero_class_files_message},  # attempt 2's triggered baseline replay
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  String x2;\n  int y;\n}"}],
+        ])
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert res["quality_gates_passed"] is False
+    assert we.developer.run_generation.call_count == 2  # never reached a third Developer call
+    assert res.get("failure_category") == "candidate_independent_deterministic_failure"
+    assert res.get("environment_failure", "").startswith("CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE:")

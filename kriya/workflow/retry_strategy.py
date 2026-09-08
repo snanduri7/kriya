@@ -586,12 +586,14 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             store=ctx.deterministic_failure_diagnostics,
             fail_type=fail_type,
             current_failure_signature=current_failure_signature,
+            current_error_text=raw_error_context,
             previous_failure_signature=previous_failure_signature,
             workspace_changed=current_workspace_hash != state.last_failed_workspace_hash,
             has_implicated_files=bool(getattr(failure, "likely_files", None)),
             authoritative_workspace_path=ctx.workspace_path,
             known_files=ctx.established_files,
             autonomy_cfg=ctx.kernel.config.autonomy,
+            subtask_id=ctx.current_subtask_id,
         )
         if diagnostic is not None and diagnostic.correctability == DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE:
             # Reuses the EXISTING state.environment_failure/STOP_ENVIRONMENT

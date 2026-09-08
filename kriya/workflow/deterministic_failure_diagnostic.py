@@ -94,18 +94,35 @@ _BASELINE_COPY_EXCLUDED_DIRS = frozenset({
 })
 
 
+# A store key is (subtask_id, failure_signature) - fail_type is already
+# baked into failure_signature's own leading element (build_failure_
+# signature() returns (failure_type, ...)), so the only piece worth adding
+# explicitly is the subtask/workflow context: two DIFFERENT subtasks
+# producing the byte-identical Kriya-synthesized message text must never
+# silently inherit each other's baseline-replay conclusion just because the
+# text collided - a scoping gap the user caught before this closed. None
+# for subtask_id (a caller with no current_subtask_id, e.g. a plain Legacy
+# run) still scopes correctly - it is simply one shared bucket for that
+# caller, exactly like today's un-scoped behavior for every non-MA6-
+# structured run.
+DiagnosticKey = Tuple[Optional[str], Tuple[str, Any]]
+
+
 @dataclass(frozen=True)
 class DeterministicFailureDiagnosticRecord:
-    """One conclusion, keyed by the SAME normalized failure_signature
+    """One conclusion. failure_signature is the SAME normalized signature
     build_failure_signature() already produces (kriya/workflow/
     failure_grounding.py) - never re-derived from raw error text, for the
     same reason obligations.py's own ObligationRecord.id docstring gives:
-    stability across attempts is the whole point."""
+    stability across attempts is the whole point. subtask_id is carried
+    alongside it (not folded into a single opaque key) so a caller can
+    inspect which subtask this conclusion was actually proven for."""
 
     failure_signature: Tuple[str, Any]
     fail_type: str
     correctability: DeterministicFailureCorrectability
     baseline_output: str
+    subtask_id: Optional[str] = None
     evidence: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -119,16 +136,22 @@ class DeterministicFailureDiagnosticStore:
     conclusion already proven here - deliberately a separate object from
     ObligationLedger, not a new ObligationKind, so this mechanism carries
     zero coupling to MA8's regression-detection/authority-precedence
-    semantics, which do not apply to this question at all."""
+    semantics, which do not apply to this question at all.
+
+    Keyed by (subtask_id, failure_signature) - see DiagnosticKey's own
+    comment for why cross-subtask cache sharing would be a real
+    contamination risk, not merely a naming nicety."""
 
     def __init__(self) -> None:
-        self._records: Dict[Tuple[str, Any], DeterministicFailureDiagnosticRecord] = {}
+        self._records: Dict[DiagnosticKey, DeterministicFailureDiagnosticRecord] = {}
 
-    def get(self, failure_signature: Tuple[str, Any]) -> Optional[DeterministicFailureDiagnosticRecord]:
-        return self._records.get(failure_signature)
+    def get(
+        self, subtask_id: Optional[str], failure_signature: Tuple[str, Any],
+    ) -> Optional[DeterministicFailureDiagnosticRecord]:
+        return self._records.get((subtask_id, failure_signature))
 
     def record(self, rec: DeterministicFailureDiagnosticRecord) -> None:
-        self._records[rec.failure_signature] = rec
+        self._records[(rec.subtask_id, rec.failure_signature)] = rec
 
 
 def _copy_baseline_workspace(source_workspace_path: str, dest_dir: str) -> None:
@@ -187,12 +210,14 @@ def evaluate_candidate_independent_failure(
     store: DeterministicFailureDiagnosticStore,
     fail_type: str,
     current_failure_signature: Tuple[str, Any],
+    current_error_text: str,
     previous_failure_signature: Optional[Tuple[str, Any]],
     workspace_changed: bool,
     has_implicated_files: bool,
     authoritative_workspace_path: str,
     known_files: Iterable[str],
     autonomy_cfg: Any,
+    subtask_id: Optional[str] = None,
 ) -> Optional[DeterministicFailureDiagnosticRecord]:
     """Orchestrates the full trigger-then-replay decision. Returns None
     whenever the trigger conditions are not met (nothing evaluated, no
@@ -203,6 +228,21 @@ def evaluate_candidate_independent_failure(
     STOP_ENVIRONMENT mechanism, never a new one - see that call site's own
     comment). A CANDIDATE_CORRECTABLE record is also returned so the caller
     can log it, but must never be treated as a reason to stop.
+
+    current_error_text is the SAME raw text current_failure_signature was
+    built from (retry_strategy.py's own raw_error_context, i.e. str(the
+    raised exception)) - needed because the ORIGINAL failure's message is
+    typically a wrapped form of the validator's raw output (e.g. attempt.py's
+    own compile raise site: f"COMPILATION FAILURE:\\n{compile_res['output']}"),
+    while a fresh baseline replay call only ever returns the validator's own
+    raw, unwrapped output. Comparing build_failure_signature() of the two
+    directly would (and, found live in this session's own direct
+    verification before this fix, DID) almost always disagree even for the
+    textually-identical underlying failure, since the wrapping prefix isn't
+    itself part of the normalized digest either side computes independently.
+    Substring containment (does current_error_text contain the baseline's
+    own raw output) sidesteps needing to know or reconstruct any particular
+    raise site's own wrapping convention.
 
     Trigger requires ALL of:
       1. fail_type is a bounded, safely-replayable deterministic gate.
@@ -219,12 +259,16 @@ def evaluate_candidate_independent_failure(
          evidence for TRIGGERING only, per this module's own docstring - it
          never independently produces a NON_CANDIDATE_CORRECTABLE verdict.
 
-    A cached record for this exact failure_signature (from an earlier
-    attempt, possibly in a since-reset GenerationState/plan-scope-recovery
-    cycle) is returned immediately without a second replay - a baseline
-    replay is a real subprocess call and this mechanism is deliberately
-    bounded to at most one per distinct failure_signature per run."""
-    cached = store.get(current_failure_signature)
+    A cached record for this exact (subtask_id, failure_signature) pair
+    (from an earlier attempt, possibly in a since-reset GenerationState/
+    plan-scope-recovery cycle) is returned immediately without a second
+    replay - a baseline replay is a real subprocess call and this mechanism
+    is deliberately bounded to at most one per distinct pair per run.
+    subtask_id scopes the cache so the byte-identical message occurring for
+    a DIFFERENT subtask never inherits this subtask's own conclusion - two
+    subtasks can share a failure_signature by coincidence without sharing a
+    validation context."""
+    cached = store.get(subtask_id, current_failure_signature)
     if cached is not None:
         return cached
     if fail_type not in _DETERMINISTIC_REPLAYABLE_FAIL_TYPES:
@@ -237,9 +281,10 @@ def evaluate_candidate_independent_failure(
         return None
     logger.info(
         "Candidate-independent deterministic failure check triggered for fail_type=%s "
-        "(same normalized failure recurred after a materially different candidate, no "
-        "credible implicated file) - replaying against an isolated baseline copy.",
-        fail_type,
+        "subtask_id=%s (same normalized failure recurred after a materially different "
+        "candidate, no credible implicated file) - replaying against an isolated "
+        "baseline copy.",
+        fail_type, subtask_id,
     )
     baseline_result = replay_deterministic_verification_against_baseline(
         fail_type=fail_type,
@@ -247,19 +292,18 @@ def evaluate_candidate_independent_failure(
         known_files=known_files,
         autonomy_cfg=autonomy_cfg,
     )
-    from kriya.workflow.failure_grounding import build_failure_signature
-
     if baseline_result.get("success"):
         record = DeterministicFailureDiagnosticRecord(
             failure_signature=current_failure_signature,
             fail_type=fail_type,
             correctability=DeterministicFailureCorrectability.CANDIDATE_CORRECTABLE,
             baseline_output=baseline_result.get("output", ""),
+            subtask_id=subtask_id,
             evidence={"baseline_reproduced_failure": False},
         )
     else:
-        baseline_signature = build_failure_signature(fail_type, baseline_result.get("output", ""))
-        baseline_reproduced = baseline_signature == current_failure_signature
+        baseline_output = baseline_result.get("output", "")
+        baseline_reproduced = bool(baseline_output) and baseline_output in current_error_text
         record = DeterministicFailureDiagnosticRecord(
             failure_signature=current_failure_signature,
             fail_type=fail_type,
@@ -267,7 +311,8 @@ def evaluate_candidate_independent_failure(
                 DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE if baseline_reproduced
                 else DeterministicFailureCorrectability.CANDIDATE_CORRECTABLE
             ),
-            baseline_output=baseline_result.get("output", ""),
+            baseline_output=baseline_output,
+            subtask_id=subtask_id,
             evidence={"baseline_reproduced_failure": baseline_reproduced},
         )
     store.record(record)
