@@ -621,11 +621,43 @@ def find_brownfield_public_api_changes(
     original_contents: Dict[str, str],
     final_contents: Dict[str, str],
     goal: str,
+    active_authorizations: Optional[List[Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Reject model-preferred API renames during an ordinary brownfield repair.
 
     A removed signature is blocking only when existing tests or call sites name
     that API. Explicit API-migration requests are outside this repair guard.
+
+    CORR-016 (P9/PRV-08, 2026-09-08): a real P9 production run found this
+    function had no way to distinguish an incidental, unrequested public-API
+    mutation from one the raw, authoritative user goal itself explicitly
+    requests. A first authorization channel, keyed off the current subtask's
+    entire legal write scope, was built, caught authorizing an unrelated
+    incidental rename, and was reverted (see git history / the Risk
+    Register's CORR-016 row). A revised architecture design
+    (docs/architecture/CORR016_AUTHORIZED_CONTRACT_EVOLUTION_DESIGN.md,
+    Revision 2) then found the real PRV-08 defect was not a missing
+    authorization at all: the frozen authoritative goal never asked for
+    CustomerSummary's own contract to change, so this function's original
+    rejection was CORRECT. Only the narrow DIRECT slice of that design is
+    implemented here (kriya/workflow/contract_authority.py) - a
+    ContractEvolutionAuthorization exists only when the raw grounding_goal
+    text itself, in one clause, independently names the owner, the symbol,
+    and the change category. DERIVED authorization (permitting a downstream
+    file to change because an upstream one did) remains designed but
+    deliberately NOT implemented - no production scenario has yet
+    demonstrated the need, and the general case is not soundly decidable
+    from repository evidence alone (see the design doc's own §3/§19).
+
+    active_authorizations is a caller-filtered, caller-scoped list of
+    ContractEvolutionAuthorization records (kriya/workflow/contract_authority.py)
+    - the caller is responsible for including only records whose legal_scope
+    already matches the current subtask; this function does not re-derive
+    subtask ownership itself. A match is per EXACT (owner, symbol) pair,
+    never a whole-owner or whole-batch grant (a second, unrelated violation
+    in the same file or the same candidate batch is entirely unaffected by
+    an unrelated authorization) - see SAME_FILE_OVERREACH/UNRELATED_OWNER
+    tests in tests/test_workflow.py.
     """
     if _goal_explicitly_requests_api_change(goal):
         return []
@@ -640,6 +672,19 @@ def find_brownfield_public_api_changes(
                     evidence_contents[evidence_path] = fh.read()
             except OSError:
                 continue
+    # Candidate overlay (Step 6, CORR-016 investigation - independently
+    # correct, kept unmodified across every CORR-016 revision): a consumer
+    # file already updated in this SAME candidate batch must be evaluated on
+    # its own new content, not stale on-disk text - otherwise a compatible
+    # co-update looks like outstanding evidence of continued old-API usage
+    # forever.
+    evidence_contents.update(final_contents)
+
+    authorizations_by_owner_symbol: Dict[tuple, Any] = {}
+    for authorization in active_authorizations or []:
+        authorizations_by_owner_symbol[
+            (authorization.affected_owner, authorization.affected_symbol)
+        ] = authorization
 
     violations = []
     for path, final_content in final_contents.items():
@@ -648,6 +693,7 @@ def find_brownfield_public_api_changes(
             continue
         original_signatures = _normalized_public_signatures(path, original_content)
         final_signatures = _normalized_public_signatures(path, final_content)
+        final_api_names = set(final_signatures.values())
         for signature, api_name in sorted(original_signatures.items()):
             if signature in final_signatures:
                 continue
@@ -656,12 +702,28 @@ def find_brownfield_public_api_changes(
                 if evidence_path != path
                 and re.search(rf"(?<![\w$]){re.escape(api_name)}\s*\(", evidence_content)
             )
-            if evidence_files:
-                violations.append({
-                    "owner": path,
-                    "removed_signature": signature,
-                    "evidence_files": evidence_files,
-                })
+            if not evidence_files:
+                continue
+            authorization = authorizations_by_owner_symbol.get((path, api_name))
+            if authorization is not None:
+                # Rule 6: category must agree, not just identity. api_name
+                # still present in final_signatures (just reshaped) means
+                # this is an ADD/MODIFY, not a REMOVE - matched against
+                # whichever category the authorization actually grants.
+                symbol_still_present = api_name in final_api_names
+                category_ok = (
+                    authorization.allowed_change_category.value in ("add", "modify")
+                    if symbol_still_present
+                    else authorization.allowed_change_category.value == "remove"
+                )
+                if category_ok:
+                    continue  # authorized: this one violation is dropped
+            violations.append({
+                "owner": path,
+                "removed_signature": signature,
+                "evidence_files": evidence_files,
+            })
+    violations.sort(key=lambda v: (v["owner"], v["removed_signature"]))
     return violations
 
 

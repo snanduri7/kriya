@@ -944,6 +944,52 @@ async def test_fill_missing_content_no_fix_analysis_instruction_without_prior_er
     assert "FIX ANALYSIS" not in file_prompt
     assert files[0]["content"] == "public class App {}"
 
+def test_planner_agent_system_prompt_documents_execution_role_verification():
+    """P9-P1 (P9/PRV-08, 2026-09-08): the Planner's own prompt never
+    mentioned execution_role/ExecutionRole.VERIFICATION at all, even though
+    the schema already supports it (plan_schema.py's own model_validator
+    requires empty planned_files + a real verifier for that role, and
+    plan_validation.py already exempts it from the MODEL_SUBTASK_MISSING_
+    PLANNED_FILES check) - so the Planner had no way to know a genuinely
+    non-mutating "revalidate this affected consumer" step was legal,
+    defaulting every dependent subtask to execution_role=implementation
+    with a modify action instead. This asserts the prompt now documents the
+    "verification" role by name and shows its required shape (empty
+    planned_files, a real verification list entry)."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    planner = PlannerAgent("planner", llm)
+    sp = planner.system_prompt
+    assert "execution_role" in sp
+    assert '"verification"' in sp
+    assert "planned_files MUST be empty" in sp or "planned_files MUST be []" in sp
+
+
+def test_planner_agent_system_prompt_states_affectedness_does_not_imply_mutation():
+    """P9-P1 - the core semantic rule this fix exists to teach: being
+    affected by an upstream contract change is never, by itself, evidence
+    that a downstream file's own source must be modified."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    planner = PlannerAgent("planner", llm)
+    sp = planner.system_prompt
+    assert "AFFECTEDNESS DOES NOT IMPLY MUTATION" in sp
+    assert "never, by itself, evidence" in sp or "not, by itself, evidence" in sp
+
+
+def test_planner_agent_system_prompt_requires_positive_justification_for_implementation():
+    """P9-P1 - execution_role=implementation with planned_files must be
+    reserved for a subtask with POSITIVE justification (the goal itself
+    naming the change, or concrete grounded evidence of incompatibility),
+    never merely "this file depends on something that changed"."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    planner = PlannerAgent("planner", llm)
+    sp = planner.system_prompt
+    assert "positive justification" in sp
+    assert "consumes or depends on something that changed" in sp
+
+
 def test_developer_agent_system_prompt_documents_authority_sections():
     """PRV-11 authority-isolation fix (2026-08-30, follow-up): the batch/
     full-generation path (self.system_prompt) must also know how to

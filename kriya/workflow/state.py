@@ -314,6 +314,21 @@ class GenerationState:
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)
     all_original_contents: Dict[str, str] = field(default_factory=dict)
+    # P9-R1 (P9/PRV-08, 2026-09-08): the most recent content `files` (this
+    # attempt's own Developer/deterministic-restore response) carried for
+    # each path, updated on EVERY attempt regardless of that attempt's own
+    # gate outcome - a real, legitimate edit to one file must survive even
+    # when the SAME batch is rejected for an unrelated reason in a
+    # different file. Consumed only while state.api_contract_recovery is
+    # active (kriya/workflow/attempt.py's own run_attempt(), just before the
+    # brownfield ownership check) to fold an untouched-this-round expected
+    # file's own last real content back into a recovery attempt's narrowed
+    # `files` list, so the generic completeness check doesn't mistake a
+    # deliberately narrowed recovery round for the Developer silently
+    # under-delivering. Never read to fabricate content for a file that was
+    # never actually generated in any attempt (get() returns None; the
+    # caller does not fall back to baseline).
+    last_candidate_contents: Dict[str, str] = field(default_factory=dict)
     # Revisions that passed the real compile gate. A later candidate invalidates
     # only changed files and their manifest dependents; unrelated validated files
     # remain stable across targeted/dependency-scoped retries.

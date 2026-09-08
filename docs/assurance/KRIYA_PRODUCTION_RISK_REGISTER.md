@@ -1,0 +1,529 @@
+# Kriya Production Risk Register
+
+Governed by `KRIYA_PRODUCTION_RISK_REGISTER_SPEC.md` (schema, v2, APPROVED)
+against `KRIYA_V1_DEPLOYMENT_ENVELOPE.md` (APPROVED 2026-09-08).
+
+**Population status: Pass 3 — final evidence closure.** This supersedes
+Passes 1 and 2 in place. See §0.7 for what Pass 3 corrected on top of
+Pass 2 (topology reconciliation, full P1–P8 raw-evidence audit, the
+Python capability sweep, the `VER-004` correction, the `CORR-017` E5
+upgrade, and the `RECV-003`/PRV-06 formal resolution). Read §0 in full
+before trusting any count — three consecutive passes each found real
+errors in the previous one; do not assume this pass is error-free either,
+only that it applied the same scrutiny one level further.
+
+### §0.7 What Pass 3 corrected on top of Pass 2
+
+- **All 20 R1 Topology Coverage rows reconciled** (`KRIYA_TOPOLOGY_RECONCILIATION.md`) — zero new Risk IDs needed; `TOP-001` (created in Pass 2, before this row-by-row read) turned out to be an exact match for `TOP-REPO-002`, confirming rather than duplicating.
+- **All 8 P-runs' raw evidence read directly** (`KRIYA_P_SERIES_EVIDENCE_AUDIT.md`) — found P-runs are not evidentially equal: P1–P5 show real Kriya-gate success but unconfirmed manual follow-up; P6/P7/P8 carry independently-graded, non-Kriya-self-reported acceptance evidence. This is what grounded `CORR-017`'s E5 upgrade.
+- **P4 risk mapping resolved** — folds into `CORR-017`/`TOP-REPO-001`, no new risk (its preservation-under-refactor dimension isn't materially distinct from what `CORR-008`–`010` already represent).
+- **`RECV-003`/PRV-06 evidence conflict formally resolved** — full chronology established, downgraded to deterministic (E3) evidence, both underlying vertical-test citations independently re-verified by grep this pass (not memory).
+- **Python capability sweep completed** (`KRIYA_PYTHON_CAPABILITY_SWEEP.md`, all 24 named capabilities individually classified) — and it found a real error running the other direction from Pass 2's PRV corrections: `VER-004`'s "confirmed defect" (pyproject.toml dependency installation) doesn't actually exist in current source; I'd read an incident-description docstring as current behavior. Corrected `VER-004` from E0/NEEDS_IMPLEMENTATION to E2/NEEDS_EVIDENCE.
+- **`CORR-017` upgraded a second time**, this time on solid ground — E4 (Pass 2) → E5 (Pass 3), backed by three independently-graded, materially-distinct production instances (P6, P7, P8), diversity dimensions named explicitly per the schema's own E5 rule.
+
+---
+
+## §0. Population summary (Pass 2)
+
+### §0.1 What changed this pass, and why it matters more than new rows
+
+Pass 1 treated "a PRV result directory exists" as evidence. That was
+wrong, and re-reading the actual `RESULT.md`/`COMPARISON.md` files this
+pass overturned several Pass 1 conclusions:
+
+- **`PRV-06`'s actual result: FAIL for both `legacy` and `hardened`
+  variants**, reason `KRIYA_GREENFIELD_GIT_BOOTSTRAP_MISSING` — a
+  harness/fixture-precondition failure, not a confirmation of the
+  process-boundary-compatibility fix Pass 1 cited. The fix itself (real
+  commits, real named tests) is not in question; treating this *result*
+  as E4 confirmation of it was wrong, and is corrected in `RECV-003`
+  below.
+- **`PRV-11`'s own `RESULT.md` states outright: "Plan Recovery Capability
+  — NOT EXERCISED this run — this run proves nothing about plan recovery
+  specifically."** Pass 1 assigned this as E4 evidence for MA9 coordinated
+  repair. The scenario passed, but for reasons unrelated to the mechanism
+  it exists to test. Corrected in `RECV-002` below.
+- **`PRV-02`, `PRV-13`, `PRV-18` are all `NEEDS_REVIEW`** with an
+  unchecked manual-verification box in their own `RESULT.md` (token
+  semantics, self-correction build-config check, deterministic-denial
+  scope probe respectively) — Quality Gates passed, but the scenario's
+  own acceptance bar was never confirmed closed. Corrected in `POL-002`,
+  `RECV-004`, and the `CORR-002`/`REPO-003` evidence citation.
+- **`PRV-17`'s actual result contains real, previously-uncredited Python
+  evidence**: a genuine Django greenfield generation (`config/`,
+  `customers/`, `manage.py`, `pyproject.toml`, 11 files), `Quality Gates:
+  PASSED`, `Kriya exit: 0`. Status is `NEEDS_REVIEW` only because one
+  scope-creep manual check ("confirm project remains Python/Django only")
+  was never ticked — not a correctness failure. Pass 1's Python capability
+  framing was too pessimistic; corrected in `VER-005` below, and this is
+  the single most consequential correction in this pass.
+- **A targeted second capability grep found real Python machinery Pass 1
+  undersold**: `kriya/analyzer/analyzer.py`/`graph.py` use Python's
+  stdlib `ast` module for symbol extraction (native, not a tree-sitter
+  dependency); `kriya/tools/validate.py` has real venv-creation and
+  `python -m pytest` execution code, not just marker detection. No
+  dedicated `tests/test_python_*` file was found confirming this path's
+  own coverage — real source capability, unconfirmed by a named test.
+
+None of this changes the register's overall shape (the major gaps —
+Gradle, sandbox, policy enforcement, tool authority, concurrency — are
+unaffected and remain the largest, most load-bearing findings), but it
+changes several individual E-levels and dispositions materially, and it
+means the Pass-1 numbers should not have been used for prioritization as
+they stood.
+
+### §0.2 Scope/evidence separation applied (per explicit review)
+
+Of the 19 R1 invariant-derived risks, individual audit (not bulk
+relabeling) found **17 of 19 are language-neutral mechanisms currently
+evidenced only through Java** — the R1 invariant machinery lives in
+orchestration-level Python code (`workflow_controller.py`,
+`plan_validation.py`, `obligations.py`) operating on abstract plan/state
+objects, not on Java source itself. Only two are genuinely intrinsic to
+Java by their own nature: `INV-PLAN-005` (Java interface indexing — a
+Java-specific language construct) and `INV-BUILD-001` (Maven reactor
+compile evidence — intrinsic to Maven's build model). These two keep
+`Language Scope: JAVA`. The other 17 are reclassified `LANGUAGE_NEUTRAL`
+with per-language evidence noted inline in the same row (the smallest
+schema change that represents this correctly — see §0.3; no new field or
+taxonomy value was needed).
+
+`RECV-003` (process-boundary compatibility) is the one exception that
+looks similar but isn't: its actual detector code matches Java/Surefire
+signatures only, by explicit design (per its own source comment,
+"list-shaped for future stacks" — i.e., not yet built for anything else).
+That's a language-specific *mechanism*, not just language-specific
+*evidence*, so it correctly stays `JAVA`.
+
+### §0.3 Representational adjustment made (schema NOT redesigned)
+
+For a `LANGUAGE_NEUTRAL`-scoped row, `Effective Evidence Level` may now
+carry a per-language breakdown inline (e.g. "Java: E3; Python: E1, not
+independently demonstrated") when the two differ materially, instead of
+splitting into duplicate rows. Row-splitting (as done for `VER-004`/
+`VER-005`) is reserved for cases where the *mechanism itself* materially
+differs by language — not merely where evidence differs. This is a
+formatting convention within the existing `Effective Evidence Level`
+field, not a new field, value, or taxonomy — per the instruction not to
+redesign the schema unless actually necessary.
+
+### §0.4 Totals (recomputed with a small parsing script, not by hand)
+
+**Correction on top of a correction:** the first version of this table
+(written while composing the body, same mistake pattern as Pass 1) said
+67 total risks. A short Python script parsing every `**ID —`/`Disposition:`/
+`Deployment Relevance:`/`Language Scope:` line directly found the real
+total is **68** — I'd correctly summed the by-domain breakdown to 68 in
+the process of writing it, then transcribed the total as 67 anyway, a
+pure arithmetic slip on top of already-verified components. The
+by-domain row below was already right; only the total and the
+disposition/relevance/language cross-tabs needed correcting, which the
+script did exactly, with no rows failing to parse (0 missing dispositions,
+relevances, or language-scope values out of 68).
+
+| | Count |
+|---|---:|
+| Total risks | 68 |
+| REQUIRED | 60 |
+| OPTIONAL | 6 |
+| OUT_OF_SCOPE | 2 |
+| CLOSED | 25 |
+| NEEDS_EVIDENCE | 21 |
+| NEEDS_IMPLEMENTATION | 20 |
+| SUPERSEDED | 0 (row-level) |
+| DEFERRED | 2 |
+| **REQUIRED + CLOSED** | **23** |
+| **REQUIRED + NEEDS_EVIDENCE** | **20** |
+| **REQUIRED + NEEDS_IMPLEMENTATION** | **17** |
+
+**Pass 3 update**: `VER-004` moved `NEEDS_IMPLEMENTATION`→`NEEDS_EVIDENCE`
+(the confirmed-defect claim was wrong, corrected in §0.7). All other Pass 2
+counts unchanged by Pass 3's other corrections (`CORR-017`/`RECV-003`
+changed evidence level and citation quality, not disposition or relevance).
+
+By domain: ORCH 3 · CORR 17 · RECV 4 · REPO 4 · VER 5 · SEC 5 · POL 3 ·
+TOOL 4 · MODEL 4 · CTX 3 · STATE 3 · CONC 2 · OBS 4 · REL 2 · TOP 5.
+
+By Language Scope: JAVA 6 (`CORR-015`, `RECV-003`, `VER-001`, `VER-003`,
+`TOP-001`, `TOP-002`) · PYTHON 2 (`VER-004`, `VER-005`) · LANGUAGE_NEUTRAL
+60 (many of these carry a Java-only evidence gap noted inline per §0.3 —
+language-neutral *scope* is not the same claim as language-neutral
+*proof*).
+
+Verification identities, script-checked: CLOSED(25) + NEEDS_EVIDENCE(21) +
+NEEDS_IMPLEMENTATION(20) + SUPERSEDED(0) + DEFERRED(2) = 68 ✓.
+REQUIRED(60) + OPTIONAL(6) + OUT_OF_SCOPE(2) = 68 ✓.
+REQUIRED+CLOSED(23) + REQUIRED+NEEDS_EVIDENCE(20) + REQUIRED+NEEDS_IMPLEMENTATION(17) = 60 = REQUIRED total ✓ (confirms no REQUIRED row has a DEFERRED/SUPERSEDED disposition, which is correct — both DEFERRED rows are OUT_OF_SCOPE).
+
+### §0.5 Requirement-authority conflicts: 0 (corrected from Pass 1's 1)
+
+`TOOL-001` was reclassified this pass — see its own entry. It is **not**
+a requirement-authority conflict: no two currently-authoritative
+requirements demand incompatible behavior. It is a REQUIRED CAPABILITY GAP
+with an intentional current safety restriction, directly confirmed by
+KRP-020's own stated rationale ("Structured enforce mode currently refuses
+TOOL-tagged subtasks because safe authoritative routing does not exist" —
+read from the full `TASKS_DETAILED.md` text this pass, not the one-line
+summary).
+
+### §0.6 Evidence conflicts found this pass: 1
+
+`PRV-06`'s `FAIL` result and the process-boundary-fix narrative in project
+memory are not strictly contradictory (different runs, different failure
+modes — the bootstrap error looks like a harness/fixture precondition
+issue, not a regression of the fix itself), but they cannot both be cited
+as clean confirmation of the same thing. Recorded as `RECV-003`'s
+Evidence Validity note, not silently reconciled either direction.
+
+---
+
+## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (17, updated Pass 3 — script-verified)
+
+`CONC-001` concurrent-writer rejection · `CTX-001` context/graph
+freshness · `MODEL-001` model capability certification · `OBS-001`
+enforce-mode telemetry gap · `OBS-002` operator run summary · `OBS-004`
+resource budgets · `POL-001` authoritative execution policy · `REL-002`
+`doctor --production` · `SEC-001` hostile-code containment · `SEC-003`
+MCP environment isolation · `SEC-005` package/network containment ·
+`STATE-003` deterministic replay · `TOOL-001` policy-mediated TOOL
+execution (reclassified Pass 2 — see its own entry) · `TOOL-002`
+ToolBroker · `TOOL-003` MCP capability authorization · `TOOL-004` plugin
+manifest/provenance · `TOP-001` Gradle support. Note `VER-004` **moved out
+of this list this pass** (see §0.7 — the defect it named doesn't exist)
+and `ORCH-001`/`ORCH-002` are **not** in this list — reclassified
+`OPTIONAL` in Pass 2 (see their own entries and the requirement-authority
+challenge).
+
+## §0.1b REQUIRED + NEEDS_EVIDENCE (20, updated Pass 3 — script-verified)
+
+`CORR-006` semantic-contract protection · `CORR-016` PRV-08 transitive
+revalidation · `CTX-002` large-repo scale · `CTX-003` PRV-09 dependency
+resolution · `MODEL-002` KnowledgeGuard live confirmation · `MODEL-004`
+fresh-repo stack-drift (downgraded from CLOSED, Pass 2) · `OBS-003`
+secret redaction · `ORCH-003` structured-mode checkpointing · `POL-002`
+security-sensitive-goal handling (downgraded from CLOSED, Pass 2 —
+PRV-02's manual check was never confirmed) · `RECV-002` MA9 coordinated
+repair (downgraded from CLOSED, Pass 2 — PRV-11's own result states plan
+recovery was not exercised) · `REL-001` release packaging · `REPO-004`
+workspace isolation · `SEC-002` fail-closed sandbox failure · `SEC-004`
+MCP timeout · `STATE-001` crash/resume · `STATE-002` multi-store
+consistency (reframed Pass 2 to evidence-first) · `TOP-002`
+framework-neutral Java · `TOP-005` CI operating requirements · `VER-004`
+Python dependency/build-metadata handling (**moved into this list this
+pass** — real mechanism confirmed, not the absent one previously claimed)
+· `VER-005` Python end-to-end validation. Note `RECV-004` is
+`NEEDS_EVIDENCE` too (downgraded Pass 2), but its `OPTIONAL` relevance
+keeps it out of this REQUIRED-only list.
+
+---
+
+## §1. ORCH — Orchestration
+
+**ORCH-001 — Dual orchestration paths (WorkflowEngine vs. WorkflowController)**
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `ARCHITECTURE_INVARIANT` only (Production Readiness Review) — **not `DEPLOYMENT_ENVELOPE`; challenged and confirmed this pass.** `KRIYA_V1_DEPLOYMENT_ENVELOPE.md` §10's own definition of "Kriya v1 production-ready" names specific behaviors (unattended-safety evidence, TOOL/MCP policy-mediation, concurrent-writer rejection, per-risk evidence thresholds) — it never requires a specific orchestration *shape*. Deployment Relevance: **OPTIONAL** (maintainability/change-risk debt, not a certification blocker on its own) · **Transitive necessity, stated precisely, not glossed over:** `KRP-021` (enable TOOL subtasks — the mechanism `TOOL-001` needs) depends on `KRP-012`, which depends on `KRP-011` — i.e. on this consolidation. So while `ORCH-001` is not *directly* required by the envelope, it is a real prerequisite specifically for closing `TOOL-001`, and only for that — the ActionBroker/SandboxBroker/policy-enforcement work (`KRP-014`–`KRP-020`) depends only on `KRP-002`/`KRP-003` per the roadmap's own dependency graph, confirmed by reading the full spec text this pass, and does **not** depend on orchestration consolidation at all. · Related KRP: KRP-010, 011, 012, 013 · Effective Evidence Level: E4 (both paths individually proven; growth/coupling is directly observed, not inferred) · Disposition: NEEDS_IMPLEMENTATION, OPTIONAL priority except as a `TOOL-001` prerequisite.
+
+**ORCH-002 — Core orchestration functions exceed safely-evolvable size, still growing**
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `ARCHITECTURE_INVARIANT` only, same reasoning as `ORCH-001` · Deployment Relevance: **OPTIONAL** · Same transitive-necessity note as `ORCH-001` (`KRP-010` sits on the same dependency chain toward `KRP-011`) · Current mechanism: `run_attempt()` 3,509 lines, `run_generation_workflow()` 2,701, `_run_structured_enforce()` 2,524, `handle_attempt_failure()` 1,098 — all measured directly, all grew since the 2026-09-06 review snapshot, including growth from this project's own R1 Deliverable 5 work · Effective Evidence Level: E4 (directly observed) · Disposition: NEEDS_IMPLEMENTATION, OPTIONAL priority.
+
+**ORCH-003 — Per-subtask checkpointing not fully wired in structured enforce mode**
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §4 (DE-03 unattended autonomy needs reliable mid-run recovery — this one *is* a genuine behavioral requirement, unlike `ORCH-001`/`002`) · Deployment Relevance: REQUIRED · Current mechanism: legacy path's `kriya/workflow/checkpoint.py` is unit-tested (`test_checkpoint_control_plane_hashes.py`, `test_subtask_checkpoint.py`); enforce-mode's own gap is source-documented, not independently re-confirmed against current line numbers this pass · Effective Evidence Level: E1 · Disposition: NEEDS_EVIDENCE (confirm the exact current-state gap before assuming NEEDS_IMPLEMENTATION).
+
+---
+
+## §2. CORR — Correctness (plan repair, obligations, preservation)
+
+Per §0.2's individual audit: 15 of these 17 rows are `LANGUAGE_NEUTRAL`
+mechanisms with Java-only evidence today (noted inline per row, per §0.3's
+convention). `CORR-015` is the one genuinely Java-intrinsic exception.
+
+**CORR-001 — Grounded-reference gap detection scoped to test-source only** (`INV-PLAN-001`)
+Language Scope: LANGUAGE_NEUTRAL (plan-validation logic operates on abstract plan/subtask objects) · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E3 (Catalog Vertical Evidence); Python E0/E1, not independently demonstrated · Disposition: CLOSED for the mechanism at its required E3 bar — **but note the required bar itself was only ever evaluated against Java evidence; Python-side closure is not established by this row and should not be read as such.**
+
+**CORR-002 — Scope-denial merges into plan surgery, not silent drop** (`INV-RECOVERY-001`, FI-01, FI-09)
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: **E3 (corrected down from E4 this pass)** — FI-01/FI-09 are real, directly-verified `test_authorize_denies_file_outside_validated_subtask_scope`/`test_commit_batch_raises_and_writes_nothing_when_one_target_is_denied`/`test_workflow_stops_retrying_immediately_on_unrecoverable_scope_denial` (all three confirmed to exist by direct grep this pass), which is solid E3. The PRV-18 "corroborating E4" claim from Pass 1 is **removed**: PRV-18's actual result is `NEEDS_REVIEW` with its own deterministic-denial manual check unticked, not confirmed evidence. Java evidence only; Python E0. · Disposition: CLOSED at the required E3 bar (met without needing the disputed PRV-18 evidence).
+
+**CORR-003 — Sole-provided-capability self-satisfaction rejected** (`INV-PLAN-002`)
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E3; Python E0/E1 · Disposition: CLOSED (Java bar met).
+
+**CORR-004 — Schema self-heal doesn't consume repair budget** (`INV-PLAN-003`)
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E4 (real live incident, overnight PRV-06-cycle-1 stale-`tool_name` fix `88ae0a9`, per project memory — not independently re-read raw this pass, flagged as memory-sourced not raw-file-confirmed); Python E0 · Disposition: CLOSED (Java bar met, evidence quality flagged).
+
+**CORR-005 — Strict reason-code-set regression rejection** (`INV-PLAN-004`)
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E4 (P2's real, multi-attempt "Run 4-8" Planner-convergence saga, `8cd94ec` — memory-sourced, not re-read raw this pass); Python E0 · Disposition: CLOSED.
+
+**CORR-006 — Semantic-contract regression protection** (`INV-OBL-001`, MA8, FI-02)
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E3 (FI-02, a real `test_workflow_controller_enforce.py` exercise); Python E0 · Disposition: NEEDS_EVIDENCE — required bar is E4 given this obligation kind's own history of live defects (P7 oscillation), not yet met at Java, let alone Python.
+
+**CORR-007 — Preserved reference must not silently regress** (`INV-PRESERVE-001`, FI-03)
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E4 (the live P5 defect R1 itself found and fixed, `ddcc1ab` — this one *is* independently well-documented in R1's own audit, higher confidence than the memory-only citations above); Python E0 · Disposition: CLOSED.
+
+**CORR-008/009/010 — Preservation suppression per-source not per-path / terminal byte-identity gate / preserve-modify contradiction rejection** (`INV-PRESERVE-002/003/004`)
+Language Scope: LANGUAGE_NEUTRAL (byte-identity/path-suppression comparison is inherently content-based, not language-parsing-based) · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E3 each; Python E0 each · Disposition: CLOSED (E3 required and met).
+
+**CORR-011 — Fixture/precondition failure attributes to test, never production** (`INV-ATTR-001`, FI-10)
+Language Scope: LANGUAGE_NEUTRAL (baseline content-diff attribution logic) · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E4 (the real P2 defect, `5c4dff4` — memory-sourced); Python E0 · Disposition: CLOSED.
+
+**CORR-012 — Runtime-verification negation wins** (`INV-GOAL-001`)
+Language Scope: LANGUAGE_NEUTRAL (pure goal-text regex analysis, `goal_requires_runtime_behavior()` — operates on the goal string, not target-repo code, so this one is neutral by construction, not just by absence-of-counterevidence) · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E4 (real P3 defect, `4768db1` — memory-sourced); the underlying mechanism's language-neutrality is stronger evidence here than for most other rows, since it doesn't touch target-repo source at all · Disposition: CLOSED.
+
+**CORR-013 — Response-owner positive-intent gating** (`INV-GOAL-002`)
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E3; Python E0 · Disposition: CLOSED.
+
+**CORR-014 — Reason-code classification completeness (test-time scan)** (`INV-PLAN-006`)
+Language Scope: LANGUAGE_NEUTRAL (a scan over Kriya's own test suite, not target-repo-dependent at all) · Deployment Relevance: OPTIONAL · Effective Evidence Level: E1, by the invariant's own stated design · Disposition: CLOSED.
+
+**CORR-015 — Java interface indexing correctness** (`INV-PLAN-005`)
+Language Scope: **JAVA (genuinely intrinsic — confirmed by individual audit, not bulk-labeled)** · Deployment Relevance: REQUIRED (DE-02 multi-module Java) · Effective Evidence Level: E3 · Disposition: CLOSED.
+
+**CORR-016 — Transitive downstream revalidation on a deliberate contract change** (PRV-08)
+Language Scope: LANGUAGE_NEUTRAL (obligation-tracking mechanism itself is generic; PRV-08's own goal happened to be Java-shaped) · Deployment Relevance: REQUIRED · Effective Evidence Level: **E1 (DIRECT authorization deterministically implemented and tested this pass; the row's own required bar — not below E3 — is not met, since the recovery-layer fix is not yet implemented and no real P9 rerun exists)** · Disposition: NEEDS_IMPLEMENTATION.
+
+History: P9 (2026-09-08, live production run of PRV-08 against the frozen baseline) FAILED — `find_brownfield_public_api_changes()` (`kriya/workflow/file_resolution.py`) rejected s2's goal-authorized `CustomerSummary` contract evolution (a required consequence of s1's already-completed `CustomerRecord` change) because it received only the flat subtask goal string as its authority input, even though the approved plan's own `requires`/`provides` chain (s2.requires=['updated_customer_record_contract'] == s1.provides) plus global invariant gi3 already established the authorization two layers up the call stack. Root-cause confirmed and reproduced deterministically; classified MISSING WIRING, not architecture extension. Disposition moved NEEDS_EVIDENCE → NEEDS_IMPLEMENTATION on that confirmation.
+
+Fix attempted, then reverted same day: `compute_authorized_contract_evolutions()` derived a typed authorization list from `structured_plan`/`current_subtask_id`/`completed_subtask_ids` (all three already threaded through `run_generation_workflow()`/`AttemptContext` from prior MA6/MA8 work — confirming the *wiring* itself needs no architecture extension, that finding stands). It matched an upstream subtask's `provides` against the current subtask's `requires`, gated on the upstream id being in the genuinely-deterministic `completed_subtask_ids` set, and allowlisted the current subtask's entire legal write-scope file list as "owners." A direct `run_attempt()` integration test caught it authorizing an **unrelated, incidental single-symbol rename** in a different file riding in the same candidate batch — because `Subtask.requires`/`provides` are file-agnostic string tokens, there is no deterministic requirement-to-file/symbol binding anywhere in `plan_schema.py`, so the only allowlist available (the whole subtask's write scope) authorizes any lone violator in that scope, not just the one file the requirement actually concerns. A follow-up isolated repro confirmed the gap is not retry-sequence-specific: a single incidental rename alone in a batch, with no genuine contract-evolution file present at all, is authorized the same way. This is exactly the STOP condition under which this work was authorized ("no deterministic relationship exists between the authoritative requirement and the downstream contract delta"; "symbol/signature-specific authorization cannot be expressed with existing structures without introducing a new authority concept") — implementation was halted and fully reverted rather than shipped. `find_brownfield_public_api_changes()` is back to 4 positional args and stays fail-closed; only the independent Step 6 candidate-overlay fix (a consumer file updated in the same candidate batch is evaluated on its own new content, not stale on-disk text — unrelated to the authority question) was kept.
+
+Tests: the reverted authorization-specific tests were removed; `tests/test_workflow.py::test_prv08_shaped_downstream_contract_evolution_is_rejected` (characterization, still red — the real P9 candidate is still rejected) and `test_prv08_shaped_deterministic_integration` (full `run_attempt()` integration; now asserts the genuine contract evolution AND an unrelated incidental rename are BOTH rejected pre-write, the same way, documenting that the guard cannot yet tell them apart) replace the prior "authorized" tests. `test_candidate_overlay_consumer_updated_in_same_batch_is_not_stale_evidence`/`_not_updated_remains_evidence` (Step 6) are retained unchanged. Existing brownfield-API tests and `CORR-008`/`009`/`010`'s own suites are untouched (different mechanism, `INV-PRESERVE-002/003/004`).
+
+Authority audit (2026-09-08, second pass, prompted by an independent review flagging the exact laundering risk the revert above already found): every candidate input to the reverted mechanism was traced to a SOURCE (USER/DETERMINISTIC_DERIVED/PLANNER/DEVELOPER/RUNTIME) and AUTHORITY LEVEL (AUTHORITATIVE/DERIVED_WITH_AUTHORITY/STRATEGY_ONLY/EVIDENCE_ONLY). `Subtask.requires`/`provides`/`description`, `PlannedFile.action`, `AcceptanceCriterion`, `GlobalInvariant.statement`: SOURCE=PLANNER, STRATEGY_ONLY — Planner-authored, however faithfully derived from the real goal, never authoritative on their own (`plan_validation.py` proves these edges are *structurally real*, i.e. AFFECTEDNESS, never that a specific mutation is *permitted*, i.e. MUTATION AUTHORITY). `completed_subtask_ids`: SOURCE=DETERMINISTIC_DERIVED (computed live off `approved_stage_states`), the one genuinely non-Planner-asserted fact — but it only proves an upstream subtask finished, not that any specific downstream mutation is authorized. `expected_files_upfront`: derived from Planner-authored `planned_files`, so STRATEGY_ONLY — defines legal write *scope*, which the Critical Implementation Constraint already named as explicitly insufficient for *permission*. No "Change Contract" type exists anywhere in this codebase (grepped: zero hits for `ChangeContract`/`change_contract`/`authoritative_requirement`/`ContractDelta`). `ObligationLedger`/`ObligationRecord.authority` (DETERMINISTIC/GROUNDED/JUDGMENT, `kriya/workflow/obligations.py`) was checked kind-by-kind: `SUBTASK_SEMANTIC_CONTRACT` is DETERMINISTIC but only for the *structural validity of the requires/provides edge itself* (AFFECTEDNESS again, at higher confidence than the raw plan fields, still never MUTATION AUTHORITY); `GOAL_SPEC_REQUIREMENT` is JUDGMENT (an LLM verdict, explicitly the lowest tier by this module's own docstring, never sufficient to override a deterministic guard); `CROSS_OWNER_ARTIFACT_REQUIREMENT`/`FUTURE_OWNER_VERIFICATION`/`RUNTIME_PLAN_GAP`/`PRESERVED_REFERENCE`/`PROCESS_BOUNDARY_COMPATIBILITY`/`CROSS_SUBTASK_INTEGRATION`/`PLAN_STRUCTURAL_VALIDITY`/`MIGRATION_COMPLETION` each answer a different, narrower question (a missing dependency, unfinished prerequisite work, a plan-graph gap, byte-identity preservation, a process-boundary conflict, integration composition, planned-file-action stability, migration completion) — none represents "an authoritative requirement permits this specific downstream public-API delta."
+
+One genuinely AUTHORITATIVE, SOURCE=USER structure does exist and was not previously considered: `AttemptContext.grounding_goal` (`kriya/workflow/attempt.py:510`) — the raw, unmediated top-level user request string, explicitly separated from Planner-authored text by an already-shipped "authority-isolation fix" (PRV-11, 2026-08-30, `build_subtask_goal_text()`'s own docstring: an "Authoritative Goal" section holding `grounding_goal` verbatim, kept distinct from a "Planned Implementation Strategy" section for exactly this reason). `find_brownfield_public_api_changes()`'s existing `_goal_explicitly_requests_api_change()` escape hatch is currently wired to the wrong field at both call sites — it receives `ctx.goal` (the Planner-synthesized, mixed per-subtask text), never `ctx.grounding_goal` — a real, narrow, separate MISSING WIRING gap, noted but **not fixed here** (out of this session's authorized scope; also would not have closed the real P9 gap on its own, since the real P9 goal text, "Extend the existing CustomerRecord contract with a new required field named region," contains none of that regex's trigger words, and using free-text keyword matching against `grounding_goal` to authorize a *specific* downstream file/symbol would repeat the exact "regex/semantic interpretation of prose" anti-pattern already ruled out for `GlobalInvariant.statement`, just on a USER-authored string instead of a Planner-authored one — the SOURCE differs, the AUTHORITY-BINDING risk to a specific symbol does not).
+
+Conclusion: no existing Kriya structure — plan schema, obligation ledger, or `grounding_goal` — carries a deterministic, structured binding from an authoritative requirement to a *specific downstream file/symbol delta*. `Subtask.requires`/`provides`/`completed_subtask_ids` establish AFFECTEDNESS only (an already-shipped concept, correctly used elsewhere for exactly that: scope recovery, topological validation, obligation dependency tracking) and were never a valid source of MUTATION AUTHORITY for a protected public signature. **CLASSIFICATION for CORR-016's specific fix: ARCHITECTURE EXTENSION**, not MISSING WIRING — closing it safely requires a new, explicitly-authorized authority concept (or a different mechanism entirely) capable of expressing that binding; the wiring-availability finding (`structured_plan`/`current_subtask_id`/`completed_subtask_ids` already reach both call sites) stands on its own but is necessary, not sufficient.
+
+Regression test added, per an independent review's request, to lock this in: `tests/test_workflow.py::test_completed_planner_dependency_cannot_authorize_public_api_change_without_requirement_authority` — constructs the maximal AFFECTEDNESS scenario (s1 completed, s1.provides matched by s2.requires, s2 legally owns the changed file, exactly one public symbol changes, the dependency edge is structurally real) with deliberately NO authoritative requirement/Change Contract/authority-preserving obligation behind it, and asserts `find_brownfield_public_api_changes()` still rejects. Passes today specifically because no authorization channel exists at all post-revert; kept as a permanent regression guard so a future authority concept cannot reopen this exact laundering path without this test failing first.
+
+**Causal reclassification (2026-09-08, third pass — the P9 failure itself was reread, not just the authority question)**: an architecture design (`docs/architecture/CORR016_AUTHORIZED_CONTRACT_EVOLUTION_DESIGN.md`, Revision 2) re-read PRV-08's frozen `goal.md` verbatim (never inferred from the Planner plan or Developer candidate, per an explicit review instruction) and the real fixture source under `kriya-live-validation/PRVS/kriya-prv-harness-1.0.1/work/PRV-08/hardened/` (`CustomerRecord.java`, `CustomerSummary.java`, `SummaryService.java`, `Printer.java` — the actual, un-mutated baseline; confirmed via `git log`/`git status` in that working copy that no candidate was ever written to it). Finding: **the authoritative goal never asks for `CustomerSummary`'s own contract to change**, and nothing in the fixture forces it to — `SummaryService.summarize(CustomerRecord r)` reads `CustomerRecord` only via accessor methods (`r.customerId()`/`r.firstName()`/`r.lastName()`), never constructs it positionally, and no file anywhere in the 4-file fixture (grepped) constructs `new CustomerRecord(`. **`find_brownfield_public_api_changes()`'s original rejection of s2's candidate was CORRECT** — CustomerSummary's contract should have stayed `(customerId, displayName)` unchanged, and the ENTIRE valid fix for the real PRV-08 fixture is a single-file change to `CustomerRecord.java` alone.
+
+The real approved plan for this P9 run (`.kriya/control/plans/20260908T200912-707d349b.json`, read directly from the actual run's own control-plane artifact) confirms the Planner **over-specified** s2 and s3 as `execution_role: implementation` / `planned_files action: modify` subtasks requiring code changes to `CustomerSummary.java`, `SummaryService.java`, and `Printer.java` — despite none of them needing any diff at all — while s4 (the plan's own terminal step) correctly modeled "revalidate" as `execution_role: verification` with `planned_files: []`. The Planner conflated AFFECTED (a real `requires`/`provides` dependency exists) with MUST_MODIFY (a file must be written) for s2/s3, when the goal's own language ("update"/"revalidate"/"preserve") never demanded a write. This is a genuine, distinct planning-layer observation — separate from CORR-016's own authority question — noted here, not separately triaged as its own risk row this pass.
+
+**The real P9 log** (`logs/kriya.log` in that same working directory) shows the ACTUAL failure sequence after the correct rejection: attempt 1 rejected pre-write (`BROWNFIELD PUBLIC API REJECTED BEFORE WRITE`) → the existing, already-shipped `RESTORE_PUBLIC_CONTRACT` recovery phase (`INV-PRESERVE-002/003/004` family, `CORR-008`/`009`/`010`) deterministically restores `CustomerSummary.java` to baseline and re-invokes the Developer for **that one file only** (`owners=['CustomerSummary.java']`) → the Developer correctly reasons "this record's public contract is immutable, no change needed here" and returns `CustomerSummary.java` unchanged, exactly correctly — but never re-emits `SummaryService.java`, because the recovery phase's own Developer re-invocation never asked for it → the generic, recovery-unaware completeness check (`find_missing_expected_files` against `ctx.architect_files`, `kriya/workflow/attempt.py` ~line 5085) still requires `SummaryService.java` to appear in `state.all_files_written` for this attempt, since it doesn't know the recovery phase deliberately narrowed the Developer's scope → `IncompleteGenerationError` on both remaining attempts → retry budget exhausted → run FAILS. **First incorrect state after the legitimate rejection: the `RESTORE_PUBLIC_CONTRACT` recovery phase's own participant selection** (it re-invoked the Developer for the rejected owner only, without either also re-confirming/carrying forward the other originally-planned file's content or narrowing the completeness check to match its own reduced scope for that attempt) — a RECOVERY-layer coordination defect between two existing mechanisms (`kriya/workflow/attempt.py`'s `APIContractRecovery`/`RESTORE_PUBLIC_CONTRACT` and its generic completeness check), not a GENERATION defect (the Developer did exactly what it was asked, for the one file it was asked to fix) and not itself CORR-016's authority question. **NOT implemented or fixed this pass** — traced and diagnosed only, per explicit instruction to separate it from the DIRECT-authorization implementation below and stop for review before touching it. Likely extends the existing `CORR-008`/`009`/`010` (`INV-PRESERVE-002/003/004`) row rather than needing a new one, since it lives in the exact same mechanism family; a formal decision on whether to fold it into that row or open a new one is deferred to the next review, not made unilaterally here.
+
+**DIRECT authorization implemented this pass** (narrower than Revision 2's original design, per explicit authorization limited to the DIRECT-only slice): `kriya/workflow/contract_authority.py` (new module) — `derive_direct_contract_authorizations(grounding_goal, structured_plan)`, a pure, deterministic, idempotent function (no MA8/`ObligationLedger` integration — none needed for DIRECT-only, since there is no parent chain, no plan-repair-vs-authorization interaction, and no resume state to reconcile for a record with no lineage) requiring OWNER, SYMBOL, and CHANGE CATEGORY to be independently grounded in the SAME clause of the raw `grounding_goal` text — never `Subtask.description`/`requires`/`provides`, never `GlobalInvariant.statement`. A record/class's own component-shape change (a named FIELD) is keyed by the owner's own type identity (matching `_normalized_public_signatures()`'s own record-identity convention: `signatures[f"record {record_name}(...)"] = record_name`), never by the individual field name — this distinction was verified necessary and correct against the real fixture before shipping (an earlier draft would have looked for `"region"` as the match key and never matched anything). `find_brownfield_public_api_changes()` gained an additive `active_authorizations` 5th parameter (default `None`, fully backward compatible — every existing call site/test passing 4 positional args is unaffected), matching per-EXACT-`(owner, symbol)` pair with an explicit category check (a symbol still present in `final_signatures` requires `ADD`/`MODIFY`; a symbol absent requires `REMOVE`) — a strict improvement on the reverted design's whole-owner forfeiture: two symbols in the same file are now evaluated fully independently. Wired at both existing call sites (`attempt.py`'s pre-write gate, `workflow.py`'s terminal gate), each filtering to authorizations whose `legal_scope.subtask_id` matches the current subtask before passing them in. DERIVED authorization remains **designed but deliberately NOT implemented** (see the module's own docstring and the design doc's own §5/§19) — no current production scenario demonstrates the need, and the general "is a preserving implementation possible" question is not soundly decidable from repository evidence alone.
+
+11 new deterministic tests added to `tests/test_workflow.py` (no live LLM): `test_explicit_add_field_authorized`, `test_explicit_remove_symbol_authorized`, `test_explicit_modify_named_signature_authorized`, `test_downstream_update_language_does_not_authorize_public_contract_change`, `test_owner_named_but_symbol_not_named_rejected`, `test_symbol_named_elsewhere_in_goal_not_same_clause_rejected`, `test_planner_text_cannot_create_direct_authorization`, `test_same_file_unrelated_public_delta_rejected`, `test_authorized_direct_delta_with_stale_consumer_rejected_or_revalidated_correctly`, `test_prv08_customerrecord_direct_change_authorized`, `test_prv08_customersummary_change_not_authorized` (replaces the now-stale `test_prv08_shaped_downstream_contract_evolution_is_rejected`, same characterization intent, now explicitly proving CustomerSummary stays rejected even with the mechanism live and CustomerRecord's own authorization present). `test_prv08_shaped_deterministic_integration` gained a third part exercising s1's own `CustomerRecord` attempt end-to-end through `run_attempt()` with `grounding_goal` set — now correctly allowed. `test_completed_planner_dependency_cannot_authorize_public_api_change_without_requirement_authority` and both candidate-overlay tests kept unchanged.
+
+**P9-P1/P9-R1 implemented (2026-09-08, fourth pass)**: two independent BUG FIXES, per a follow-up architecture review that traced the PLANNING root cause one level earlier than the RECOVERY finding above.
+
+**P9-P1 (Planner over-specification)**: root cause confirmed by direct fork-based code trace, independently re-verified against the actual source — `PlannerAgent.system_prompt` (`kriya/agents/agent.py`) never mentioned `execution_role`/`ExecutionRole.VERIFICATION` anywhere, despite the schema already supporting a genuinely non-mutating "revalidate this affected consumer" subtask shape end-to-end (`plan_schema.py`'s own `model_validator` requires empty `planned_files` + a real verifier for that role; `plan_validation.py:895-926` explicitly exempts it from the `MODEL_SUBTASK_MISSING_PLANNED_FILES` check, found live PRV-05 2026-08-28; s4 in the very same PRV-08 plan already used it correctly). `workflow_controller.py:4855` (`target_files = [pf.path for pf in target.planned_files]`) confirmed the Planner's raw choice passes into `expected_files_upfront` completely unfiltered. Fix: added `execution_role` to the Planner's JSON shape example, corrected the prior "never emit a MODEL subtask with planned_files=[]" sentence to carve out the `verification`-role exception (previously actively hostile to using that role at all), and added a new paragraph teaching "AFFECTEDNESS DOES NOT IMPLY MUTATION" with a generic (non-PRV-08-named) worked example and the concrete `verification`-list JSON shape (never previously shown to the Planner at all — a second, necessary gap: even if told to use the role, the prompt never demonstrated how). Prompt content only — no schema, validator, MA8, MA9, or `WorkflowController` change. 3 new deterministic prompt-content tests (`tests/test_agents.py`): `test_planner_agent_system_prompt_documents_execution_role_verification`, `test_planner_agent_system_prompt_states_affectedness_does_not_imply_mutation`, `test_planner_agent_system_prompt_requires_positive_justification_for_implementation`. Real proof remains a P9 rerun (not authorized).
+
+**P9-R1 (recovery completeness)**: confirmed independent of P9-P1 via the posed hypothetical (a valid two-file-modification plan hits the identical collision) and via the real log's own attempt numbering (`RESTORE_PUBLIC_CONTRACT`'s own single attempt exits via an internal `RecoveryPhaseAdvanced` control-flow exception *before* ever reaching quality gates — confirmed by direct trace of `run_attempt()` and by every existing `test_restore_public_contract_*` test's own shared pattern — so the actual collision fires during **REPAIR_BEHAVIOR**, attempts 3–4 in the real log, not literally the `RESTORE_PUBLIC_CONTRACT` phase the fix's own name suggests; both phases narrow the Developer's target scope identically via `known_target_files=state.last_implicated_files`, so the fix is scoped to `state.api_contract_recovery is not None` — any active recovery phase — not to one literal enum value, and this deviation from the fix's own working name is called out explicitly rather than silently shipping something that wouldn't have fixed the real log). Fix: new `GenerationState.last_candidate_contents: Dict[str, str]` field (`kriya/workflow/state.py`), updated from every attempt's own finalized `files` list regardless of that attempt's gate outcome (so a legitimate edit to one file survives a same-batch rejection caused by a different, unrelated file — the real P9 shape). Consulted in `run_attempt()` (`kriya/workflow/attempt.py`, immediately after path-resolution/dedup, before the brownfield check) only while `state.api_contract_recovery is not None`: an expected file (`ctx.architect_files`) outside the active recovery's own `owner_files` that isn't already part of this attempt's own `files` is folded in from its own cumulative content — never fabricated from baseline for a file that was never actually generated in any attempt (`.get()` returns `None`, left alone, still correctly reported missing). Same `files` list every downstream gate sees — no shadow candidate representation, no MA9/`RepairContract` change, no change to recovery owner selection, retry budgets, or the public-API restoration decision itself, no change to the ordinary (non-recovery) completeness path. 6 new deterministic tests (`tests/test_workflow.py`, next to the existing `test_restore_public_contract_*` group): `test_narrow_recovery_preserves_other_generated_file`, `test_narrow_recovery_does_not_invent_never_generated_file`, `test_restored_owner_uses_restoration_content`, `test_multi_file_recovery_cumulative_content`, `test_non_recovery_completeness_unchanged`, `test_prv08_shaped_recovery_regression` — all pass. Maps to the existing `CORR-008`/`009`/`010` (`INV-PRESERVE-002/003/004`) row, confirmed by source inspection (same `APIContractRecovery`/`RESTORE_PUBLIC_CONTRACT` mechanism family in `attempt.py`) — no new risk row created.
+
+CORR-016's own wording is corrected accordingly: PRV-08 does **not** prove Kriya needs authority to evolve `CustomerSummary` — it proves (1) `CustomerRecord`'s own direct evolution is authoritative and now DIRECT-authorized; (2) affected downstream consumers must be revalidated, never mutated without positive justification (now taught to the Planner, P9-P1); (3) an unrelated/unauthorized downstream contract mutation must remain rejected unless separately, explicitly authorized (unchanged, always correct); and (4) Kriya's own recovery-completeness coordination had an independent bug that would have prevented convergence even under a correctly-scoped plan (P9-R1, now fixed).
+
+Disposition **NEEDS_IMPLEMENTATION (unchanged)**: DIRECT authorization, P9-P1, and P9-R1 are all implemented and deterministically tested, but CORR-016 as a row represents "PRV-08 passes end-to-end," which still requires a real P9 rerun (not authorized this pass) to become production evidence. Not CLOSED, not moved to NEEDS_EVIDENCE, until that rerun is reviewed and passes.
+
+**CORR-017 — Baseline bug-fix / brownfield-enhancement correctness (general)**
+Language Scope: LANGUAGE_NEUTRAL (the Planner/Developer/Verify pipeline is stack-agnostic in principle; this row represents proven end-to-end capability, not a language-intrinsic mechanism) · Deployment Relevance: REQUIRED · Effective Evidence Level: **E5 — upgraded again this pass, this time earned through raw-evidence confirmation rather than assumed.** Pass 2 conservatively downgraded this to E4 because only P8 had been independently re-verified. This pass read P1–P8's actual raw `RESULT.md` files directly (`KRIYA_P_SERIES_EVIDENCE_AUDIT.md`) and found P6 and P7 both carry **independently-graded, non-Kriya-self-reported** acceptance evidence recorded directly in their artifacts — P6's real external runtime probe (observed vs. expected HTTP-response ordering, matched), P7's three independent verification layers plus a computed `P7_PASS: True` field. Combined with P8 (personally re-verified this session), that's three materially distinct qualifying scenarios for the same risk: different repositories (`spring-petclinic-rest` / `modular-app` / `spring-boot-application-example`), different task shapes (runtime-order sort with an external probe / cross-module interface extension with a 3-layer independent test / query-filter composition), different topologies (single-module runtime-verified / multi-module reactor / single-module). That is genuine E5 by the strict definition, with the diversity dimensions named explicitly, not asserted. P1–P5 remain real, solid E3-level evidence (Kriya's own deterministic gates demonstrably ran and passed) but are not independently re-verified at the same strength and are not needed once three qualifying E4 instances exist. Python: E0/E1 for this specific "proven baseline, confirmed end-to-end" claim — `VER-005` documents real, broad Python capability, but no single clean, fully-confirmed production pass exists yet for Python the way it now does three times over for Java · Disposition: CLOSED (Java, E5 met, exceeds the E4 bar) · Required Evidence Level: E4.
+
+---
+
+## §3. RECV — Recovery (MA9, retry/failure classification)
+
+**RECV-001 — Candidate-independent deterministic-failure termination** (`INV-RETRY-001`, FI-05, FI-06)
+Language Scope: LANGUAGE_NEUTRAL (retry-loop logic operates on generic PASS/FAIL signals from any validator) · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E3 (FI-05/06, real `test_deterministic_failure_diagnostic.py` exercises, including this session's own FI-06 negative-control test); Python E0/E1 (the underlying retry-loop code is language-neutral, but no Python-path exercise of it has been confirmed) · Disposition: CLOSED (Java bar met).
+
+**RECV-002 — MA9 coordinated repair / cross-subtask plan recovery**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Related PRV: PRV-11 · Effective Evidence Level: **E1, sharply downgraded this pass.** PRV-11's own `RESULT.md` states explicitly: "Plan Recovery Capability — NOT EXERCISED this run — no `plan_recovery_events`; this run proves nothing about plan recovery specifically." The scenario passed for unrelated reasons. `kriya/workflow/repair_contract.py` (MA9) exists and is presumably unit-tested at some level, which is the actual basis for E1; no confirmed vertical or production evidence exists for the coordinated-repair mechanism specifically · Disposition: **NEEDS_EVIDENCE (downgraded from CLOSED)** · Required Evidence Level: E4 given this mechanism's history (the PRV-06-driven owner-recovery rewrite exists precisely because the prior version had a real live defect) — currently far below that.
+
+**RECV-003 — Process-boundary/testability compatibility (System.exit-class conflicts)**
+Language Scope: **JAVA — genuinely intrinsic**, not merely evidenced-only-in-Java: `ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY`'s detector matches Java/Surefire crash signatures specifically, by explicit design (source comment: "list-shaped for future stacks," i.e., not yet generalized) · Deployment Relevance: REQUIRED · Related PRV: PRV-06 · **Evidence conflict formally resolved this pass** (was flagged §0.6 in the prior pass, chronology now established): **(A)** Did PRV-06 itself subsequently PASS after the process-boundary fix? No — only one PRV-06 result exists on disk (`results/PRV-06/hardened/` and `.../legacy/`, no timestamped attempt history the way the P-series has), and it is the FAIL result already cited; there is no evidence a later, passing PRV-06 result was ever produced and then overwritten, or that one exists elsewhere. **(B)** N/A, since (A) is No. **(C)** Was the mechanism subsequently exercised successfully by a *different* real P/PRV run? Not found — the Surefire/in-process-crash failure mode is specific enough (a JVM-crashing `System.exit`-class conflict during test execution) that none of P1–P8's own goals were shaped to trigger it, confirmed by re-reading all eight P-run summaries this pass (`KRIYA_P_SERIES_EVIDENCE_AUDIT.md`) — none mention this failure class. **(D)** Highest valid evidence level: **deterministic (vertical/unit) evidence, E3** — `test_run_attempt_escalates_message_when_process_boundary_failure_recurs` (`tests/test_workflow.py:2783`, confirmed to exist by direct grep this pass, not memory) plus 10 real, directly-confirmed detector tests in `tests/test_failure_grounding.py` (`test_detects_surefire_booter_fork_exception`, `test_process_termination_output_upgrades_type_and_message`, and eight others, all grep-confirmed to exist this pass, not previously verified this specifically) · Effective Evidence Level: **E3, confirmed (not merely corrected) this pass** — grounded in directly-verified test names, not memory citation · Disposition: CLOSED at the required E3 bar · **RESOLVED — downgraded to deterministic evidence.**
+
+**RECV-004 — Bounded self-correction loop**
+Language Scope: LANGUAGE_NEUTRAL (`kriya/workflow/self_correction.py` is generic tool-loop orchestration) · Deployment Relevance: OPTIONAL (`self_correction_loop_enabled` defaults `false`) · Related PRV: PRV-13 · Effective Evidence Level: **E1, downgraded this pass** — PRV-13's own `RESULT.md` status is `NEEDS_REVIEW` with its manual check ("confirm self-correction did not write build config") unticked; `tests/test_self_correction.py` is confirmed to exist, which is the actual basis for E1 · Disposition: **NEEDS_EVIDENCE (downgraded from CLOSED)**, OPTIONAL priority.
+
+---
+
+## §4. REPO — Repository mutation/transactions
+
+**REPO-001 — Isolated Git worktree, fail-closed creation**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (P1–P8 all used this path; P8 directly, independently re-verified this session) · Disposition: CLOSED.
+
+**REPO-002 — Revision-grounded atomic apply**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (same basis as REPO-001) · Disposition: CLOSED.
+
+**REPO-003 — Write-authorization scope enforcement** (`AuthorizedFileWriter`, FI-01/FI-09)
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: **E3 (corrected down from E4, same reasoning as `CORR-002` — PRV-18 corroboration withdrawn, FI-01/FI-09 vertical evidence stands independently and directly confirmed by grep this pass)** · Disposition: CLOSED for its scope-authorization purpose at the required E3 bar · **Explicitly not sufficient for DE-06's hostile-code containment claim** — see `SEC-001`.
+
+**REPO-004 — Workspace state isolation**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Related PRV: PRV-14 (no recorded results, fault/recovery invariant, manual check required by its own design) · Effective Evidence Level: E1 · Disposition: NEEDS_EVIDENCE.
+
+---
+
+## §5. VER — Verification (compile/test/runtime)
+
+**VER-001 — Deterministic build validation (real compiled output required)** (`INV-BUILD-001`, FI-04)
+Language Scope: **JAVA (genuinely intrinsic — Maven reactor semantics)** · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 — the real, live P7 Maven-reactor-false-positive defect, `13a73b0` (memory-sourced, not re-read raw this pass, but this is the specific fix independently credited with the 78.6→15.4 min P7 timing improvement, a detail with enough specificity to trust) · Disposition: CLOSED.
+
+**VER-002 — Runtime verification, real evidence producer/consumer matching** (`INV-RUNTIME-001`/`002`, FI-07, FI-08)
+Language Scope: LANGUAGE_NEUTRAL (managed-service prepare→launch→probe→verify is a generic orchestration pattern; the "prepare" step's own content is language-specific, but the pattern and the producer/consumer-matching check are not) · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E4 (P6's two real live defects, `e073d47`/`e790c1a` — memory-sourced); Python E0/E1 · Disposition: CLOSED (Java bar met).
+
+**VER-003 — Java validation correctness (compile/test-selection/regression, general)**
+Language Scope: JAVA · Risk Family: `VER-LANGUAGE-VALIDATION` · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (P1–P8) · Disposition: CLOSED.
+
+**VER-004 — Python dependency/build-metadata handling**
+Language Scope: PYTHON · Risk Family: `VER-LANGUAGE-VALIDATION` · Deployment Relevance: REQUIRED · **Corrected this pass — the "confirmed defect" carried across the prior two passes was wrong, and the error is worth stating plainly rather than quietly fixing.** `kriya/tools/validate.py:131` (`_pyproject_dependencies()`) and its call site inside `_resolve_python_interpreter()` (lines 370-378) show pyproject.toml dependency extraction and installation is a real, wired mechanism, directly tied to a documented fix citing "PRV-17, 2026-09-03." The text I quoted in the prior two passes — "never consulted for DEPENDENCY INSTALLATION... always returns [] same as no pyproject.toml existing at all" — is the function's own docstring *describing the historical bug it was written to close*, not current behavior. I read an incident-description comment as a current-state description, the identical error class this whole exercise exists to catch, this time against source comments rather than PRV results. Caught by re-reading the actual code this pass, not by re-reading the comment more carefully · Effective Evidence Level: **E2, corrected from Pass 1/2's E0.** Real wiring confirmed directly; PRV-17's actual result shows a generated `pyproject.toml` declaring Django with `Quality Gates: PASSED` — indirect but compelling production confirmation (the tests could not have passed without a real Django import succeeding), though no dedicated unit test isolates the extraction→install path in isolation · Disposition: **NEEDS_EVIDENCE, corrected from NEEDS_IMPLEMENTATION** — a real mechanism with real (if indirect) production support, not an absent one.
+
+**VER-005 — Python end-to-end validation/generation correctness**
+Language Scope: PYTHON · Risk Family: `VER-LANGUAGE-VALIDATION` · Deployment Relevance: REQUIRED · Related PRV: PRV-17 · Current mechanism: see `KRIYA_PYTHON_CAPABILITY_SWEEP.md` for the full 24-capability audit completed this pass — repository discovery, project detection, dependency handling, venv assumptions, symbol extraction (native stdlib `ast`), planning, **static/syntax validation (a real `compile(source, f, "exec")` gate, newly confirmed this pass, structurally parallel to the Java `javac` check)**, test discovery/execution, and single-package topology are all confirmed `PRESENT`; import/dependency grounding and preservation checks are `PARTIAL` (the shared structural-evidence mechanism is Java-syntax-shaped); multi-package topology is `ABSENT` · Effective Evidence Level: **E2** — PRV-17's real result (`Quality Gates: PASSED`, `Kriya exit: 0`, a genuine 11-file Django generation) plus the confirmed breadth of real underlying capability; `NEEDS_REVIEW` status only because one scope-creep manual check was never ticked, not a correctness failure · Disposition: NEEDS_EVIDENCE — real, broad capability confirmed, but no single clean, fully-confirmed E4 production pass exists yet. Do not manufacture symmetry with `VER-003`'s E4, but do not understate real capability either — both of the prior two passes did, in different directions.
+
+---
+
+## §6. SEC — Security / isolation
+
+*(Unchanged from Pass 1 — no PRV/P-series evidence claims existed here to re-audit; all E0/E1 assignments already reflected absence of a mechanism, directly confirmed by source grep both passes.)*
+
+**SEC-001 — Hostile-code containment for generated/executed code**
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §7 (DE-06) · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+
+**SEC-002 — Fail-closed behavior under sandbox/policy failure**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE first.
+
+**SEC-003 — MCP environment isolation**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Current mechanism: `full_env = {**os.environ, **self.env}`, `kriya/mcp/mcp.py:41`, re-confirmed by grep this session · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+
+**SEC-004 — MCP request timeout / non-responsive server**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE first (line numbers not re-checked this pass either).
+
+**SEC-005 — Package-installation/network-access containment**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_IMPLEMENTATION.
+
+---
+
+## §7. POL — Policy / execution enforcement
+
+**POL-001 — Authoritative (pre-execution-denying) execution policy**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Current mechanism: `execution_policy.mode: "enforce"` hard-rejected at config load, `kriya/config/config.py:420-423`, exact error text re-confirmed by direct grep this session · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+
+**POL-002 — Security-sensitive-goal handling / approval escalation**
+Language Scope: LANGUAGE_NEUTRAL (sensitive-path/approval logic is orchestration-level, not Java-specific) · Deployment Relevance: REQUIRED · Related PRV: PRV-02 · Effective Evidence Level: **E2, downgraded this pass from Pass 1's E4.** PRV-02's `RESULT.md` status is `NEEDS_REVIEW`, manual check ("confirm valid/expired/malformed token semantics") unticked — Quality Gates passed and `TokenValidator.java`/`TokenValidatorTest.java` were produced, real evidence something happened, but the scenario's own acceptance bar for the security-sensitive *semantics* specifically was never confirmed · Disposition: **NEEDS_EVIDENCE (downgraded from CLOSED)**.
+
+**POL-003 — Sandboxed execution policy under `execution_policy.mode: audit` (current, working as designed)**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: OPTIONAL (this is the current, correctly-functioning audit-only mode, not `POL-001`'s REQUIRED enforce capability) · Effective Evidence Level: E4 (exercised by every P-run) · Disposition: CLOSED for its own narrower scope.
+
+---
+
+## §8. TOOL — Tools / MCP execution authority
+
+**TOOL-001 — Policy-mediated authoritative TOOL subtask execution**
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §5 (DE-04) · Deployment Relevance: REQUIRED · **Reclassified this pass, as requested and as the primary source text directly supports:** this is **not** a requirement-authority conflict. `_run_structured_enforce`'s current refusal of TOOL-tagged subtasks is, by KRP-020's own stated rationale (read in full this pass, not the one-line summary): *"Structured enforce mode currently refuses TOOL-tagged subtasks because safe authoritative routing does not exist."* That is a description of *why the current safe behavior is correct today*, not a competing authoritative requirement. No two currently-authoritative requirements demand incompatible behavior. This is a **REQUIRED CAPABILITY GAP with an intentional, currently-correct safety restriction** — the restriction should not be removed until the capability (`TOOL-002`) exists; the capability's absence is the actual gap · Effective Evidence Level: E0 · Disposition: NEEDS_IMPLEMENTATION. Depends structurally on `TOOL-002`, `TOOL-003`, and — per `ORCH-001`'s transitive-necessity note — on `KRP-012`.
+
+**TOOL-002 — Authoritative ToolBroker**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_IMPLEMENTATION.
+
+**TOOL-003 — MCP tool-schema trust vs. capability authorization**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_IMPLEMENTATION.
+
+**TOOL-004 — Plugin manifest/provenance/compatibility governance** (new, KRP-031)
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `KRP_REQUIREMENT` (KRP-031) · Deployment Relevance: REQUIRED — DE-04's controlled-capability model implies the same governance discipline for plugin-delivered extensions as for MCP tools, not just MCP itself · Current mechanism: `kriya/plugins/` exists (plugin discovery/`BasePlugin` per `CLAUDE.md`'s own architecture description) but no manifest/provenance/capability-approval/version-compatibility registry was found or traced this pass · Effective Evidence Level: E0 · Disposition: NEEDS_IMPLEMENTATION.
+
+---
+
+## §9. MODEL — Local-model / runtime governance
+
+**MODEL-001 — Model capability profile accuracy vs. actual runtime/quantization/template**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION (KRP-023).
+
+**MODEL-002 — KnowledgeGuard / public-knowledge-gap handling**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Related PRV: PRV-10 (no recorded results) · Effective Evidence Level: E1 (`tests/test_knowledge.py`, `tests/test_knowledge_extraction.py` confirmed to exist) · Disposition: NEEDS_EVIDENCE.
+
+**MODEL-003 — Fallback-model escalation on failure**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E3 · Disposition: CLOSED.
+
+**MODEL-004 — Fresh-repository stack-drift resilience**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Related PRV: PRV-17 · Effective Evidence Level: **E2, more precisely characterized this pass** — the R7–R14 rounds cited in project memory, and the raw result re-read this pass, are Python/Django evidence specifically (not Java, as Pass 1's write-up left ambiguous), status `NEEDS_REVIEW` not clean PASS · Disposition: NEEDS_EVIDENCE (downgraded from Pass 1's CLOSED — the mechanism is real and heavily exercised, but "heavily exercised, one unticked manual check" is not the same as CLOSED at the required bar).
+
+---
+
+## §10. CTX — Context / retrieval
+
+*(Unchanged from Pass 1 in substance — no PRV/P-series E4 claims existed here to re-audit.)*
+
+**CTX-001 — Dependency-graph/context freshness and health**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION · graphify candidate mechanism retained unchanged from the original seed entry.
+
+**CTX-002 — Repository-context scale / large-repository budget behavior**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Related PRV: PRV-16 (no recorded results) · Effective Evidence Level: E1 · Disposition: NEEDS_EVIDENCE.
+
+**CTX-003 — Dependency resolution from real build metadata**
+Language Scope: LANGUAGE_NEUTRAL (the underlying risk — trusting real build metadata over hardcoded coordinates — isn't Java-specific even though PRV-09's own goal was) · Deployment Relevance: REQUIRED · Related PRV: PRV-09 (no recorded results) · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE.
+
+---
+
+## §11. STATE — Persistence / replay
+
+**STATE-001 — Checkpoint/resume correctness under real interruption**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Related PRV: PRV-15 (no recorded results, fault/recovery invariant) · Effective Evidence Level: E1 · Disposition: NEEDS_EVIDENCE.
+
+**STATE-002 — Multi-store state consistency**
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §4 for the underlying *behavior* (crash-consistent unattended operation, DE-03) — **but not for `KRP-026`'s specific "unify around one canonical event log" implementation shape, which is one candidate solution, not itself an envelope requirement.** Reframed this pass, per the explicit challenge: do not treat an architectural consolidation recommendation as though the envelope demanded that exact shape. Deployment Relevance: REQUIRED (the behavior) · Effective Evidence Level: E1 · Disposition: **NEEDS_EVIDENCE first (corrected from Pass 1's direct NEEDS_IMPLEMENTATION)** — whether the *current*, fragmented stores actually violate crash-consistency under real interruption is untested (this is exactly what `STATE-001`'s own gap is about); if that evidence shows a real failure, *then* NEEDS_IMPLEMENTATION, and `KRP-026`'s unification is a candidate answer, not the only possible one.
+
+**STATE-003 — Deterministic run replay / reproducibility ID** (new, KRP-027)
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `KRP_REQUIREMENT` (KRP-027) + `DEPLOYMENT_ENVELOPE` §7 (DE-06's threat model implies investigability of applied changes) · Deployment Relevance: REQUIRED · Current mechanism: `traces.db` captures substantial per-run detail but has no reproducibility-ID/bundle/tamper-detection concept · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+
+---
+
+## §12. CONC — Concurrency / workspace ownership
+
+**CONC-001 — Safe rejection of a conflicting second authoritative mutation run**
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §6 (DE-05) · Deployment Relevance: REQUIRED · Current mechanism: none found (direct grep this session, zero matches) · Effective Evidence Level: E0 · Disposition: NEEDS_IMPLEMENTATION.
+
+**CONC-002 — Global `sqlite3.connect` monkey-patching**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: OPTIONAL · Effective Evidence Level: E3 · Disposition: NEEDS_IMPLEMENTATION, OPTIONAL priority.
+
+---
+
+## §13. OBS — Observability
+
+**OBS-001 — Structured-plan repair-round telemetry, enforce-mode `generation_metrics` gap**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (the gap's existence was directly, independently observed during P8, not inferred) · Disposition: NEEDS_IMPLEMENTATION.
+
+**OBS-002 — Operator-facing run summary**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+
+**OBS-003 — Secret redaction in logs/traces/evidence**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE first (confirm absence precisely before assuming NEEDS_IMPLEMENTATION — not done this pass).
+
+**OBS-004 — Explicit run/subtask resource budgets** (new, KRP-024)
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `KRP_REQUIREMENT` (KRP-024) + `DEPLOYMENT_ENVELOPE` §4 (DE-03 unattended autonomy needs bounded resource consumption to be safe — a runaway retry loop or unbounded process time is exactly the kind of thing that becomes dangerous without supervision) · Deployment Relevance: REQUIRED · Current mechanism: scattered limits exist (`generation_time_budget_seconds`, sandbox CPU/memory limits, retry ceilings) but no single governing budget object · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+
+---
+
+## §14. REL — Release / productization
+
+**REL-001 — Reproducible release artifact**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 for SBOM/CI-promotion specifically; the live repo does have a working `pyproject.toml` (this session's own `pip install -e .` usage is direct confirmation), so the original review's "no packaging metadata" finding is at least partly stale for the current repo, not just the archived zip — not fully re-verified this pass either · Disposition: NEEDS_EVIDENCE first.
+
+**REL-002 — `kriya doctor --production` truthful environment certification**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E2 (`kriya doctor` genuinely exercises multiple real components together — directly re-confirmed this session ahead of P8) · Disposition: NEEDS_IMPLEMENTATION.
+
+---
+
+## §15. TOP — Topology / support boundary
+
+**TOP-001 — Gradle build-system support**
+Language Scope: JAVA · Requirement Authority: `DEPLOYMENT_ENVELOPE` §2 (DE-01) · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 (zero mechanism found or traced) · Disposition: NEEDS_IMPLEMENTATION — one of the largest concrete gaps the envelope's DE-01 correction created.
+
+**TOP-002 — Non-Spring, framework-neutral Java repository support**
+Language Scope: JAVA · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 (P7's own repository was plain multi-module Java, not Spring-specific, per project memory — not re-verified raw this pass) · Disposition: NEEDS_EVIDENCE.
+
+**TOP-003 — Monorepo and generated-source pipeline support**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: OUT_OF_SCOPE (Envelope §3/§8) · Disposition: DEFERRED.
+
+**TOP-004 — Multi-user/server deployment, distributed coordination**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: OUT_OF_SCOPE (Envelope §6/§8) · Disposition: DEFERRED · `CONC-001` remains REQUIRED regardless (rejection, not support).
+
+**TOP-005 — CI/non-interactive operating requirements**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E2 (the P-series harness itself runs Kriya non-interactively, repeatedly, successfully — real evidence of *a* working non-interactive path, not a deliberately CI-certified one) · Disposition: NEEDS_EVIDENCE.
+
+---
+
+## Superseded / no-distinct-risk mappings
+
+Unchanged from Pass 1: PRV-07 folds into `TOP-MVN-003`/`004` (Topology
+Coverage doc, both VALIDATED, spec never run, no evidence contributed);
+PRV-03/05 fold into `CORR-017`/`CORR-008`–`010`; PRV-04 superseded by
+`CORR-013`; PRV-06 is now `RECV-003`'s own row (not folded, its result is
+directly discussed there); PRV-12 folds into `VER-002`; PRV-18 no longer
+cited as corroborating evidence for `CORR-002`/`REPO-003` (its own result
+is `NEEDS_REVIEW`, not confirmed) but the fold-mapping itself (same
+underlying mechanism) still holds.

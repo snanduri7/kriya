@@ -435,21 +435,51 @@ class PlannerAgent(BaseAgent):
             "subtasks, used for tooling, in ADDITION TO (never instead of) the Markdown plan above:\n"
             '{"global_invariants": [{"id": "gi1", "statement": "one concise goal-wide invariant"}], '
             '"subtasks": [{"id": "s1", "description": "...", "execution_method": "model", '
+            '"execution_role": "implementation", '
             '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete", '
             '"environment_requirements": ["..."], "requires_capabilities": ["..."]}], '
             '"provides": ["capability.stable.name"], "requires": [], '
             '"relevant_global_invariant_ids": ["gi1"], '
-            '"acceptance_criteria_ids": ["ac1"]}], '
+            '"acceptance_criteria_ids": ["ac1"], "verification": []}], '
             '"acceptance_criteria": [{"id": "ac1", "description": "...", "method": "judgment"}], '
             '"extension_points": [], "refactor_baseline": null}\n'
             "Each subtask is either execution_method \"model\" (normal code generation - never set "
             "tool_name/tool_arguments, and MUST declare at least one planned_files entry covering every "
-            "file it may create, modify, or delete; never emit a MODEL subtask with planned_files=[]). "
+            "file it may create, modify, or delete, UNLESS execution_role is \"verification\" (see below), "
+            "in which case planned_files MUST be empty). "
             "A build, test, run, or output check that does not edit files belongs in verification or "
             "acceptance_criteria, NOT in a fake MODEL subtask. A subtask may instead be \"tool\" (a "
             "deterministic check like a test/lint run - must set "
             "tool_name; only use \"tool\" for a check you are certain is a real, already-registered tool, "
-            "never invent one). depends_on lists other subtask ids that must complete first. Every "
+            "never invent one).\n"
+            "\n"
+            "execution_role is WHAT the subtask is for, separate from execution_method (HOW it runs): "
+            "\"implementation\" (the default - this subtask writes/modifies real source, and MUST declare "
+            "planned_files covering exactly what it changes) or \"verification\" (this subtask makes NO "
+            "code changes at all - planned_files MUST be [] and it MUST instead declare at least one "
+            "concrete entry in a \"verification\" list, e.g. "
+            "{\"type\": \"tool\", \"tool_name\": \"compile\", \"verifier_kind\": \"compile\", "
+            "\"description\": \"compile the workspace against the updated contract\"}). "
+            "AFFECTEDNESS DOES NOT IMPLY MUTATION: when an upstream subtask changes a contract another "
+            "subtask depends on (via requires/provides or depends_on), that downstream subtask is "
+            "AFFECTED and needs to be RECONSIDERED - but being affected is never, by itself, evidence "
+            "that its own source needs to change. Use execution_role \"verification\" (empty "
+            "planned_files, a real compile/test verifier) for a downstream consumer whose compatibility "
+            "with the change needs confirming but which the goal never asks you to edit and which you "
+            "have no concrete, grounded reason (an actual incompatibility you can name, or the goal "
+            "itself explicitly requiring a change to that specific file/symbol) to believe needs its own "
+            "code modified. Reserve execution_role \"implementation\" with a modify action for a specific "
+            "file only when you have that kind of positive justification - never merely because the file "
+            "consumes or depends on something that changed elsewhere. Worked example: a goal extends a "
+            "shared data contract (e.g. a record type) with a new field, and a separate service class "
+            "elsewhere merely reads values from that contract through its existing accessor methods, "
+            "never constructing it directly and never itself declaring the field that changed - that "
+            "service's own subtask should be execution_role \"verification\" (confirm it still compiles "
+            "and its own tests still pass against the extended contract), NOT execution_role "
+            "\"implementation\" with a planned_files entry mutating that service's own file. Only promote "
+            "it to \"implementation\" if the goal itself names that service/field explicitly, or if you "
+            "have concrete evidence (not merely \"it depends on the changed thing\") that it cannot "
+            "compile or behave correctly unchanged. depends_on lists other subtask ids that must complete first. Every "
             "subtask that consumes a build manifest, configuration, source API, generated artifact, "
             "or other output from another subtask MUST declare that producer in depends_on. Keep all "
             "semantic producer/consumer relationships explicit with stable provides/requires names; "

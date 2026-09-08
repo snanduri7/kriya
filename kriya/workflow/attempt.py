@@ -52,6 +52,7 @@ from kriya.workflow.dependency_invalidation import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, classify_environment_failure, extract_missing_project_local_python_module, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
+from kriya.workflow.contract_authority import derive_direct_contract_authorizations
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -4073,6 +4074,58 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             deduped[file_obj["filepath"]] = file_obj
         files = list(deduped.values())
 
+    # P9-R1 (P9/PRV-08, 2026-09-08): while API_CONTRACT_RECOVERY is active
+    # (RESTORE_PUBLIC_CONTRACT AND REPAIR_BEHAVIOR both narrow the Developer's
+    # own target scope to state.api_contract_recovery.owner_files ONLY - see
+    # this attempt's known_target_files=state.last_implicated_files above,
+    # and _restore_api_contract_owners_deterministically's own [owner]-only
+    # return - confirmed against the real P9 log: the collision this fixes
+    # actually fires during REPAIR_BEHAVIOR, attempts 3-4, not the single
+    # RESTORE_PUBLIC_CONTRACT attempt itself, which transitions before ever
+    # reaching quality gates), this attempt's own `files` legitimately omits
+    # every OTHER expected file - the completeness check below has no way to
+    # know that omission was deliberate and correct, not the Developer
+    # silently under-delivering. For each expected file outside the active
+    # recovery owner set that isn't already part of THIS attempt's own
+    # `files`, fold in its own most-recent cumulative candidate content
+    # (state.last_candidate_contents, updated below from every attempt's
+    # own `files`, deliberately BEFORE quality-gate outcome is known - Case
+    # A's own "changed A" survives even though the batch containing it was
+    # ultimately rejected for an unrelated reason, exactly the real P9
+    # shape). A file with NO cumulative entry (never generated in any
+    # attempt) is left alone - still correctly reported missing (Case B);
+    # never fabricated from baseline merely to satisfy completeness. This is
+    # the SAME `files` list every downstream gate (brownfield check,
+    # compile, staged writes, the completeness check itself) sees - no
+    # second, shadow candidate representation.
+    if state.api_contract_recovery is not None:
+        recovery_owner_files = set(state.api_contract_recovery.owner_files)
+        already_in_files = {file_obj["filepath"] for file_obj in files}
+        for expected_path in ctx.architect_files:
+            if expected_path in recovery_owner_files or expected_path in already_in_files:
+                continue
+            cumulative_content = state.last_candidate_contents.get(expected_path)
+            if cumulative_content is not None:
+                files.append({"filepath": expected_path, "content": cumulative_content})
+    # Recorded on EVERY attempt, not just during recovery - Case A needs
+    # attempt 1's own legitimate content for a file captured before recovery
+    # ever begins. A later attempt's entry for the same path overwrites the
+    # earlier one (most-recent-candidate semantics); Case C (an explicit
+    # RESTORE_PUBLIC_CONTRACT restoration) naturally overwrites this the
+    # same way, since the restored content IS this attempt's own `files`
+    # entry for that owner. A targeted/anchored-edit response's own entries
+    # carry "edits", not "content" (resolved to full content later, by the
+    # anchored-edit application pipeline further down this function) -
+    # skipped here, not an error: this cache exists to carry forward a
+    # file's own most recent FULL content across attempt boundaries, and an
+    # edit-shaped entry with no prior full-content entry simply leaves the
+    # cache unchanged for that path, exactly as if this attempt hadn't
+    # touched it.
+    for file_obj in files:
+        content = file_obj.get("content")
+        if content is not None:
+            state.last_candidate_contents[file_obj["filepath"]] = content
+
     # Brownfield ownership is enforced before any candidate byte reaches the
     # sandbox. Path resolution alone is insufficient: a model can target the
     # correct existing pathname while pasting an invented replacement class
@@ -4104,8 +4157,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             except OSError:
                 continue
             candidate_contents[filepath] = file_obj["content"]
+        # CORR-016 (P9/PRV-08, 2026-09-08, DIRECT-only): direct_contract_
+        # authorizations() is a pure function of ctx.grounding_goal (the raw,
+        # unmediated user request) and ctx.structured_plan - filtered here to
+        # exactly this subtask's own legal_scope, never a wider allowlist.
+        # See kriya/workflow/contract_authority.py's own module docstring.
+        direct_authorizations = [
+            authorization
+            for authorization in derive_direct_contract_authorizations(
+                ctx.grounding_goal, ctx.structured_plan,
+            )
+            if authorization.legal_scope.get("subtask_id") == ctx.current_subtask_id
+        ]
         early_api_violations = find_brownfield_public_api_changes(
             ctx.workspace_path, baseline_contents, candidate_contents, ctx.goal,
+            direct_authorizations,
         )
         if early_api_violations:
             state.all_original_contents.update(baseline_contents)

@@ -86,6 +86,7 @@ from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.tools.service_runtime import ManagedServiceVerificationResult, ServiceVerificationOutcomeKind
 from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
+from kriya.workflow.contract_authority import derive_direct_contract_authorizations
 from kriya.workflow.file_resolution import (
     correct_exec_main_class_property,
     ensure_maven_covers_nonconventional_java_files,
@@ -532,6 +533,304 @@ async def test_restore_public_contract_fails_closed_on_missing_baseline(tmp_path
     dev_gen.assert_not_called()
     # Left untouched on disk - fail-closed means no silent write either.
     assert (tmp_path / owner).read_text() == "def format_renamed(x):\n    return x\n"
+
+
+# --- P9-R1 (P9/PRV-08, 2026-09-08): RESTORE_PUBLIC_CONTRACT/REPAIR_BEHAVIOR
+# narrow the Developer's own target scope to state.api_contract_recovery.
+# owner_files ONLY (known_target_files=state.last_implicated_files) - real P9
+# log evidence confirms the actual collision fires during REPAIR_BEHAVIOR
+# (attempts 3-4), not the single RESTORE_PUBLIC_CONTRACT attempt itself
+# (which transitions via RecoveryPhaseAdvanced before ever reaching quality
+# gates). state.last_candidate_contents (kriya/workflow/state.py), updated
+# from every attempt's own `files` regardless of that attempt's gate
+# outcome, lets run_attempt() fold an untouched-this-round expected file's
+# own most recent real content back into a narrowed recovery attempt,
+# instead of the generic completeness check mistaking deliberate narrowing
+# for the Developer silently under-delivering.
+
+@pytest.mark.asyncio
+async def test_narrow_recovery_preserves_other_generated_file(tmp_path):
+    """P9-R1 #1 NARROW_RECOVERY_PRESERVES_OTHER_GENERATED_FILE - expected
+    files A+B; A was legitimately changed by an earlier attempt (captured in
+    last_candidate_contents) while B was rejected/is being repaired; a
+    REPAIR_BEHAVIOR attempt regenerating ONLY B must not report A missing,
+    and A's effective content must be its own changed version, not baseline."""
+    owner_a, owner_b = "helper.py", "formatter.py"
+    original_a = "def helper(x):\n    return x\n"
+    changed_a = "def helper(x):\n    return x + 1\n"  # attempt 1's own legitimate edit
+    baseline_b = "def format(x):\n    return x\n"
+    repaired_b = "def format(x):\n    return str(x)\n"  # same signature, repaired body
+
+    (tmp_path / owner_a).write_text(original_a)
+    (tmp_path / owner_b).write_text(baseline_b)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner_a: original_a, owner_b: baseline_b}
+    state.last_candidate_contents = {owner_a: changed_a}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner_b, "removed_signature": "format(x)"}], [], {owner_b: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+    state.api_contract_recovery.owner_contract_restored()
+    assert state.api_contract_recovery.phase is APIContractRecoveryPhase.REPAIR_BEHAVIOR
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": owner_b, "content": repaired_b},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[owner_a, owner_b], expected_files_upfront=[owner_a, owner_b],
+        architect_basename_to_path={owner_a: owner_a, owner_b: owner_b},
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must not raise IncompleteGenerationError
+
+    assert (tmp_path / owner_a).read_text() == changed_a  # NOT baseline
+    assert (tmp_path / owner_b).read_text() == repaired_b
+
+
+@pytest.mark.asyncio
+async def test_narrow_recovery_does_not_invent_never_generated_file(tmp_path):
+    """P9-R1 #2 NARROW_RECOVERY_DOES_NOT_INVENT_NEVER_GENERATED_FILE -
+    expected files A+B; A was NEVER generated in any attempt (no entry in
+    last_candidate_contents at all). A must remain missing -
+    IncompleteGenerationError still fires, never fabricated from baseline."""
+    owner_a, owner_b = "helper.py", "formatter.py"
+    baseline_b = "def format(x):\n    return x\n"
+    repaired_b = "def format(x):\n    return str(x)\n"
+    (tmp_path / owner_b).write_text(baseline_b)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner_b: baseline_b}
+    state.last_candidate_contents = {}  # A was never generated
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner_b, "removed_signature": "format(x)"}], [], {owner_b: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+    state.api_contract_recovery.owner_contract_restored()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": owner_b, "content": repaired_b},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[owner_a, owner_b], expected_files_upfront=[owner_a, owner_b],
+        architect_basename_to_path={owner_a: owner_a, owner_b: owner_b},
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(IncompleteGenerationError) as exc_info:
+            await run_attempt(state, ctx)
+    assert owner_a in exc_info.value.missing_files
+
+
+@pytest.mark.asyncio
+async def test_restored_owner_uses_restoration_content(tmp_path):
+    """P9-R1 #3 RESTORED_OWNER_USES_RESTORATION_CONTENT - Case C: when
+    RESTORE_PUBLIC_CONTRACT deterministically restores an owner to baseline,
+    that restoration result - not whatever bad mutation last_candidate_
+    contents held before - becomes the new cumulative entry for that path."""
+    owner = "formatter.py"
+    baseline = "def format(x):\n    return x\n"
+    bad_mutation = "def format_renamed(x):\n    return x\n"
+    (tmp_path / owner).write_text(bad_mutation)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {owner: baseline}
+    state.last_candidate_contents = {owner: bad_mutation}  # stale, pre-restoration
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner, "removed_signature": "format(x)"}], [], {owner: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=AsyncMock(),
+        architect_files=[owner], expected_files_upfront=[owner],
+        architect_basename_to_path={owner: owner},
+    )
+    with pytest.raises(RecoveryPhaseAdvanced):
+        await run_attempt(state, ctx)
+
+    assert state.last_candidate_contents[owner] == baseline
+
+
+@pytest.mark.asyncio
+async def test_multi_file_recovery_cumulative_content(tmp_path):
+    """P9-R1 #4 MULTI_FILE_RECOVERY_CUMULATIVE_CONTENT - three expected
+    files; two valid pre-recovery candidate modifications must survive
+    while the third (recovery owner) is repaired in the same attempt."""
+    owner_a, owner_b, owner_c = "helper.py", "utils.py", "formatter.py"
+    changed_a = "def helper(x):\n    return x + 1\n"
+    changed_b = "def util(x):\n    return x * 2\n"
+    baseline_c = "def format(x):\n    return x\n"
+    repaired_c = "def format(x):\n    return str(x)\n"
+    (tmp_path / owner_a).write_text("def helper(x):\n    return x\n")
+    (tmp_path / owner_b).write_text("def util(x):\n    return x\n")
+    (tmp_path / owner_c).write_text(baseline_c)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {
+        owner_a: "def helper(x):\n    return x\n",
+        owner_b: "def util(x):\n    return x\n",
+        owner_c: baseline_c,
+    }
+    state.last_candidate_contents = {owner_a: changed_a, owner_b: changed_b}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": owner_c, "removed_signature": "format(x)"}], [], {owner_c: "API_OWNER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+    state.api_contract_recovery.owner_contract_restored()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": owner_c, "content": repaired_c},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[owner_a, owner_b, owner_c],
+        expected_files_upfront=[owner_a, owner_b, owner_c],
+        architect_basename_to_path={owner_a: owner_a, owner_b: owner_b, owner_c: owner_c},
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)
+
+    assert (tmp_path / owner_a).read_text() == changed_a
+    assert (tmp_path / owner_b).read_text() == changed_b
+    assert (tmp_path / owner_c).read_text() == repaired_c
+
+
+@pytest.mark.asyncio
+async def test_non_recovery_completeness_unchanged(tmp_path):
+    """P9-R1 #5 NON_RECOVERY_COMPLETENESS_UNCHANGED - with NO active
+    api_contract_recovery, an under-delivering Developer response must still
+    trip IncompleteGenerationError exactly as before, even when stale
+    last_candidate_contents data happens to exist (proving the new
+    cumulative-candidate consultation is strictly gated on active recovery,
+    never consulted on the ordinary path)."""
+    owner_a, owner_b = "helper.py", "formatter.py"
+    (tmp_path / owner_a).write_text("def helper(x):\n    return x\n")
+    (tmp_path / owner_b).write_text("def format(x):\n    return x\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {}
+    state.last_candidate_contents = {owner_a: "def helper(x):\n    return x + 1\n"}
+    state.api_contract_recovery = None
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": owner_b, "content": "def format(x):\n    return x\n"},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[owner_a, owner_b], expected_files_upfront=[owner_a, owner_b],
+        architect_basename_to_path={owner_a: owner_a, owner_b: owner_b},
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(IncompleteGenerationError) as exc_info:
+            await run_attempt(state, ctx)
+    assert owner_a in exc_info.value.missing_files
+
+
+@pytest.mark.asyncio
+async def test_prv08_shaped_recovery_regression(tmp_path):
+    """P9-R1 #6 PRV08_SHAPED_RECOVERY_REGRESSION - reproduces the real P9
+    collision deterministically: expected CustomerSummary.java +
+    SummaryService.java, a pre-recovery candidate contains both, a
+    public-contract rejection fires on CustomerSummary, RESTORE_PUBLIC_
+    CONTRACT/REPAIR_BEHAVIOR narrows the Developer to CustomerSummary only,
+    and SummaryService is never re-emitted. Expected: SummaryService is
+    preserved from the cumulative candidate rather than falsely reported
+    missing. This protects the recovery bug itself - it does NOT claim the
+    original PRV-08 plan (which planned modify actions for these files at
+    all) was correct; see P9-P1 for that separate defect."""
+    summary_owner, service_owner, original_summary, original_service = _prv08_shaped_fixture(tmp_path)
+    # The real P9 attempt-1 candidate: CustomerSummary mutated, SummaryService
+    # updated consistently with it - SummaryService's own edit is legitimate
+    # on its own terms (it compiles, it's internally consistent), it's
+    # CustomerSummary's mutation that's the actual rejected delta.
+    changed_service = (
+        "package com.example.m2; import com.example.m1.CustomerRecord;\n"
+        "public class SummaryService { public CustomerSummary summarize(CustomerRecord r)"
+        "{return new CustomerSummary(r.customerId(),r.firstName()+\" \"+r.lastName(),r.region());} }\n"
+    )
+    repaired_summary = original_summary  # REPAIR_BEHAVIOR: restore, don't re-mutate
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    state.all_original_contents = {summary_owner: original_summary, service_owner: original_service}
+    state.last_candidate_contents = {service_owner: changed_service}
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{
+            "owner": summary_owner,
+            "removed_signature": "record CustomerSummary(long, String)",
+            "evidence_files": [service_owner],
+        }],
+        [service_owner],
+        {summary_owner: "API_OWNER", service_owner: "EVIDENCE_CALLER"},
+    )
+    state.api_contract_recovery.begin_restoration()
+    state.api_contract_recovery.owner_contract_restored()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": summary_owner, "content": repaired_summary},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[summary_owner, service_owner],
+        expected_files_upfront=[summary_owner, service_owner],
+        architect_basename_to_path={
+            "CustomerSummary.java": summary_owner, "SummaryService.java": service_owner,
+        },
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state, ctx)  # must NOT raise IncompleteGenerationError
+
+    assert (tmp_path / summary_owner).read_text() == repaired_summary
+    assert (tmp_path / service_owner).read_text() == changed_service
+
 
 
 def test_required_verification_evidence_preserves_identity_and_only_resolves_builtin_gates():
@@ -1682,6 +1981,695 @@ def test_brownfield_enhancement_allows_new_public_method_alongside_preserved_con
         str(tmp_path), {owner: original}, {owner: with_derived_method},
         "Add a displayName field to Customer records and expose it via the API",
     ) == []
+
+
+# --- P9/PRV-08 (2026-09-08): CORR-016, DIRECT authorization implemented ---
+#
+# CORR-016/INV-... (Risk Register): a real, reproducible P9 production run
+# against the frozen baseline FAILED because find_brownfield_public_api_changes()
+# rejected s2's candidate mutation of CustomerSummary. Two investigations of
+# that rejection (an "authorize the downstream evolution" channel keyed off
+# Subtask.requires/provides + completed_subtask_ids, and a revised version
+# keyed off the Developer's own candidate proving "every caller was updated")
+# were BOTH built, BOTH caught authorizing something they should not have
+# (an unrelated incidental rename; a candidate justifying its own mutation),
+# and BOTH were reverted. Re-reading PRV-08's own frozen authoritative goal
+# (goal.md, never inferred from the Planner plan or Developer candidate) plus
+# the real fixture source (kriya-live-validation's PRV-08-contract-evolution
+# fixture: CustomerRecord/m1, CustomerSummary+SummaryService/m2, Printer/m3)
+# settled the question: the goal never asks for CustomerSummary's own public
+# contract to change, and nothing in the fixture forces it to (SummaryService
+# reads CustomerRecord only via accessor methods, never constructs it
+# positionally; Printer only calls CustomerSummary.displayName()). The
+# guard's original rejection of that mutation was CORRECT. P9's real defect
+# was downstream of that legitimate rejection, in the RESTORE_PUBLIC_CONTRACT
+# recovery phase's own participant selection (see the Risk Register / the
+# design doc's own architecture review chain for the full trace) - separate
+# from this test group, not fixed here.
+#
+# What IS real and now implemented: the raw, authoritative `grounding_goal`
+# text (never Planner-authored `Subtask.requires`/`provides`/`description`,
+# never `GlobalInvariant` prose) can DIRECTLY name a specific owner, symbol,
+# and change category in one clause - e.g. "Extend the existing
+# `CustomerRecord` contract with a new required field named `region`." This
+# group tests kriya/workflow/contract_authority.py's
+# derive_direct_contract_authorizations() (DIRECT only - DERIVED remains
+# designed but deliberately NOT implemented, see that module's own docstring
+# and docs/architecture/CORR016_AUTHORIZED_CONTRACT_EVOLUTION_DESIGN.md) and
+# find_brownfield_public_api_changes()'s new active_authorizations parameter
+# (an additive 5th arg; every call above passing only 4 positional args is
+# unaffected, default None == no authorization, identical prior behavior).
+
+def _prv08_shaped_fixture(tmp_path):
+    """Same 3-file shape as the real PRV-08 fixture (kriya-live-validation's
+    lib/fixtures.py, PRV-08 branch): CustomerRecord (m1, producer) ->
+    CustomerSummary/SummaryService (m2, direct consumer) -> Printer (m3,
+    transitive consumer, not touched by this test group)."""
+    summary_owner = "m2/src/main/java/com/example/m2/CustomerSummary.java"
+    service_owner = "m2/src/main/java/com/example/m2/SummaryService.java"
+    original_summary = (
+        "package com.example.m2; public record CustomerSummary(long customerId,"
+        "String displayName) {}\n"
+    )
+    original_service = (
+        "package com.example.m2; import com.example.m1.CustomerRecord;\n"
+        "public class SummaryService { public CustomerSummary summarize(CustomerRecord r)"
+        "{return new CustomerSummary(r.customerId(),r.firstName()+\" \"+r.lastName());} }\n"
+    )
+    (tmp_path / summary_owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / service_owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / summary_owner).write_text(original_summary)
+    (tmp_path / service_owner).write_text(original_service)
+    return summary_owner, service_owner, original_summary, original_service
+
+
+_PRV08_AUTHORITATIVE_GOAL = (
+    "Extend the existing `CustomerRecord` contract with a new required field "
+    "named `region`.\n\n"
+    "Requirements:\n"
+    "- Preserve all existing contract fields.\n"
+    "- Update the provider implementation.\n"
+    "- Update all affected consumers.\n"
+    "- Revalidate every downstream component whose assumptions are affected.\n"
+    "- Preserve unrelated behavior.\n"
+)
+
+
+def _single_owner_plan(owner_path: str, subtask_id: str = "s1") -> EngineeringPlan:
+    return EngineeringPlan(
+        plan_id="contract-authority-probe", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id=subtask_id, description="d", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path=owner_path, action=FileAction.MODIFY)],
+        )],
+    )
+
+
+def test_explicit_add_field_authorized(tmp_path):
+    """DIRECT_AUTHORIZATION #1 - owner, symbol, and ADD category all
+    grounded in the same clause of the raw authoritative goal text."""
+    owner = "m1/src/main/java/com/example/m1/CustomerRecord.java"
+    original = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName) {}\n"
+    )
+    candidate = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName,String region) {}\n"
+    )
+    caller = "m2/src/main/java/com/example/m2/SummaryService.java"
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("new CustomerRecord(r.customerId(),r.firstName(),r.lastName());\n")
+
+    plan = _single_owner_plan(owner)
+    authorizations = derive_direct_contract_authorizations(_PRV08_AUTHORITATIVE_GOAL, plan)
+    assert len(authorizations) == 1
+    assert authorizations[0].affected_owner == owner
+    assert authorizations[0].affected_symbol == "CustomerRecord"
+    assert authorizations[0].allowed_change_category.value == "add"
+    assert authorizations[0].provenance.value == "direct"
+    assert authorizations[0].authority.value == "authoritative"
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: candidate},
+        _PRV08_AUTHORITATIVE_GOAL, authorizations,
+    )
+    assert violations == []
+
+
+def test_explicit_remove_symbol_authorized(tmp_path):
+    """DIRECT_AUTHORIZATION #2 - a named METHOD removal, grounded and
+    allowed."""
+    goal = "Remove the deprecated `legacyGreet` method from `Customer`."
+    owner = "src/main/java/example/Customer.java"
+    caller = "src/main/java/example/CustomerCaller.java"
+    original = "public class Customer { public String legacyGreet(String name) { return name; } }\n"
+    candidate = "public class Customer {  }\n"
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("new Customer().legacyGreet(\"x\");\n")
+
+    authorizations = derive_direct_contract_authorizations(goal, _single_owner_plan(owner))
+    assert len(authorizations) == 1
+    assert authorizations[0].affected_symbol == "legacyGreet"
+    assert authorizations[0].allowed_change_category.value == "remove"
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: candidate}, goal, authorizations,
+    )
+    assert violations == []
+
+
+def test_explicit_modify_named_signature_authorized(tmp_path):
+    """DIRECT_AUTHORIZATION #3 - a named METHOD's signature change (MODIFY),
+    grounded and allowed."""
+    goal = "Change the `find` method on `CustomerService` to accept an id."
+    owner = "src/main/java/example/CustomerService.java"
+    caller = "src/main/java/example/CustomerServiceCaller.java"
+    original = "public class CustomerService { public Customer find(String name) { return null; } }\n"
+    candidate = "public class CustomerService { public Customer find(long id) { return null; } }\n"
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("new CustomerService().find(\"x\");\n")
+
+    authorizations = derive_direct_contract_authorizations(goal, _single_owner_plan(owner))
+    assert len(authorizations) == 1
+    assert authorizations[0].affected_symbol == "find"
+    assert authorizations[0].allowed_change_category.value == "modify"
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: candidate}, goal, authorizations,
+    )
+    assert violations == []
+
+
+def test_downstream_update_language_does_not_authorize_public_contract_change(tmp_path):
+    """AFFECTEDNESS_WITHOUT_AUTHORITY - "update"/"revalidate" language names
+    no owner and no symbol; it grounds nothing, by construction, exactly the
+    real PRV-08 clauses ("Update all affected consumers.", "Revalidate every
+    downstream component whose assumptions are affected.")."""
+    owner = "m2/src/main/java/com/example/m2/CustomerSummary.java"
+    for clause in (
+        "Update all affected consumers.",
+        "Revalidate every downstream component whose assumptions are affected.",
+    ):
+        assert derive_direct_contract_authorizations(clause, _single_owner_plan(owner)) == []
+
+
+def test_owner_named_but_symbol_not_named_rejected(tmp_path):
+    """DIRECT grounding requires owner AND symbol AND category in the same
+    clause - naming only the owner (with no category verb, no symbol)
+    grounds nothing."""
+    owner = "src/main/java/example/Customer.java"
+    goal = "Update the Customer provider implementation."
+    assert derive_direct_contract_authorizations(goal, _single_owner_plan(owner)) == []
+
+
+def test_symbol_named_elsewhere_in_goal_not_same_clause_rejected(tmp_path):
+    """Owner in one sentence, symbol+category in a DIFFERENT sentence -
+    grounding requires all three in the SAME clause, not merely present
+    somewhere in the whole text."""
+    owner = "src/main/java/example/Customer.java"
+    goal = "Customer must be extended. A new field named region should be added somewhere."
+    assert derive_direct_contract_authorizations(goal, _single_owner_plan(owner)) == []
+
+
+def test_planner_text_cannot_create_direct_authorization(tmp_path):
+    """PLANNER_LAUNDERING (grounding-text variant) - the owner and symbol
+    are named in Planner-authored text (Subtask.description /
+    GlobalInvariant.statement), never in grounding_goal itself. Only
+    grounding_goal is ever consulted - Planner text, however explicit,
+    cannot substitute for it."""
+    owner = "m2/src/main/java/com/example/m2/CustomerSummary.java"
+    plan = EngineeringPlan(
+        plan_id="planner-text-probe", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(
+            id="gi1",
+            statement="Add a new required field named region to CustomerSummary.",
+        )],
+        subtasks=[Subtask(
+            id="s1",
+            description="Add a new required field named region to CustomerSummary.",
+            execution_method=ExecutionMethod.MODEL,
+            relevant_global_invariant_ids=["gi1"],
+            planned_files=[PlannedFile(path=owner, action=FileAction.MODIFY)],
+        )],
+    )
+    grounding_goal = "Make the necessary changes to support regional customer data."
+    assert derive_direct_contract_authorizations(grounding_goal, plan) == []
+
+
+def test_same_file_unrelated_public_delta_rejected(tmp_path):
+    """SAME_FILE_OVERREACH - an authorized field ADD and an unrelated,
+    unauthorized method rename in the SAME file, SAME batch: the authorized
+    delta is allowed, the unrelated one is independently rejected (per-
+    (owner, symbol) matching, not whole-owner/whole-batch)."""
+    owner = "m1/src/main/java/com/example/m1/CustomerRecord.java"
+    original = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName) {}\n"
+        "class Helper { public String helperMethod(String x) { return x; } }\n"
+    )
+    candidate = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName,String region) {}\n"
+        "class Helper { public String renamedMethod(String x) { return x; } }\n"
+    )
+    caller = "m1/src/main/java/com/example/m1/HelperCaller.java"
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text("new Helper().helperMethod(\"x\");\n")
+
+    authorizations = derive_direct_contract_authorizations(
+        _PRV08_AUTHORITATIVE_GOAL, _single_owner_plan(owner),
+    )
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: candidate},
+        _PRV08_AUTHORITATIVE_GOAL, authorizations,
+    )
+    assert violations == [{
+        "owner": owner,
+        "removed_signature": "String helperMethod(String)",
+        "evidence_files": [caller],
+    }]
+
+
+def test_authorized_direct_delta_with_stale_consumer_rejected_or_revalidated_correctly(tmp_path):
+    """DIRECT authorization is a permission grant, orthogonal to whether
+    consumers were updated - it must still allow the authorized owner's own
+    delta even when a caller elsewhere still shows evidence of the OLD
+    shape (that staleness is a separate, existing consumer-revalidation/
+    compile-check concern, not this guard's job to adjudicate)."""
+    owner = "m1/src/main/java/com/example/m1/CustomerRecord.java"
+    original = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName) {}\n"
+    )
+    candidate = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName,String region) {}\n"
+    )
+    stale_caller = "m2/src/main/java/com/example/m2/SummaryService.java"
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / stale_caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / stale_caller).write_text(
+        "new CustomerRecord(r.customerId(),r.firstName(),r.lastName());\n"  # still old arity
+    )
+
+    authorizations = derive_direct_contract_authorizations(
+        _PRV08_AUTHORITATIVE_GOAL, _single_owner_plan(owner),
+    )
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: candidate},
+        _PRV08_AUTHORITATIVE_GOAL, authorizations,
+    )
+    assert violations == []
+
+
+def test_prv08_customerrecord_direct_change_authorized(tmp_path):
+    """PRV08_CustomerRecord_direct_change_authorized - the real, frozen
+    authoritative goal, the real fixture shape: CustomerRecord's OWN
+    extension is DIRECT-authorized and allowed."""
+    owner = "m1/src/main/java/com/example/m1/CustomerRecord.java"
+    original = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName) {}\n"
+    )
+    candidate = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName,String region) {}\n"
+    )
+    caller = "m2/src/main/java/com/example/m2/SummaryService.java"
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+    (tmp_path / caller).write_text(
+        "new CustomerRecord(r.customerId(),r.firstName(),r.lastName());\n"
+    )
+    authorizations = derive_direct_contract_authorizations(
+        _PRV08_AUTHORITATIVE_GOAL, _single_owner_plan(owner),
+    )
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: candidate},
+        _PRV08_AUTHORITATIVE_GOAL, authorizations,
+    )
+    assert violations == []
+
+
+def test_prv08_customersummary_change_not_authorized(tmp_path):
+    """PRV08_CustomerSummary_change_not_authorized - CHARACTERIZATION,
+    proves the real P9 defect reproduces deterministically and remains
+    correctly rejected even with DIRECT authorization now live: the real
+    authoritative goal grounds CustomerRecord (owner+symbol+category), but
+    never names CustomerSummary or `region` together in the same clause -
+    "update all affected consumers"/"revalidate every downstream component"
+    ground nothing. This is the exact attempt-1 candidate content the real
+    P9 run generated; it stays red/failing, correctly."""
+    summary_owner, service_owner, original_summary, original_service = _prv08_shaped_fixture(tmp_path)
+    candidate_summary = (
+        "package com.example.m2; public record CustomerSummary(long customerId,"
+        "String displayName, String region) {}\n"
+    )
+    candidate_service = (
+        "package com.example.m2; import com.example.m1.CustomerRecord;\n"
+        "public class SummaryService { public CustomerSummary summarize(CustomerRecord r)"
+        "{return new CustomerSummary(r.customerId(),r.firstName()+\" \"+r.lastName(),r.region());} }\n"
+    )
+    plan = EngineeringPlan(
+        plan_id="prv08-real", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="extend CustomerRecord", execution_method=ExecutionMethod.MODEL,
+                provides=["updated_customer_record_contract"],
+                planned_files=[PlannedFile(
+                    path="m1/src/main/java/com/example/m1/CustomerRecord.java",
+                    action=FileAction.MODIFY,
+                )],
+            ),
+            Subtask(
+                id="s2", description="propagate", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], requires=["updated_customer_record_contract"],
+                planned_files=[
+                    PlannedFile(path=summary_owner, action=FileAction.MODIFY),
+                    PlannedFile(path=service_owner, action=FileAction.MODIFY),
+                ],
+            ),
+        ],
+    )
+    authorizations = derive_direct_contract_authorizations(_PRV08_AUTHORITATIVE_GOAL, plan)
+    # CustomerRecord's own DIRECT authorization exists ...
+    assert any(a.affected_owner.endswith("CustomerRecord.java") for a in authorizations)
+    # ... but nothing authorizes CustomerSummary, even with the mechanism live.
+    assert not any(a.affected_owner == summary_owner for a in authorizations)
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path),
+        {summary_owner: original_summary, service_owner: original_service},
+        {summary_owner: candidate_summary, service_owner: candidate_service},
+        _PRV08_AUTHORITATIVE_GOAL, authorizations,
+    )
+    assert violations == [{
+        "owner": summary_owner,
+        "removed_signature": "record CustomerSummary(long, String)",
+        "evidence_files": [service_owner],
+    }]
+
+
+def test_completed_planner_dependency_cannot_authorize_public_api_change_without_requirement_authority(
+    tmp_path,
+):
+    """PLANNER-AUTHORITY-LAUNDERING PROTECTION, the real test: a merely-
+    completed Planner dependency edge must never, by itself, authorize a
+    protected public-API mutation. This is deliberately the STRONGEST
+    possible AFFECTEDNESS signal available anywhere in the plan schema -
+    s1.provides matched by s2.requires, s1 ACTUALLY completed
+    (completed_subtask_ids), s2 legally owns the changed file, exactly one
+    public symbol changes, the dependency chain is structurally valid - and
+    it must still be rejected, because none of that is MUTATION AUTHORITY
+    (an authoritative requirement/Change Contract/authority-preserving
+    obligation permitting this specific contract delta). Kriya has no such
+    structure today (see the CORR-016 comment block above
+    _prv08_shaped_fixture for the full audit: Subtask.requires/provides are
+    Planner-authored STRATEGY_ONLY tokens; GlobalInvariant.statement is
+    free text with no authority linkage; the only DETERMINISTIC-authority
+    obligation kind that touches requires/provides
+    (ObligationKind.SUBTASK_SEMANTIC_CONTRACT) proves the DEPENDENCY EDGE
+    is structurally real, never that a specific downstream mutation is
+    authorized - it answers AFFECTEDNESS, not MUTATION AUTHORITY) - so
+    find_brownfield_public_api_changes() takes no authorized_evolutions
+    channel at all and rejects unconditionally, by construction. This test
+    exists so a future reintroduction of such a channel cannot silently
+    reopen the laundering path this scenario probes without this test
+    failing first."""
+    summary_owner, service_owner, original_summary, original_service = _prv08_shaped_fixture(tmp_path)
+    plan = EngineeringPlan(
+        plan_id="planner-laundering-probe", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(
+            id="gi-x",
+            statement="Downstream consumers must be updated when the contract changes.",
+        )],
+        subtasks=[
+            Subtask(
+                id="s1", description="change the upstream contract",
+                execution_method=ExecutionMethod.MODEL,
+                provides=["changed_contract"],
+            ),
+            Subtask(
+                id="s2", description="propagate the contract change downstream",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s1"],
+                requires=["changed_contract"],
+                relevant_global_invariant_ids=["gi-x"],
+                planned_files=[PlannedFile(path=summary_owner, action=FileAction.MODIFY)],
+            ),
+        ],
+    )
+    completed_subtask_ids = frozenset({"s1"})  # s1 IS completed - maximal affectedness
+    candidate_summary = (  # exactly one public symbol changes (the record's own arity)
+        "package com.example.m2; public record CustomerSummary(long customerId,"
+        "String displayName, String region) {}\n"
+    )
+    candidate_service = (
+        "package com.example.m2; import com.example.m1.CustomerRecord;\n"
+        "public class SummaryService { public CustomerSummary summarize(CustomerRecord r)"
+        "{return new CustomerSummary(r.customerId(),r.firstName()+\" \"+r.lastName(),r.region());} }\n"
+    )
+    # The dependency edge itself is structurally real and unambiguous - the
+    # exact fact plan_validation.py's own SEMANTIC_DEPENDENCY_EDGE_MISSING/
+    # AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER checks confirm before a plan is
+    # ever allowed to execute - not a fabricated/dangling token.
+    s1, s2 = plan.subtasks
+    assert "changed_contract" in s1.provides and "changed_contract" in s2.requires
+    assert "s1" in completed_subtask_ids  # the one non-Planner-asserted fact - present here too
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path),
+        {summary_owner: original_summary, service_owner: original_service},
+        {summary_owner: candidate_summary, service_owner: candidate_service},
+        "Extend the existing CustomerRecord contract with a new required field named region.",
+    )
+    assert violations != []  # REJECTED - affectedness alone never grants mutation authority
+    assert any(v["owner"] == summary_owner for v in violations)
+
+
+def test_candidate_overlay_consumer_updated_in_same_batch_is_not_stale_evidence(tmp_path):
+    """CANDIDATE_OVERLAY_CONSUMER_UPDATED (Step 6) - a consumer file that
+    genuinely stops calling the old API entirely (not merely evolving to a
+    compatible new arity) is updated in the SAME candidate batch. The
+    evidence walk must see the candidate's own new content for that file,
+    not its stale on-disk original, so it correctly stops counting it as
+    live evidence of continued old-API usage."""
+    owner = "src/main/java/example/Customer.java"
+    caller = "src/main/java/example/CustomerCaller.java"
+    original_owner = "public class Customer { public String legacyGreet(String name) { return name; } }\n"
+    renamed_owner = "public class Customer { public String greet(String name) { return name; } }\n"
+    original_caller = "class CustomerCaller { void run() { new Customer().legacyGreet(\"x\"); } }\n"
+    updated_caller = "class CustomerCaller { void run() { new Customer().greet(\"x\"); } }\n"
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original_owner)
+    (tmp_path / caller).write_text(original_caller)
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path),
+        {owner: original_owner, caller: original_caller},
+        {owner: renamed_owner, caller: updated_caller},
+        "Rename Customer.legacyGreet to Customer.greet and update its one caller in the same change",
+    )
+    assert violations == []
+
+
+def test_candidate_overlay_consumer_not_updated_remains_evidence(tmp_path):
+    """CANDIDATE_OVERLAY_CONSUMER_NOT_UPDATED (Step 6, inverse) - same
+    rename as above, but the candidate batch does NOT touch the caller file
+    at all this attempt. Its stale on-disk content, still calling the old
+    API, must remain live evidence and the change must still be rejected."""
+    owner = "src/main/java/example/Customer.java"
+    caller = "src/main/java/example/CustomerCaller.java"
+    original_owner = "public class Customer { public String legacyGreet(String name) { return name; } }\n"
+    renamed_owner = "public class Customer { public String greet(String name) { return name; } }\n"
+    original_caller = "class CustomerCaller { void run() { new Customer().legacyGreet(\"x\"); } }\n"
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original_owner)
+    (tmp_path / caller).write_text(original_caller)
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path),
+        {owner: original_owner},  # caller not in this candidate batch at all
+        {owner: renamed_owner},
+        "Rename Customer.legacyGreet to Customer.greet",
+    )
+    assert violations == [{
+        "owner": owner,
+        "removed_signature": "String legacyGreet(String)",
+        "evidence_files": [caller],
+    }]
+
+
+@pytest.mark.asyncio
+async def test_prv08_shaped_deterministic_integration(tmp_path):
+    """PRV08_SHAPED_DETERMINISTIC_INTEGRATION - end-to-end through the real
+    run_attempt() pre-write gate (no live LLM - the Developer is mocked to
+    return the deterministic candidate content real P9 attempt 1 produced).
+    Parts 1-2 below deliberately omit grounding_goal (only `goal=` is set,
+    matching a plain/Legacy-shaped call) - CustomerSummary/SummaryService
+    gaining `region` and an unrelated incidental rename (Helper.java) are
+    BOTH rejected pre-write, exactly as they always were, confirming the new
+    active_authorizations parameter changes nothing when no authoritative
+    grounding_goal is available (default None/[], fully backward compatible).
+    Part 3 sets grounding_goal to the real PRV-08 authoritative text and
+    exercises s1's own CustomerRecord attempt end-to-end - now correctly
+    ALLOWED, proving the attempt.py wiring (not just the unit-level
+    find_brownfield_public_api_changes() calls above) works."""
+    summary_owner, service_owner, original_summary, original_service = _prv08_shaped_fixture(tmp_path)
+    plan = EngineeringPlan(
+        plan_id="prv08-shaped", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(
+            id="gi3",
+            statement=(
+                "All affected consumer modules must be updated to handle the "
+                "new region field, and downstream components must be "
+                "revalidated without breaking unrelated behavior."
+            ),
+        )],
+        subtasks=[
+            Subtask(
+                id="s1", description="extend CustomerRecord with region",
+                execution_method=ExecutionMethod.MODEL,
+                provides=["updated_customer_record_contract"],
+            ),
+            Subtask(
+                id="s2", description="propagate region through CustomerSummary",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s1"],
+                requires=["updated_customer_record_contract"],
+                relevant_global_invariant_ids=["gi3"],
+            ),
+        ],
+    )
+    candidate_summary = (
+        "package com.example.m2; public record CustomerSummary(long customerId,"
+        "String displayName, String region) {}\n"
+    )
+    candidate_service = (
+        "package com.example.m2; import com.example.m1.CustomerRecord;\n"
+        "public class SummaryService { public CustomerSummary summarize(CustomerRecord r)"
+        "{return new CustomerSummary(r.customerId(),r.firstName()+\" \"+r.lastName(),r.region());} }\n"
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": summary_owner, "content": candidate_summary},
+        {"filepath": service_owner, "content": candidate_service},
+    ])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        goal="Extend the existing CustomerRecord contract with a new required field named region.",
+        architect_files=[summary_owner, service_owner],
+        expected_files_upfront=[summary_owner, service_owner],
+        architect_basename_to_path={
+            "CustomerSummary.java": summary_owner, "SummaryService.java": service_owner,
+        },
+        structured_plan=plan, current_subtask_id="s2",
+        completed_subtask_ids=frozenset({"s1"}),
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+    assert exc_info.value.failure.type == "brownfield_public_api_changed"
+    assert summary_owner in exc_info.value.failure.likely_files
+
+    # --- An unrelated rename in a different file must be rejected the same
+    # way - confirms the guard treats both shapes identically (fail closed,
+    # no allowlist that could distinguish a genuine downstream propagation
+    # from an incidental rider without a new authority concept). ---
+    unrelated_owner = "m2/src/main/java/com/example/m2/Helper.java"
+    unrelated_caller = "m2/src/main/java/com/example/m2/HelperCaller.java"
+    (tmp_path / unrelated_owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / unrelated_owner).write_text(
+        "package com.example.m2; public class Helper { public String helperMethod(String x) { return x; } }\n"
+    )
+    (tmp_path / unrelated_caller).write_text("new Helper().helperMethod(\"x\");\n")
+
+    state2 = GenerationState()
+    state2.attempt_number = 0
+    state2.all_files_written = set()
+    developer2 = AsyncMock()
+    developer2.run_generation = AsyncMock(return_value=[
+        {
+            "filepath": unrelated_owner,
+            "content": (
+                "package com.example.m2; public class Helper { public String renamedMethod(String x) "
+                "{ return x; } }\n"
+            ),
+        },
+    ])
+    ctx2 = _minimal_attempt_ctx(
+        tmp_path, developer=developer2,
+        goal="Extend the existing CustomerRecord contract with a new required field named region.",
+        architect_files=[unrelated_owner],
+        expected_files_upfront=[unrelated_owner],
+        architect_basename_to_path={"Helper.java": unrelated_owner},
+        structured_plan=plan, current_subtask_id="s2",
+        completed_subtask_ids=frozenset({"s1"}),
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info2:
+            await run_attempt(state2, ctx2)
+    assert exc_info2.value.failure.type == "brownfield_public_api_changed"
+    assert unrelated_owner in exc_info2.value.failure.likely_files
+
+    # --- Part 3: with the real authoritative grounding_goal set, s1's own
+    # CustomerRecord attempt is DIRECT-authorized end-to-end through
+    # run_attempt() - the attempt.py wiring, not just the unit-level guard
+    # calls above. ---
+    record_owner = "m1/src/main/java/com/example/m1/CustomerRecord.java"
+    original_record = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName) {}\n"
+    )
+    candidate_record = (
+        "package com.example.m1; public record CustomerRecord(long customerId,"
+        "String firstName,String lastName,String region) {}\n"
+    )
+    (tmp_path / record_owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / record_owner).write_text(original_record)
+    plan_with_record = EngineeringPlan(
+        plan_id="prv08-shaped-with-record", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="extend CustomerRecord with region",
+                execution_method=ExecutionMethod.MODEL,
+                provides=["updated_customer_record_contract"],
+                planned_files=[PlannedFile(path=record_owner, action=FileAction.MODIFY)],
+            ),
+        ],
+    )
+    state3 = GenerationState()
+    state3.attempt_number = 0
+    state3.all_files_written = set()
+    developer3 = AsyncMock()
+    developer3.run_generation = AsyncMock(return_value=[
+        {"filepath": record_owner, "content": candidate_record},
+    ])
+    ctx3 = _minimal_attempt_ctx(
+        tmp_path, developer=developer3,
+        goal=_PRV08_AUTHORITATIVE_GOAL,
+        grounding_goal=_PRV08_AUTHORITATIVE_GOAL,
+        architect_files=[record_owner],
+        expected_files_upfront=[record_owner],
+        architect_basename_to_path={"CustomerRecord.java": record_owner},
+        structured_plan=plan_with_record, current_subtask_id="s1",
+        completed_subtask_ids=frozenset(),
+    )
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        await run_attempt(state3, ctx3)  # must not raise QualityGateFailure
 
 
 @pytest.mark.asyncio

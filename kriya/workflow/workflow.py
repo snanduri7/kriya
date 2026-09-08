@@ -91,6 +91,7 @@ from kriya.workflow.attribution import (
     find_whole_response_no_op,
     resolve_future_owner_verification_deferral,
 )
+from kriya.workflow.contract_authority import derive_direct_contract_authorizations
 from kriya.workflow.file_resolution import (
     EXPECTED_FILE_EXTENSIONS,
     IncompleteGenerationError,
@@ -2937,11 +2938,26 @@ class WorkflowEngine:
                         failure.diagnostics = {**(failure.diagnostics or {}), **diagnostics}
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
+                # CORR-016 (P9/PRV-08, 2026-09-08, DIRECT-only) - same
+                # authorization the per-attempt pre-write gate in
+                # run_attempt() already applies (kriya/workflow/attempt.py),
+                # computed identically here so a candidate that passed that
+                # gate is never re-rejected at this terminal regression
+                # check. [] for every plain Legacy run (structured_plan is
+                # None there).
+                terminal_direct_authorizations = [
+                    authorization
+                    for authorization in derive_direct_contract_authorizations(
+                        grounding_goal, structured_plan,
+                    )
+                    if authorization.legal_scope.get("subtask_id") == current_subtask_id
+                ]
                 api_violations = find_brownfield_public_api_changes(
                     workspace_path,
                     state.all_original_contents,
                     final_candidate_contents,
                     goal,
+                    terminal_direct_authorizations,
                 )
                 if api_violations:
                     evidence = "; ".join(
