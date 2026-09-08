@@ -1648,12 +1648,31 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 # (set in kriya/workflow/workflow.py), so this toolchain-
                 # specific message and its "check your Java/Maven toolchain"
                 # advice must not fire for it.
-                if res.get("environment_failure") and res.get("failure_category") != "unauthorized_generation_target":
+                if res.get("environment_failure") and res.get("failure_category") not in (
+                    "unauthorized_generation_target", "candidate_independent_deterministic_failure",
+                ):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                         "Kriya stopped retrying early rather than burning its retry budget "
                         "re-generating code that could never fix this - run `kriya doctor` "
                         "to check your Java/Maven toolchain resolution.",
+                        fg="yellow", bold=True
+                    )
+                # PRV-17 (2026-09-08, P7 efficiency finding): a candidate-
+                # independent deterministic failure (kriya/workflow/
+                # deterministic_failure_diagnostic.py) is neither an
+                # environment/toolchain problem nor a plan/scope defect - an
+                # isolated baseline replay already proved no candidate change
+                # could have resolved it, so the advice must point at the
+                # validator/build configuration, not the toolchain.
+                if res.get("failure_category") == "candidate_independent_deterministic_failure":
+                    click.secho(
+                        f"\n[DETERMINISTIC VALIDATOR DEFECT] {res['environment_failure']}\n"
+                        "Kriya stopped retrying early: replaying the same deterministic check "
+                        "against an isolated copy of the pre-candidate baseline reproduced the "
+                        "identical failure, proving no further Developer regeneration could "
+                        "have fixed it - the defect is in the validator or build configuration "
+                        "itself, not the generated code.",
                         fg="yellow", bold=True
                     )
                 if res.get("run_id"):
@@ -2287,12 +2306,26 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             # unauthorized/unrecoverable generation target reuses environment_
             # failure purely as its STOP mechanism, not as a real toolchain
             # problem, and must not print this Java/Maven-specific advice.
-            if res.get("environment_failure") and res.get("failure_category") != "unauthorized_generation_target":
+            if res.get("environment_failure") and res.get("failure_category") not in (
+                "unauthorized_generation_target", "candidate_independent_deterministic_failure",
+            ):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                     "Kriya stopped retrying early rather than burning its retry budget "
                     "re-generating code that could never fix this - run `kriya doctor` "
                     "to check your Java/Maven toolchain resolution.",
+                    fg="yellow", bold=True
+                )
+            # PRV-17 (2026-09-08, P7 efficiency finding): see the matching
+            # branch above in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "candidate_independent_deterministic_failure":
+                click.secho(
+                    f"\n[DETERMINISTIC VALIDATOR DEFECT] {res['environment_failure']}\n"
+                    "Kriya stopped retrying early: replaying the same deterministic check "
+                    "against an isolated copy of the pre-candidate baseline reproduced the "
+                    "identical failure, proving no further Developer regeneration could "
+                    "have fixed it - the defect is in the validator or build configuration "
+                    "itself, not the generated code.",
                     fg="yellow", bold=True
                 )
             if res.get("run_id"):

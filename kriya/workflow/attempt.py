@@ -97,6 +97,7 @@ from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_p
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
+from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationLedger, ObligationRecord, ObligationStatus
 from kriya.workflow.plan_schema import RequirementOwnershipRelation
 from kriya.workflow.repair_contract import RepairContractStatus, build_repair_contract, derive_process_boundary_participants
@@ -526,6 +527,16 @@ class AttemptContext:
     # call site always supplies one.
     obligation_ledger: Optional["ObligationLedger"] = None
     completed_subtask_ids: FrozenSet[str] = frozenset()
+    # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
+    # deterministic_failure_diagnostic.py. One per-run store, threaded
+    # through unchanged from workflow.py's run_generation_workflow() the
+    # same way obligation_ledger already is above - deliberately a SEPARATE
+    # object from obligation_ledger, not a new ObligationKind, so this
+    # mechanism carries zero coupling to MA8's own regression-detection
+    # semantics. None here only so ad hoc AttemptContext construction in
+    # existing tests keeps working unchanged; every real call site supplies
+    # one. See that module's own docstring for the incident this closes.
+    deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None
 
 
 def _process_boundary_obligation_id(subtask_id: str) -> str:

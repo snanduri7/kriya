@@ -43,6 +43,7 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.migration import MigrationResolution, resolve_migration_resolution
+from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.obligations import (
     ObligationAuthority,
     ObligationKind,
@@ -756,6 +757,7 @@ class WorkflowEngine:
         current_subtask_id: Optional[str] = None,
         obligation_ledger: Optional["ObligationLedger"] = None,
         completed_subtask_ids: Optional[FrozenSet[str]] = None,
+        deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -2223,6 +2225,16 @@ class WorkflowEngine:
         # Legacy call gets its own fresh one, mirroring migration_resolution's
         # own "resolved once, reused, or created fresh for this call" pattern.
         resolved_obligation_ledger = obligation_ledger if obligation_ledger is not None else ObligationLedger()
+        # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
+        # deterministic_failure_diagnostic.py. Same "resolved once, reused
+        # across every bounded-subtask call, or created fresh for a plain
+        # Legacy call" pattern as resolved_obligation_ledger immediately
+        # above - deliberately a separate store, not folded into the
+        # ObligationLedger itself (see that module's own docstring for why).
+        resolved_deterministic_failure_diagnostics = (
+            deterministic_failure_diagnostics if deterministic_failure_diagnostics is not None
+            else DeterministicFailureDiagnosticStore()
+        )
 
         # Loop-invariant - nothing in this object is reassigned across retry
         # attempts, so it's built once here rather than reconstructed per
@@ -2298,6 +2310,7 @@ class WorkflowEngine:
             current_subtask_id=current_subtask_id,
             obligation_ledger=resolved_obligation_ledger,
             completed_subtask_ids=completed_subtask_ids or frozenset(),
+            deterministic_failure_diagnostics=resolved_deterministic_failure_diagnostics,
         )
 
         from kriya.workflow.retry_policy import decide_for_state
@@ -3251,9 +3264,20 @@ class WorkflowEngine:
             is_scope_defect_stop = bool(state.environment_failure) and state.environment_failure.startswith((
                 "UNAUTHORIZED_GENERATION_TARGET:", "NO_AUTHORIZED_REPAIR_TARGET:",
             ))
+            # PRV-17 (2026-09-08, P7 efficiency finding): same message-prefix
+            # convention as is_scope_defect_stop above - a candidate-
+            # independent deterministic validator/build-configuration defect
+            # (kriya/workflow/deterministic_failure_diagnostic.py) is neither
+            # a machine/toolchain environment problem nor a plan/scope
+            # defect, and must not be reported or traced as either.
+            is_candidate_independent_deterministic_failure = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE:")
+            )
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
                 else "unauthorized_generation_target" if is_scope_defect_stop
+                else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )

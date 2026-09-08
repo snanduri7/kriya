@@ -135,6 +135,7 @@ from kriya.workflow.migration import (
     MigrationResolution, MigrationResolutionStatus, MigrationValidationScope,
     find_migration_incomplete, resolve_migration_resolution,
 )
+from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.obligations import (
     ObligationAuthority,
     ObligationKind,
@@ -4077,6 +4078,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # everywhere in one run. See this module's own docstring for the two
         # concrete run #8 defects this closes.
         obligation_ledger = ObligationLedger()
+        # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
+        # deterministic_failure_diagnostic.py. One store for the whole run,
+        # deliberately separate from obligation_ledger above (see that
+        # module's own docstring for why) - threaded unchanged into every
+        # subtask's run_generation_workflow() call below so a plan-scope-
+        # recovery re-invocation of the SAME subtask (a brand new
+        # GenerationState) never loses a conclusion already proven here.
+        deterministic_failure_diagnostics = DeterministicFailureDiagnosticStore()
         # raw_plan is the Planner's own asserted output, before
         # canonicalize_planned_file_actions() derives create/modify from
         # real repository state - kept only so the resume-hash comparison
@@ -4739,6 +4748,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # during this subtask's own attempt accumulate into the
                 # SAME per-run ledger, not a fresh one per subtask.
                 obligation_ledger=obligation_ledger,
+                deterministic_failure_diagnostics=deterministic_failure_diagnostics,
                 completed_subtask_ids=completed_subtask_ids,
                 # DENY_ALL for a verification-role subtask - enforced at the
                 # real write gate (AuthorizedFileWriter), not merely implied

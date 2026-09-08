@@ -27,6 +27,10 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.attribution import AttributionResult, DETERMINISTIC_ATTRIBUTION_TIERS, _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.banners import log_gate_banner
+from kriya.workflow.deterministic_failure_diagnostic import (
+    DeterministicFailureCorrectability,
+    evaluate_candidate_independent_failure,
+)
 from kriya.workflow.failure import (
     Failure,
     FailureAttributionKind,
@@ -565,6 +569,53 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         ctx.worktree_path,
         set(state.all_files_written) | set(ctx.established_files),
     )
+    # Candidate-independent deterministic failure detection (PRV-17,
+    # 2026-09-08, P7 efficiency finding) - read-only reuse of state BEFORE
+    # record_workspace_progress overwrites state.last_failed_workspace_hash
+    # below; this block never writes to GenerationState.budgets or to any
+    # field record_workspace_progress itself reads/writes, and never calls
+    # it. See kriya/workflow/deterministic_failure_diagnostic.py's own
+    # module docstring for the full incident and why this is deliberately a
+    # separate mechanism from record_workspace_progress, MA8, and MA9's
+    # cross-owner RECOVERY_NO_PROGRESS.
+    if (
+        ctx.deterministic_failure_diagnostics is not None
+        and not state.environment_failure
+    ):
+        diagnostic = evaluate_candidate_independent_failure(
+            store=ctx.deterministic_failure_diagnostics,
+            fail_type=fail_type,
+            current_failure_signature=current_failure_signature,
+            previous_failure_signature=previous_failure_signature,
+            workspace_changed=current_workspace_hash != state.last_failed_workspace_hash,
+            has_implicated_files=bool(getattr(failure, "likely_files", None)),
+            authoritative_workspace_path=ctx.workspace_path,
+            known_files=ctx.established_files,
+            autonomy_cfg=ctx.kernel.config.autonomy,
+        )
+        if diagnostic is not None and diagnostic.correctability == DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE:
+            # Reuses the EXISTING state.environment_failure/STOP_ENVIRONMENT
+            # mechanism as the stop signal (same reuse pattern already used
+            # for UNAUTHORIZED_GENERATION_TARGET/NO_AUTHORIZED_REPAIR_TARGET
+            # just above in this module) - no new retry_policy.py branch, no
+            # budget change. workflow.py's own failure_category classifier
+            # recognizes this exact prefix so it is reported as a validator
+            # defect, never mislabeled "[ENVIRONMENT/TOOLCHAIN ISSUE]".
+            state.environment_failure = (
+                "CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE: the same normalized "
+                f"{fail_type} failure recurred after a materially different candidate, "
+                "named no credible repair target, and was independently reproduced by "
+                "replaying the same deterministic check against an isolated copy of the "
+                "pre-candidate baseline - this is a validator/build-configuration/"
+                "environment defect, not something further Developer regeneration can "
+                f"resolve.\n\nBaseline replay output:\n{diagnostic.baseline_output}"
+            )
+            logger.error(
+                "CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE: baseline replay reproduced "
+                "the identical %s failure signature - stopping further Developer "
+                "regeneration for this subtask.",
+                fail_type,
+            )
     # The runtime contract allows two recovery actions and stops on the third
     # consecutive no-progress result. Older configurations commonly used 2
     # for the former failure-family-churn counter; do not reinterpret that as
