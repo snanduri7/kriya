@@ -640,6 +640,112 @@ def test_ordinary_test_gate_outcome_does_not_satisfy_judgment_runtime_requiremen
     assert evidence[0]["source"] == "unresolved"
 
 
+@pytest.mark.asyncio
+async def test_real_run_app_sequence_test_outcome_satisfies_judgment_runtime_requirement(tmp_path):
+    """Vertical counterpart to test_test_command_run_verification_satisfies_
+    judgment_runtime_requirement immediately above, which feeds a hand-
+    built gate_outcome dict directly into _build_required_verification_
+    evidence() - that proves the CONSUMER's matching predicate is correct,
+    but never proves the real PRODUCER (attempt.py's
+    _execute_runtime_verification_directly(), which calls
+    PolymorphicValidator.run_app_sequence() for real) actually constructs a
+    gate_outcome in the exact shape the consumer expects. Only the model
+    judgment (RunVerifierAgent.judge - not under test here) and the
+    spawned process's own identity (a real, trivial pytest invocation
+    substituted for what a real project's test suite would be) are
+    controlled; PolymorphicValidator coordination, command classification
+    (deterministic_sequence_kind), the real subprocess run, and the real
+    evidence-builder consumption all run unmocked.
+
+    Uses the absolute path to this venv's own `pytest` executable (not
+    `[sys.executable, "-m", "pytest"]`) - deterministic_verification_kind's
+    classifier matches on `Path(command[0]).name` against a literal
+    {"python", "python3"} set, and sys.executable's own basename is
+    launcher-dependent (e.g. "python" when invoked via `.venv/bin/python`,
+    but "python3.14" when invoked via `.venv/bin/pytest`'s own shebang) -
+    found live, this exact test failing only under a real pytest run. Not
+    a production bug: `pytest`'s own basename is stable regardless of how
+    THIS test itself was launched."""
+    from kriya.workflow.attempt import _execute_runtime_verification_directly
+    from kriya.tools.validate import PolymorphicValidator
+
+    (tmp_path / "test_sample.py").write_text("def test_ok():\n    assert True\n")
+    pytest_executable = os.path.join(os.path.dirname(sys.executable), "pytest")
+    state = GenerationState()
+    state.attempt_number = 1
+    ctx = _minimal_attempt_ctx(
+        tmp_path, runtime_verification_required=True,
+        run_verifier=AsyncMock(
+            judge=AsyncMock(return_value={
+                "should_run": True,
+                "run_commands": [[pytest_executable, "-q"]],
+                "command_source": "confirmed",
+                "input_channel": "none",
+                "success_criteria": "the test suite passes",
+            }),
+        ),
+    )
+    validator = PolymorphicValidator(str(tmp_path))
+
+    await _execute_runtime_verification_directly(state, ctx, validator)
+
+    real_outcome = state.gate_outcomes[-1]
+    assert real_outcome["type"] == "test"
+    assert real_outcome["success"] is True
+    assert real_outcome["commands"] == [[pytest_executable, "-q"]]
+
+    requirements = [{
+        "type": "judgment", "verifier_kind": "application_runtime",
+        "description": "Verify observable application-runtime behavior via test execution.",
+        "requires_runtime_execution": True,
+    }]
+    evidence = _build_required_verification_evidence(
+        requirements, quality_gates_passed=True, gate_outcomes=state.gate_outcomes,
+    )
+    assert evidence[0]["passed"] is True
+    assert evidence[0]["source"] == "authoritative_runtime_verification"
+
+
+def test_real_ordinary_test_gate_outcome_does_not_satisfy_judgment_runtime_requirement(tmp_path):
+    """Negative counterpart, safety property established via a REAL
+    producer too (not just the hand-built dict in test_ordinary_test_gate_
+    outcome_does_not_satisfy_judgment_runtime_requirement above): an
+    ORDINARY full-suite test run (PolymorphicValidator.run_tests(), the
+    producer for every non-runtime-verification test gate - never
+    run_app_sequence()) appended in attempt.py's own real shape (kriya/
+    workflow/attempt.py ~line 5507-5513: type="test", no "commands" key)
+    must NOT satisfy a runtime-execution requirement it was never produced
+    to prove, even though it shares the same type="test" tag with the
+    positive case above. This is the producer/consumer-mismatch safety
+    property the #6 audit finding was concerned with - proven from real
+    execution, not asserted from an assumption that the fix "fails safe"."""
+    from kriya.tools.validate import PolymorphicValidator
+
+    (tmp_path / "test_sample.py").write_text("def test_ok():\n    assert True\n")
+    validator = PolymorphicValidator(str(tmp_path))
+    test_res = validator.run_tests()
+    assert test_res["success"] is True
+
+    # Exact real append shape from attempt.py's own ordinary-test-gate
+    # path - deliberately no "commands" key, unlike run_app_sequence()'s
+    # own two success-path appends.
+    real_ordinary_outcome = {
+        "attempt": 1, "type": "test", "success": True,
+        "output": test_res.get("output", ""),
+    }
+
+    requirements = [{
+        "type": "judgment", "verifier_kind": "application_runtime",
+        "description": "Verify observable application-runtime behavior via test execution.",
+        "requires_runtime_execution": True,
+    }]
+    evidence = _build_required_verification_evidence(
+        requirements, quality_gates_passed=True, gate_outcomes=[real_ordinary_outcome],
+    )
+    assert evidence[0]["passed"] is None
+    assert evidence[0]["source"] == "unresolved"
+
+
 def test_response_shape_owner_discovery_finds_existing_controller(tmp_path):
     controller = tmp_path / "src/main/java/com/example/customer/CustomerController.java"
     controller.parent.mkdir(parents=True)

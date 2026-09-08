@@ -5373,6 +5373,401 @@ async def test_enforce_revises_service_scope_to_grounded_controller_and_continue
 
 
 @pytest.mark.asyncio
+async def test_enforce_grounds_stale_pinned_test_scope_denial_and_merges_to_success(tmp_path):
+    """The real P2 run-1 incident (2026-09-05, spring-ignite-demo), driven
+    through the full enforce loop rather than handle_attempt_failure()
+    called directly (test_handle_attempt_failure_scope_denial_with_real_
+    existing_test_owner_is_grounded in test_workflow.py does that, proving
+    grounding itself is correct, but stops there - it never proves the
+    CONTROLLER actually completes the recovery: revise_plan_for_grounded_
+    scope_owner() merging the ownership in, revalidating, and reaching a
+    real success). A plan splits "change EmployeeService" (s1) and "update
+    the existing EmployeeServiceTest that pins its old behavior" (s2,
+    depends_on=[s1]) into two subtasks; s1's own full regression gate can
+    never pass without updating that test, and s1 has no write authority
+    over it - exactly the shape b6685cb fixed (a real, existing TEST file
+    grounds identically to a real, existing PRODUCTION file, not
+    blanket-excluded). Mirrors test_enforce_revises_service_scope_to_
+    grounded_controller_and_continues immediately above, with the grounded
+    owner being the downstream TEST subtask itself (not a third production
+    subtask), matching P2's own 2-subtask shape exactly."""
+    service = "src/main/EmployeeService.java"
+    test_file = "src/test/EmployeeServiceTest.java"
+    for path in (service, test_file):
+        full = tmp_path / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text("baseline\n")
+    plan = EngineeringPlan(
+        plan_id="p2-run1", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="only the raise cap changes")],
+        subtasks=[
+            Subtask(
+                id="s1", description="cap the raise", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
+                provides=["raise capped"], relevant_global_invariant_ids=["gi1"],
+            ),
+            Subtask(
+                id="s2", description="update the pinned test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path=test_file, action=FileAction.MODIFY)],
+                requires=["raise capped"], relevant_global_invariant_ids=["gi1"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            # s1's own full regression gate fails: the stale pinned test
+            # still asserts the OLD uncapped behavior. AuthorizedFileWriter
+            # denies s1's attempt to fix it directly (outside s1's own
+            # scope), grounding to the real, existing test file exactly as
+            # _failure_from_validated_scope_denial() does in production.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "classification": "PLAN_SCOPE_DEFECT",
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "regression_test",
+                    "required_files": [test_file],
+                    "grounded_owner_files": [test_file],
+                    "attribution_tier": "architectural_owner",
+                    "allowed_files": [service],
+                },
+            }
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "cap the raise at 150000.0, updating the existing pinned test",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert calls[0]["allowed_write_relpaths"] == [service]
+    assert calls[1]["allowed_write_relpaths"] == [service, test_file]
+    assert calls[1]["execution_scope"] == "subtask=s1 role=plan_scope_recovery"
+    assert len(calls) == 2  # s2 fully absorbed into s1 - no separate execution call
+    assert (tmp_path / test_file).read_text() == "modified\n"
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_subtasks = approved["plan"]["subtasks"]
+    assert any(
+        item["id"] == "s1" and test_file in [pf["path"] for pf in item["planned_files"]]
+        for item in approved_subtasks
+    )
+    assert not any(item["id"] == "s2" for item in approved_subtasks)
+    assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
+
+
+@pytest.mark.asyncio
+async def test_enforce_merge_self_satisfies_per_file_requires_capabilities_via_real_validate_plan(
+    tmp_path,
+):
+    """The real P2 run-3 incident (2026-09-05, spring-ignite-demo): identical
+    merge shape to test_enforce_grounds_stale_pinned_test_scope_denial_and_
+    merges_to_success immediately above, except the grounded test file's
+    own PlannedFile ALSO declares requires_capabilities=["raise_capped"] -
+    a per-file field, distinct from subtask-level requires. Before 1b6e727,
+    validate_plan()'s per-file check demanded this capability appear in the
+    MERGED subtask's own `requires`, but revise_plan_for_grounded_scope_
+    owner()'s subtask-level reconciliation already correctly drops a
+    self-provided capability from `requires` during merge - so every
+    grounded-owner merge of exactly this shape was unvalidatable. This
+    test does NOT mock validate_plan (unlike the sibling test above) - the
+    REAL function must accept the REAL merged plan on the first pass,
+    proving the fix holds through the actual controller merge, not just
+    against a hand-built plan (test_plan_validation.py's own
+    test_planned_artifact_prerequisite_self_satisfied_by_sole_provider_
+    passes already covers that in isolation)."""
+    service = "src/main/EmployeeService.java"
+    test_file = "src/test/EmployeeServiceTest.java"
+    for path in (service, test_file):
+        full = tmp_path / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text("baseline\n")
+    plan = EngineeringPlan(
+        plan_id="p2-run3", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="only the raise cap changes")],
+        subtasks=[
+            Subtask(
+                id="s1", description="cap the raise", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
+                provides=["raise_capped"], relevant_global_invariant_ids=["gi1"],
+            ),
+            Subtask(
+                id="s2", description="update the pinned test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], requires=["raise_capped"],
+                planned_files=[PlannedFile(
+                    path=test_file, action=FileAction.MODIFY,
+                    requires_capabilities=["raise_capped"],
+                )],
+                relevant_global_invariant_ids=["gi1"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    # Unlike every other test in this module, validate_plan() runs for
+    # real here (see docstring) - its own internals call
+    # triage_service.recompute_from_files(), which _workflow_engine()'s
+    # bare MagicMock doesn't otherwise support awaiting.
+    we.engineering_triage.recompute_from_files = AsyncMock(return_value=_route())
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "classification": "PLAN_SCOPE_DEFECT",
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "regression_test",
+                    "required_files": [test_file],
+                    "grounded_owner_files": [test_file],
+                    "attribution_tier": "architectural_owner",
+                    "allowed_files": [service],
+                },
+            }
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ):
+        result = await WorkflowController(we).execute(
+            "cap the raise at 150000.0, updating the existing pinned test",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 2  # merge validated and converged on the first real validate_plan pass
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_subtasks = approved["plan"]["subtasks"]
+    merged_s1 = next(item for item in approved_subtasks if item["id"] == "s1")
+    assert test_file in [pf["path"] for pf in merged_s1["planned_files"]]
+    assert "raise_capped" not in merged_s1["requires"]
+
+
+@pytest.mark.asyncio
+async def test_enforce_preserved_reference_acceptance_and_terminal_integrity_gate_a_real_run(
+    tmp_path,
+):
+    """The real P2 run-8 shape (2026-09-07, spring-ignite-demo, the run that
+    finally closed the whole MISSING_GROUNDED_PRODUCTION_ARTIFACT
+    non-convergence question): CustomerControllerTest.java references
+    CustomerController.java, which no subtask owns - declared as a
+    preserved_references entry instead of a real gap. Every existing test
+    for this mechanism either calls find_missing_grounded_production_
+    artifacts() directly (proving acceptance/recording in isolation) or
+    enforce_preserved_reference_terminal_integrity() directly (proving the
+    re-hash in isolation) - neither goes through WorkflowController.
+    execute() end to end, so neither proves the declared preservation is
+    what actually lets a REAL plan pass planning-time validation AND that
+    the terminal gate is wired into the REAL run's own success
+    determination, not just callable in isolation. Uses the same real
+    structural-evidence fixture (_seed_structural_customer_repo) the
+    acceptance unit test already relies on for its genuine TEST->
+    CONTROLLER edge - not a hand-waved structural_resolved_edges dict."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    plan = EngineeringPlan(
+        plan_id="p2-run8", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="CustomerController is untouched")],
+        subtasks=[
+            Subtask(
+                id="s1", description="update CustomerService", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=_CUSTOMER_SERVICE_PATH, action=FileAction.MODIFY)],
+                provides=["service_updated"], relevant_global_invariant_ids=["gi1"],
+            ),
+            Subtask(
+                id="s2", description="update the controller test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], requires=["service_updated"],
+                planned_files=[PlannedFile(
+                    path=_CUSTOMER_CONTROLLER_TEST_PATH, action=FileAction.MODIFY,
+                    preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+                )],
+                relevant_global_invariant_ids=["gi1"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    we.engineering_triage.recompute_from_files = AsyncMock(return_value=_route())
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        # Neither subtask ever writes CustomerController.java - the
+        # preservation holds for real, not just as a plan-time claim.
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ):
+        result = await WorkflowController(we).execute(
+            "update CustomerService without touching CustomerController",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 2
+    assert (tmp_path / _CUSTOMER_CONTROLLER_PATH).read_text() == _STRUCTURAL_CUSTOMER_CONTROLLER_JAVA
+
+
+@pytest.mark.asyncio
+async def test_enforce_preserved_reference_terminal_integrity_fails_a_real_run_on_mutation(
+    tmp_path,
+):
+    """Negative counterpart: the exact same accepted plan, but this time
+    the Developer's own generated content for s1 (CustomerService.java)
+    ALSO rewrites CustomerController.java (a realistic mistake - a model
+    editing a related file it wasn't authorized to touch). The terminal
+    integrity re-hash must catch this and the run must NOT report
+    success, proving the gate is load-bearing in the real run, not merely
+    present."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    plan = EngineeringPlan(
+        plan_id="p2-run8-mutated", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="CustomerController is untouched")],
+        subtasks=[
+            Subtask(
+                id="s1", description="update CustomerService", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=_CUSTOMER_SERVICE_PATH, action=FileAction.MODIFY)],
+                provides=["service_updated"], relevant_global_invariant_ids=["gi1"],
+            ),
+            Subtask(
+                id="s2", description="update the controller test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], requires=["service_updated"],
+                planned_files=[PlannedFile(
+                    path=_CUSTOMER_CONTROLLER_TEST_PATH, action=FileAction.MODIFY,
+                    preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+                )],
+                relevant_global_invariant_ids=["gi1"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    we.engineering_triage.recompute_from_files = AsyncMock(return_value=_route())
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        if len(calls) == 1:
+            # Out-of-band mutation of the file declared preserved - not
+            # part of this subtask's own allowed_write_relpaths, mimicking
+            # a worktree-level side effect a real generation pass could
+            # produce (e.g. an IDE-style multi-file edit).
+            (tmp_path / _CUSTOMER_CONTROLLER_PATH).write_text("silently mutated\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ):
+        result = await WorkflowController(we).execute(
+            "update CustomerService without touching CustomerController",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+
+
+def _p2_run5_attempt0_plan_text():
+    """Verbatim reconstruction of the real P2 run 5 (2026-09-06, spring-
+    ignite-demo) attempt-0 payload - see test_planner_structured_output.py's
+    own test_p2_run5_attempt0_schema_shape_parses_without_a_repair_round,
+    which proves parse_planner_structured_output() self-heals this shape
+    directly. That test never drives the real repair-budget-counting loop,
+    though - this one does."""
+    payload = {
+        "subtasks": [{
+            "id": "s1", "description": "cap giveRaise salary", "execution_method": "model",
+            "planned_files": [{
+                "path": "src/main/java/com/example/ignite/service/EmployeeService.java",
+                "action": "modify",
+            }],
+            "acceptance_criteria_ids": ["ac1", "ac2"],
+        }],
+        "acceptance_criteria": [
+            {"id": "ac1", "description": "Salary cap enforced via a named constant.", "method": "judgment"},
+            {"id": "ac2", "description": "Raised salary > cap gets exactly the cap.", "method": "test"},
+        ],
+    }
+    return f"Some prose plan.\n\n```json\n{json.dumps(payload)}\n```"
+
+
+@pytest.mark.asyncio
+async def test_enforce_schema_self_heal_does_not_consume_a_real_repair_slot(tmp_path):
+    """Vertical counterpart to test_planner_structured_output.py's own
+    self-heal unit tests, which call parse_planner_structured_output()
+    directly - those prove the healed shape is schema-valid, but never
+    prove the real WorkflowController repair-budget counter (Planner-
+    convergence audit, 2026-09-06: one shared repair_attempts counter for
+    BOTH schema noise and genuine semantic failures) treats a self-healed
+    attempt as consuming zero of its 2 real semantic repair slots. Neither
+    parse_planner_structured_output nor build_engineering_plan_from_
+    planner_output is mocked here - only validate_plan (this test is about
+    the SCHEMA layer, not semantic convergence) and run_generation_
+    workflow (ordinary successful execution)."""
+    plan_text = _p2_run5_attempt0_plan_text()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value=plan_text)
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+
+    with patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(return_value=PlanValidationResult(valid=True)),
+    ):
+        result = await WorkflowController(we).execute(
+            "cap the raise", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    # Exactly one Planner call, zero repairs - the malformed method="test"/
+    # no-tool_name shape never reached validate_plan at all, let alone
+    # consumed a real semantic repair round fixing something else.
+    assert we.planner.run.await_count == 1
+    assert result.legacy_result.get("plan_repair_attempts", 0) == 0
+
+
+@pytest.mark.asyncio
 async def test_enforce_reopens_owner_with_grounded_diagnosis_and_commits_plan_atomically(
     tmp_path, monkeypatch,
 ):
