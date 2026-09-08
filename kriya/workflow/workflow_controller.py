@@ -6405,6 +6405,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "run_id": run_id,
             "subtask_results": [r.to_dict() for r in subtask_results],
             "files": sorted(established_file_context.keys()),
+            # R1 Deliverable 5 correction (2026-09-08): the same
+            # `repair_attempts` local this function already threads into
+            # every save_approved_plan()/build_approved_plan_document() call
+            # above (the authoritative structured-plan repair-round count -
+            # see PLAN VALIDATION near this function's start) - the
+            # _UnsafeStructuredPlan except-handler around this function's
+            # caller already surfaces it under this exact key
+            # (`plan_repair_attempts`) for the plan-repair-exhausted failure
+            # case; this is the same value, same key, for every OTHER
+            # outcome (success/needs_review/failed-in-subtask-loop). A pure
+            # read of an existing local, not a new counter.
+            "plan_repair_attempts": repair_attempts,
         }
         if global_migration_gap:
             aggregated["global_migration_gap"] = global_migration_gap

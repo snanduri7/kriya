@@ -346,11 +346,27 @@ async def _run_developer_generation(
         return result
     finally:
         duration = time.monotonic() - started
+        # R1 Deliverable 5 (2026-09-08) - observational only, read AFTER the
+        # await above already returned/raised; never influences kwargs,
+        # result, or control flow. ctx.developer.llm.last_call_metrics
+        # reflects the LAST underlying LLMClient.complete() call
+        # run_generation() made - for the common single-shot batch-JSON
+        # path this is the whole attempt's real usage; for the iterative
+        # per-file fallback path (kriya/agents/agent.py, one completion per
+        # filepath) it is only the FINAL file's usage, not a sum across all
+        # of them - documented as a known undercount in
+        # docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md rather than silently
+        # presented as exact.
+        call_metrics = getattr(ctx.developer, "llm", None)
+        last_call_metrics = getattr(call_metrics, "last_call_metrics", None) if call_metrics else None
         state.generation_timings.append({
             "duration_seconds": duration,
             "file_count": file_count,
             "succeeded": succeeded,
             "model": active_model,
+            "prompt_tokens": (last_call_metrics or {}).get("prompt_tokens"),
+            "completion_tokens": (last_call_metrics or {}).get("completion_tokens"),
+            "tokens_estimated": (last_call_metrics or {}).get("tokens_estimated"),
         })
         state.record_event(RunEvent(
             kind="generation.completed" if succeeded else "generation.failed",
@@ -2337,7 +2353,20 @@ async def _execute_managed_service_verification(
         " ".join(spec.service_command), spec.probe.method, spec.probe.host, spec.probe.port, spec.probe.path,
     )
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
+    _managed_service_started = time.monotonic()
     result = run_managed_service_verification(spec)
+    # R1 Deliverable 5 - observational only, coarse phase only: prepare/
+    # launch/readiness/probe/shutdown are not separately timed here because
+    # they are not separable from OUTSIDE run_managed_service_verification()
+    # without modifying kriya/tools/service_runtime.py's own internals - an
+    # architecture change this instrumentation-only task deliberately does
+    # not make (see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md's own
+    # documented limitation).
+    state.validator_timings.append({
+        "kind": "managed_service_verification",
+        "duration_seconds": time.monotonic() - _managed_service_started,
+        "success": bool(getattr(result, "passed", False)),
+    })
     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
 
     output = f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
@@ -2729,10 +2758,22 @@ async def _execute_runtime_verification_directly(
         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
     )
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
+    _run_app_sequence_started = time.monotonic()
     run_res = validator.run_app_sequence(
         resolved_run_commands, timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
         stdin_payload=stdin_payload,
     )
+    # R1 Deliverable 5 - observational only. kind reflects the deterministic
+    # command classification already computed above (command_verification_
+    # kind), matching gate_type's own "test" vs "run_verification" split
+    # elsewhere in this function - so this coarse timing bucket lines up
+    # with the same distinction INV-RUNTIME-002's own evidence-matching
+    # fix relies on, not a new taxonomy.
+    state.validator_timings.append({
+        "kind": command_verification_kind or "run_verification",
+        "duration_seconds": time.monotonic() - _run_app_sequence_started,
+        "success": not bool(run_res.get("timed_out")),
+    })
     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
     _raise_runtime_verification_infrastructure_failure(
         state, run_res, resolved_run_commands,
@@ -5258,7 +5299,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 with open(java_abs_path, "w", encoding="utf-8") as fh:
                     fh.write(corrected_java)
 
+        _compile_started = time.monotonic()
         compile_res = validator.run_compile_check(compile_known_files)
+        # R1 Deliverable 5 - observational only, timing the primary compile
+        # gate call (the main full-set/targeted path's own compile check,
+        # not every secondary/verification-only call site in this module -
+        # see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md for the exact
+        # coverage boundary). Recorded AFTER the call returns; never reads
+        # compile_res beyond what the very next line already does.
+        state.validator_timings.append({
+            "kind": "compile",
+            "duration_seconds": time.monotonic() - _compile_started,
+            "success": bool(compile_res.get("success")),
+        })
         if not compile_res["success"]:
             self_correction_result = None
             if ctx.kernel.config.autonomy.self_correction_loop_enabled:

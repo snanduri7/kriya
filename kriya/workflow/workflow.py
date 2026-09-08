@@ -1677,10 +1677,16 @@ class WorkflowEngine:
             _log_phase_banner("PLANNING")
             logger.info("Planner Agent drafting execution steps...")
             plan_stream = (lambda token: stream_callback("Planning", token)) if stream_callback else None
+            _planner_started = time.monotonic()
             plan = await self.planner.run(
                 plan_prompt,
                 stream_callback=plan_stream
             )
+            # R1 Deliverable 5 - observational only, same posture as
+            # attempt.py's Developer-call wrapper: read after the await
+            # already returned, never influences plan/control flow.
+            state.planner_calls += 1
+            state.planner_llm_seconds += time.monotonic() - _planner_started
             _save_stage_checkpoint("plan", plan=plan)
 
             # MA6.3 Stage A - parse only, never act on the result yet (MA6
@@ -1772,10 +1778,15 @@ class WorkflowEngine:
             _log_phase_banner("ARCHITECTURE")
             logger.info("Architect Agent defining interface designs...")
             architect_stream = (lambda token: stream_callback("Architect Design", token)) if stream_callback else None
+            _architect_started = time.monotonic()
             design, architect_files = await self.architect.run_with_file_list(
                 design_prompt,
                 stream_callback=architect_stream
             )
+            # R1 Deliverable 5 - observational only, same posture as the
+            # Planner wrapper immediately above.
+            state.architect_calls += 1
+            state.architect_llm_seconds += time.monotonic() - _architect_started
             _save_stage_checkpoint("design", plan=plan, design=design, architect_files=architect_files)
         # predetermined_architect_files=[] (an EMPTY list, not None) is a
         # deliberate zero-file plan, not a broken one - a bounded subtask
@@ -2530,10 +2541,17 @@ class WorkflowEngine:
                         for i, batch in enumerate(review_batches, 1):
                             batch_prompt = f"Goal: {goal}\n{verified_evidence}\nFiles generated:\n{batch}"
                             label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
-                            review_parts.append(label + await self.reviewer.run(
+                            _reviewer_started = time.monotonic()
+                            review_text = await self.reviewer.run(
                                 batch_prompt, stream_callback=None,
                                 temperature_override=self.kernel.config.llm.reviewer_temperature,
-                            ))
+                            )
+                            # R1 Deliverable 5 - observational only, one
+                            # entry per review batch (a multi-batch review
+                            # makes more than one real LLM call).
+                            state.reviewer_calls += 1
+                            state.reviewer_llm_seconds += time.monotonic() - _reviewer_started
+                            review_parts.append(label + review_text)
                         state.pre_approval_review = "\n".join(review_parts)
                         escalation_reason += f"\n\n=== Automated Code Review ===\n{state.pre_approval_review}"
                     except Exception as ex:
@@ -3164,7 +3182,9 @@ class WorkflowEngine:
                 milestone_total=milestone_total,
                 run_events=[event.to_dict() for event in state.run_events],
                 evidence_records=[record.to_dict() for record in state.evidence_records],
-                generation_metrics=state.generation_metrics(),
+                generation_metrics=state.generation_metrics(
+                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
+                ),
             )
         except Exception as trace_ex:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
@@ -3221,10 +3241,16 @@ class WorkflowEngine:
             for i, batch in enumerate(review_batches, 1):
                 batch_prompt = goal_header + batch
                 label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
-                review_parts.append(label + await self.reviewer.run(
+                _reviewer_started = time.monotonic()
+                review_text = await self.reviewer.run(
                     batch_prompt, stream_callback=reviewer_stream,
                     temperature_override=self.kernel.config.llm.reviewer_temperature,
-                ))
+                )
+                # R1 Deliverable 5 - observational only, same posture as the
+                # pre-approval reviewer wrapper above.
+                state.reviewer_calls += 1
+                state.reviewer_llm_seconds += time.monotonic() - _reviewer_started
+                review_parts.append(label + review_text)
             review = "\n".join(review_parts)
         if step_callback:
             step_callback("Review", review)
@@ -3330,7 +3356,9 @@ class WorkflowEngine:
                 milestone_total=milestone_total,
                 run_events=[event.to_dict() for event in state.run_events],
                 evidence_records=[record.to_dict() for record in state.evidence_records],
-                generation_metrics=state.generation_metrics(),
+                generation_metrics=state.generation_metrics(
+                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
+                ),
             )
             logger.info(f"Persistent run trace recorded: {trace_id}")
         except Exception as trace_ex:
@@ -3382,7 +3410,9 @@ class WorkflowEngine:
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
             "skill_staleness_warnings": sorted(set(skill_staleness_warnings)) or None,
             "active_skill_manifest": active_skill_manifest,
-            "generation_metrics": state.generation_metrics(),
+            "generation_metrics": state.generation_metrics(
+                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
+                ),
             "review": review,
             "review_included_in_approval": state.pre_approval_review is not None,
             "run_id": run_id,

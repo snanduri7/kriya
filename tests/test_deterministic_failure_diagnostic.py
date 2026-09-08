@@ -594,3 +594,77 @@ async def test_real_retry_loop_stops_before_a_third_developer_call(tmp_path):
     assert we.developer.run_generation.call_count == 2  # never reached a third Developer call
     assert res.get("failure_category") == "candidate_independent_deterministic_failure"
     assert res.get("environment_failure", "").startswith("CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE:")
+
+
+@pytest.mark.asyncio
+async def test_real_retry_loop_continues_past_a_third_developer_call_when_baseline_reproduces_nothing(
+    tmp_path,
+):
+    """FI-06 (R1 Deliverable 4 fault-injection audit) - negative control for
+    the test immediately above. Same recurring-signature shape (attempt 1
+    and attempt 2 write materially different candidates, the same
+    deterministic compile-check message rejects both, triggering a
+    baseline replay) - but this time the baseline replay SUCCEEDS (the
+    underlying project/toolchain is fine; attempt 2's own candidate is
+    genuinely still broken, not the same deterministic defect the
+    candidate-independent detector exists to catch). Unlike the unit-level
+    tests for evaluate_candidate_independent_failure() (test_baseline_
+    succeeds_classifies_candidate_correctable_and_retry_continues,
+    test_different_failure_signatures_produce_no_candidate_independent_
+    conclusion), which prove only that the classification FUNCTION returns
+    the right enum, this drives the real WorkflowEngine.run_generation_
+    workflow() retry loop and proves the loop actually keeps going: a
+    THIRD Developer call happens (never short-circuited), and if that
+    third candidate genuinely fixes the problem, the run succeeds
+    normally - the detector must never terminate a legitimately
+    continuing repair."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm_call_log: list = []
+
+    async def mock_complete(*args, **kwargs):
+        llm_call_log.append(1)
+        n = len(llm_call_log)
+        if n == 1:
+            return "Step 1: Write code"
+        if n == 2:
+            return "Design: Write App.java"
+        # Reviewer, and (since this run reaches terminal success after a
+        # real retry) the post-success advisory lesson-extraction call -
+        # both tolerate this generic text fine (extraction just logs a
+        # harmless warning when it can't recover a fact list from it).
+        return "Review: Approved"
+
+    llm.complete = mock_complete
+
+    zero_class_files_message = (
+        "Maven reported compilation success, but zero .class files were actually "
+        "produced under target/classes. Maven's default sourceDirectory (src/main/java) "
+        "most likely doesn't cover where this project's .java files actually live - add "
+        "an explicit <sourceDirectory> to pom.xml's <build> section pointing at their "
+        "real location, rather than assuming the conventional src/main/java layout."
+    )
+
+    we = WorkflowEngine(kernel, llm)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": zero_class_files_message},  # attempt 1's own check
+            {"success": False, "output": zero_class_files_message},  # attempt 2's own check
+            {"success": True, "output": "BUILD SUCCESS"},  # attempt 2's triggered baseline replay - REPRODUCES NOTHING
+            {"success": True, "output": "BUILD SUCCESS"},  # attempt 3's own check - genuinely fixed
+        ]
+        we.developer.run_generation = AsyncMock(side_effect=[
+            [{"filepath": "App.java", "content": "class App {\n  Object x;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  String x2;\n  int y;\n}"}],
+            [{"filepath": "App.java", "content": "class App {\n  public static void main(String[] a) {}\n}"}],
+        ])
+        res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    assert we.developer.run_generation.call_count == 3  # the loop was NOT short-circuited
+    assert res["quality_gates_passed"] is True
+    assert res.get("failure_category") != "candidate_independent_deterministic_failure"

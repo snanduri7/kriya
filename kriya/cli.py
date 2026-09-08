@@ -1702,6 +1702,65 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     click.secho(f"Subtask '{sr.get('subtask_id')}' failed: {sr['error']}", fg="red")
                     break
 
+        # R1 Deliverable 5 (2026-09-08) - concise Performance summary from
+        # the same generation_metrics dict already threaded into JSON output
+        # and traces.db (see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md).
+        # High-value totals only - detailed per-call data belongs in the
+        # structured artifact (traces.db/`kriya traces`), never flooded into
+        # this terminal summary. Printed for the legacy/single-run path only
+        # (the same scope generation_metrics itself is threaded through
+        # here) - the milestone path has its own separate summary above.
+        gm = res.get("generation_metrics") or {}
+        # R1 Deliverable 5 correction (2026-09-08): plan_repair_attempts is a
+        # sibling top-level key on `res`, not part of `gm` - it comes from
+        # WorkflowController._run_structured_enforce's own repair_attempts
+        # counter (kriya/workflow/workflow_controller.py), a structured-plan
+        # concept that only exists when workflow_controller.enabled=True
+        # (not the packaged default). Read unconditionally so it still shows
+        # for an enforce-mode run even though enforce mode's own aggregated
+        # result never populates generation_metrics (a separate, accepted
+        # R1 limitation - see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md).
+        # None (the packaged-default legacy/single-run path has no repair-
+        # round concept at all) is printed as "unavailable", never guessed.
+        plan_repair_attempts = res.get("plan_repair_attempts")
+        if gm or plan_repair_attempts is not None:
+            llm = gm.get("llm") or {}
+            validators = gm.get("validators") or {}
+            retry = gm.get("retry") or {}
+
+            def _fmt_duration(seconds: Optional[float]) -> str:
+                if seconds is None:
+                    return "n/a"
+                minutes, secs = divmod(int(seconds), 60)
+                return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+            click.secho("\nPerformance", bold=True)
+            click.echo("-----------")
+            if gm:
+                click.echo(f"Total wall:             {_fmt_duration(gm.get('total_wall_seconds'))}")
+                click.echo(f"LLM calls:              {llm.get('calls', 0)}")
+                click.echo(f"LLM wall:               {_fmt_duration(llm.get('wall_seconds'))}")
+                click.echo(f"Validator wall:         {_fmt_duration(validators.get('wall_seconds'))}")
+                click.echo(f"Developer attempts:     {llm.get('developer_calls', 0)}")
+                # Was mislabeled "Planner repair rounds" prior to this
+                # correction - full_set_attempts is GenerationState.budgets.
+                # retry_count, the Developer's own full-file-set retry
+                # counter, unrelated to structured-plan Planner repair.
+                click.echo(f"Developer full-set retries: {retry.get('full_set_attempts', 0)}")
+                click.echo(f"Baseline replays:       {retry.get('baseline_replay_count', 0)}")
+            if plan_repair_attempts is not None:
+                click.echo(f"Planner repair rounds:  {plan_repair_attempts}")
+            else:
+                click.echo("Planner repair rounds:  unavailable (structured-plan repair not active for this run)")
+            # Categories above overlap by design (a validator call happens
+            # WHILE wall-clock time toward total_wall also elapses) - never
+            # presented as though they sum exactly to total wall.
+            if gm:
+                click.secho(
+                    "(LLM/validator wall overlap with total wall - they are not additive)",
+                    dim=True,
+                )
+
         return res
 
     try:

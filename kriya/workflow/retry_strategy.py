@@ -582,6 +582,16 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         ctx.deterministic_failure_diagnostics is not None
         and not state.environment_failure
     ):
+        # R1 Deliverable 5 - observational only, does not read the store's
+        # own conclusions or influence anything below. records_before/after
+        # is a cheap, non-invasive proxy for "did this call actually record
+        # a new (subtask, signature) conclusion" (which only happens on the
+        # trigger-conditions-met + baseline-replay-attempted path inside
+        # evaluate_candidate_independent_failure - see that function's own
+        # docstring) without needing that function's own return contract to
+        # change or a second, parallel replay-counting mechanism.
+        state.candidate_independent_diagnostic_invocations += 1
+        _diagnostics_records_before = len(ctx.deterministic_failure_diagnostics._records)
         diagnostic = evaluate_candidate_independent_failure(
             store=ctx.deterministic_failure_diagnostics,
             fail_type=fail_type,
@@ -595,6 +605,8 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             autonomy_cfg=ctx.kernel.config.autonomy,
             subtask_id=ctx.current_subtask_id,
         )
+        if len(ctx.deterministic_failure_diagnostics._records) > _diagnostics_records_before:
+            state.baseline_replay_count += 1
         if diagnostic is not None and diagnostic.correctability == DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE:
             # Reuses the EXISTING state.environment_failure/STOP_ENVIRONMENT
             # mechanism as the stop signal (same reuse pattern already used

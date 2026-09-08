@@ -97,6 +97,21 @@ class LLMClient:
         # MA4.3 - audit-only. See _audit_llm_network_access below; this is
         # never consulted for enforcement, only logged.
         self.execution_policy = ExecutionPolicy()
+        # R1 Deliverable 5 (performance telemetry, 2026-09-08) - observational
+        # side-channel only: the metadata for the MOST RECENT complete() call,
+        # for a caller that wants it (kriya/workflow/attempt.py's Developer-
+        # timing wrapper, kriya/workflow/workflow.py's Planner/Architect/
+        # Reviewer timing) to read AFTER the call returns. Never read by
+        # complete() itself, never influences temperature/max_tokens/retry/
+        # model selection or any return value - complete()'s own return
+        # contract (a bare str) is completely unchanged. None until the first
+        # successful call; overwritten (not appended) on every call, since a
+        # caller must read it immediately after its own await completes,
+        # before any other concurrent call on the same client could overwrite
+        # it - single-flight per client instance is the existing calling
+        # convention everywhere in this codebase already (no concurrent
+        # complete() calls share one LLMClient), not a new constraint.
+        self.last_call_metrics: Optional[Dict[str, Any]] = None
 
     def _audit_llm_network_access(self, url: str) -> None:
         """MA4.3 - audit-only ExecutionPolicy consultation, wired in front of
@@ -205,6 +220,10 @@ class LLMClient:
         import click
 
         start_time = time.time()
+        # Cleared up front, not just overwritten on success - a caller reading
+        # this after a raised exception must see None (no metrics for a
+        # failed call), never a stale value left over from a previous call.
+        self.last_call_metrics = None
 
         try:
             try:
@@ -259,12 +278,26 @@ class LLMClient:
                 content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
             elapsed_time = time.time() - start_time
+            tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
             if prompt_tokens == 0:
                 prompt_tokens = int((len(system_prompt) + len(user_prompt)) / 4)
             if completion_tokens == 0:
                 completion_tokens = int(len(content) / 4)
 
             click.secho(f"\n[Usage: {prompt_tokens} input tokens, {completion_tokens} output tokens | Time: {elapsed_time:.2f}s]", fg="blue", dim=True)
+            # R1 Deliverable 5 - observational only, see this attribute's own
+            # docstring in __init__. tokens_estimated=True means the server's
+            # response carried no usage field for prompt and/or completion
+            # tokens, so one or both counts above are the existing char/4
+            # heuristic, not a real measurement - never silently presented as
+            # exact.
+            self.last_call_metrics = {
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "tokens_estimated": tokens_estimated,
+                "duration_seconds": elapsed_time,
+            }
             return content
         except Exception as e:
             logger.error(f"Local LLM call failed: {e}", exc_info=True)

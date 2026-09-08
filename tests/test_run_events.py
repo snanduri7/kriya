@@ -91,6 +91,13 @@ def test_generation_state_metrics_aggregate_events_without_source_content():
         authority=EventAuthority.ADVISORY,
     ))
 
+    # R1 Deliverable 5 (2026-09-08): generation_metrics() gained five new,
+    # purely additive top-level keys (total_wall_seconds/terminal_status/
+    # llm/validators/retry) - every one of the 7 original keys/values above
+    # is asserted completely unchanged; this expected dict was extended to
+    # match, not loosened to a subset check, so a future accidental change
+    # to any of the ORIGINAL 7 fields still fails this test exactly as
+    # before.
     assert state.generation_metrics() == {
         "calls": 2,
         "successful_calls": 1,
@@ -99,4 +106,33 @@ def test_generation_state_metrics_aggregate_events_without_source_content():
         "operation_fallbacks": 1,
         "validation_invalidations": 1,
         "validated_files": 1,
+        "total_wall_seconds": None,
+        "terminal_status": "failed",
+        "llm": {
+            "calls": 2,
+            "wall_seconds": 6.5,
+            "developer_calls": 2,
+            "developer_wall_seconds": 6.5,
+            "developer_prompt_tokens": 0,
+            "developer_completion_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "planner_calls": 0,
+            "planner_wall_seconds": 0.0,
+            "architect_calls": 0,
+            "architect_wall_seconds": 0.0,
+            "reviewer_calls": 0,
+            "reviewer_wall_seconds": 0.0,
+        },
+        "validators": {
+            "invocations": 0,
+            "wall_seconds": 0,
+            "by_kind": {},
+        },
+        "retry": {
+            "full_set_attempts": 0,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "baseline_replay_count": 0,
+        },
     }

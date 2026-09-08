@@ -9706,6 +9706,148 @@ async def test_enforce_accepts_targeted_requires_change_for_implicated_subtask(t
     assert we.planner.run.await_count == 2
 
 
+# --- R1 Deliverable 5 correction (2026-09-08): plan_repair_attempts ---
+#
+# _run_structured_enforce's own `repair_attempts` local (PLAN VALIDATION
+# loop above) is now also copied into the aggregated result dict on every
+# non-exception exit (kriya/workflow/workflow_controller.py, right where
+# `aggregated: Dict[str, Any] = {...}` is built) under the SAME key the
+# _UnsafeStructuredPlan except-handler already used for the repair-
+# exhausted failure case. These tests prove the copied value exactly
+# matches the real loop's own convergence point - counted independently
+# via we.planner.run's own await_count (one initial call + one call per
+# repair round) - and that adding this read changes nothing about the
+# real outcome (status/files still come from the same mocked
+# run_generation_workflow calls as every other enforce test in this file).
+
+def _repair_probe_plan():
+    return EngineeringPlan(
+        plan_id="repair-probe-run", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+        )],
+    )
+
+
+async def _successful_generation(**kwargs):
+    with open(os.path.join(kwargs["workspace_path"], "a.py"), "w", encoding="utf-8") as f:
+        f.write("# generated\n")
+    return {"status": "success", "quality_gates_passed": True, "files": ["a.py"]}
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_attempts_is_zero_when_the_first_plan_validates(tmp_path):
+    """PT-planner-01: no repair round ever runs (validate_plan passes on
+    attempt 0) -> the real loop never increments repair_attempts, and
+    planner.run is called exactly once (the initial plan, no repair)."""
+    plan = _repair_probe_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(side_effect=_successful_generation)
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(return_value=PlanValidationResult(valid=True)),
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert result.legacy_result["files"] == ["a.py"]
+    assert we.planner.run.await_count == 1
+    assert result.legacy_result["plan_repair_attempts"] == we.planner.run.await_count - 1
+    assert result.legacy_result["plan_repair_attempts"] == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_attempts_is_one_after_a_single_repair_round(tmp_path):
+    """PT-planner-02: validate_plan fails once (attempt 0), then passes on
+    the repaired redraft (attempt 1) -> the real loop's repair_attempts
+    converges at exactly 1, matching one extra planner.run call beyond the
+    initial plan."""
+    plan = _repair_probe_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(side_effect=_successful_generation)
+    validate_results = [
+        PlanValidationResult(valid=False, errors=["missing acceptance mapping"], reason_codes=["PLAN_VALIDATION_FAILED"]),
+        PlanValidationResult(valid=True),
+    ]
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=validate_results),
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2
+    assert result.legacy_result["plan_repair_attempts"] == we.planner.run.await_count - 1
+    assert result.legacy_result["plan_repair_attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_attempts_is_two_after_the_maximum_allowed_repair_rounds(tmp_path):
+    """PT-planner-03: validate_plan fails on attempt 0 AND attempt 1 (the
+    current fixed repair bound), then passes on attempt 2 -> repair_attempts
+    converges at exactly 2, the highest value reachable without exhausting
+    the bound (a 3rd failure would instead raise _UnsafeStructuredPlan,
+    already covered by this file's own STRUCTURED_PLAN_REPAIR_EXHAUSTED
+    tests)."""
+    plan = _repair_probe_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(side_effect=_successful_generation)
+    validate_results = [
+        PlanValidationResult(valid=False, errors=["missing acceptance mapping"], reason_codes=["PLAN_VALIDATION_FAILED"]),
+        PlanValidationResult(valid=False, errors=["still missing acceptance mapping"], reason_codes=["PLAN_VALIDATION_FAILED"]),
+        PlanValidationResult(valid=True),
+    ]
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=validate_results),
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 3
+    assert result.legacy_result["plan_repair_attempts"] == we.planner.run.await_count - 1
+    assert result.legacy_result["plan_repair_attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_attempts_on_repair_exhaustion_matches_the_except_handler_value(tmp_path):
+    """Cross-check against the PRE-EXISTING _UnsafeStructuredPlan except-
+    handler path (kriya/workflow/workflow_controller.py, caller of
+    _run_structured_enforce) - both the exception path's `plan_repair_
+    attempts` (already existed before this correction) and this task's new
+    success-path copy read the exact same `repair_attempts` local, so a
+    plan that never converges must report 2 either way."""
+    we = _workflow_engine()
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(None, "structured plan JSON block failed schema validation: invalid verification"),
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "needs_review"
+    assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in result.legacy_result["reason_codes"]
+    assert result.legacy_result["plan_repair_attempts"] == 2
+
+
 @pytest.mark.asyncio
 async def test_enforce_accepts_targeted_provides_change_for_implicated_subtask(tmp_path):
     """Provides-side counterpart: a GROUNDED_SEMANTIC_PROVIDER_MISMATCH
