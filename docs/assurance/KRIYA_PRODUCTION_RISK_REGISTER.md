@@ -123,37 +123,49 @@ relevances, or language-scope values out of 68).
 
 | | Count |
 |---|---:|
-| Total risks | 68 |
-| REQUIRED | 60 |
+| Total risks | 70 |
+| REQUIRED | 62 |
 | OPTIONAL | 6 |
 | OUT_OF_SCOPE | 2 |
 | CLOSED | 25 |
-| NEEDS_EVIDENCE | 21 |
-| NEEDS_IMPLEMENTATION | 20 |
+| NEEDS_EVIDENCE | 22 |
+| NEEDS_IMPLEMENTATION | 21 |
 | SUPERSEDED | 0 (row-level) |
 | DEFERRED | 2 |
 | **REQUIRED + CLOSED** | **23** |
-| **REQUIRED + NEEDS_EVIDENCE** | **20** |
-| **REQUIRED + NEEDS_IMPLEMENTATION** | **17** |
+| **REQUIRED + NEEDS_EVIDENCE** | **21** |
+| **REQUIRED + NEEDS_IMPLEMENTATION** | **18** |
 
 **Pass 3 update**: `VER-004` moved `NEEDS_IMPLEMENTATION`→`NEEDS_EVIDENCE`
 (the confirmed-defect claim was wrong, corrected in §0.7). All other Pass 2
 counts unchanged by Pass 3's other corrections (`CORR-017`/`RECV-003`
 changed evidence level and citation quality, not disposition or relevance).
 
-By domain: ORCH 3 · CORR 17 · RECV 4 · REPO 4 · VER 5 · SEC 5 · POL 3 ·
+**A1-P1 update (2026-09-09)**: `CORR-018` added (new row, REQUIRED,
+LANGUAGE_NEUTRAL, NEEDS_IMPLEMENTATION) — recorded, not implemented, per
+that task's explicit bookkeeping-only instruction.
+
+**A1-E2 update (2026-09-09)**: `CORR-019` added (new row, REQUIRED,
+LANGUAGE_NEUTRAL, NEEDS_EVIDENCE — implementation complete and
+deterministically tested this pass, live validation still required, per
+the investigation's own recommended disposition). All counts below now
+reflect both new rows; no other row's disposition/relevance/language scope
+changed across either pass.
+
+By domain: ORCH 3 · CORR 19 · RECV 4 · REPO 4 · VER 5 · SEC 5 · POL 3 ·
 TOOL 4 · MODEL 4 · CTX 3 · STATE 3 · CONC 2 · OBS 4 · REL 2 · TOP 5.
 
 By Language Scope: JAVA 6 (`CORR-015`, `RECV-003`, `VER-001`, `VER-003`,
 `TOP-001`, `TOP-002`) · PYTHON 2 (`VER-004`, `VER-005`) · LANGUAGE_NEUTRAL
-60 (many of these carry a Java-only evidence gap noted inline per §0.3 —
+62 (many of these carry a Java-only evidence gap noted inline per §0.3 —
 language-neutral *scope* is not the same claim as language-neutral
 *proof*).
 
-Verification identities, script-checked: CLOSED(25) + NEEDS_EVIDENCE(21) +
-NEEDS_IMPLEMENTATION(20) + SUPERSEDED(0) + DEFERRED(2) = 68 ✓.
-REQUIRED(60) + OPTIONAL(6) + OUT_OF_SCOPE(2) = 68 ✓.
-REQUIRED+CLOSED(23) + REQUIRED+NEEDS_EVIDENCE(20) + REQUIRED+NEEDS_IMPLEMENTATION(17) = 60 = REQUIRED total ✓ (confirms no REQUIRED row has a DEFERRED/SUPERSEDED disposition, which is correct — both DEFERRED rows are OUT_OF_SCOPE).
+Verification identities (hand-updated for the CORR-018/CORR-019
+additions, not rescripted): CLOSED(25) + NEEDS_EVIDENCE(22) +
+NEEDS_IMPLEMENTATION(21) + SUPERSEDED(0) + DEFERRED(2) = 70 ✓.
+REQUIRED(62) + OPTIONAL(6) + OUT_OF_SCOPE(2) = 70 ✓.
+REQUIRED+CLOSED(23) + REQUIRED+NEEDS_EVIDENCE(21) + REQUIRED+NEEDS_IMPLEMENTATION(18) = 62 = REQUIRED total ✓ (confirms no REQUIRED row has a DEFERRED/SUPERSEDED disposition, which is correct — both DEFERRED rows are OUT_OF_SCOPE).
 
 ### §0.5 Requirement-authority conflicts: 0 (corrected from Pass 1's 1)
 
@@ -177,27 +189,29 @@ Evidence Validity note, not silently reconciled either direction.
 
 ---
 
-## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (17, updated Pass 3 — script-verified)
+## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (18, updated A1-P1 — CORR-018 added)
 
-`CONC-001` concurrent-writer rejection · `CTX-001` context/graph
-freshness · `MODEL-001` model capability certification · `OBS-001`
-enforce-mode telemetry gap · `OBS-002` operator run summary · `OBS-004`
-resource budgets · `POL-001` authoritative execution policy · `REL-002`
-`doctor --production` · `SEC-001` hostile-code containment · `SEC-003`
-MCP environment isolation · `SEC-005` package/network containment ·
-`STATE-003` deterministic replay · `TOOL-001` policy-mediated TOOL
-execution (reclassified Pass 2 — see its own entry) · `TOOL-002`
-ToolBroker · `TOOL-003` MCP capability authorization · `TOOL-004` plugin
-manifest/provenance · `TOP-001` Gradle support. Note `VER-004` **moved out
-of this list this pass** (see §0.7 — the defect it named doesn't exist)
-and `ORCH-001`/`ORCH-002` are **not** in this list — reclassified
-`OPTIONAL` in Pass 2 (see their own entries and the requirement-authority
-challenge).
+`CONC-001` concurrent-writer rejection · `CORR-018` unauthorized
+behavioral drift within authorized files (new, A1-P1) · `CTX-001`
+context/graph freshness · `MODEL-001` model capability certification ·
+`OBS-001` enforce-mode telemetry gap · `OBS-002` operator run summary ·
+`OBS-004` resource budgets · `POL-001` authoritative execution policy ·
+`REL-002` `doctor --production` · `SEC-001` hostile-code containment ·
+`SEC-003` MCP environment isolation · `SEC-005` package/network
+containment · `STATE-003` deterministic replay · `TOOL-001`
+policy-mediated TOOL execution (reclassified Pass 2 — see its own entry)
+· `TOOL-002` ToolBroker · `TOOL-003` MCP capability authorization ·
+`TOOL-004` plugin manifest/provenance · `TOP-001` Gradle support. Note
+`VER-004` **moved out of this list this pass** (see §0.7 — the defect it
+named doesn't exist) and `ORCH-001`/`ORCH-002` are **not** in this list —
+reclassified `OPTIONAL` in Pass 2 (see their own entries and the
+requirement-authority challenge).
 
-## §0.1b REQUIRED + NEEDS_EVIDENCE (20, updated Pass 3 — script-verified)
+## §0.1b REQUIRED + NEEDS_EVIDENCE (21, updated A1-E2 — CORR-019 added)
 
 `CORR-006` semantic-contract protection · `CORR-016` PRV-08 transitive
-revalidation · `CTX-002` large-repo scale · `CTX-003` PRV-09 dependency
+revalidation · `CORR-019` Reviewer self-assigned evidence confidence
+(new, A1-E2) · `CTX-002` large-repo scale · `CTX-003` PRV-09 dependency
 resolution · `MODEL-002` KnowledgeGuard live confirmation · `MODEL-004`
 fresh-repo stack-drift (downgraded from CLOSED, Pass 2) · `OBS-003`
 secret redaction · `ORCH-003` structured-mode checkpointing · `POL-002`
@@ -314,6 +328,24 @@ Disposition **NEEDS_IMPLEMENTATION (unchanged)**: DIRECT authorization, P9-P1, a
 
 **CORR-017 — Baseline bug-fix / brownfield-enhancement correctness (general)**
 Language Scope: LANGUAGE_NEUTRAL (the Planner/Developer/Verify pipeline is stack-agnostic in principle; this row represents proven end-to-end capability, not a language-intrinsic mechanism) · Deployment Relevance: REQUIRED · Effective Evidence Level: **E5 — upgraded again this pass, this time earned through raw-evidence confirmation rather than assumed.** Pass 2 conservatively downgraded this to E4 because only P8 had been independently re-verified. This pass read P1–P8's actual raw `RESULT.md` files directly (`KRIYA_P_SERIES_EVIDENCE_AUDIT.md`) and found P6 and P7 both carry **independently-graded, non-Kriya-self-reported** acceptance evidence recorded directly in their artifacts — P6's real external runtime probe (observed vs. expected HTTP-response ordering, matched), P7's three independent verification layers plus a computed `P7_PASS: True` field. Combined with P8 (personally re-verified this session), that's three materially distinct qualifying scenarios for the same risk: different repositories (`spring-petclinic-rest` / `modular-app` / `spring-boot-application-example`), different task shapes (runtime-order sort with an external probe / cross-module interface extension with a 3-layer independent test / query-filter composition), different topologies (single-module runtime-verified / multi-module reactor / single-module). That is genuine E5 by the strict definition, with the diversity dimensions named explicitly, not asserted. P1–P5 remain real, solid E3-level evidence (Kriya's own deterministic gates demonstrably ran and passed) but are not independently re-verified at the same strength and are not needed once three qualifying E4 instances exist. Python: E0/E1 for this specific "proven baseline, confirmed end-to-end" claim — `VER-005` documents real, broad Python capability, but no single clean, fully-confirmed production pass exists yet for Python the way it now does three times over for Java · Disposition: CLOSED (Java, E5 met, exceeds the E4 bar) · Required Evidence Level: E4.
+
+**CORR-018 — Unauthorized Behavioral Drift Within Authorized Files**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E2 (a real live production run independently confirmed the gap, plus a permanent deterministic characterization test pins the exact current, unaddressed behavior — this is direct, reproduced evidence of the gap's existence, not yet evidence of a fix) · Disposition: NEEDS_IMPLEMENTATION.
+
+Requirement: *"When modifying an authorized file, Kriya must prevent or explicitly detect material behavioral changes unrelated to the authoritative goal, unless those changes are independently authorized or required by grounded evidence."*
+
+Evidence: P10 (PRV-10, 2026-09-08 live production run) — `CustomerPrinter.print(CustomerRecord):String` kept its exact signature while its body changed from `return r.name();` to `return r.name() + " (" + r.region() + ")";`, under an authoritative goal explicitly requiring "Preserve all unrelated public contracts and behavior." No existing Kriya mechanism caught this: `find_brownfield_public_api_changes()` is signature-only by design (a deliberate choice — see the same function's handling of legitimate internal bug fixes, `CORR-011`); `SpecComplianceAgent`'s schema has only `missing_requirements` (absence), no field for an unauthorized ADDITION; the real regression/test suite only protects behavior an existing test already pins, and none did here for this file. This is a genuine coverage gap distinct from `CORR-016` (which concerns *authorized* contract-signature evolution) — CORR-018 concerns *unsignaled* behavior drift inside a file Kriya was already permitted to touch, where the signature itself never changes. Permanently characterized (not just narrated) by `tests/test_workflow.py::test_brownfield_guard_does_not_detect_public_method_body_behavior_change` — a deterministic, non-live test asserting the CURRENT (gap-having) behavior, so a future fix will fail this test first and must update it deliberately, not regress silently.
+
+No solution implemented or designed this pass — recorded per explicit instruction to bookkeep the risk, not to close it. A real fix would need some form of behavior-change detection beyond signature comparison (e.g. body-diff-aware heuristics, mandatory regression-test evidence for touched public methods, or explicit narrow-scope authorization for body changes analogous to `CORR-016`'s DIRECT authorization) — no specific approach is endorsed here; that design question is open.
+
+**CORR-019 — Reviewer self-assigned evidence confidence is not deterministically enforced**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E2 (two independent live A1 production runs each demonstrated the gap with a different concrete finding, plus a deterministic mechanism now exists and is unit-tested against both historical shapes — this is direct, reproduced evidence the gap existed and that a fix has been implemented and deterministically tested, not yet evidence the fix holds live) · Disposition: NEEDS_EVIDENCE (implementation complete, live validation still required — see below).
+
+Requirement: *"When Kriya presents an advisory review finding with an evidence-confidence classification, the final confidence must not exceed the authority and completeness of evidence deterministically supplied and resolved for that finding."*
+
+Evidence: A1 live run 1 (2026-09-09) — Reviewer classified Spring same-class `@Transactional` self-invocation as `PROVEN ISSUE`, asserting a broken-transaction-boundary consequence not established by any evidence actually supplied. A1-R1 (prompt-only fix) corrected this exact pattern. A1-R2 (2026-09-09, second live run) — the *same* prompt-only discipline then classified `delete()`'s missing explicit `save()` call as `PROVEN ISSUE`, asserting the change "will not be persisted" - again a consequence not established by supplied evidence (and, independently, likely backwards under standard JPA dirty-checking semantics). Two independent live runs, two different patterns, the same underlying gap: prompt guidance alone does not reliably bound an LLM's own self-assigned confidence across pattern classes. Investigated (A1-E1, design-only pass) and implemented (A1-E2, this pass): `kriya/workflow/review_context.py`'s new deterministic evidence-adjudication mechanism (`build_member_evidence_ids`/`build_relation_evidence_ids`, `adjudicate_findings`, `build_structured_review_report`) makes Kriya, not the Reviewer, authoritative for final finding confidence - a `PROVEN_ISSUE` request is only honored when the model cites, by Kriya-generated id, at least one resolvable CONDITION reference and at least one resolvable CONSEQUENCE reference; otherwise it is deterministically downgraded (to `STRONG_STATIC_INDICATION` or `EVIDENCE_INSUFFICIENT`) or forced to `REQUIRES_PROFILING_OR_RUNTIME_EVIDENCE` when a runtime dependency is declared. Deliberately pattern-agnostic - no Spring/JPA/framework-specific rule anywhere in the mechanism; `tests/test_review_context.py::test_historical_shape_run1_self_invocation_overclassification_downgrades` and `test_historical_shape_run2_delete_persistence_overclassification_downgrades` prove both historical over-classifications downgrade through the identical generic code path.
+
+Not yet CLOSED: the mechanism is implemented and deterministically tested (no live model), but has never been exercised against a real live model's own structured output - a third live A1 run (A1-R3, not performed this pass, separately authorized) is required before this row can move to evidence of the fix actually holding in production, not just in test fixtures.
 
 ---
 

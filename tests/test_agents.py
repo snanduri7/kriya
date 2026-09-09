@@ -8,6 +8,7 @@ from kriya.agents.agent import (
     ArchitectAgent,
     DeveloperAgent,
     PlannerAgent,
+    ReviewerAgent,
     RunVerifierAgent,
     SkillGapAgent,
     SpecComplianceAgent,
@@ -988,6 +989,189 @@ def test_planner_agent_system_prompt_requires_positive_justification_for_impleme
     sp = planner.system_prompt
     assert "positive justification" in sp
     assert "consumes or depends on something that changed" in sp
+
+
+def test_reviewer_agent_system_prompt_related_artifact_relationship_does_not_reveal_contents():
+    """A1-R1 (2026-09-09): the first live A1 run showed the Reviewer inferring
+    a related file's UNSEEN contents (an endpoint path, an HTTP status) from
+    nothing more than that file's name/relationship being mentioned in the
+    supplied Repository Evidence. The contract must state explicitly that a
+    related artifact's existence/name/type/relationship is not itself
+    evidence about its contents."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "does NOT provide evidence about that artifact's unseen contents" in sp
+
+
+def test_reviewer_agent_system_prompt_prohibits_inventing_endpoints_status_codes_from_artifact_names():
+    """A1-R1: the two concrete live failures - a fabricated REST endpoint path
+    for DriverController.java and a fabricated HTTP status for
+    ConstraintsViolationException - must be named as explicitly prohibited
+    inference categories, with the required fallback phrasing when the real
+    fact wasn't supplied."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "endpoint paths, HTTP methods, request mappings" in sp
+    assert "status codes, exception mappings" in sp
+    assert "not determinable from the supplied repository evidence" in sp
+
+
+def test_reviewer_agent_system_prompt_applies_evidence_discipline_to_every_section():
+    """A1-R1: the first live run's two hallucinations both landed in the
+    mandatory 'How to Run the Application' section, which had no evidence-
+    discipline instruction applied to it at all - only the findings table
+    did. The contract must now say explicitly that every section is
+    evidence-governed, naming 'How to Run' among them, not just the table."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "applies to the ENTIRE response, not just a findings table" in sp
+    assert "How to Run" in sp
+    assert "This section is not exempt from guideline 6" in sp
+
+
+def test_reviewer_agent_system_prompt_requires_condition_and_consequence_for_proven_issue():
+    """A1-R1: the live run classified Spring same-class @Transactional
+    self-invocation as PROVEN ISSUE purely because the syntactic pattern was
+    present - but the outer caller was itself transactional with compatible
+    propagation, so the claimed consequence (broken transaction boundary)
+    was never actually established. PROVEN ISSUE must require both the
+    condition AND the material adverse consequence to be evidenced, not a
+    pattern match alone."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "both the relevant condition AND the material adverse consequence are deterministically established" in sp
+    assert "a syntactic pattern match is not itself a proven consequence" in sp
+    assert "what exact condition is proven" in sp
+    assert "what exact adverse consequence is proven" in sp
+
+
+def test_reviewer_agent_system_prompt_requires_runtime_evidence_downgrade():
+    """A1-R1: a concern whose actual impact depends on runtime
+    characteristics (cardinality, load, latency, I/O) must be downgraded to
+    REQUIRES PROFILING OR RUNTIME EVIDENCE rather than asserted with
+    unqualified confidence - this is deliberately phrased generically (no
+    specific method name), per instruction not to encode any one file's
+    findings into the prompt."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "REQUIRES PROFILING OR RUNTIME EVIDENCE" in sp
+    assert "database cardinality" in sp
+    assert "DefaultDriverService" not in sp
+    assert "updateLocation" not in sp
+    assert "findAll" not in sp
+
+
+def test_reviewer_agent_structured_system_prompt_forbids_inventing_evidence_ids():
+    """A1-E2: the structured contract must tell the model it can only cite
+    ids Kriya actually supplied (M#/R#) and that an invented id is simply
+    discarded, not that it will fool anything."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "Never invent an id" in sp
+    assert "M1" in sp and "R1" in sp
+
+
+def test_reviewer_agent_structured_system_prompt_separates_condition_from_consequence():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "CONDITION" in sp and "CONSEQUENCE" in sp
+    assert "different questions" in sp
+
+
+def test_reviewer_agent_structured_system_prompt_states_confidence_is_advisory():
+    """A1-E2's core authority rule: the model may request a confidence
+    level, but Kriya - not the model - computes the final one."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "advisory only" in sp
+    assert "Kriya independently" in sp
+
+
+def test_reviewer_agent_structured_system_prompt_preserves_related_artifact_boundary():
+    """A1-R1's boundary rule must survive into structured mode: a relation
+    id proves only its own printed relation/detail text, never a related
+    file's unseen contents."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "never that related file's unseen contents" in sp
+
+
+def test_reviewer_agent_structured_system_prompt_requires_honest_runtime_declaration():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "runtime_dependency_declared: true" in sp
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_run_structured_review_returns_parsed_dict_on_success():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value='{"summary": "ok", "findings": []}')
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    result = await reviewer.run_structured_review("=== TARGET SOURCE ===\n...")
+
+    assert result == {"summary": "ok", "findings": []}
+    assert llm.complete.await_args.kwargs.get("json_mode") is True
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_run_structured_review_fails_clearly_on_unparseable_json():
+    """A1-E2 explicit requirement: a malformed structured response must
+    never silently fall back to unvalidated free-form Markdown - it must
+    surface as a clear, checkable error instead."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="not JSON at all")
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    result = await reviewer.run_structured_review("=== TARGET SOURCE ===\n...")
+
+    assert "_error" in result
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_run_structured_review_fails_clearly_when_call_raises():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=ConnectionError("down"))
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    result = await reviewer.run_structured_review("=== TARGET SOURCE ===\n...")
+
+    assert "_error" in result
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_run_structured_review_fails_clearly_when_response_not_a_json_object():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="[1, 2, 3]")  # valid JSON, but not an object
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    result = await reviewer.run_structured_review("=== TARGET SOURCE ===\n...")
+
+    assert "_error" in result
 
 
 def test_developer_agent_system_prompt_documents_authority_sections():

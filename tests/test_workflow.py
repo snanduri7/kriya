@@ -1890,6 +1890,54 @@ def test_brownfield_bug_fix_allows_private_change_with_public_api_unchanged(tmp_
     ) == []
 
 
+def test_brownfield_guard_does_not_detect_public_method_body_behavior_change(tmp_path):
+    """P10 (PRV-10, 2026-09-08) BEHAVIORAL-PRESERVATION GAP, ISSUE B - a
+    CHARACTERIZATION of existing, unchanged behavior, not a new assertion
+    about desired behavior. find_brownfield_public_api_changes() is
+    signature-only by design (see test_brownfield_bug_fix_allows_private_
+    change_with_public_api_unchanged directly above - the SAME mechanism
+    deliberately allows a legitimate internal bug fix without requiring
+    public-contract-level authorization for it). This test proves the exact
+    other side of that same design choice: a PUBLIC method's own BODY can
+    change observable behavior - here, printing a field the original never
+    printed - while its signature (name, parameter types, return type)
+    stays byte-for-byte identical, and the guard reports zero violations.
+
+    Confirmed live, P10/PRV-10: CustomerPrinter.print(CustomerRecord):String
+    kept its exact signature while its body changed from `return r.name();`
+    to `return r.name() + " (" + r.region() + ")";` - an authoritative goal
+    explicitly requiring "Preserve all unrelated public contracts and
+    behavior" did not prevent this, because no existing Kriya mechanism
+    checks BEHAVIOR at all: this guard checks signatures only;
+    SpecComplianceAgent's own schema has no field for an unauthorized
+    ADDITION (only `missing_requirements`, for absence); the only
+    mechanism that WOULD catch this - the real regression/test suite -
+    only protects behavior an existing test actually pins, and none did
+    here. This is not a regression to fix in this test; it documents a
+    real, general architecture question (see docs/assurance/
+    KRIYA_PRODUCTION_RISK_REGISTER.md's CORR-018 row, "Unauthorized
+    Behavioral Drift Within Authorized Files") that remains open and is
+    deliberately NOT resolved by this test."""
+    owner = "m3/src/main/java/com/example/m3/CustomerPrinter.java"
+    original = (
+        "package com.example.m3; import com.example.m1.CustomerRecord;\n"
+        "public class CustomerPrinter { public String print(CustomerRecord r) { return r.name(); } }\n"
+    )
+    behavior_changed_same_signature = (
+        "package com.example.m3; import com.example.m1.CustomerRecord;\n"
+        "public class CustomerPrinter { public String print(CustomerRecord r) "
+        "{ return r.name() + \" (\" + r.region() + \")\"; } }\n"
+    )
+    (tmp_path / owner).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / owner).write_text(original)
+
+    violations = find_brownfield_public_api_changes(
+        str(tmp_path), {owner: original}, {owner: behavior_changed_same_signature},
+        "Preserve all unrelated public contracts and behavior.",
+    )
+    assert violations == []  # documents the gap - the guard has no body-semantics coverage
+
+
 def test_brownfield_enhancement_rejects_unrequested_record_component_addition(tmp_path):
     """EXISTING_CONTRACT_PRESERVATION: a record's canonical constructor
     component shape is as much an established public contract as any

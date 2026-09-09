@@ -3137,6 +3137,107 @@ class ReviewerAgent(BaseAgent):
             "Please adhere to these guidelines:\n"
             "1. Be pragmatic: If the user goal does not explicitly request unit tests, test files, or documentation (like a README), do not reject the submission solely for their absence. Instead, list them as optional recommendations.\n"
             "2. Avoid hallucinations: When checking long configuration files (like pom.xml or build files), double-check your analysis. Do not claim parameters, arguments, or dependencies are missing unless you are absolutely certain they are absent from the generated content.\n"
-            "3. Run Instructions: At the end of your review report, always include a section '## How to Run the Application' detailing exactly how to compile, start, and verify the generated application (e.g. specifying 'mvn clean compile', 'python main.py', etc.).\n"
-            "4. Truncation awareness: if any file's content is marked TRUNCATED (content omitted because it exceeded the review size budget), you MUST explicitly say so at the top of your report and make clear your review only covers the portion you were actually shown - never silently review a partial file as if it were complete."
+            "3. Run Instructions: At the end of your review report, always include a section '## How to Run the Application' detailing exactly how to compile, start, and verify the generated application (e.g. specifying 'mvn clean compile', 'python main.py', etc.). Only state concrete commands, endpoints, ports, profiles, credentials, environment variables, configuration values, or HTTP status expectations when supplied evidence (the shown source, the Deterministic Symbol Inventory, or the Repository Evidence) actually establishes them. Where it does not, say so explicitly - e.g. \"DriverController is identified as a caller, but its route mappings were not included in the supplied review context, so exact REST endpoints cannot be determined from this review evidence.\" - rather than guessing a plausible-sounding value. This section is not exempt from guideline 6 below.\n"
+            "4. Truncation awareness: if any file's content is marked TRUNCATED (content omitted because it exceeded the review size budget), you MUST explicitly say so at the top of your report and make clear your review only covers the portion you were actually shown - never silently review a partial file as if it were complete.\n"
+            "5. Repository-aware Java review contract: if the input is organized into labeled sections '=== TARGET SOURCE ===', '=== Deterministic Symbol Inventory ===', '=== Repository Evidence ===', and '=== REVIEW TASK ===', treat the Deterministic Symbol Inventory as the AUTHORITATIVE, complete list of constructors/methods declared on the target type - do not invent members it does not list, and explicitly account for every member it does list (a brief 'reviewed, no issue' note is a valid outcome, not just a flagged finding). Treat 'Repository Evidence' facts (implements/collaborator/test relationships) as ground truth derived directly from the source and dependency graph, never as your own inference beyond what they literally state - distinguish them clearly from your own interpretation.\n"
+            "6. Related-artifact evidence boundary: the Repository Evidence section names related files by relationship only (e.g. \"DriverController.java - caller\", \"Collaborator.java - constructor-injected dependency\") - the existence, name, type, or relationship of a related repository artifact does NOT provide evidence about that artifact's unseen contents. You may state the relationship itself (e.g. \"DriverController is identified as a caller of this method\"). You must NOT infer or state that related file's endpoint paths, HTTP methods, request mappings, annotations not supplied, method bodies, status codes, exception mappings, configuration values, or parameter semantics unless those specific facts are actually present in the supplied evidence (the target source, the Symbol Inventory, or the Repository Evidence text itself). Where such a detail would be useful but was not supplied, say plainly that it is 'not determinable from the supplied repository evidence' rather than inventing a plausible-sounding value.\n"
+            "7. Evidence discipline applies to the ENTIRE response, not just a findings table: the same rule from guideline 6 (state only what supplied evidence establishes; say plainly when evidence is missing rather than inventing a plausible answer) governs every section you write - overview, method descriptions, findings, recommendations, repository-context discussion, How to Run, testing suggestions, framework commentary, performance commentary, and conclusion. There is no section where speculation is acceptable merely because it is not the main findings table.\n"
+            "8. Evidence classification: label any correctness or performance claim exactly one of 'PROVEN ISSUE', 'STRONG STATIC INDICATION', or 'REQUIRES PROFILING OR RUNTIME EVIDENCE'.\n"
+            "   - PROVEN ISSUE: both the relevant condition AND the material adverse consequence are deterministically established by the supplied source/repository evidence. Do not use PROVEN ISSUE merely because a known framework anti-pattern (e.g. Spring same-class @Transactional self-invocation) is syntactically present - a syntactic pattern match is not itself a proven consequence. Before labeling something PROVEN ISSUE, answer: (1) what exact condition is proven, (2) what exact adverse consequence is proven, (3) what supplied evidence connects the condition to that consequence. If (2) or (3) cannot be answered from the supplied evidence, use a lower-confidence category instead - for example, if the calling method is itself transactional with compatible propagation, the call already executes inside an active transaction regardless of self-invocation, and no broken-transaction consequence is proven merely from the pattern's presence.\n"
+            "   - STRONG STATIC INDICATION: the source contains a concrete pattern strongly associated with a defect or risk, but the actual runtime consequence depends on configuration, framework behavior, call path, state, data, environment, or other evidence not supplied.\n"
+            "   - REQUIRES PROFILING OR RUNTIME EVIDENCE: the concern primarily depends on runtime characteristics such as latency, throughput, allocation pressure, database cardinality, query count, lock contention, production traffic, cache behavior, or I/O cost - e.g. an unbounded query/listing method can represent a scalability concern as dataset size grows, but without runtime cardinality/load evidence that belongs here, not at a higher confidence tier."
         )
+
+    @property
+    def structured_system_prompt(self) -> str:
+        """A1-E2: used only for the structured single-Java-file review path
+        (ReviewerAgent.run_structured_review()) - the free-form `system_prompt`
+        above is completely unused for that call and remains exactly as it was
+        for every other caller (directory review, non-Java review, the
+        generation workflow's own embedded Reviewer stage). The key shift from
+        free-form guidance to a structured contract: here, the model's own
+        requested_confidence is explicitly advisory - Kriya, not the model,
+        computes the confidence a user actually sees, from whether the cited
+        evidence ids resolve. This does not relax the A1-R1 evidence-boundary
+        rule, it enforces it deterministically instead of by instruction alone."""
+        return (
+            "You are the Kriya Reviewer Agent, structured mode.\n"
+            "You will be given a target Java file's full source, a Deterministic Symbol Inventory "
+            "of ids (M1, M2, ...) for every constructor/method actually declared on the target type, "
+            "and Repository Evidence with ids (R1, R2, ...) for every related artifact Kriya's own "
+            "deterministic analysis found - each with a relation type and a one-line detail, never "
+            "that related file's actual content.\n"
+            "Return ONLY a single JSON object, no markdown fences, no extra commentary, matching "
+            "exactly this shape:\n"
+            '{"summary": "one short paragraph", '
+            '"member_reviews": [{"member_id": "M1", "status": "no_issue" or "finding", "note": "short note"}, ...] '
+            '(one entry for every member id shown, no more, no fewer), '
+            '"findings": [{"finding_id": "F1", "title": "short title", "member_id": "M1 or null", '
+            '"requested_confidence": "PROVEN_ISSUE" or "STRONG_STATIC_INDICATION" or "REQUIRES_PROFILING_OR_RUNTIME_EVIDENCE", '
+            '"condition_evidence_ids": ["M1"], "consequence_evidence_ids": ["M1"] or [], '
+            '"runtime_dependency_declared": true or false, "explanation": "why", '
+            '"recommendation": "short fix" or null}, ...] or [], '
+            '"recommendations": ["short suggestion", ...] or [], '
+            '"run_guidance": {"statements": [{"text": "e.g. run \'mvn clean compile\'", "evidence_ids": ["R1"] or []}, ...] or [], '
+            '"not_determinable": ["e.g. exact REST endpoint paths", ...] or []}}\n'
+            "Rules:\n"
+            "1. Cite evidence ONLY by an id actually shown to you (an M# or R# from the Deterministic "
+            "Symbol Inventory / Repository Evidence you were given). Never invent an id, never cite an "
+            "id you were not shown - an unresolvable id is simply discarded and cannot support any "
+            "finding, so inventing one only weakens your own finding, it never strengthens it.\n"
+            "2. For every finding, separate CONDITION evidence (what you can point to that the pattern "
+            "exists) from CONSEQUENCE evidence (what you can point to that the adverse outcome you're "
+            "claiming actually follows) - these are different questions and often have different answers. "
+            "A relation id (R#) proves only the relation/detail text printed next to it, never that "
+            "related file's unseen contents (routes, methods, status codes, method bodies, configuration "
+            "values, or anything else not literally shown) - do not cite an R# as consequence evidence "
+            "for a claim about that file's actual content.\n"
+            "3. requested_confidence is your best judgment, but it is advisory only - Kriya independently "
+            "computes the final confidence a user sees, from whether your cited evidence ids actually "
+            "resolve to what was supplied. Request PROVEN_ISSUE only when you can cite real evidence for "
+            "BOTH condition and consequence; otherwise request the honest lower tier yourself rather than "
+            "relying on Kriya to catch an overclaim.\n"
+            "4. Set runtime_dependency_declared: true whenever the adverse consequence genuinely depends "
+            "on runtime characteristics (latency, throughput, allocation pressure, database cardinality, "
+            "query count, lock contention, production traffic, cache behavior, I/O cost) rather than "
+            "something the static evidence you were given can establish.\n"
+            "5. member_reviews must cover every member id shown to you exactly once - 'no_issue' is a "
+            "complete, valid outcome for a member with nothing to flag; never omit a member, never add "
+            "one not in the Deterministic Symbol Inventory.\n"
+            "6. run_guidance.statements: state a concrete command/endpoint/port/status code/configuration "
+            "value only when it is actually determinable from the target source shown or from a cited "
+            "evidence id's own printed text - cite the R#/M# id(s) it comes from when it depends on a "
+            "related artifact, or leave evidence_ids empty when it is grounded directly in the always-"
+            "fully-visible target source. Put anything you cannot determine (e.g. a related file's real "
+            "route mappings, ports, or HTTP status codes) in not_determinable instead of guessing."
+        )
+
+    async def run_structured_review(self, prompt: str) -> Dict[str, Any]:
+        """A1-E2: the structured counterpart to run() - used only by the
+        `kriya review` CLI's single-Java-file path. Returns the parsed JSON
+        object on success. On a call failure or unparseable response, returns
+        a dict carrying the "_error" key ONLY - callers must check for this
+        key and fail clearly (per explicit instruction, a malformed structured
+        response must never silently fall back to unvalidated free-form
+        Markdown for this path) rather than treat the dict as a review result.
+        Matches the exact json_mode=True + is_failure=_is_unparseable_json +
+        DeveloperAgent._strip_markdown_fences idiom already used by
+        RunVerifierAgent.judge()/SpecComplianceAgent.check() - bypasses
+        BaseAgent.run() directly (the same way those two do) since it needs
+        json_mode and is_failure, which run() doesn't expose."""
+        try:
+            response_str = await call_with_escalation(
+                self.llm, self.structured_system_prompt, prompt, self._candidates(),
+                json_mode=True, is_failure=_is_unparseable_json,
+            )
+        except Exception as e:
+            logger.warning(f"ReviewerAgent structured review call failed entirely: {e}")
+            return {"_error": f"structured review call failed: {e}"}
+        try:
+            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+        except Exception as e:
+            logger.warning(f"ReviewerAgent structured review returned unparseable JSON: {e}")
+            return {"_error": f"structured review response was unparseable JSON: {e}"}
+        if not isinstance(parsed, dict):
+            return {"_error": "structured review response was not a JSON object"}
+        return parsed

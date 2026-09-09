@@ -2013,16 +2013,71 @@ def review(ctx: click.Context, file_path: str) -> None:
             "partial file set.\n\n"
         )
 
+        # Repository-aware Java review contract (A1-P1/A1-E2): only for the narrow,
+        # unambiguous case of reviewing exactly one .java file whose content fit
+        # in a single batch (untruncated/unsplit) - a deterministic member
+        # inventory and bounded repository context are assembled BEFORE the
+        # model call (no model-directed reads/tools), each item given a
+        # Kriya-generated evidence id (M#/R#), and the model's own structured
+        # response is deterministically adjudicated against those ids before
+        # any confidence label reaches the user (A1-E2 - Kriya, not the
+        # Reviewer, is authoritative for final finding confidence). Every
+        # other case (directories, non-Java files, multi-batch splits) is
+        # completely unchanged from before - still the free-form path.
+        structured_evidence = None
+        if (
+            len(files_to_review) == 1
+            and len(batches) == 1
+            and files_to_review[0][0].endswith(".java")
+        ):
+            from kriya.analyzer.java_members import extract_java_members
+            from kriya.workflow.review_context import (
+                build_member_evidence_ids,
+                build_relation_evidence_ids,
+                build_review_repository_context,
+                find_java_repo_root,
+                format_member_evidence_registry,
+                format_relation_evidence_registry,
+            )
+
+            target_rel, target_full = files_to_review[0]
+            target_content = dict(file_contents)[target_rel]
+            members = extract_java_members(target_content)
+            repo_root = find_java_repo_root(target_full)
+            target_relpath_in_root = os.path.relpath(target_full, repo_root)
+            repo_ctx = build_review_repository_context(
+                repo_root, target_relpath_in_root, target_content, members,
+            )
+            member_ids = build_member_evidence_ids(members)
+            relation_ids = build_relation_evidence_ids(repo_ctx.related_files)
+            evidence_prefix = format_member_evidence_registry(member_ids) + format_relation_evidence_registry(repo_ctx, relation_ids)
+            structured_evidence = (member_ids, relation_ids, evidence_prefix)
+
         import sys
         def on_stream(token: str):
             click.echo(token, nl=False)
             sys.stdout.flush()
 
         async def run_review():
+            if structured_evidence:
+                from kriya.workflow.review_context import build_structured_review_report
+
+                member_ids, relation_ids, evidence_prefix = structured_evidence
+                click.secho("\n=== Code Review Report ===", bold=True, fg="cyan", err=True)
+                prompt = "=== TARGET SOURCE ===\n" + batches[0] + evidence_prefix + "\n=== REVIEW TASK ===\n" + review_context_header
+                raw = await reviewer.run_structured_review(prompt)
+                if "_error" in raw:
+                    click.secho(f"Structured review failed: {raw['_error']}", fg="red", err=True)
+                    sys.exit(1)
+                report = build_structured_review_report(raw, member_ids, relation_ids)
+                click.echo(report)
+                return
+
             for i, batch in enumerate(batches, 1):
                 label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
                 click.secho(f"\n{label}", bold=True, fg="cyan", err=True)
-                await reviewer.run(review_context_header + batch, stream_callback=on_stream)
+                prompt = review_context_header + batch
+                await reviewer.run(prompt, stream_callback=on_stream)
                 click.echo()
 
         asyncio.run(run_review())
