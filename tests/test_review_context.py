@@ -21,6 +21,7 @@ from kriya.workflow.review_context import (
     format_relation_evidence_registry,
     format_review_repository_context,
     parse_and_validate_run_guidance,
+    parse_member_reviews,
     parse_structured_findings,
 )
 
@@ -453,7 +454,7 @@ def test_format_adjudicated_review_shows_requested_vs_final_confidence_on_downgr
     [adjudicated] = adjudicate_findings([f], member_ids, {})
 
     report = format_adjudicated_review(
-        summary="ok", member_ids=member_ids, member_review_ids=[mid], coverage={"missing": [], "invented": []},
+        summary="ok", member_ids=member_ids, member_reviews={mid: ("finding", "")}, coverage={"missing": [], "invented": []},
         adjudicated=[adjudicated], recommendations=[], run_guidance_statements=[], run_guidance_gaps=[],
     )
 
@@ -466,12 +467,14 @@ def test_format_adjudicated_review_shows_requested_vs_final_confidence_on_downgr
 def test_format_adjudicated_review_does_not_expose_raw_json_keys():
     member_ids = _member_ids_fixture()
     report = format_adjudicated_review(
-        summary="ok", member_ids=member_ids, member_review_ids=[], coverage={"missing": [], "invented": []},
+        summary="ok", member_ids=member_ids, member_reviews={}, coverage={"missing": [], "invented": []},
         adjudicated=[], recommendations=[], run_guidance_statements=[], run_guidance_gaps=[],
     )
 
     assert '"finding_id"' not in report
     assert '"requested_confidence"' not in report
+    assert '"member_id"' not in report
+    assert '"note"' not in report
     assert not report.strip().startswith("{")
 
 
@@ -554,3 +557,178 @@ def test_build_structured_review_report_never_crashes_on_totally_malformed_shape
 
     assert isinstance(report, str)
     assert "0/2 deterministic member(s) accounted for" in report
+
+
+# =====================================================================
+# A1 UX fix: member_reviews[] status/note preserved and rendered
+# (previously extracted only the bare member id and discarded the rest)
+# =====================================================================
+
+def test_parse_member_reviews_preserves_status_and_note():
+    parsed = parse_member_reviews([
+        {"member_id": "M1", "status": "no_issue", "note": "Stores the dependency."},
+        {"member_id": "M2", "status": "finding", "note": "No body."},
+    ])
+
+    assert parsed == {
+        "M1": ("no_issue", "Stores the dependency."),
+        "M2": ("finding", "No body."),
+    }
+
+
+def test_parse_member_reviews_skips_malformed_entries():
+    parsed = parse_member_reviews(["not a dict", {"status": "no_issue"}, {"member_id": "M1", "note": "ok"}])
+
+    assert parsed == {"M1": ("", "ok")}
+
+
+def test_parse_member_reviews_returns_empty_dict_for_malformed_top_level_shape():
+    assert parse_member_reviews({"not": "a list"}) == {}
+    assert parse_member_reviews(None) == {}
+
+
+# --- 1/4/5: two reviewed members both render, status rendered ---
+def test_format_adjudicated_review_renders_two_member_reviews():
+    member_ids = _member_ids_fixture()  # M1 = constructor, M2 = doWork()
+    member_reviews = {"M1": ("no_issue", "Stores the collaborator."), "M2": ("finding", "No body.")}
+
+    report = format_adjudicated_review(
+        summary="", member_ids=member_ids, member_reviews=member_reviews,
+        coverage={"missing": [], "invented": []}, adjudicated=[], recommendations=[],
+        run_guidance_statements=[], run_guidance_gaps=[],
+    )
+
+    assert "## Member Review" in report
+    assert "### M1" in report and "Status: no_issue" in report
+    assert "### M2" in report and "Status: finding" in report
+
+
+# --- 2: deterministic member order preserved (M1 before M2 regardless of
+# the order member_reviews happened to list them in) ---
+def test_format_adjudicated_review_member_order_is_deterministic_not_model_order():
+    member_ids = _member_ids_fixture()
+    # Deliberately reversed vs. member_ids' own M1-then-M2 order.
+    member_reviews = {"M2": ("no_issue", "second declared"), "M1": ("no_issue", "first declared")}
+
+    report = format_adjudicated_review(
+        summary="", member_ids=member_ids, member_reviews=member_reviews,
+        coverage={"missing": [], "invented": []}, adjudicated=[], recommendations=[],
+        run_guidance_statements=[], run_guidance_gaps=[],
+    )
+
+    assert report.index("### M1") < report.index("### M2")
+
+
+# --- 3: signature shown comes from Kriya's own evidence registry, not the model ---
+def test_format_adjudicated_review_uses_kriya_signature_not_model_text():
+    member_ids = _member_ids_fixture()
+    mid, member = next(iter(member_ids.items()))
+    member_reviews = {mid: ("no_issue", "some note")}
+
+    report = format_adjudicated_review(
+        summary="", member_ids=member_ids, member_reviews=member_reviews,
+        coverage={"missing": [], "invented": []}, adjudicated=[], recommendations=[],
+        run_guidance_statements=[], run_guidance_gaps=[],
+    )
+
+    assert member.signature in report
+    assert f"### {mid} — {member.signature}" in report
+
+
+# --- 6: missing member explicitly reported (both in the section itself and
+# in the existing Member Coverage summary) ---
+def test_format_adjudicated_review_reports_missing_member_explicitly():
+    member_ids = _member_ids_fixture()  # M1, M2
+    member_reviews = {"M1": ("no_issue", "covered")}  # M2 never addressed
+
+    report = format_adjudicated_review(
+        summary="", member_ids=member_ids, member_reviews=member_reviews,
+        coverage={"missing": ["M2"], "invented": []}, adjudicated=[], recommendations=[],
+        run_guidance_statements=[], run_guidance_gaps=[],
+    )
+
+    assert "### M2" in report
+    assert "not reviewed" in report
+    assert "No review was provided for this member." in report
+    assert "**Missing (never addressed by the review):** M2" in report
+
+
+# --- 7: invented member ID explicitly reported, per existing coverage behavior ---
+def test_format_adjudicated_review_reports_invented_member_id_explicitly():
+    member_ids = _member_ids_fixture()
+    member_reviews = {"M1": ("no_issue", "x"), "M2": ("no_issue", "y"), "M999": ("no_issue", "fabricated")}
+
+    report = format_adjudicated_review(
+        summary="", member_ids=member_ids, member_reviews=member_reviews,
+        coverage={"missing": [], "invented": ["M999"]}, adjudicated=[], recommendations=[],
+        run_guidance_statements=[], run_guidance_gaps=[],
+    )
+
+    assert "**Invented (not part of the supplied inventory - ignored):** M999" in report
+    assert "Ignored - not part of the supplied deterministic inventory: M999" in report
+    assert "### M999" not in report  # never rendered as if it were a real member section
+
+
+# --- 8/9/10: member note is advisory prose only - never evidence authority ---
+def test_member_note_does_not_affect_finding_confidence():
+    """A finding's condition/consequence evidence must resolve through the
+    normal evidence registry only - member_reviews[].note is never
+    consulted by adjudicate_findings() at all (different function,
+    different inputs), so a note asserting a consequence cannot upgrade a
+    finding that cites no real consequence evidence id."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    f = _finding(condition_evidence_ids=(mid,), consequence_evidence_ids=())
+
+    [result] = adjudicate_findings([f], member_ids, {})
+
+    assert result.final_confidence == CONFIDENCE_STRONG_STATIC_INDICATION
+
+
+def test_member_note_cannot_provide_condition_or_consequence_evidence():
+    """adjudicate_findings()'s signature takes only (findings, member_ids,
+    relation_ids) - member_reviews/notes are never passed to it at all, so
+    there is no code path through which a note's text could be read as an
+    evidence reference, by construction."""
+    import inspect
+
+    params = list(inspect.signature(adjudicate_findings).parameters)
+
+    assert params == ["findings", "member_ids", "relation_ids"]
+    assert "member_reviews" not in params and "notes" not in params
+
+
+# --- 11: raw JSON still not rendered, including the new fields ---
+def test_format_adjudicated_review_member_section_does_not_expose_raw_json():
+    member_ids = _member_ids_fixture()
+    member_reviews = {"M1": ("no_issue", "a note")}
+
+    report = format_adjudicated_review(
+        summary="", member_ids=member_ids, member_reviews=member_reviews,
+        coverage={"missing": [], "invented": []}, adjudicated=[], recommendations=[],
+        run_guidance_statements=[], run_guidance_gaps=[],
+    )
+
+    assert '"status"' not in report
+    assert '"member_id"' not in report
+    assert not report.strip().startswith("{")
+
+
+# --- 14: frozen A1 9-member fixture renders exactly 9 member sections ---
+def test_frozen_a1_default_driver_service_renders_nine_member_sections():
+    from test_java_members import _DEFAULT_DRIVER_SERVICE_SOURCE
+
+    members = extract_java_members(_DEFAULT_DRIVER_SERVICE_SOURCE)
+    member_ids = build_member_evidence_ids(members)
+    assert len(member_ids) == 9
+
+    member_reviews = {mid: ("no_issue", f"note for {mid}") for mid in member_ids}
+    report = format_adjudicated_review(
+        summary="", member_ids=member_ids, member_reviews=member_reviews,
+        coverage={"missing": [], "invented": []}, adjudicated=[], recommendations=[],
+        run_guidance_statements=[], run_guidance_gaps=[],
+    )
+
+    for mid in member_ids:
+        assert f"### {mid} —" in report
+    assert "9/9 deterministic member(s) accounted for" in report

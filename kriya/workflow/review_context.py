@@ -713,10 +713,40 @@ def parse_and_validate_run_guidance(raw: Any, member_ids: Dict[str, JavaMember],
     return statements, gaps
 
 
+def parse_member_reviews(raw: Any) -> Dict[str, Tuple[str, str]]:
+    """Defensive parse of the model's own `member_reviews` JSON array into
+    {member_id: (status, note)} - preserves the model's own per-member
+    explanation instead of discarding it after coverage-checking (the gap
+    A1-R3 exposed: the prior implementation extracted only the bare id).
+    A malformed individual entry (not a dict, or missing member_id) is
+    simply skipped, matching this module's other defensive-parse
+    functions; a duplicate member_id keeps the LAST entry, deterministic
+    given the input's own order.
+
+    `note` is advisory explanation only - it is never read by
+    adjudicate_findings() (which only ever sees `findings`, never
+    `member_reviews`), never contributes a condition/consequence evidence
+    reference, and cannot upgrade or otherwise influence any finding's
+    confidence. It is rendered for the user's benefit only."""
+    if not isinstance(raw, list):
+        return {}
+    out: Dict[str, Tuple[str, str]] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        member_id = item.get("member_id")
+        if not member_id:
+            continue
+        status = str(item.get("status") or "")
+        note = str(item.get("note") or "")
+        out[str(member_id)] = (status, note)
+    return out
+
+
 def format_adjudicated_review(
     summary: str,
     member_ids: Dict[str, JavaMember],
-    member_review_ids: Sequence[str],
+    member_reviews: Dict[str, Tuple[str, str]],
     coverage: Dict[str, List[str]],
     adjudicated: Sequence[AdjudicatedFinding],
     recommendations: Sequence[str],
@@ -729,19 +759,42 @@ def format_adjudicated_review(
     the validated structured result, never straight from the model's own
     unvalidated prose. Transparent about downgrades on purpose: when Kriya
     changes a requested confidence, the report says so explicitly rather
-    than silently substituting its own verdict."""
+    than silently substituting its own verdict.
+
+    `member_reviews` is {member_id: (status, note)} (see
+    parse_member_reviews()) - rendered in the "## Member Review" section
+    below in Kriya's own deterministic M1..Mn order (never the model's own
+    return order), using Kriya's own signature from `member_ids`, never a
+    model-provided one - the note is advisory prose only and plays no part
+    in the Findings section's confidence adjudication above/below it."""
     lines = ["## Review Status: Reviewed (Kriya-adjudicated evidence confidence)", ""]
     if summary:
         lines += ["### Overview", summary.strip(), ""]
 
     lines += ["### Member Coverage", ""]
-    accounted = len(set(member_review_ids) & set(member_ids))
+    accounted = len(set(member_reviews) & set(member_ids))
     lines.append(f"{accounted}/{len(member_ids)} deterministic member(s) accounted for.")
     if coverage["missing"]:
         lines.append(f"**Missing (never addressed by the review):** {', '.join(coverage['missing'])}")
     if coverage["invented"]:
         lines.append(f"**Invented (not part of the supplied inventory - ignored):** {', '.join(coverage['invented'])}")
     lines.append("")
+
+    lines += ["## Member Review", ""]
+    for mid, member in member_ids.items():  # Kriya's own deterministic M1..Mn order
+        lines.append(f"### {mid} — {member.signature}")
+        if mid in member_reviews:
+            status, note = member_reviews[mid]
+            lines.append(f"Status: {status or 'unspecified'}")
+            if note:
+                lines.append(note.strip())
+        else:
+            lines.append("Status: not reviewed")
+            lines.append("No review was provided for this member.")
+        lines.append("")
+    if coverage["invented"]:
+        lines.append(f"*(Ignored - not part of the supplied deterministic inventory: {', '.join(coverage['invented'])})*")
+        lines.append("")
 
     lines += ["### Findings", ""]
     if not adjudicated:
@@ -801,12 +854,8 @@ def build_structured_review_report(
     findings = parse_structured_findings(raw_response.get("findings"))
     adjudicated = adjudicate_findings(findings, member_ids, relation_ids)
 
-    member_reviews = raw_response.get("member_reviews")
-    member_review_ids = [
-        str(item.get("member_id")) for item in member_reviews
-        if isinstance(item, dict) and item.get("member_id")
-    ] if isinstance(member_reviews, list) else []
-    coverage = compute_member_coverage(member_ids, member_review_ids)
+    member_reviews = parse_member_reviews(raw_response.get("member_reviews"))
+    coverage = compute_member_coverage(member_ids, list(member_reviews.keys()))
 
     recommendations_raw = raw_response.get("recommendations")
     recommendations = [str(r) for r in recommendations_raw if r] if isinstance(recommendations_raw, list) else []
@@ -816,7 +865,7 @@ def build_structured_review_report(
     )
 
     return format_adjudicated_review(
-        summary=summary, member_ids=member_ids, member_review_ids=member_review_ids,
+        summary=summary, member_ids=member_ids, member_reviews=member_reviews,
         coverage=coverage, adjudicated=adjudicated, recommendations=recommendations,
         run_guidance_statements=run_guidance_statements, run_guidance_gaps=run_guidance_gaps,
     )
