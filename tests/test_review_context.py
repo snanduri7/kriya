@@ -4,9 +4,13 @@ from kriya.workflow.review_context import (
     CONFIDENCE_PROVEN_ISSUE,
     CONFIDENCE_REQUIRES_RUNTIME,
     CONFIDENCE_STRONG_STATIC_INDICATION,
+    PROPOSAL_APPROVAL_NOT_APPROVED,
+    PROPOSAL_AUTHORITY_ADVISORY_ONLY,
+    ProposedModification,
     StructuredFinding,
     adjudicate_findings,
     build_member_evidence_ids,
+    build_proposed_modification,
     build_relation_evidence_ids,
     build_review_batches,
     build_review_repository_context,
@@ -18,6 +22,7 @@ from kriya.workflow.review_context import (
     format_adjudicated_review,
     format_java_member_inventory,
     format_member_evidence_registry,
+    format_proposed_modification,
     format_relation_evidence_registry,
     format_review_repository_context,
     parse_and_validate_run_guidance,
@@ -732,3 +737,249 @@ def test_frozen_a1_default_driver_service_renders_nine_member_sections():
     for mid in member_ids:
         assert f"### {mid} —" in report
     assert "9/9 deterministic member(s) accounted for" in report
+
+
+# =====================================================================
+# A2: review finding -> proposed modification (advisory only, read-only)
+# =====================================================================
+
+def _proposal_finding(**overrides):
+    base = dict(
+        finding_id="F1", title="Constructor stores collaborator without null check", member_id=None,
+        requested_confidence=CONFIDENCE_STRONG_STATIC_INDICATION,
+        condition_evidence_ids=(), consequence_evidence_ids=(),
+        runtime_dependency_declared=False, explanation="No null guard on c.",
+        recommendation="Add a null check on the constructor parameter.",
+    )
+    base.update(overrides)
+    return StructuredFinding(**base)
+
+
+def test_build_proposed_modification_grounded_finding_produces_full_proposal():
+    """Tests 1,2,4,5,6,7,8,9: a valid grounded finding with evidence and a
+    recommendation produces a fully-populated, structurally advisory proposal."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    f = _proposal_finding(member_id=mid, condition_evidence_ids=(mid,))
+    [adj] = adjudicate_findings([f], member_ids, {})
+
+    proposal = build_proposed_modification("F1", [adj], member_ids, {}, "src/main/java/Target.java")
+
+    assert isinstance(proposal, ProposedModification)
+    assert proposal.source_finding_id == "F1"  # test 2: retains source finding id
+    assert any(mid in e for e in proposal.evidence)  # test 3: retains valid evidence reference
+    assert proposal.target_file == "src/main/java/Target.java"  # test 4: deterministic file identity
+    assert member_ids[mid].signature in proposal.target_member  # test 4: deterministic member identity
+    assert "null guard" in proposal.problem_statement.lower()  # test 5: problem statement
+    assert proposal.proposed_change == f.recommendation  # test 6: concrete proposed change
+    assert len(proposal.must_preserve) >= 3  # test 7: preservation constraints
+    assert len(proposal.verification) >= 2  # test 8: verification requirements
+    assert proposal.authority == PROPOSAL_AUTHORITY_ADVISORY_ONLY  # test 9
+    assert proposal.approval == PROPOSAL_APPROVAL_NOT_APPROVED  # test 9
+
+
+def test_proposal_authority_is_advisory_regardless_of_finding_strength():
+    """Test 10/18 (authority half): a PROVEN_ISSUE-strength finding and an
+    EVIDENCE_INSUFFICIENT one both produce an equally advisory/unapproved
+    proposal - authority never scales with the finding's own confidence."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    strong = _proposal_finding(
+        finding_id="F1", condition_evidence_ids=(mid,), consequence_evidence_ids=(mid,),
+        requested_confidence=CONFIDENCE_PROVEN_ISSUE,
+    )
+    weak = _proposal_finding(finding_id="F2", requested_confidence="not a real tier", condition_evidence_ids=(mid,))
+    [adj_strong] = adjudicate_findings([strong], member_ids, {})
+    [adj_weak] = adjudicate_findings([weak], member_ids, {})
+
+    p_strong = build_proposed_modification("F1", [adj_strong], member_ids, {}, "X.java")
+    p_weak = build_proposed_modification("F2", [adj_weak], member_ids, {}, "X.java")
+
+    for p in (p_strong, p_weak):
+        assert p.authority == PROPOSAL_AUTHORITY_ADVISORY_ONLY
+        assert p.approval == PROPOSAL_APPROVAL_NOT_APPROVED
+
+
+def test_proposal_reflects_downgraded_confidence_not_requested_confidence():
+    """Test 18 (the real distinction from test 9/10): a finding requesting
+    PROVEN_ISSUE but downgraded (no consequence evidence) to
+    STRONG_STATIC_INDICATION must produce a proposal whose OWN confidence
+    claim is the downgraded tier - never the originally requested,
+    unsupported one. The downgrade is still transparently disclosed in
+    Assumptions (same "say so explicitly" convention as
+    format_adjudicated_review()), just never rendered as the proposal's
+    own Confidence: line."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    f = _proposal_finding(
+        requested_confidence=CONFIDENCE_PROVEN_ISSUE,
+        condition_evidence_ids=(mid,), consequence_evidence_ids=(),  # no consequence -> downgrade
+    )
+    [adj] = adjudicate_findings([f], member_ids, {})
+    assert adj.final_confidence == CONFIDENCE_STRONG_STATIC_INDICATION  # sanity on the fixture
+
+    proposal = build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
+    report = format_proposed_modification(proposal)
+
+    assert proposal.final_confidence == CONFIDENCE_STRONG_STATIC_INDICATION
+    assert "Confidence: STRONG STATIC INDICATION" in report
+    assert "Confidence: PROVEN ISSUE" not in report
+    assert "Kriya downgraded this finding's confidence from PROVEN_ISSUE" in report  # transparent disclosure
+
+
+def test_proposal_cannot_be_built_for_unknown_finding_id():
+    """Test 16: an id not present in this invocation's own adjudicated list
+    is rejected outright, never silently ignored or matched fuzzily."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    f = _proposal_finding(condition_evidence_ids=(mid,))
+    [adj] = adjudicate_findings([f], member_ids, {})
+
+    try:
+        build_proposed_modification("F999", [adj], member_ids, {}, "X.java")
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "Unknown finding id" in str(e)
+
+
+def test_proposal_refused_when_finding_has_no_recommendation():
+    """A concrete proposed change cannot be fabricated - if the finding
+    itself carries no recommendation, refuse rather than inventing one."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    f = _proposal_finding(condition_evidence_ids=(mid,), recommendation=None)
+    [adj] = adjudicate_findings([f], member_ids, {})
+
+    try:
+        build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "no recommendation" in str(e).lower()
+
+
+def test_proposal_refused_when_no_evidence_id_resolves():
+    """Grounding requirement: a finding citing only invented/unresolvable
+    evidence ids has nothing real for the proposal to be traceable to -
+    refuse rather than proposing an ungrounded change."""
+    member_ids = _member_ids_fixture()
+    f = _proposal_finding(condition_evidence_ids=("M999",), consequence_evidence_ids=("R999",))
+    [adj] = adjudicate_findings([f], member_ids, {})
+
+    try:
+        build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "no evidence id" in str(e).lower()
+
+
+def test_proposal_excludes_invented_evidence_ids_entirely():
+    """Test 17: a finding citing a mix of a real and an invented evidence
+    id keeps only the real one - the invented id is excluded from the
+    proposal entirely (never listed, even as "ignored"), matching how
+    adjudicate_findings() already treats an unresolvable id as simply not
+    counting, by construction."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    f = _proposal_finding(condition_evidence_ids=(mid, "M999"))
+    [adj] = adjudicate_findings([f], member_ids, {})
+
+    proposal = build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
+    report = format_proposed_modification(proposal)
+
+    assert not any("M999" in e for e in proposal.evidence)
+    assert "M999" not in report
+
+
+def test_proposal_runtime_dependent_finding_keeps_runtime_verification():
+    """Test 19: a finding whose consequence is runtime-dependent must keep
+    a runtime/profiling verification requirement, and must never be
+    converted into a certainty claim about runtime behavior."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    f = _proposal_finding(
+        requested_confidence=CONFIDENCE_REQUIRES_RUNTIME, condition_evidence_ids=(mid,),
+        runtime_dependency_declared=True,
+    )
+    [adj] = adjudicate_findings([f], member_ids, {})
+    assert adj.final_confidence == CONFIDENCE_REQUIRES_RUNTIME
+
+    proposal = build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
+    report = format_proposed_modification(proposal)
+
+    assert any("profiling/runtime evidence" in v for v in proposal.verification)
+    assert "definitely fix" not in report.lower()
+    assert "will definitely" not in report.lower()
+
+
+def test_proposal_target_member_uses_kriya_signature_not_model_text():
+    """Test 20: the rendered target member/signature comes from Kriya's own
+    member registry, never from the finding's own free-text title/
+    explanation - even when the model's text names something different,
+    Kriya's own registry value is what's authoritative and rendered."""
+    member_ids = _member_ids_fixture()
+    mid, member = next(iter(member_ids.items()))
+    f = _proposal_finding(
+        member_id=mid, condition_evidence_ids=(mid,),
+        title="totally unrelated model-invented method name AAAAZZZZ",
+    )
+    [adj] = adjudicate_findings([f], member_ids, {})
+
+    proposal = build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
+
+    assert member.signature in proposal.target_member
+    assert "AAAAZZZZ" not in proposal.target_member
+
+
+def test_format_proposed_modification_states_no_modification_occurred():
+    """Test 21: the rendered proposal must explicitly say no files were
+    modified and nothing was approved - never leave the user to infer it."""
+    member_ids = _member_ids_fixture()
+    mid = next(iter(member_ids))
+    f = _proposal_finding(condition_evidence_ids=(mid,))
+    [adj] = adjudicate_findings([f], member_ids, {})
+    proposal = build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
+
+    report = format_proposed_modification(proposal)
+
+    assert "has not been approved" in report
+    assert "no source files were modified" in report
+    assert f"Authority: {PROPOSAL_AUTHORITY_ADVISORY_ONLY}" in report
+    assert f"Approval: {PROPOSAL_APPROVAL_NOT_APPROVED}" in report
+
+
+def test_a1_format_adjudicated_review_signature_and_behavior_unchanged():
+    """Test 22: A2 must not touch format_adjudicated_review() at all - its
+    signature (no new proposal-shaped parameter) is proof A1's own report
+    is unaffected by A2 existing in the same module."""
+    import inspect
+
+    params = list(inspect.signature(format_adjudicated_review).parameters)
+    assert "proposal" not in params
+    assert "proposed_modification" not in params
+
+
+def test_review_context_module_never_imports_write_capable_components():
+    """Zero-write structural proof (parts 10-14 of the required test list):
+    review_context.py - where A2's build_proposed_modification()/
+    format_proposed_modification() live - must never import
+    DeveloperAgent, AuthorizedFileWriter, or the generation/recovery
+    workflow, by construction. Checked via the actual compiled AST import
+    graph, not a source-text grep (which would trivially pass even if the
+    forbidden name were merely mentioned in a call deep in the module)."""
+    import ast
+    import inspect
+
+    import kriya.workflow.review_context as rc
+
+    tree = ast.parse(inspect.getsource(rc))
+    imported_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                imported_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                imported_names.add(alias.asname or alias.name)
+
+    forbidden = {"DeveloperAgent", "AuthorizedFileWriter", "WorkflowEngine", "run_generation_workflow"}
+    assert not (imported_names & forbidden), imported_names & forbidden

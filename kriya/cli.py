@@ -1868,8 +1868,14 @@ def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[
 
 @main.command()
 @click.argument('file_path', type=click.Path(exists=True))
+@click.option('--propose', 'propose_finding_id', default=None, metavar='FINDING_ID',
+              help="A2: after the review, build an advisory (not-yet-approved) proposed "
+              "modification from finding FINDING_ID (e.g. F2) in THIS review's own output - "
+              "invocation-local, single-Java-file repository-aware review path only. Never "
+              "modifies files, never invokes generation - see the printed proposal's own "
+              "Authority/Approval fields.")
 @click.pass_context
-def review(ctx: click.Context, file_path: str) -> None:
+def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]) -> None:
     """Run code review agent on a file or a folder."""
     cfg: AppConfig = ctx.obj['config']
 
@@ -2051,7 +2057,15 @@ def review(ctx: click.Context, file_path: str) -> None:
             member_ids = build_member_evidence_ids(members)
             relation_ids = build_relation_evidence_ids(repo_ctx.related_files)
             evidence_prefix = format_member_evidence_registry(member_ids) + format_relation_evidence_registry(repo_ctx, relation_ids)
-            structured_evidence = (member_ids, relation_ids, evidence_prefix)
+            structured_evidence = (member_ids, relation_ids, evidence_prefix, target_relpath_in_root)
+
+        if propose_finding_id and not structured_evidence:
+            click.secho(
+                "--propose is only supported for the single-Java-file repository-aware review "
+                "path (exactly one .java file, whose content fits in a single batch).",
+                fg="red", err=True,
+            )
+            sys.exit(1)
 
         import sys
         def on_stream(token: str):
@@ -2060,9 +2074,15 @@ def review(ctx: click.Context, file_path: str) -> None:
 
         async def run_review():
             if structured_evidence:
-                from kriya.workflow.review_context import build_structured_review_report
+                from kriya.workflow.review_context import (
+                    adjudicate_findings,
+                    build_proposed_modification,
+                    build_structured_review_report,
+                    format_proposed_modification,
+                    parse_structured_findings,
+                )
 
-                member_ids, relation_ids, evidence_prefix = structured_evidence
+                member_ids, relation_ids, evidence_prefix, target_relpath_in_root = structured_evidence
                 click.secho("\n=== Code Review Report ===", bold=True, fg="cyan", err=True)
                 prompt = "=== TARGET SOURCE ===\n" + batches[0] + evidence_prefix + "\n=== REVIEW TASK ===\n" + review_context_header
                 raw = await reviewer.run_structured_review(prompt)
@@ -2071,6 +2091,24 @@ def review(ctx: click.Context, file_path: str) -> None:
                     sys.exit(1)
                 report = build_structured_review_report(raw, member_ids, relation_ids)
                 click.echo(report)
+
+                if propose_finding_id:
+                    # A2: same adjudicated findings this exact call already computed inside
+                    # build_structured_review_report() above - recomputed here (cheap, pure,
+                    # no second model call) since that function doesn't expose them. Never
+                    # touches DeveloperAgent/AuthorizedFileWriter/the generation workflow -
+                    # see review_context.py's own A2 section docstring for the zero-write
+                    # invariant this whole path is built to preserve.
+                    findings = parse_structured_findings(raw.get("findings"))
+                    adjudicated = adjudicate_findings(findings, member_ids, relation_ids)
+                    try:
+                        proposal = build_proposed_modification(
+                            propose_finding_id, adjudicated, member_ids, relation_ids, target_relpath_in_root,
+                        )
+                    except ValueError as e:
+                        click.secho(f"\nCannot build proposal: {e}", fg="red", err=True)
+                        sys.exit(1)
+                    click.echo("\n" + format_proposed_modification(proposal))
                 return
 
             for i, batch in enumerate(batches, 1):

@@ -531,3 +531,153 @@ def test_plan_milestones_bare_output_filename_does_not_crash(runner, tmp_path):
 
         assert result.exit_code == 0, result.output
         assert os.path.exists(os.path.join(cwd, "plan.json"))
+
+
+# =====================================================================
+# A2: `kriya review <file> --propose <finding-id>` (advisory only, read-only)
+# =====================================================================
+
+_A2_TARGET_SRC = (
+    "public class Target implements TargetInterface {\n"
+    "    public Target(Collaborator c) {\n"
+    "    }\n"
+    "\n"
+    "    public void doWork() {\n"
+    "    }\n"
+    "}\n"
+)
+
+_A2_FAKE_RAW_RESPONSE = {
+    "summary": "ok",
+    "findings": [
+        {
+            "finding_id": "F1",
+            "title": "Constructor stores collaborator without null check",
+            "member_id": "M1",
+            "requested_confidence": "STRONG_STATIC_INDICATION",
+            "condition_evidence_ids": ["M1"],
+            "consequence_evidence_ids": [],
+            "runtime_dependency_declared": False,
+            "explanation": "No null guard on c.",
+            "recommendation": "Add a null check and throw IllegalArgumentException.",
+        }
+    ],
+    "member_reviews": [
+        {"member_id": "M1", "status": "finding", "note": "see F1"},
+        {"member_id": "M2", "status": "no_issue", "note": "fine"},
+    ],
+    "recommendations": [],
+    "run_guidance": [],
+}
+
+
+def _hash_dir(d):
+    import hashlib
+    h = hashlib.sha256()
+    for root, dirs, files in sorted(os.walk(d)):
+        for fn in sorted(files):
+            p = os.path.join(root, fn)
+            h.update(p.encode())
+            with open(p, "rb") as fh:
+                h.update(fh.read())
+    return h.hexdigest()
+
+
+def _mock_reviewer_agent():
+    mock_reviewer = MagicMock()
+    mock_reviewer.run_structured_review = AsyncMock(return_value=_A2_FAKE_RAW_RESPONSE)
+    return mock_reviewer
+
+
+def test_review_propose_flag_absent_leaves_a1_report_unchanged(runner, tmp_path):
+    """Test 22/23: without --propose, output is exactly the pre-A2 A1 report -
+    no Proposed Modification section appears at all."""
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
+         patch("kriya.cli.LLMClient"):
+        result = runner.invoke(main, ["review", str(java_file)])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "### Findings" in result.output
+    assert "Proposed Modification" not in result.output
+
+
+def test_review_propose_valid_finding_renders_advisory_proposal(runner, tmp_path):
+    """Tests 1,9,21: --propose F1 renders a proposal grounded in the same
+    review's own findings, explicitly advisory/unapproved, and states
+    plainly that nothing was modified - alongside the unchanged A1 report."""
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+    before = _hash_dir(str(tmp_path))
+
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
+         patch("kriya.cli.LLMClient"):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F1"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "### Findings" in result.output  # A1 report still present, unchanged
+    assert "## Proposed Modification" in result.output
+    assert "Authority: ADVISORY_ONLY" in result.output
+    assert "Approval: NOT_APPROVED" in result.output
+    assert "has not been approved" in result.output
+    assert "no source files were modified" in result.output
+    assert before == _hash_dir(str(tmp_path))  # test 15: zero-write, byte-identical
+
+
+def test_review_propose_unknown_finding_id_is_rejected(runner, tmp_path):
+    """Test 16: an id not present in this review's own output is rejected
+    with a clear error and a nonzero exit code, not silently ignored."""
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
+         patch("kriya.cli.LLMClient"):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F999"])
+
+    assert result.exit_code != 0
+    assert "Unknown finding id" in result.output + result.stderr
+
+
+def test_review_propose_rejected_outright_for_non_structured_review_path(runner, tmp_path):
+    """--propose only applies to the single-Java-file repository-aware
+    review path - a non-Java file is rejected up front, before the model
+    is ever called at all (structurally: reviewer.run is never invoked)."""
+    py_file = tmp_path / "x.py"
+    py_file.write_text("def f():\n    pass\n")
+
+    mock_reviewer = MagicMock()
+    mock_reviewer.run = AsyncMock()
+    with patch("kriya.cli.ReviewerAgent", return_value=mock_reviewer), \
+         patch("kriya.cli.LLMClient"):
+        result = runner.invoke(main, ["review", str(py_file), "--propose", "F1"])
+
+    assert result.exit_code != 0
+    assert not mock_reviewer.run.called
+    assert not mock_reviewer.run_structured_review.called
+
+
+def test_review_propose_never_invokes_write_capable_components(runner, tmp_path):
+    """Dynamic zero-write proof (tests 11,12,13,14): patches the real
+    write-capable entry points - AuthorizedFileWriter.commit_file,
+    DeveloperAgent.run_generation, WorkflowEngine.run_generation_workflow -
+    to raise if ever called. The --propose path completing without
+    exception is a real proof none of them were invoked, not just an
+    absence of their names from review_context.py's source text (see
+    test_review_context.py's AST-based structural companion proof)."""
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+
+    def _raise(*a, **k):
+        raise AssertionError("A2 zero-write violation: a write-capable component was invoked")
+
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
+         patch("kriya.cli.LLMClient"), \
+         patch("kriya.policy.filesystem.AuthorizedFileWriter.commit_file", side_effect=_raise), \
+         patch("kriya.agents.agent.DeveloperAgent.run_generation", side_effect=_raise), \
+         patch("kriya.workflow.workflow.WorkflowEngine.run_generation_workflow", side_effect=_raise):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F1"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert result.exception is None

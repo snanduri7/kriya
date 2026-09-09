@@ -869,3 +869,213 @@ def build_structured_review_report(
         coverage=coverage, adjudicated=adjudicated, recommendations=recommendations,
         run_guidance_statements=run_guidance_statements, run_guidance_gaps=run_guidance_gaps,
     )
+
+
+# =====================================================================
+# A2: review finding -> proposed modification (advisory only, read-only)
+#
+# This module has zero imports of DeveloperAgent/AuthorizedFileWriter/
+# WorkflowEngine (and must stay that way - it's the structural half of A2's
+# zero-write proof, see tests/test_review_context.py's A2 section). A
+# ProposedModification is built ENTIRELY from objects Kriya itself already
+# produced for this exact review call (an AdjudicatedFinding from
+# adjudicate_findings(), plus the same member_ids/relation_ids evidence
+# registries) - never from a second, independent model call, and never
+# written to disk. It is data + a formatter, nothing else.
+# =====================================================================
+
+PROPOSAL_AUTHORITY_ADVISORY_ONLY = "ADVISORY_ONLY"
+PROPOSAL_APPROVAL_NOT_APPROVED = "NOT_APPROVED"
+
+
+@dataclass(frozen=True)
+class ProposedModification:
+    """A2's output shape - see build_proposed_modification()'s docstring for
+    how each field is grounded. `authority`/`approval` are fixed at
+    construction time (never derived from the finding) - a proposal built
+    from a PROVEN_ISSUE finding is exactly as advisory/unapproved as one
+    built from an EVIDENCE_INSUFFICIENT finding; only `final_confidence`
+    (and the language gated by it) varies with the finding's own strength.
+    `proposal_id`/`source_finding_id` are invocation-local identifiers, not
+    a global ID architecture - see format_proposed_modification()'s footer."""
+    proposal_id: str
+    source_finding_id: str
+    target_file: str
+    target_member: str
+    problem_statement: str
+    proposed_change: str
+    must_preserve: Tuple[str, ...]
+    verification: Tuple[str, ...]
+    evidence: Tuple[str, ...]
+    assumptions: Tuple[str, ...]
+    final_confidence: str
+    authority: str = PROPOSAL_AUTHORITY_ADVISORY_ONLY
+    approval: str = PROPOSAL_APPROVAL_NOT_APPROVED
+
+
+def _describe_evidence_id(eid: str, member_ids: Dict[str, JavaMember], relation_ids: Dict[str, RelatedFile], role: str) -> str:
+    if eid in member_ids:
+        m = member_ids[eid]
+        return f"{eid} ({role}) - {m.signature}"
+    rf = relation_ids[eid]
+    return f"{eid} ({role}) - [{rf.relation}] {rf.relpath}: {rf.detail}"
+
+
+def build_proposed_modification(
+    finding_id: str,
+    adjudicated: Sequence[AdjudicatedFinding],
+    member_ids: Dict[str, JavaMember],
+    relation_ids: Dict[str, RelatedFile],
+    target_file: str,
+) -> ProposedModification:
+    """Builds one advisory ProposedModification for `finding_id` out of
+    `adjudicated` - the SAME AdjudicatedFinding list already computed for
+    this review call (adjudicate_findings()'s output), never a fresh model
+    call. Raises ValueError (never fabricates a fallback) when:
+
+    - `finding_id` isn't in `adjudicated` (invocation-local lookup only -
+      an id from a different review call is simply unknown here);
+    - the finding carries no `recommendation` - there's nothing concrete to
+      propose, and inventing one would violate the grounding requirement;
+    - the finding cites zero evidence ids that actually resolve against
+      `member_ids`/`relation_ids` for THIS call (an invented/unresolvable
+      id doesn't count - same known_ids rule as adjudicate_findings()) -
+      a proposal must be traceable to real evidence, not just a title.
+
+    `target_member`/evidence descriptions are read from `member_ids`/
+    `relation_ids` (Kriya's own registries), never from the finding's own
+    free-text - the same "Kriya's registry is ground truth" rule
+    format_adjudicated_review() already follows for member signatures.
+
+    The rendered confidence is always the finding's ADJUDICATED
+    (`final_confidence`), never `requested_confidence` - a finding
+    downgraded from PROVEN_ISSUE to STRONG_STATIC_INDICATION produces a
+    proposal that only ever claims STRONG_STATIC_INDICATION; the downgrade
+    itself is disclosed transparently in `assumptions` (same "say so
+    explicitly" convention as format_adjudicated_review()), not hidden."""
+    match = next((af for af in adjudicated if af.finding.finding_id == finding_id), None)
+    if match is None:
+        known = ", ".join(af.finding.finding_id for af in adjudicated) or "(none)"
+        raise ValueError(f"Unknown finding id {finding_id!r} for this review - this review returned: {known}")
+
+    f = match.finding
+    if not f.recommendation:
+        raise ValueError(f"Finding {finding_id} has no recommendation - nothing concrete to propose")
+
+    known_ids = set(member_ids) | set(relation_ids)
+    valid_condition = tuple(i for i in f.condition_evidence_ids if i in known_ids)
+    valid_consequence = tuple(i for i in f.consequence_evidence_ids if i in known_ids)
+    if not valid_condition and not valid_consequence:
+        raise ValueError(
+            f"Finding {finding_id} cites no evidence id that resolved for this review - "
+            "refusing to build a proposal that isn't traceable to real evidence"
+        )
+
+    member = member_ids.get(f.member_id) if f.member_id else None
+    target_member = f"{f.member_id} - {member.signature}" if member else "N/A (not tied to a specific deterministic member)"
+
+    evidence = tuple(
+        _describe_evidence_id(eid, member_ids, relation_ids, "condition") for eid in valid_condition
+    ) + tuple(
+        _describe_evidence_id(eid, member_ids, relation_ids, "consequence") for eid in valid_consequence
+    )
+
+    must_preserve = [
+        "unrelated public APIs",
+        "unrelated service/application behavior",
+        "existing repository contracts, unless the approved change specifically requires altering them",
+    ]
+    if member:
+        must_preserve.append(f"the existing signature of {member.signature}, unless the approved change explicitly requires modifying it")
+    must_preserve.append(f"all files other than {target_file}, unless the approved change explicitly requires touching them")
+
+    verification = ["compile", "existing regression tests"]
+    if member:
+        verification.append(f"a targeted test for the reviewed behavior of {member.signature}")
+    if match.final_confidence == CONFIDENCE_REQUIRES_RUNTIME or f.runtime_dependency_declared:
+        verification.append(
+            "profiling/runtime evidence - this finding's consequence is runtime-dependent and "
+            "cannot be treated as resolved by static verification alone"
+        )
+
+    assumptions = []
+    if match.final_confidence != f.requested_confidence:
+        assumptions.append(
+            f"Kriya downgraded this finding's confidence from {f.requested_confidence} to "
+            f"{match.final_confidence} ({match.downgrade_reason}) - this proposal reflects only "
+            f"the downgraded ({match.final_confidence}) confidence, never the originally requested one."
+        )
+    if match.final_confidence in (CONFIDENCE_EVIDENCE_INSUFFICIENT, CONFIDENCE_REQUIRES_RUNTIME):
+        assumptions.append(
+            f"This finding's final confidence is {match.final_confidence} - treat the proposed "
+            "change as a starting point for investigation, not a confirmed defect, until further "
+            "evidence is gathered."
+        )
+    if not assumptions:
+        assumptions.append("None beyond the evidence cited above.")
+
+    problem_statement = f.title.strip() if f.title else f"(untitled finding {finding_id})"
+    if f.explanation:
+        problem_statement += " - " + f.explanation.strip()
+
+    return ProposedModification(
+        proposal_id="P1",
+        source_finding_id=finding_id,
+        target_file=target_file,
+        target_member=target_member,
+        problem_statement=problem_statement,
+        proposed_change=f.recommendation.strip(),
+        must_preserve=tuple(must_preserve),
+        verification=tuple(verification),
+        evidence=evidence,
+        assumptions=tuple(assumptions),
+        final_confidence=match.final_confidence,
+    )
+
+
+def format_proposed_modification(proposal: ProposedModification) -> str:
+    """Renders a ProposedModification as standalone Markdown, printed
+    AFTER the normal `## Findings`-bearing review report - never merged
+    into format_adjudicated_review()'s own output, so the A1 report's
+    shape/behavior is completely unaffected by A2 existing at all."""
+    display_confidence = _CONFIDENCE_DISPLAY_LABELS.get(proposal.final_confidence, proposal.final_confidence)
+    lines = [
+        "## Proposed Modification (advisory only)",
+        "",
+        f"Proposal ID: {proposal.proposal_id}",
+        "",
+        "Source Finding:",
+        proposal.source_finding_id,
+        "",
+        "Target:",
+        proposal.target_file,
+        f"Member: {proposal.target_member}",
+        "",
+        "Problem:",
+        proposal.problem_statement,
+        "",
+        "Proposed Change:",
+        proposal.proposed_change,
+        "",
+        f"Confidence: {display_confidence}",
+        "",
+        "Evidence:",
+    ]
+    lines += [f"- {e}" for e in proposal.evidence] if proposal.evidence else ["- (none)"]
+    lines += ["", "Must Preserve:"]
+    lines += [f"- {p}" for p in proposal.must_preserve]
+    lines += ["", "Verification:"]
+    lines += [f"- {v}" for v in proposal.verification]
+    lines += ["", "Assumptions / Uncertainty:"]
+    lines += [f"- {a}" for a in proposal.assumptions]
+    lines += [
+        "",
+        f"Authority: {proposal.authority}",
+        f"Approval: {proposal.approval}",
+        "",
+        "This proposal has not been approved and no source files were modified. Kriya cannot act "
+        "on it further until a user explicitly approves it through a separate, future step. "
+        f"'{proposal.proposal_id}'/'{proposal.source_finding_id}' are identifiers local to this "
+        "review invocation only, not a persistent global registry.",
+    ]
+    return "\n".join(lines)
