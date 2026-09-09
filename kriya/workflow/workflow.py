@@ -92,6 +92,7 @@ from kriya.workflow.attribution import (
     resolve_future_owner_verification_deferral,
 )
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.file_resolution import (
     EXPECTED_FILE_EXTENSIONS,
     IncompleteGenerationError,
@@ -744,6 +745,7 @@ class WorkflowEngine:
         predetermined_architect_files: Optional[List[str]] = None,
         protected_source_file: Optional[str] = None,
         allowed_write_relpaths: Optional[List[str]] = None,
+        authorized_semantic_regions: Optional[List["AuthorizedSemanticRegion"]] = None,
         write_scope_mode: Optional[WriteScopeMode] = None,
         required_verification: Optional[List[Dict[str, Any]]] = None,
         runtime_verification_required: Optional[bool] = None,
@@ -2294,6 +2296,7 @@ class WorkflowEngine:
             established_files=established_files or [],
             protected_relpath=protected_relpath,
             allowed_write_relpaths=list(allowed_write_relpaths or []),
+            authorized_semantic_regions=list(authorized_semantic_regions or []),
             required_verification=list(required_verification or []),
             # Resolved ONCE, here, mirroring AuthorizedFileWriter's own
             # backward-compatible inference (kriya/policy/filesystem.py) so
@@ -2983,6 +2986,45 @@ class WorkflowEngine:
                         likely_files=sorted({item["owner"] for item in api_violations}),
                         diagnostics={
                             "api_contract_recovery": {"violations": api_violations},
+                        },
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                # CORR-018-P1 (A3-bound slice, 2026-09-09) - same terminal
+                # re-check discipline as the brownfield-API gate immediately
+                # above (never re-rejects a candidate that already passed the
+                # per-attempt gate in attempt.py, computed identically here),
+                # applied to a SEPARATE, deterministic question - see
+                # semantic_region_authority.py's own module docstring and
+                # attempt.py's early gate for the full rationale. No-op unless
+                # a caller actually populated authorized_semantic_regions.
+                terminal_semantic_violations = find_unauthorized_semantic_changes(
+                    state.all_original_contents, final_candidate_contents, authorized_semantic_regions or [],
+                )
+                if terminal_semantic_violations:
+                    evidence = "; ".join(
+                        f"file={v.relpath}, member={v.member_key}, reason={v.reason_code}: {v.detail}"
+                        for v in terminal_semantic_violations
+                    )
+                    failure = Failure(
+                        type="semantic_region_unauthorized",
+                        message=(
+                            "SEMANTIC REGION REJECTED: the candidate changes source outside the "
+                            "explicitly authorized region(s) for this run."
+                        ),
+                        raw_output=evidence,
+                        source="semantic_authority_gate", authority="deterministic",
+                        file_locations=[FileLocation(filepath=v.relpath) for v in terminal_semantic_violations],
+                        likely_files=sorted({v.relpath for v in terminal_semantic_violations}),
+                        diagnostics={
+                            "semantic_region_authority": {
+                                "violations": [
+                                    {"relpath": v.relpath, "member_key": v.member_key,
+                                     "reason_code": v.reason_code, "detail": v.detail}
+                                    for v in terminal_semantic_violations
+                                ],
+                            },
                         },
                         attempt=state.attempt_number,
                     )

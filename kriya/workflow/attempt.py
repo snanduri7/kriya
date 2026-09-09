@@ -54,6 +54,7 @@ from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, classify_environment_failure, extract_missing_project_local_python_module, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
 from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
+from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -448,6 +449,14 @@ class AttemptContext:
     # function - already carries its own `self` reference, so it's just
     # another callable from this module's perspective.
     approve_web_lookup: Callable[..., Any]
+    # CORR-018-P1 (A3-bound slice, 2026-09-09): explicit, deterministic
+    # semantic-region authority for Java files (kriya/workflow/
+    # semantic_region_authority.py) - empty for every existing/non-A3
+    # caller (default), which is a full no-op for that guard, byte-for-byte
+    # identical to pre-CORR-018 behavior. Not yet populated by any real
+    # caller (A3 promotion doesn't exist yet) - present so the guard is
+    # wired and testable ahead of that wiring, per explicit instruction.
+    authorized_semantic_regions: List[AuthorizedSemanticRegion] = field(default_factory=list)
     # path -> direct manifest dependencies, in generation order. Default keeps
     # isolated tests and old checkpoints backward compatible.
     generation_dependencies: Dict[str, List[str]] = field(default_factory=dict)
@@ -4206,6 +4215,53 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 likely_files=sorted({item["owner"] for item in early_api_violations}),
                 diagnostics={
                     "api_contract_recovery": {"violations": early_api_violations},
+                },
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        # CORR-018-P1 (A3-bound slice, 2026-09-09): a SEPARATE, deterministic
+        # check from the brownfield-API gate immediately above - that gate asks
+        # "did a protected public signature change without authority"; this one
+        # asks "did anything structurally material change outside explicitly
+        # authorized regions", including inside a signature-preserving method
+        # body (the exact P10 production gap - CustomerPrinter.print() kept its
+        # signature while its body silently changed). Deliberately its own
+        # module/function/reason-code space, never merged into
+        # find_brownfield_public_api_changes() - see semantic_region_authority.py's
+        # own module docstring. A full no-op (early-out on empty list, inside
+        # find_unauthorized_semantic_changes() itself) for every caller that
+        # hasn't populated ctx.authorized_semantic_regions - which is every
+        # caller today, since A3 promotion doesn't exist yet.
+        semantic_violations = find_unauthorized_semantic_changes(
+            baseline_contents, candidate_contents, ctx.authorized_semantic_regions,
+        )
+        if semantic_violations:
+            evidence = "; ".join(
+                f"file={v.relpath}, member={v.member_key}, reason={v.reason_code}: {v.detail}"
+                for v in semantic_violations
+            )
+            failure = Failure(
+                type="semantic_region_unauthorized",
+                message=(
+                    "SEMANTIC REGION REJECTED BEFORE WRITE: the candidate changes source "
+                    "outside the explicitly authorized region(s) for this run. Only the "
+                    "approved change, and its narrowly authorized supporting regions, may "
+                    "differ from the baseline."
+                ),
+                raw_output=evidence,
+                source="semantic_authority_gate", authority="deterministic",
+                file_locations=[FileLocation(filepath=v.relpath) for v in semantic_violations],
+                likely_files=sorted({v.relpath for v in semantic_violations}),
+                diagnostics={
+                    "semantic_region_authority": {
+                        "violations": [
+                            {"relpath": v.relpath, "member_key": v.member_key,
+                             "reason_code": v.reason_code, "detail": v.detail}
+                            for v in semantic_violations
+                        ],
+                    },
                 },
                 attempt=state.attempt_number,
             )
