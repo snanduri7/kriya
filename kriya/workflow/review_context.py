@@ -18,6 +18,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from kriya.analyzer.analyzer import chunk_file_syntactically
 from kriya.analyzer.graph import DependencyGraph
 from kriya.analyzer.java_members import JavaMember, extract_java_members
+from kriya.control.workspace_identity import workspace_identity
+from kriya.workflow.checkpoint import compute_workspace_fingerprint
+from kriya.workflow.proposal_binding import EvidenceBinding, bind_evidence, sha256_file
+from kriya.workflow.semantic_region_authority import stable_member_key
 
 
 def build_reviewer_verified_evidence(gate_outcomes: List[Dict[str, Any]]) -> str:
@@ -897,7 +901,19 @@ class ProposedModification:
     built from an EVIDENCE_INSUFFICIENT finding; only `final_confidence`
     (and the language gated by it) varies with the finding's own strength.
     `proposal_id`/`source_finding_id` are invocation-local identifiers, not
-    a global ID architecture - see format_proposed_modification()'s footer."""
+    a global ID architecture - see format_proposed_modification()'s footer.
+
+    A3-P0 additive fields (all default to "empty" so every pre-existing
+    caller that doesn't pass `workspace_root` to build_proposed_modification()
+    is completely unaffected): `target_member_key`/`target_member_kind` are
+    the durable CORR-018 identity for `target_member` (never a source line
+    number or A1's own `M#` id - see `semantic_region_authority.py`'s
+    `stable_member_key()`); `workspace_id`/`workspace_fingerprint`/
+    `target_file_sha256`/`evidence_bindings` are the durable content binding
+    `kriya/workflow/proposal_binding.py::verify_proposal_bindings()` checks
+    against - see that module's own docstring for what each one actually
+    proves and its known limitations (the workspace_fingerprint's dirty-
+    state coarseness in particular)."""
     proposal_id: str
     source_finding_id: str
     target_file: str
@@ -911,6 +927,12 @@ class ProposedModification:
     final_confidence: str
     authority: str = PROPOSAL_AUTHORITY_ADVISORY_ONLY
     approval: str = PROPOSAL_APPROVAL_NOT_APPROVED
+    target_member_key: Optional[str] = None
+    target_member_kind: Optional[str] = None
+    workspace_id: str = ""
+    workspace_fingerprint: Optional[str] = None
+    target_file_sha256: str = ""
+    evidence_bindings: Tuple[EvidenceBinding, ...] = ()
 
 
 def _describe_evidence_id(eid: str, member_ids: Dict[str, JavaMember], relation_ids: Dict[str, RelatedFile], role: str) -> str:
@@ -927,6 +949,7 @@ def build_proposed_modification(
     member_ids: Dict[str, JavaMember],
     relation_ids: Dict[str, RelatedFile],
     target_file: str,
+    workspace_root: Optional[str] = None,
 ) -> ProposedModification:
     """Builds one advisory ProposedModification for `finding_id` out of
     `adjudicated` - the SAME AdjudicatedFinding list already computed for
@@ -940,7 +963,11 @@ def build_proposed_modification(
     - the finding cites zero evidence ids that actually resolve against
       `member_ids`/`relation_ids` for THIS call (an invented/unresolvable
       id doesn't count - same known_ids rule as adjudicate_findings()) -
-      a proposal must be traceable to real evidence, not just a title.
+      a proposal must be traceable to real evidence, not just a title;
+    - (A3-P0, only when `workspace_root` is given) the finding isn't tied to
+      a specific deterministic member - refusing to build a durably-bound
+      proposal a future A3 could later execute ambiguously (Part 9 of the
+      A3-P0 investigation's own explicit fail-closed instruction).
 
     `target_member`/evidence descriptions are read from `member_ids`/
     `relation_ids` (Kriya's own registries), never from the finding's own
@@ -952,7 +979,15 @@ def build_proposed_modification(
     downgraded from PROVEN_ISSUE to STRONG_STATIC_INDICATION produces a
     proposal that only ever claims STRONG_STATIC_INDICATION; the downgrade
     itself is disclosed transparently in `assumptions` (same "say so
-    explicitly" convention as format_adjudicated_review()), not hidden."""
+    explicitly" convention as format_adjudicated_review()), not hidden.
+
+    `workspace_root` (A3-P0, optional, default None): when given, this
+    function ALSO populates the durable binding fields (`target_member_key`,
+    `workspace_id`, `workspace_fingerprint`, `target_file_sha256`,
+    `evidence_bindings`) by reading real file bytes from disk (read-only -
+    see `kriya/workflow/proposal_binding.py`'s own zero-write proof) -
+    every pre-existing caller that omits it gets exactly today's behavior,
+    unchanged (those fields stay at their "empty" defaults)."""
     match = next((af for af in adjudicated if af.finding.finding_id == finding_id), None)
     if match is None:
         known = ", ".join(af.finding.finding_id for af in adjudicated) or "(none)"
@@ -1018,6 +1053,34 @@ def build_proposed_modification(
     if f.explanation:
         problem_statement += " - " + f.explanation.strip()
 
+    # A3-P0 durable identity - the CORR-018 stable key, computed from Kriya's
+    # own registry fields (never model text), independent of whether
+    # workspace_root binding was requested at all.
+    target_member_key = (
+        stable_member_key(target_file, member.enclosing_type, member.kind, member.name, member.parameter_types)
+        if member else None
+    )
+    target_member_kind = member.kind if member else None
+
+    workspace_id = ""
+    workspace_fingerprint: Optional[str] = None
+    target_file_sha256 = ""
+    evidence_bindings: Tuple[EvidenceBinding, ...] = ()
+    if workspace_root is not None:
+        if target_member_key is None:
+            raise ValueError(
+                f"Finding {finding_id} is not tied to a specific deterministic member - refusing to "
+                "build a durably-bound proposal (workspace_root was given) that a future A3 could "
+                "later execute ambiguously"
+            )
+        workspace_id = workspace_identity(workspace_root)
+        workspace_fingerprint = compute_workspace_fingerprint(workspace_root)
+        target_file_sha256 = sha256_file(os.path.join(workspace_root, target_file))
+        evidence_bindings = tuple(
+            bind_evidence(eid, member_ids, relation_ids, workspace_root, target_file)
+            for eid in (valid_condition + valid_consequence)
+        )
+
     return ProposedModification(
         proposal_id="P1",
         source_finding_id=finding_id,
@@ -1030,6 +1093,12 @@ def build_proposed_modification(
         evidence=evidence,
         assumptions=tuple(assumptions),
         final_confidence=match.final_confidence,
+        target_member_key=target_member_key,
+        target_member_kind=target_member_kind,
+        workspace_id=workspace_id,
+        workspace_fingerprint=workspace_fingerprint,
+        target_file_sha256=target_file_sha256,
+        evidence_bindings=evidence_bindings,
     )
 
 
@@ -1068,6 +1137,17 @@ def format_proposed_modification(proposal: ProposedModification) -> str:
     lines += [f"- {v}" for v in proposal.verification]
     lines += ["", "Assumptions / Uncertainty:"]
     lines += [f"- {a}" for a in proposal.assumptions]
+    if proposal.workspace_id:  # A3-P0: only present when build_proposed_modification() got workspace_root
+        fp_display = f"{proposal.workspace_fingerprint[:16]}..." if proposal.workspace_fingerprint else "unavailable (not a git repo)"
+        lines += [
+            "",
+            "Binding:",
+            f"- Workspace: {proposal.workspace_id[:12]}...",
+            f"- Workspace fingerprint: {fp_display}",
+            f"- Target member key: {proposal.target_member_key}",
+            f"- Target file SHA-256: {proposal.target_file_sha256[:12]}...",
+            f"- Evidence bindings: {len(proposal.evidence_bindings)}",
+        ]
     lines += [
         "",
         f"Authority: {proposal.authority}",
