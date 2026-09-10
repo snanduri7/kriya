@@ -191,7 +191,7 @@ Evidence Validity note, not silently reconciled either direction.
 
 ## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (18, updated A1-P1 — CORR-018 added)
 
-`CONC-001` concurrent-writer rejection · `CORR-018` unauthorized
+`CORR-018` unauthorized
 behavioral drift within authorized files (new, A1-P1) · `CTX-001`
 context/graph freshness · `MODEL-001` model capability certification ·
 `OBS-001` enforce-mode telemetry gap · `OBS-002` operator run summary ·
@@ -503,7 +503,15 @@ Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `KRP_REQUIREMENT` (KR
 ## §12. CONC — Concurrency / workspace ownership
 
 **CONC-001 — Safe rejection of a conflicting second authoritative mutation run**
-Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §6 (DE-05) · Deployment Relevance: REQUIRED · Current mechanism: none found (direct grep this session, zero matches) · Effective Evidence Level: E0 · Disposition: NEEDS_IMPLEMENTATION.
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §6 (DE-05) · Deployment Relevance: REQUIRED · Effective Evidence Level: E3 (real deterministic tests, including real cross-process OS-lock contention/`SIGKILL` recovery/git-worktree independence - not live-model evidence, none is required for deterministic infrastructure) · Disposition: **CLOSED**.
+
+Invariant enforced: **exactly one mutating Kriya process may acquire workspace ownership; every competing process is rejected before that competing process can perform repository/workspace mutation.** (Acquiring ownership never itself guarantees the winner completes without error - only that no second process can mutate the same workspace concurrently.)
+
+Implemented (2026-09-10, commit `cc4cbbf`, unattended-workstation/Linux-CI envelope - multi-user/server operation stays out of scope, see `TOP-004`): `kriya/control/run_ownership.py`'s `acquire_run_lock()` - a context manager around `fcntl.flock(fd, LOCK_EX | LOCK_NB)` on `<workspace>/.kriya/run.lock`, held for the acquiring process's lifetime. The kernel lock is the sole correctness authority (releases automatically and unconditionally on crash/`SIGKILL`, no PID/heartbeat staleness scheme needed or used); lock-file content is diagnostics only, never consulted to decide ownership. Wired into the four CLI entry points that can mutate a repository - `generate` (both branches), `fix`, `proposal execute` - each holding one lock for its entire command duration; `review`/`ask`/`proposal show`/`approve`/`reject` never acquire it, by construction. Full design rationale and worktree/symlink-alias semantics: `docs/design.md` §4.4a.
+
+Evidence: 25 new tests (`tests/test_run_ownership.py`) plus zero regression in the pre-existing 37 CLI smoke tests, user-confirmed real pytest run: **all green, 0 failures** (baseline 3318 + 25 new = 3343 passed). Coverage includes real cross-process contention (not a mocked `flock`), real `SIGKILL`-recovery, real `git worktree`-independence, symlink/relative-path alias contention, PID-reuse non-reliance, and permission-failure fail-closed behavior.
+
+Deliberately not done this pass: the optional defense-in-depth lock inside `run_generation_workflow()` itself (for a hypothetical future non-CLI mutation entry point) - the CLI-layer wiring above already covers every currently-traced mutating path, including `WorkflowController`'s own early worktree creation, since it has no caller outside those same four commands. Any future non-CLI mutating entry point must call `acquire_run_lock()` itself before its first possible mutation - documented as an explicit invariant in the module's own docstring and `docs/design.md` §4.4a, not implemented speculatively here.
 
 **CONC-002 — Global `sqlite3.connect` monkey-patching**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: OPTIONAL · Effective Evidence Level: E3 · Disposition: NEEDS_IMPLEMENTATION, OPTIONAL priority.
