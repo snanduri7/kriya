@@ -21,7 +21,7 @@ SUBCOMMAND_GROUPS = {
     "prompt": ["render", "generate"],
     "tools": ["list", "execute"],
     "skills": ["list", "show", "create", "approve"],
-    "proposal": ["show", "approve", "reject"],
+    "proposal": ["show", "approve", "reject", "execute"],
 }
 
 

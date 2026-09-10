@@ -2239,6 +2239,82 @@ def proposal_reject(ctx: click.Context, proposal_id: str) -> None:
         sys.exit(1)
     click.secho(f"Rejected: {persisted.proposal_id}", fg="yellow")
 
+@proposal_group.command(name="execute")
+@click.argument('proposal_id')
+@click.option('--yes', '-y', is_flag=True, default=False,
+              help="Auto-approve the generation workflow's own write-approval gate "
+              "(and any knowledge-guard risk it surfaces) once this ALREADY-APPROVED "
+              "proposal is confirmed still valid - does not and cannot approve the "
+              "proposal itself, that only ever happens via `kriya proposal approve`.")
+@click.pass_context
+def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
+    """A3-P2: promote an APPROVED, currently-valid persisted proposal into a real
+    generation run via Kriya's existing generation workflow.
+
+    Refuses BEFORE invoking any generation if the proposal is PENDING_APPROVAL,
+    REJECTED, tampered, or has drifted stale (target/evidence file changed, wrong
+    workspace) since approval - `-y` here can never substitute for `kriya proposal
+    approve <id>`, it only controls the generation run's own internal write-approval
+    prompt once promotion has already been validated."""
+    from kriya.workflow.proposal_promotion import ProposalPromotionError, execute_approved_proposal
+    from kriya.workflow.proposal_store import ProposalStoreError
+
+    cfg: AppConfig = ctx.obj['config']
+    workspace_root = os.getcwd()
+
+    llm = LLMClient(cfg)
+    kernel = Kernel(config=cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    def on_stream(step_name: str, token: str) -> None:
+        click.echo(token, nl=False)
+        sys.stdout.flush()
+
+    def on_approval(files: List[Dict[str, str]], reason: str) -> bool:
+        if yes:
+            click.secho(f"\n[Auto-Approving] Reason: {reason}", bold=True, fg="green")
+            return True
+        click.secho(f"\n[Escalation Review Needed] Reason: {reason}", bold=True, fg="yellow")
+        for f in files:
+            filepath = f.get("filepath", "")
+            content = f.get("content", "")
+            click.secho(f"\n--- Proposed changes for: {filepath} ---", bold=True, fg="cyan")
+            lines = content.splitlines()
+            click.echo("\n".join(lines[:15]))
+            if len(lines) > 15:
+                click.echo(f"... and {len(lines) - 15} more lines.")
+        return click.confirm("\nDo you approve applying these changes to the codebase?")
+
+    async def run_execution() -> Dict[str, Any]:
+        await kernel.start()
+        try:
+            return await execute_approved_proposal(
+                proposal_id, workspace_root, we,
+                knowledge_risk_confirmed=yes,
+                stream_callback=on_stream,
+                approval_callback=on_approval,
+            )
+        finally:
+            await kernel.stop()
+
+    try:
+        res = asyncio.run(run_execution())
+    except (ProposalPromotionError, ProposalStoreError) as e:
+        reason_code = getattr(e, "reason_code", None) or ", ".join(getattr(e, "reason_codes", ()))
+        click.secho(f"\nCannot execute proposal '{proposal_id}': [{reason_code}] {e}", fg="red", err=True)
+        sys.exit(1)
+
+    click.secho("\n=== Proposal Execution Completed ===", bold=True)
+    if res.get("status") == "knowledge_gap":
+        click.secho(
+            "Blocked by a knowledge-guard gap - re-run with -y to accept the risk "
+            "for this promoted goal (see `kriya generate --knowledge-policy` for the "
+            "equivalent manual-goal behavior).", fg="yellow",
+        )
+        sys.exit(3)
+    click.echo(json.dumps(res, indent=2, default=str))
+    sys.exit(0 if res.get("quality_gates_passed") else 1)
+
 @main.command(name="ask")
 @click.argument('question')
 @click.pass_context

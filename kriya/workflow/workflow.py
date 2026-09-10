@@ -1025,6 +1025,25 @@ class WorkflowEngine:
                         drift_reasons.append("config has changed")
                     if candidate.get("goal_fingerprint") != current_goal_fp:
                         drift_reasons.append("goal/error text differs")
+                    # A3-P2: authorized_semantic_regions is NOT itself written
+                    # into or restored from a checkpoint (no field for it below)
+                    # - a checkpoint saved by a proposal-promoted run therefore
+                    # carries no evidence of the region boundary it was
+                    # executing under. Resuming it under a call that supplies
+                    # no regions (e.g. plain `generate --resume`, which knows
+                    # nothing about the proposal that started it) would
+                    # silently drop that boundary rather than honor or refuse
+                    # it - fail closed via the SAME drift-reasons/fresh-run
+                    # fallback already used for workspace/config/goal drift,
+                    # rather than inventing new resume semantics. See
+                    # proposal_promotion.py's own module docstring for the
+                    # complementary half (execute_approved_proposal() never
+                    # passes resume/resume_id at all).
+                    if candidate.get("had_authorized_semantic_regions") and not authorized_semantic_regions:
+                        drift_reasons.append(
+                            "checkpoint was saved with an authorized-semantic-region boundary "
+                            "that this resume call did not supply"
+                        )
                     if drift_reasons:
                         logger.warning(
                             f"Refusing to resume checkpoint '{target_id}': {'; '.join(drift_reasons)}. "
@@ -1647,6 +1666,11 @@ class WorkflowEngine:
                 "goal_fingerprint": checkpoint_goal_fp,
                 "milestone_group_id": milestone_group_id,
                 "milestone_index": milestone_index,
+                # A3-P2 resume-safety marker - see the matching drift check
+                # above. A bare boolean, not the regions themselves: nothing
+                # resumes FROM this value, it only ever blocks an unsafe
+                # resume attempt that supplies none.
+                "had_authorized_semantic_regions": bool(authorized_semantic_regions),
                 **extra,
             })
 
