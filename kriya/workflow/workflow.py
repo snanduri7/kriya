@@ -1921,13 +1921,28 @@ class WorkflowEngine:
                 # than parsed from a command string via
                 # extract_install_package_target.
                 # MA4.15 - `enforce` is read from config rather than left at
-                # _authorize_action's Python-level default, and PolicyDeniedError
-                # is deliberately let through (not swallowed by the broad
-                # except below) - it can never actually be raised while the
-                # config validator keeps mode pinned to "audit", but a future
-                # milestone lifting that restriction shouldn't ALSO have to
-                # remember to fix this try/except to stop silently eating a
-                # real denial.
+                # _authorize_action's Python-level default, and a genuine
+                # DENY is deliberately let through (not swallowed by the
+                # broad except below) - it can never actually be raised
+                # while the config validator keeps mode pinned to "audit",
+                # but a future milestone lifting that restriction shouldn't
+                # ALSO have to remember to fix this try/except to stop
+                # silently eating a real denial.
+                #
+                # POL-001: a REQUIRE_APPROVAL verdict here is deliberately
+                # NOT re-raised and no approval_callback is passed into
+                # _authorize_action for it - _check_package_supply_chain
+                # returns REQUIRE_APPROVAL for every non-URL-source package
+                # (never a bare ALLOW), so under enforce=True this loop
+                # would otherwise ask once per library in new_gaps AND THEN
+                # hit the existing single aggregate prompt built from the
+                # very same new_gaps a few lines below (`desc`/`reason_str`,
+                # "Do you want to proceed with these dependencies?") -
+                # doubling (N+1) an approval flow that already covers this
+                # exact batch once. DENY (e.g. an install source classified
+                # as untrusted) still hard-stops immediately, unconditional
+                # on any human answer - that's the real, new protection this
+                # gate adds once enforce=True is reachable.
                 execution_policy_cfg = self.kernel.config.execution_policy
                 if execution_policy_cfg.enabled:
                     for g in new_gaps:
@@ -1939,8 +1954,11 @@ class WorkflowEngine:
                                 ),
                                 enforce=(execution_policy_cfg.mode == "enforce"),
                             )
-                        except PolicyDeniedError:
-                            raise
+                        except PolicyDeniedError as e:
+                            if e.result.decision == PolicyDecision.DENY:
+                                raise
+                            # REQUIRE_APPROVAL: defer to the aggregate
+                            # approval_callback prompt below, don't double-ask.
                         except Exception as e:
                             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
                 desc = "\n".join([

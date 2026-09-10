@@ -75,6 +75,43 @@ async def test_shell_tool_env_is_restricted_by_default(monkeypatch):
     assert res["stdout"].strip() == ""
 
 @pytest.mark.asyncio
+async def test_shell_tool_sudo_is_denied_before_execution(tmp_path):
+    """POL-001: ShellTool previously executed args.command with zero
+    ExecutionPolicy consultation - reuses the same always-on
+    enforce_hard_invariants hard stop kriya/tools/validate.py's own command
+    execution already applies. A sentinel file proves the command never
+    actually ran (not just that the call raised)."""
+    tool = ShellTool()
+    sentinel = tmp_path / "sudo_ran.txt"
+    # BaseTool.execute() wraps every exception from _run() into
+    # ToolExecutionError (pre-existing framework behavior, not specific to
+    # this check) - the original PolicyDeniedError's message text survives
+    # inside it via `from e`.
+    with pytest.raises(ToolExecutionError, match="COMMAND_SUDO_DENIED"):
+        await tool.execute(command=f"sudo touch {sentinel}")
+    assert not sentinel.exists()
+
+
+@pytest.mark.asyncio
+async def test_shell_tool_ordinary_command_unaffected_by_policy_check():
+    tool = ShellTool()
+    res = await tool.execute(command="echo 'still works'")
+    assert res["exit_code"] == 0
+    assert "still works" in res["stdout"]
+
+
+@pytest.mark.asyncio
+async def test_shell_tool_unparseable_command_does_not_block_execution():
+    """A malformed-quoting string must not silently gain a free pass around
+    other enforcement - it degrades to a single opaque token the allowlist
+    stage has no opinion on, rather than blocking a command this check
+    cannot even parse."""
+    tool = ShellTool()
+    res = await tool.execute(command="echo 'unterminated")
+    assert isinstance(res["exit_code"], int)
+
+
+@pytest.mark.asyncio
 async def test_shell_tool_env_full_when_sandbox_disabled(monkeypatch):
     from kriya.config import AppConfig
     monkeypatch.setenv("KRIYA_TEST_SECRET", "super-secret-value")

@@ -18,7 +18,7 @@ from kriya.policy.filesystem import (
     is_within_scope,
     make_workspace_scope,
 )
-from kriya.policy.model import PolicyDecision
+from kriya.policy.model import PolicyDecision, PolicyResult
 from kriya.workflow.edit_safety import StagedFileWrite, content_revision
 
 
@@ -375,3 +375,47 @@ def test_commit_batch_raises_and_writes_nothing_when_one_target_is_denied(worksp
     with pytest.raises(PolicyDeniedError):
         writer.commit_batch(writes)
     assert not os.path.exists(good_target)
+
+
+# --- POL-001: fail-closed on REQUIRE_APPROVAL, not just DENY ---
+# No real path through authorize() can produce REQUIRE_APPROVAL today (it
+# never sets process_profile/engineering_route on the ActionRequest it
+# builds, and ExecutionPolicy._check_filesystem never emits REQUIRE_APPROVAL
+# for WRITE_FILE) - these tests force the verdict via a monkeypatched
+# evaluate() to prove _raise_if_denied's own fail-closed behavior in
+# isolation, independent of whether any real caller can reach it today.
+
+def test_raise_if_denied_fails_closed_on_require_approval(workspace):
+    writer = AuthorizedFileWriter(workspace)
+    target = os.path.join(workspace, "app.py")
+    writer._execution_policy.evaluate = lambda request: PolicyResult(
+        decision=PolicyDecision.REQUIRE_APPROVAL,
+        reason_code="TEST_FORCED_REQUIRE_APPROVAL",
+        explanation="forced for test",
+    )
+    with pytest.raises(PolicyDeniedError) as exc_info:
+        writer._raise_if_denied(target)
+    assert exc_info.value.result.decision == PolicyDecision.REQUIRE_APPROVAL
+
+
+def test_commit_file_raises_and_writes_nothing_when_forced_require_approval(workspace):
+    writer = AuthorizedFileWriter(workspace)
+    target = os.path.join(workspace, "app.py")
+    writer._execution_policy.evaluate = lambda request: PolicyResult(
+        decision=PolicyDecision.REQUIRE_APPROVAL,
+        reason_code="TEST_FORCED_REQUIRE_APPROVAL",
+        explanation="forced for test",
+    )
+    with pytest.raises(PolicyDeniedError):
+        writer.commit_file(target, "content", expected_revision=content_revision(""))
+    assert not os.path.exists(target)
+
+
+def test_raise_if_denied_still_passes_allow_and_allow_sandboxed(workspace):
+    writer = AuthorizedFileWriter(workspace)
+    target = os.path.join(workspace, "app.py")
+    for decision in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_SANDBOXED):
+        writer._execution_policy.evaluate = lambda request, d=decision: PolicyResult(
+            decision=d, reason_code="X", explanation="ok",
+        )
+        writer._raise_if_denied(target)  # must not raise

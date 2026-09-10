@@ -287,7 +287,17 @@ class AuthorizedFileWriter:
 
     def _raise_if_denied(self, target_path: str) -> None:
         result = self.authorize(target_path)
-        if result.decision == PolicyDecision.DENY:
+        # POL-001: fail-closed on REQUIRE_APPROVAL too, not just DENY. No
+        # stage this instance's evaluate() can reach currently produces
+        # REQUIRE_APPROVAL for a WRITE_FILE request built by authorize()
+        # above (it never sets process_profile/engineering_route, and
+        # _check_filesystem never emits REQUIRE_APPROVAL for WRITE_FILE) -
+        # verified, not assumed - so this is a defensive tightening with no
+        # behavior change for any real caller today, not a fix for an
+        # observed silent-allow. This writer has no approval_callback of
+        # its own to ask a human, so a hypothetical future REQUIRE_APPROVAL
+        # verdict here must never fall through as if it were ALLOW.
+        if result.decision != PolicyDecision.ALLOW and result.decision != PolicyDecision.ALLOW_SANDBOXED:
             raise PolicyDeniedError(
                 request=ActionRequest(action_type=ActionType.WRITE_FILE, target=target_path),
                 result=result,

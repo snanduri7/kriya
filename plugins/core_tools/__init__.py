@@ -4,12 +4,17 @@ import fnmatch
 import logging
 import os
 import re
+import shlex
 from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 
 from kriya.config.config import AutonomyConfig
 from kriya.plugins.plugin import BasePlugin
+from kriya.policy.enforcement import enforce_hard_invariants
+from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 from kriya.tools.tool import BaseTool, ToolExecutionError
 
@@ -112,6 +117,18 @@ class FilesystemTool(BaseTool):
 class ShellTool(BaseTool):
     def __init__(self, autonomy_cfg: Optional[AutonomyConfig] = None) -> None:
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
+        # POL-001: this tool previously executed args.command with zero
+        # ExecutionPolicy consultation - unlike kriya/tools/validate.py's
+        # own Kriya-constructed compile/test commands, this string is
+        # caller/model-supplied and can contain `sudo`, a force-push, a
+        # protected-ref mutation, etc. Reuses the same always-on, 5-reason-
+        # code hard stop kriya/tools/validate.py::_audit_run_command already
+        # applies (kriya/policy/enforcement.py::enforce_hard_invariants) -
+        # not a new authority, the same one, applied to a call site that
+        # was missing it. A bare `ExecutionPolicy()` with no override
+        # matches every other real caller that doesn't have config access
+        # in scope (see execution.py's own comment on this default).
+        self._execution_policy = ExecutionPolicy()
 
     @property
     def name(self) -> str:
@@ -130,6 +147,29 @@ class ShellTool(BaseTool):
         return True
 
     async def _run(self, args: ShellArgs) -> Any:
+        # POL-001: parsed best-effort the same way a real argv-based caller
+        # would be; an unparseable string (mismatched quoting) is passed
+        # through as a single opaque token rather than blocking execution -
+        # this stage only ever adds a hard stop for a small, precise set of
+        # reason codes (sudo/force-push/protected-ref/config-mutate/remote-
+        # mutate), it never grants permission, so failing to parse just
+        # means this particular check has no opinion, matching
+        # _authorize_action's own "a broken check never blocks the caller"
+        # precedent - it does not weaken any other enforcement.
+        try:
+            parsed_command = tuple(shlex.split(args.command))
+        except ValueError:
+            parsed_command = (args.command,)
+        if parsed_command:
+            enforce_hard_invariants(
+                self._execution_policy,
+                ActionRequest(
+                    action_type=ActionType.RUN_COMMAND,
+                    command=parsed_command,
+                    workspace_path=os.getcwd(),
+                ),
+            )
+
         env = None
         preexec_fn = None
         if self.autonomy_cfg.sandbox_execution:
