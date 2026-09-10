@@ -123,17 +123,17 @@ relevances, or language-scope values out of 68).
 
 | | Count |
 |---|---:|
-| Total risks | 70 |
-| REQUIRED | 62 |
+| Total risks | 71 |
+| REQUIRED | 63 |
 | OPTIONAL | 6 |
 | OUT_OF_SCOPE | 2 |
 | CLOSED | 27 |
-| NEEDS_EVIDENCE | 21 |
+| NEEDS_EVIDENCE | 22 |
 | NEEDS_IMPLEMENTATION | 20 |
 | SUPERSEDED | 0 (row-level) |
 | DEFERRED | 2 |
 | **REQUIRED + CLOSED** | **25** |
-| **REQUIRED + NEEDS_EVIDENCE** | **20** |
+| **REQUIRED + NEEDS_EVIDENCE** | **21** |
 | **REQUIRED + NEEDS_IMPLEMENTATION** | **17** |
 
 **Pass 3 update**: `VER-004` moved `NEEDS_IMPLEMENTATION`→`NEEDS_EVIDENCE`
@@ -152,14 +152,23 @@ the investigation's own recommended disposition). All counts below now
 reflect both new rows; no other row's disposition/relevance/language scope
 changed across either pass.
 
-By domain: ORCH 3 · CORR 19 · RECV 4 · REPO 4 · VER 5 · SEC 5 · POL 3 ·
+By domain: ORCH 3 · CORR 19 · RECV 4 · REPO 4 · VER 6 · SEC 5 · POL 3 ·
 TOOL 4 · MODEL 4 · CTX 3 · STATE 3 · CONC 2 · OBS 4 · REL 2 · TOP 5.
 
 By Language Scope: JAVA 6 (`CORR-015`, `RECV-003`, `VER-001`, `VER-003`,
 `TOP-001`, `TOP-002`) · PYTHON 2 (`VER-004`, `VER-005`) · LANGUAGE_NEUTRAL
-62 (many of these carry a Java-only evidence gap noted inline per §0.3 —
+63 (many of these carry a Java-only evidence gap noted inline per §0.3 —
 language-neutral *scope* is not the same claim as language-neutral
 *proof*).
+
+**VER-006 update (2026-09-10)**: new row added (`VER-006`, REQUIRED,
+LANGUAGE_NEUTRAL, NEEDS_EVIDENCE — implementation complete and
+deterministically self-tested this pass, independent pytest confirmation
+and ideally a live-model re-run still required, per this task's own
+explicit "do not mark CLOSED from implementation tests alone"
+instruction). Total risks 70→71, VER domain 5→6, REQUIRED 62→63,
+NEEDS_EVIDENCE 21→22, REQUIRED+NEEDS_EVIDENCE 20→21. All other counts
+below unchanged by this addition.
 
 **POL-001-P4 update (2026-09-10) — full re-script, two pre-existing drifts
 corrected, plus POL-001 itself.** Per this task's own explicit "recompute
@@ -186,11 +195,12 @@ reclassified to force a match; every number above is the direct sum of
 each row's own already-stated `Disposition`/`Deployment Relevance` fields
 as they stand in this file today.
 
-Verification identities (re-derived by direct row parse, not hand-updated):
-CLOSED(27) + NEEDS_EVIDENCE(21) + NEEDS_IMPLEMENTATION(20) + SUPERSEDED(0)
-+ DEFERRED(2) = 70 ✓. REQUIRED(62) + OPTIONAL(6) + OUT_OF_SCOPE(2) = 70 ✓.
-REQUIRED+CLOSED(25) + REQUIRED+NEEDS_EVIDENCE(20) + REQUIRED+NEEDS_IMPLEMENTATION(17)
-= 62 = REQUIRED total ✓ (confirms no REQUIRED row has a DEFERRED/SUPERSEDED
+Verification identities (re-derived by direct row parse, not hand-updated;
+updated again for `VER-006`'s addition): CLOSED(27) + NEEDS_EVIDENCE(22) +
+NEEDS_IMPLEMENTATION(20) + SUPERSEDED(0) + DEFERRED(2) = 71 ✓.
+REQUIRED(63) + OPTIONAL(6) + OUT_OF_SCOPE(2) = 71 ✓.
+REQUIRED+CLOSED(25) + REQUIRED+NEEDS_EVIDENCE(21) + REQUIRED+NEEDS_IMPLEMENTATION(17)
+= 63 = REQUIRED total ✓ (confirms no REQUIRED row has a DEFERRED/SUPERSEDED
 disposition, which is correct — both DEFERRED rows are OUT_OF_SCOPE).
 
 ### §0.5 Requirement-authority conflicts: 0 (corrected from Pass 1's 1)
@@ -236,7 +246,7 @@ was never corrected at the time, a pre-existing drift unrelated to this
 pass's own POL-001 work, found and fixed here). `VER-004` stays out (see
 §0.7) and `ORCH-001`/`ORCH-002` stay out (reclassified `OPTIONAL`, Pass 2).
 
-## §0.1b REQUIRED + NEEDS_EVIDENCE (20, corrected POL-001-P4 — regenerated from each row's own current Disposition, not hand-patched)
+## §0.1b REQUIRED + NEEDS_EVIDENCE (21, updated VER-006 — new row added)
 
 `CORR-006` semantic-contract protection · `CORR-019` Reviewer
 self-assigned evidence confidence (A1-E2) · `CTX-002` large-repo scale ·
@@ -254,7 +264,9 @@ isolation · `SEC-002` fail-closed sandbox failure · `SEC-004` MCP timeout
 `TOP-005` CI operating requirements · `VER-004` Python
 dependency/build-metadata handling (moved into this list Pass 3 — real
 mechanism confirmed, not the absent one previously claimed) · `VER-005`
-Python end-to-end validation. `CORR-016` **moved out of this list** (see
+Python end-to-end validation · `VER-006` runtime-verification LLM
+fallback distrust containment (new, this pass — implemented, not yet
+independently pytest-confirmed). `CORR-016` **moved out of this list** (see
 §0.1a above — its own row has read `NEEDS_IMPLEMENTATION` since commit
 `5210faa`). `POL-001` was never actually added to this list despite
 becoming `NEEDS_EVIDENCE` at P1 (the same pre-existing drift as above) —
@@ -373,6 +385,8 @@ No solution implemented or designed this pass — recorded per explicit instruct
 
 **CORR-018-P1 update (A3-bound slice only) — IMPLEMENTED, COMMITTED, LIVE-VALIDATED.** A narrower, proposal-derived slice of this same risk is now closed: `kriya/workflow/semantic_region_authority.py` (`find_unauthorized_semantic_changes`, wired as an additive gate in `attempt.py`/`workflow.py`) rejects body-level drift outside an explicitly authorized `AuthorizedSemanticRegion` set, but only when a run supplies one — i.e. only for A3's approved-proposal-promotion path (`kriya proposal execute`, `kriya/workflow/proposal_promotion.py`), not for arbitrary hand-typed `generate` goals. A4 (2026-09-10, live run against `graphify-poc/spring-boot-application-example`, real `qwen3-coder:30b`) is direct E4 live-production evidence this slice holds under real adversarial-shaped model behavior, not just unit tests: the Developer candidate hallucinated a materially different reimplementation of `DefaultDriverService.java` (different DI style, different package names, a nonexistent exception type) on attempts 1 and 3, both rejected before write (`semantic_region_unauthorized` / `brownfield_public_api_changed`), with deterministic `API_CONTRACT_RECOVERY` restoring the authoritative baseline and converging to the exact approved one-line change by attempt 6 — authorized regions (`METHOD_BODY`+`IMPORTS`, one file) never widened across any attempt. **The general case — CORR-018 for a plain `generate <goal>` run with no persisted/approved proposal and no authorized-region set — remains exactly as open as before; this update narrows scope, it does not touch the row's own Disposition above.**
 
+**2026-09-10 evidence note (no disposition/implementation change, see `VER-006` for the full incident and its own separate containment fix):** the general-case gap named above (no authorized-region set, plain `generate <goal>`) is now backed by a second, concrete live instance — `~/kriya-live-validation/milestone_task_cli`, run `bpwsqscrg` — where `main.py` collapsed to a bare verification-marker line with `had_authorized_semantic_regions: false`. This is preservation-side evidence (the file was never protected in the first place); `VER-006` covers the separate verification-side defect (the resulting broken file was then incorrectly graded PASSED). Neither this note nor `VER-006`'s own implementation touches `CORR-018`'s code.
+
 **CORR-019 — Reviewer self-assigned evidence confidence is not deterministically enforced**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E2 (two independent live A1 production runs each demonstrated the gap with a different concrete finding, plus a deterministic mechanism now exists and is unit-tested against both historical shapes; a later live run (A1-R3) confirmed the mechanism runs correctly against real model output, and a further live run (A4) reproduced the identical A1-R2 pattern a third time — all direct, reproduced evidence the mechanism runs correctly end-to-end in production, not yet evidence of the specific still-open case: the mechanism actively downgrading/rejecting a claim it should reject) · Disposition: NEEDS_EVIDENCE (implementation complete, live validation still required — see below).
 
@@ -436,6 +450,17 @@ Language Scope: PYTHON · Risk Family: `VER-LANGUAGE-VALIDATION` · Deployment R
 
 **VER-005 — Python end-to-end validation/generation correctness**
 Language Scope: PYTHON · Risk Family: `VER-LANGUAGE-VALIDATION` · Deployment Relevance: REQUIRED · Related PRV: PRV-17 · Current mechanism: see `KRIYA_PYTHON_CAPABILITY_SWEEP.md` for the full 24-capability audit completed this pass — repository discovery, project detection, dependency handling, venv assumptions, symbol extraction (native stdlib `ast`), planning, **static/syntax validation (a real `compile(source, f, "exec")` gate, newly confirmed this pass, structurally parallel to the Java `javac` check)**, test discovery/execution, and single-package topology are all confirmed `PRESENT`; import/dependency grounding and preservation checks are `PARTIAL` (the shared structural-evidence mechanism is Java-syntax-shaped); multi-package topology is `ABSENT` · Effective Evidence Level: **E2** — PRV-17's real result (`Quality Gates: PASSED`, `Kriya exit: 0`, a genuine 11-file Django generation) plus the confirmed breadth of real underlying capability; `NEEDS_REVIEW` status only because one scope-creep manual check was never ticked, not a correctness failure · Disposition: NEEDS_EVIDENCE — real, broad capability confirmed, but no single clean, fully-confirmed E4 production pass exists yet. Do not manufacture symmetry with `VER-003`'s E4, but do not understate real capability either — both of the prior two passes did, in different directions.
+
+**VER-006 — Runtime-verification LLM fallback can upgrade deterministically distrusted evidence into terminal success**
+Language Scope: LANGUAGE_NEUTRAL (the verification-marker contract, `pass_verdict_is_grounded()`, and `RunVerifierAgent.grade()` all operate on captured stdout/stderr text and written-file content generically, not on any language-specific structure) · Deployment Relevance: REQUIRED · Effective Evidence Level: **E4 at discovery** — a real, live, independently-confirmed production instance, not hypothetical: run `bpwsqscrg` (`/tmp/pol001_live_run2.log`) produced exit code 0, stdout `[VERIFICATION] PASS`, the deterministic contract-grounding check (`pass_verdict_is_grounded()`) correctly found the marker ungrounded (no `[VERIFICATION] FAIL` string anywhere in the written files), the result collapsed into the same `None` a genuine no-evidence case would produce, `RunVerifierAgent.grade()` was never told the marker was already distrusted, cited it as "strong, primary evidence" per its own then-unqualified system prompt, and returned `passed: true` — Quality Gates reported `PASSED` for a `main.py` independently confirmed broken (28 bytes, `print("[VERIFICATION] PASS")`, no argv dispatch, no CLI logic at all). Investigation: this session's dedicated root-cause task, full failure-chain trace with exact file:line references. Disposition: **NEEDS_EVIDENCE** (implementation complete this pass, see the P1 update and disposition note below — not CLOSED from self-tests alone).
+
+**2026-09-10 P1 update — narrow containment implemented.** `kriya/workflow/verification_contract.py` gained `ContractVerdictState` (`PASS`/`FAIL`/`INDETERMINATE_DISTRUSTED`/`ABSENT`) and `classify_contract_verdict()`, a pure function replacing the old binary `Optional[Dict]` collapse. `kriya/workflow/attempt.py`'s `_extract_grounded_contract_verdict()` (all 7 call sites, across both `run_attempt()`'s 4 run_res-outcome branches and `_execute_runtime_verification_directly()`'s 3) is replaced by `_classify_grounded_contract_verdict()` (IO wrapper) + a new shared `_resolve_runtime_verification_grade()` — the single point every branch now routes through. Grounded PASS/FAIL: unchanged fast path, `grade()` never called. `ABSENT`: unchanged legacy LLM-fallback behavior, fully authoritative, exactly as before. `INDETERMINATE_DISTRUSTED`: `grade()` is still called (diagnostic value preserved) with a new, TRUSTED (non-fenced) `distrust_notice` parameter naming exactly what was distrusted and why — but the caller unconditionally force-sets `passed=False` on the result regardless of what `grade()` itself returns, since this verification path has no existing independent corroboration channel to check instead (the only evidence is the same captured stdout/stderr the deterministic layer already distrusted) and prompt wording alone is explicitly not trusted as the safety boundary. `RunVerifierAgent.grade()` (`kriya/agents/agent.py`) gained the `distrust_notice` parameter and a qualified system-prompt rule ("a self-reported verification marker is positive evidence only when it has not been deterministically rejected") — defense-in-depth, not the enforcement point. Provenance: `deterministic_result` (persisted in `gate_outcomes`/`traces.db`) now distinguishes `"DISTRUSTED"` (new) from `None` (`ABSENT`, unchanged) via the new `_deterministic_result_provenance_field()` helper, applied to both the failure and success outcome paths (previously only the success path set this field at all). Terminal aggregation (`GenerationState.final_workflow_quality_passed()`) was **not touched** — the containment at the runtime-verification gate itself (raising `QualityGateFailure` before any success outcome is ever appended) is sufficient; `quality_gates_succeeded` naturally stays `False`, exactly as the task's own stated preference for caller-level containment over terminal-aggregation redesign.
+
+23 new tests (19 in new file `tests/test_ver006_distrust_containment.py`; 3 in `tests/test_agents.py` for the `distrust_notice` prompt-layer defense-in-depth; 1 new end-to-end integration test in `tests/test_workflow.py` confirming `graded_by=="llm_over_distrusted_evidence"`/`deterministic_result=="DISTRUSTED"` are queryable directly from `traces.db`), plus 1 pre-existing test (`test_workflow_ungrounded_pass_marker_falls_back_to_llm_grade`) whose own assertions encoded the exact vulnerability (`quality_gates_passed is True` when an LLM grader approved an ungrounded marker) and was corrected to assert the safe outcome instead — not a reclassification for its own sake, the same "correct the summary/test when it encoded the vulnerability" precedent as prior POL-001 increments. Self-verified via manual harness (never `.venv/bin/pytest`, per this repo's standing quota-discipline rule) — all 28 pass, including a direct reproduction of the live incident's exact shape (`print("[VERIFICATION] PASS")` as `main.py`'s entire content, mocked grader approval identical in spirit to the real incident's own grader) proving the final grade is forced non-PASS. Independent pytest confirmation is the user's own next step, same convention as every prior increment.
+
+**Disposition: NEEDS_EVIDENCE, not CLOSED.** Implementation and deterministic self-tests do not, on their own, close a risk whose own required bar (given this obligation class's history of live, production-observed defects — the same reasoning `CORR-006`'s own required-E4 bar already applies) needs independent pytest confirmation and, ideally, a live-model re-run of the original `milestone_task_cli`/`clear_completed` scenario proving the corrected pipeline now fails closed (or genuinely succeeds only with real, independent evidence) end-to-end against a real local model, not just mocked gate outcomes.
+
+**CORR-018 evidence update (no disposition/implementation change this pass):** this same incident is separately cited as new, concrete evidence for `CORR-018`'s own already-open "general case" gap (preservation, not verification) — `main.py`'s near-total content collapse under a plain hand-typed `generate` goal, with no authorized semantic region ever declared (`had_authorized_semantic_regions: false`), is exactly the class of unsignaled behavioral drift within an authorized file `CORR-018`'s general case already names as unfixed. See `CORR-018`'s own entry above; its disposition (`NEEDS_IMPLEMENTATION`) and its P1-slice implementation are both unchanged.
 
 ---
 
