@@ -294,3 +294,140 @@ async def test_shell_tool_sudo_still_denied_under_enforce_mode_too():
     tool = ShellTool(execution_policy_cfg=ExecutionPolicyConfig(mode="enforce"))
     with pytest.raises(ToolExecutionError, match="COMMAND_SUDO_DENIED"):
         await tool.execute(command="sudo echo hi")
+
+
+# --- POL-001-P4: decisive audit-vs-enforce differential evidence -----------
+# Same ActionType (RUN_COMMAND), same shell-wrapper command, same production
+# path (BaseTool.execute -> ShellTool._run -> ExecutionPolicy.evaluate),
+# config loaded through the REAL load_config() (not a bare
+# ExecutionPolicyConfig(...) construction, unlike the P2 tests above) - only
+# execution_policy.mode differs between the two halves of this test. Proves,
+# with a filesystem sentinel (not just an exception message), that audit
+# mode consults the policy but still lets the subprocess run, while enforce
+# mode blocks BEFORE the subprocess ever starts.
+
+def _write_execution_policy_kriya_yaml(cfg_dir, mode: str) -> str:
+    cfg_dir.mkdir()
+    (cfg_dir / "kriya.yaml").write_text(
+        f"execution_policy:\n  enabled: true\n  mode: {mode}\n"
+        f"paths:\n  logs: {cfg_dir}/logs\n  memory: {cfg_dir}/memory\n  skills: {cfg_dir}/skills\n"
+    )
+    return str(cfg_dir / "kriya.yaml")
+
+
+@pytest.mark.asyncio
+async def test_shell_tool_wrapper_audit_vs_enforce_differential_through_load_config(tmp_path):
+    from kriya.config.config import load_config
+    from kriya.policy.model import PolicyDecision
+
+    sentinel = tmp_path / "wrapper_ran.txt"
+    command = f"bash -c 'touch {sentinel}'"
+
+    # --- audit half: consults the policy, does not block ---
+    audit_cfg = load_config(_write_execution_policy_kriya_yaml(tmp_path / "audit_cfg", "audit"))
+    assert audit_cfg.execution_policy.mode == "audit"
+    audit_tool = ShellTool(autonomy_cfg=audit_cfg.autonomy, execution_policy_cfg=audit_cfg.execution_policy)
+    captured_audit = []
+    real_eval_audit = audit_tool._execution_policy.evaluate
+
+    def spy_audit(request):
+        result = real_eval_audit(request)
+        captured_audit.append(result)
+        return result
+
+    audit_tool._execution_policy.evaluate = spy_audit
+
+    res = await audit_tool.execute(command=command)
+    assert res["exit_code"] == 0
+    assert sentinel.exists(), "audit mode must not block the real subprocess"
+    assert len(captured_audit) == 1
+    assert captured_audit[0].decision == PolicyDecision.REQUIRE_APPROVAL
+    assert captured_audit[0].reason_code == "COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL"
+
+    sentinel.unlink()
+
+    # --- enforce half: exact same command, only mode differs ---
+    enforce_cfg = load_config(_write_execution_policy_kriya_yaml(tmp_path / "enforce_cfg", "enforce"))
+    assert enforce_cfg.execution_policy.mode == "enforce"
+    enforce_tool = ShellTool(autonomy_cfg=enforce_cfg.autonomy, execution_policy_cfg=enforce_cfg.execution_policy)
+    captured_enforce = []
+    real_eval_enforce = enforce_tool._execution_policy.evaluate
+
+    def spy_enforce(request):
+        result = real_eval_enforce(request)
+        captured_enforce.append(result)
+        return result
+
+    enforce_tool._execution_policy.evaluate = spy_enforce
+
+    with pytest.raises(ToolExecutionError, match="COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL"):
+        await enforce_tool.execute(command=command)
+    assert not sentinel.exists(), "enforce mode must block before the subprocess ever starts"
+    # Two evaluate() calls, not one: enforce_hard_invariants (P1, unconditional)
+    # evaluates first and does not raise on REQUIRE_APPROVAL; ShellTool's own
+    # P2 mode-gated block evaluates a second time and raises on that result -
+    # this is real production control flow, not a test artifact.
+    assert len(captured_enforce) == 2
+    for result in captured_enforce:
+        assert result.decision == PolicyDecision.REQUIRE_APPROVAL
+        assert result.reason_code == "COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL"
+
+
+@pytest.mark.asyncio
+async def test_git_tool_commit_audit_vs_enforce_differential_through_load_config(tmp_path):
+    """Same differential shape as the ShellTool test above, for GitTool's
+    other genuinely mode-dependent path, in an isolated TEMPORARY git repo
+    (never a user repository)."""
+    import subprocess
+
+    from kriya.config.config import load_config
+    from kriya.policy.model import PolicyDecision
+
+    async def run_phase(mode: str):
+        repo_dir = tmp_path / f"repo_{mode}"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=str(repo_dir), check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(repo_dir), check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo_dir), check=True)
+        (repo_dir / "f.txt").write_text("evidence")
+        subprocess.run(["git", "add", "f.txt"], cwd=str(repo_dir), check=True)
+
+        cfg = load_config(_write_execution_policy_kriya_yaml(tmp_path / f"cfg_{mode}", mode))
+        assert cfg.execution_policy.mode == mode
+        tool = GitTool(execution_policy_cfg=cfg.execution_policy)
+        captured = []
+        real_eval = tool._execution_policy.evaluate
+
+        def spy(request):
+            result = real_eval(request)
+            captured.append(result)
+            return result
+
+        tool._execution_policy.evaluate = spy
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo_dir))
+        error = None
+        try:
+            await tool.execute(subcommand="commit", message="pol001p4 differential commit")
+        except ToolExecutionError as e:
+            error = e
+        finally:
+            os.chdir(old_cwd)
+
+        return captured, error, _git_log(repo_dir)
+
+    captured_audit, error_audit, log_audit = await run_phase("audit")
+    assert len(captured_audit) == 1
+    assert captured_audit[0].decision == PolicyDecision.REQUIRE_APPROVAL
+    assert captured_audit[0].reason_code == "GIT_WRITE_REQUIRES_APPROVAL"
+    assert error_audit is None
+    assert "pol001p4 differential commit" in log_audit
+
+    captured_enforce, error_enforce, log_enforce = await run_phase("enforce")
+    assert len(captured_enforce) == 1
+    assert captured_enforce[0].decision == PolicyDecision.REQUIRE_APPROVAL
+    assert captured_enforce[0].reason_code == "GIT_WRITE_REQUIRES_APPROVAL"
+    assert error_enforce is not None
+    assert "GIT_WRITE_REQUIRES_APPROVAL" in str(error_enforce)
+    assert "pol001p4 differential commit" not in log_enforce
