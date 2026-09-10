@@ -1874,8 +1874,12 @@ def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[
               "invocation-local, single-Java-file repository-aware review path only. Never "
               "modifies files, never invokes generation - see the printed proposal's own "
               "Authority/Approval fields.")
+@click.option('--save', 'save_proposal', is_flag=True, default=False,
+              help="A3-P1: with --propose, also persist the proposal to .kriya/proposals/<id>.json "
+              "as PENDING_APPROVAL (see `kriya proposal show/approve/reject`). Without --save, "
+              "the proposal is printed only, exactly as before - nothing is written.")
 @click.pass_context
-def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]) -> None:
+def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str], save_proposal: bool) -> None:
     """Run code review agent on a file or a folder."""
     cfg: AppConfig = ctx.obj['config']
 
@@ -2110,6 +2114,22 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
                         click.secho(f"\nCannot build proposal: {e}", fg="red", err=True)
                         sys.exit(1)
                     click.echo("\n" + format_proposed_modification(proposal))
+                    if save_proposal:
+                        from kriya.workflow.proposal_store import persist_proposal
+                        try:
+                            persisted = persist_proposal(proposal, repo_root)
+                        except ValueError as e:
+                            click.secho(f"\nCannot save proposal: {e}", fg="red", err=True)
+                            sys.exit(1)
+                        click.secho(
+                            f"\nSaved: .kriya/proposals/{persisted.proposal_id}.json "
+                            f"(state={persisted.approval_state}, digest={persisted.proposal_digest[:12]}...)",
+                            fg="cyan",
+                        )
+                        click.echo(
+                            f"Review it, then run `kriya proposal approve {persisted.proposal_id}` "
+                            "to explicitly approve it (nothing is executed automatically)."
+                        )
                 return
 
             for i, batch in enumerate(batches, 1):
@@ -2123,6 +2143,101 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
     except Exception as e:
         click.secho(f"Review failed: {e}", fg="red", err=True)
         sys.exit(1)
+
+@main.group(name="proposal")
+def proposal_group() -> None:
+    """A3-P1: inspect/approve/reject persisted advisory proposals
+    (.kriya/proposals/, created via `kriya review <file> --propose <id> --save`).
+    Read-only + explicit approval-state changes only - never invokes generation,
+    never writes to the target repository, never applies any change."""
+    pass
+
+@proposal_group.command(name="show")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_show(ctx: click.Context, proposal_id: str) -> None:
+    """Display a persisted proposal's state, digest, and current binding/staleness status."""
+    from kriya.workflow.proposal_store import ProposalStoreError, load_proposal, verify_persisted_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        persisted = load_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot show proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+
+    result = verify_persisted_proposal(persisted, workspace_root)
+    p = persisted.proposal
+    click.secho(f"Proposal ID: {persisted.proposal_id}", bold=True)
+    click.echo(f"State: {persisted.approval_state}")
+    click.echo(f"Authority: {p.authority}")
+    click.echo(f"Target: {p.target_file}")
+    click.echo(f"Member: {p.target_member}")
+    click.echo(f"Proposed Change: {p.proposed_change}")
+    click.echo("Must Preserve:")
+    for item in p.must_preserve:
+        click.echo(f"  - {item}")
+    click.echo("Verification:")
+    for item in p.verification:
+        click.echo(f"  - {item}")
+    click.echo(f"Proposal digest: {persisted.proposal_digest[:16]}...")
+    if persisted.approved_digest:
+        click.echo(f"Approved digest: {persisted.approved_digest[:16]}...")
+    click.echo(f"Created: {persisted.created_at}")
+    click.echo(f"Updated: {persisted.updated_at}")
+
+    if result.tampered:
+        click.secho("\nINTEGRITY: TAMPERED - stored digest does not match recomputed content.", fg="red", bold=True)
+    elif not result.ok:
+        click.secho(f"\nINTEGRITY: INVALID - {'; '.join(result.details)}", fg="red", bold=True)
+    elif persisted.approval_state == "APPROVED" and not result.approved_and_valid:
+        click.secho(f"\nINTEGRITY: APPROVED BUT STALE - {'; '.join(result.details)}", fg="yellow", bold=True)
+    elif persisted.approval_state == "APPROVED":
+        click.secho("\nINTEGRITY: APPROVED AND CURRENTLY VALID", fg="green", bold=True)
+    else:
+        click.secho("\nINTEGRITY: valid (untampered, repository/evidence still match)", fg="green")
+
+@proposal_group.command(name="approve")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_approve(ctx: click.Context, proposal_id: str) -> None:
+    """Explicitly approve a PENDING_APPROVAL proposal - requires the exact
+    persisted artifact to still be untampered and currently valid against
+    the real repository/evidence. Never re-runs review or rebuilds the
+    proposal. Never invokes generation."""
+    from kriya.workflow.proposal_store import ProposalStoreError, approve_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        result = approve_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot approve proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+
+    if not result.ok:
+        click.secho(f"Approval refused: {', '.join(result.reason_codes)}", fg="red", err=True)
+        for d in result.details:
+            click.echo(f"  - {d}", err=True)
+        sys.exit(1)
+
+    click.secho(f"Approved: {proposal_id} (digest {result.persisted.approved_digest[:16]}...)", fg="green", bold=True)
+    click.echo("This records approval only - no source files were modified and no generation was invoked.")
+
+@proposal_group.command(name="reject")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_reject(ctx: click.Context, proposal_id: str) -> None:
+    """Mark a proposal REJECTED - permanent; a rejected proposal can never
+    be approved (create a new proposal instead)."""
+    from kriya.workflow.proposal_store import ProposalStoreError, reject_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        persisted = reject_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot reject proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+    click.secho(f"Rejected: {persisted.proposal_id}", fg="yellow")
 
 @main.command(name="ask")
 @click.argument('question')

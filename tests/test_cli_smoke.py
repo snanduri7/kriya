@@ -15,11 +15,13 @@ from kriya.cli import _mark_run_in_progress, main
 TOP_LEVEL_COMMANDS = [
     "version", "config", "doctor", "repl", "plugins", "analyze",
     "generate", "plan-milestones", "review", "ask", "learn", "fix", "traces", "completion",
+    "proposal",
 ]
 SUBCOMMAND_GROUPS = {
     "prompt": ["render", "generate"],
     "tools": ["list", "execute"],
     "skills": ["list", "show", "create", "approve"],
+    "proposal": ["show", "approve", "reject"],
 }
 
 
@@ -681,3 +683,81 @@ def test_review_propose_never_invokes_write_capable_components(runner, tmp_path)
 
     assert result.exit_code == 0, result.output + result.stderr
     assert result.exception is None
+
+
+# =====================================================================
+# A3-P1: `kriya review --propose --save` + `kriya proposal show/approve/reject`
+# =====================================================================
+
+def test_review_propose_without_save_does_not_persist(runner, tmp_path):
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient"):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F1"])
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "Saved:" not in result.output
+    assert not os.path.isdir(os.path.join(str(tmp_path), ".kriya", "proposals"))
+
+
+def test_review_propose_save_persists_then_cli_approve_flow(runner, tmp_path):
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient"):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F1", "--save"])
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "Saved:" in result.output
+    proposal_path = os.path.join(str(tmp_path), ".kriya", "proposals", "P1.json")
+    assert os.path.isfile(proposal_path)
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        show1 = runner.invoke(main, ["proposal", "show", "P1"])
+        assert show1.exit_code == 0, show1.output
+        assert "PENDING_APPROVAL" in show1.output
+
+        approve = runner.invoke(main, ["proposal", "approve", "P1"])
+        assert approve.exit_code == 0, approve.output + approve.stderr
+        assert "Approved:" in approve.output
+
+        show2 = runner.invoke(main, ["proposal", "show", "P1"])
+        assert "APPROVED AND CURRENTLY VALID" in show2.output
+
+        # -y appears nowhere in this flow at all - approve has no such option
+        approve_help = runner.invoke(main, ["proposal", "approve", "--help"])
+        assert "-y" not in approve_help.output and "--yes" not in approve_help.output
+    finally:
+        os.chdir(old_cwd)
+
+    # source file untouched throughout
+    assert java_file.read_text() == _A2_TARGET_SRC
+
+
+def test_proposal_reject_cli_then_cannot_approve(runner, tmp_path):
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient"):
+        runner.invoke(main, ["review", str(java_file), "--propose", "F1", "--save"])
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        reject = runner.invoke(main, ["proposal", "reject", "P1"])
+        assert reject.exit_code == 0, reject.output
+        assert "Rejected:" in reject.output
+
+        approve_after_reject = runner.invoke(main, ["proposal", "approve", "P1"])
+        assert approve_after_reject.exit_code != 0
+    finally:
+        os.chdir(old_cwd)
+
+
+def test_proposal_show_unknown_id_fails_cleanly(runner, tmp_path):
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        result = runner.invoke(main, ["proposal", "show", "NoSuchProposal"])
+        assert result.exit_code != 0
+        assert "PROPOSAL_NOT_FOUND" in result.output + result.stderr
+    finally:
+        os.chdir(old_cwd)
