@@ -156,19 +156,32 @@ class ShellTool(BaseTool):
         # means this particular check has no opinion, matching
         # _authorize_action's own "a broken check never blocks the caller"
         # precedent - it does not weaken any other enforcement.
+        #
+        # Mirrors kriya/tools/validate.py::_audit_run_command's own
+        # try/except shape exactly: PolicyDeniedError propagates (a real
+        # denial must actually stop execution), any OTHER exception from a
+        # broken/misconfigured policy engine (e.g. a bad regex in a user's
+        # autonomy.sensitive_paths) is logged and swallowed rather than
+        # newly breaking a shell command that worked before this check
+        # existed.
         try:
             parsed_command = tuple(shlex.split(args.command))
         except ValueError:
             parsed_command = (args.command,)
         if parsed_command:
-            enforce_hard_invariants(
-                self._execution_policy,
-                ActionRequest(
-                    action_type=ActionType.RUN_COMMAND,
-                    command=parsed_command,
-                    workspace_path=os.getcwd(),
-                ),
-            )
+            try:
+                enforce_hard_invariants(
+                    self._execution_policy,
+                    ActionRequest(
+                        action_type=ActionType.RUN_COMMAND,
+                        command=parsed_command,
+                        workspace_path=os.getcwd(),
+                    ),
+                )
+            except PolicyDeniedError:
+                raise
+            except Exception as e:
+                logger.debug("POL-001 policy check failed (ignored, fails open on a broken check only): %s", e)
 
         env = None
         preexec_fn = None
