@@ -127,14 +127,14 @@ relevances, or language-scope values out of 68).
 | REQUIRED | 62 |
 | OPTIONAL | 6 |
 | OUT_OF_SCOPE | 2 |
-| CLOSED | 25 |
-| NEEDS_EVIDENCE | 22 |
-| NEEDS_IMPLEMENTATION | 21 |
+| CLOSED | 27 |
+| NEEDS_EVIDENCE | 21 |
+| NEEDS_IMPLEMENTATION | 20 |
 | SUPERSEDED | 0 (row-level) |
 | DEFERRED | 2 |
-| **REQUIRED + CLOSED** | **23** |
-| **REQUIRED + NEEDS_EVIDENCE** | **21** |
-| **REQUIRED + NEEDS_IMPLEMENTATION** | **18** |
+| **REQUIRED + CLOSED** | **25** |
+| **REQUIRED + NEEDS_EVIDENCE** | **20** |
+| **REQUIRED + NEEDS_IMPLEMENTATION** | **17** |
 
 **Pass 3 update**: `VER-004` moved `NEEDS_IMPLEMENTATION`→`NEEDS_EVIDENCE`
 (the confirmed-defect claim was wrong, corrected in §0.7). All other Pass 2
@@ -161,11 +161,37 @@ By Language Scope: JAVA 6 (`CORR-015`, `RECV-003`, `VER-001`, `VER-003`,
 language-neutral *scope* is not the same claim as language-neutral
 *proof*).
 
-Verification identities (hand-updated for the CORR-018/CORR-019
-additions, not rescripted): CLOSED(25) + NEEDS_EVIDENCE(22) +
-NEEDS_IMPLEMENTATION(21) + SUPERSEDED(0) + DEFERRED(2) = 70 ✓.
-REQUIRED(62) + OPTIONAL(6) + OUT_OF_SCOPE(2) = 70 ✓.
-REQUIRED+CLOSED(23) + REQUIRED+NEEDS_EVIDENCE(21) + REQUIRED+NEEDS_IMPLEMENTATION(18) = 62 = REQUIRED total ✓ (confirms no REQUIRED row has a DEFERRED/SUPERSEDED disposition, which is correct — both DEFERRED rows are OUT_OF_SCOPE).
+**POL-001-P4 update (2026-09-10) — full re-script, two pre-existing drifts
+corrected, plus POL-001 itself.** Per this task's own explicit "recompute
+stale register summary counts row-by-row... if recomputed totals disagree
+with the summary, correct the summary — never reclassify a row to force a
+match" instruction: every one of the 68 row headers (70 distinct risk IDs,
+combined rows like `CORR-008/009/010` expanded) was re-parsed directly
+from each row's own `Disposition`/`Deployment Relevance` text (not from
+the §0.1a/§0.1b prose bullet lists, which are a separately hand-maintained
+summary and the actual source of the drift below) — 0 rows failed to
+parse, and the resulting by-domain breakdown matches the one already
+printed above exactly, cross-confirming the script against this file's own
+prior count. That re-parse found the previous table (CLOSED 25 /
+NEEDS_EVIDENCE 22 / NEEDS_IMPLEMENTATION 21 / REQUIRED+CLOSED 23 /
+REQUIRED+NEEDS_IMPLEMENTATION 18) was **already one CLOSED short and one
+NEEDS_IMPLEMENTATION over**, for two reasons unrelated to POL-001 and not
+introduced by this pass: `CONC-001`'s prior closure (commit `ba02adb`) was
+never propagated into this summary table, and `CORR-016`'s own disposition
+change from `NEEDS_EVIDENCE` to `NEEDS_IMPLEMENTATION` (commit `5210faa`)
+left it sitting in the §0.1b prose list when its own row already said
+otherwise. Both are corrected here alongside POL-001's own real change
+this pass (`NEEDS_EVIDENCE` → `CLOSED`, see §7 below) — no row was
+reclassified to force a match; every number above is the direct sum of
+each row's own already-stated `Disposition`/`Deployment Relevance` fields
+as they stand in this file today.
+
+Verification identities (re-derived by direct row parse, not hand-updated):
+CLOSED(27) + NEEDS_EVIDENCE(21) + NEEDS_IMPLEMENTATION(20) + SUPERSEDED(0)
++ DEFERRED(2) = 70 ✓. REQUIRED(62) + OPTIONAL(6) + OUT_OF_SCOPE(2) = 70 ✓.
+REQUIRED+CLOSED(25) + REQUIRED+NEEDS_EVIDENCE(20) + REQUIRED+NEEDS_IMPLEMENTATION(17)
+= 62 = REQUIRED total ✓ (confirms no REQUIRED row has a DEFERRED/SUPERSEDED
+disposition, which is correct — both DEFERRED rows are OUT_OF_SCOPE).
 
 ### §0.5 Requirement-authority conflicts: 0 (corrected from Pass 1's 1)
 
@@ -189,45 +215,52 @@ Evidence Validity note, not silently reconciled either direction.
 
 ---
 
-## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (18, updated A1-P1 — CORR-018 added)
+## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (17, corrected POL-001-P4 — regenerated from each row's own current Disposition, not hand-patched)
 
-`CORR-018` unauthorized
-behavioral drift within authorized files (new, A1-P1) · `CTX-001`
-context/graph freshness · `MODEL-001` model capability certification ·
-`OBS-001` enforce-mode telemetry gap · `OBS-002` operator run summary ·
-`OBS-004` resource budgets · `POL-001` authoritative execution policy ·
-`REL-002` `doctor --production` · `SEC-001` hostile-code containment ·
-`SEC-003` MCP environment isolation · `SEC-005` package/network
-containment · `STATE-003` deterministic replay · `TOOL-001`
-policy-mediated TOOL execution (reclassified Pass 2 — see its own entry)
-· `TOOL-002` ToolBroker · `TOOL-003` MCP capability authorization ·
-`TOOL-004` plugin manifest/provenance · `TOP-001` Gradle support. Note
-`VER-004` **moved out of this list this pass** (see §0.7 — the defect it
-named doesn't exist) and `ORCH-001`/`ORCH-002` are **not** in this list —
-reclassified `OPTIONAL` in Pass 2 (see their own entries and the
-requirement-authority challenge).
+`CORR-016` PRV-08 transitive revalidation (**moved into this list** — its
+own row disposition already reads `NEEDS_IMPLEMENTATION` since commit
+`5210faa`; the prose list here had never been updated to match) ·
+`CORR-018` unauthorized behavioral drift within authorized files (A1-P1)
+· `CTX-001` context/graph freshness · `MODEL-001` model capability
+certification · `OBS-001` enforce-mode telemetry gap · `OBS-002` operator
+run summary · `OBS-004` resource budgets · `REL-002` `doctor
+--production` · `SEC-001` hostile-code containment · `SEC-003` MCP
+environment isolation · `SEC-005` package/network containment ·
+`STATE-003` deterministic replay · `TOOL-001` policy-mediated TOOL
+execution (reclassified Pass 2 — see its own entry) · `TOOL-002`
+ToolBroker · `TOOL-003` MCP capability authorization · `TOOL-004` plugin
+manifest/provenance · `TOP-001` Gradle support. `POL-001` **moved out of
+this list this pass** — CLOSED, see §7 below (it had actually been
+`NEEDS_EVIDENCE`, not `NEEDS_IMPLEMENTATION`, since P1; this prose list
+was never corrected at the time, a pre-existing drift unrelated to this
+pass's own POL-001 work, found and fixed here). `VER-004` stays out (see
+§0.7) and `ORCH-001`/`ORCH-002` stay out (reclassified `OPTIONAL`, Pass 2).
 
-## §0.1b REQUIRED + NEEDS_EVIDENCE (21, updated A1-E2 — CORR-019 added)
+## §0.1b REQUIRED + NEEDS_EVIDENCE (20, corrected POL-001-P4 — regenerated from each row's own current Disposition, not hand-patched)
 
-`CORR-006` semantic-contract protection · `CORR-016` PRV-08 transitive
-revalidation · `CORR-019` Reviewer self-assigned evidence confidence
-(new, A1-E2) · `CTX-002` large-repo scale · `CTX-003` PRV-09 dependency
-resolution · `MODEL-002` KnowledgeGuard live confirmation · `MODEL-004`
-fresh-repo stack-drift (downgraded from CLOSED, Pass 2) · `OBS-003`
-secret redaction · `ORCH-003` structured-mode checkpointing · `POL-002`
-security-sensitive-goal handling (downgraded from CLOSED, Pass 2 —
-PRV-02's manual check was never confirmed) · `RECV-002` MA9 coordinated
-repair (downgraded from CLOSED, Pass 2 — PRV-11's own result states plan
-recovery was not exercised) · `REL-001` release packaging · `REPO-004`
-workspace isolation · `SEC-002` fail-closed sandbox failure · `SEC-004`
-MCP timeout · `STATE-001` crash/resume · `STATE-002` multi-store
-consistency (reframed Pass 2 to evidence-first) · `TOP-002`
-framework-neutral Java · `TOP-005` CI operating requirements · `VER-004`
-Python dependency/build-metadata handling (**moved into this list this
-pass** — real mechanism confirmed, not the absent one previously claimed)
-· `VER-005` Python end-to-end validation. Note `RECV-004` is
-`NEEDS_EVIDENCE` too (downgraded Pass 2), but its `OPTIONAL` relevance
-keeps it out of this REQUIRED-only list.
+`CORR-006` semantic-contract protection · `CORR-019` Reviewer
+self-assigned evidence confidence (A1-E2) · `CTX-002` large-repo scale ·
+`CTX-003` PRV-09 dependency resolution · `MODEL-002` KnowledgeGuard live
+confirmation · `MODEL-004` fresh-repo stack-drift (downgraded from
+CLOSED, Pass 2) · `OBS-003` secret redaction · `ORCH-003`
+structured-mode checkpointing · `POL-002` security-sensitive-goal
+handling (downgraded from CLOSED, Pass 2 — PRV-02's manual check was
+never confirmed) · `RECV-002` MA9 coordinated repair (downgraded from
+CLOSED, Pass 2 — PRV-11's own result states plan recovery was not
+exercised) · `REL-001` release packaging · `REPO-004` workspace
+isolation · `SEC-002` fail-closed sandbox failure · `SEC-004` MCP timeout
+· `STATE-001` crash/resume · `STATE-002` multi-store consistency
+(reframed Pass 2 to evidence-first) · `TOP-002` framework-neutral Java ·
+`TOP-005` CI operating requirements · `VER-004` Python
+dependency/build-metadata handling (moved into this list Pass 3 — real
+mechanism confirmed, not the absent one previously claimed) · `VER-005`
+Python end-to-end validation. `CORR-016` **moved out of this list** (see
+§0.1a above — its own row has read `NEEDS_IMPLEMENTATION` since commit
+`5210faa`). `POL-001` was never actually added to this list despite
+becoming `NEEDS_EVIDENCE` at P1 (the same pre-existing drift as above) —
+moot now, since it goes straight to `CLOSED` this pass (see §7). Note
+`RECV-004` is `NEEDS_EVIDENCE` too (downgraded Pass 2), but its `OPTIONAL`
+relevance keeps it out of this REQUIRED-only list.
 
 ---
 
@@ -430,7 +463,7 @@ Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective 
 ## §7. POL — Policy / execution enforcement
 
 **POL-001 — Authoritative (pre-execution-denying) execution policy**
-Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E2 (real deterministic tests, independently pytest-confirmed for P1+P2; P3's own tests are self-verified via manual harness only, pytest confirmation still outstanding; no live-model evidence is required for this mechanism) · Disposition: **NEEDS_EVIDENCE** (still not CLOSED — as of P3 the full-inventory side-effect audit has no known unresolved reachable `REQUIRE_APPROVAL`/`DENY` gap left across every real `ActionType` call site, but no real `kriya generate`/`fix` project has actually run under `execution_policy.mode="enforce"` yet, and P3's own new tests still need independent pytest confirmation).
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E3 (real deterministic tests, independently pytest-confirmed for P1+P2+P3 as part of a full-suite run; PLUS a decisive, directly-executed audit-vs-enforce differential through the real production `ShellTool`/`GitTool` paths — not inferred from a mode-independent mechanism, the actual `mode`-gated code branch was exercised and its side effect observed to differ; the differential's own two new pytest-format tests are self-verified via manual harness, independent pytest confirmation still outstanding, same convention as every prior POL-001 increment; no live-model evidence is required for this mechanism, it is deterministic policy-evaluation logic) · Disposition: **CLOSED** (P4, 2026-09-10 — see below for the decisive evidence and why the remaining self-verified-only status of 2 new tests does not block closure).
 
 **2026-09-10 P2 update.** P1's own GitTool claim ("its subcommand surface cannot construct any of the 5 hard-enforced-code shapes... wiring a check here would add zero protective value") was **corrected, not just extended**, this pass: it was true for the 5 `enforce_hard_invariants` hard-DENY codes specifically, but P1 never checked what `_check_git_destructive`'s full rule set actually returns for a plain `git commit` — it is `GIT_WRITE_REQUIRES_APPROVAL` (the catch-all "everything else well-formed GIT_WRITE requires approval" rule), never a bare `ALLOW`. Centralized policy consultation being skipped for that reason was itself the mistake this pass corrects (per this task's own instruction not to dismiss policy wiring merely because the hard-invariant subset would allow it).
 
@@ -459,7 +492,9 @@ Implemented this pass, commit `0aeb613` (see `docs/design.md` §8.2 for the full
 
 **Independent pytest confirmation received (2026-09-10, post-P2):** user-run full suite — `3361 passed, 5 deselected` — no failures, covering P1+P2's changes including the `test_run_ownership.py`/CONC-001 tests this pass's own manual harness couldn't reach. That specific gap is now closed.
 
-**Still outstanding, blocking CLOSED**: no real project has actually run `kriya generate`/`fix` with `execution_policy.mode="enforce"` set — only unit-level, directly-constructed-config evidence exists (see the P3 update below for the one remaining concrete gap this closes, and what's left after it).
+**Independent pytest confirmation received again (2026-09-10, post-P3, corrects the `3361` figure above which is now stale):** user-run full suite — `3382 passed, 5 deselected, 111 warnings in 244.96s` — no failures, covering P1+P2+P3's changes including P3's own 21 new tests (`tests/test_policy_git_destructive.py`, `tests/test_worktree_policy_audit.py`), which were self-verified-only at the time P3's own paragraph below was written. That gap is now closed too — P3's own "pytest confirmation still outstanding" note is stale as of this confirmation.
+
+**Still outstanding at that point, blocking CLOSED**: no real project had actually run `kriya generate`/`fix` with `execution_policy.mode="enforce"` set, and the only mode-dependent mechanisms (`GitTool.commit`, `ShellTool`'s shell-wrapper gate, `INSTALL_PACKAGE`) had only ever been exercised through unit tests or through a live run that happened to avoid all three — meaning no evidence existed that `mode="enforce"` actually changed any *observed* outcome versus `mode="audit"`, as opposed to just being unit-tested in isolation. See the P4 update below for how this was closed.
 
 **2026-09-10 update.** The prior E1/NEEDS_IMPLEMENTATION characterization ("no authoritative policy exists") was stale. A full call-site audit this pass found real enforcement already implemented in three separate, previously-unconnected mechanisms: `WorkflowEngine._authorize_action`'s config-gated `enforce=True` branch (`kriya/workflow/workflow.py`, one real call site, INSTALL_PACKAGE); `kriya/policy/filesystem.py::AuthorizedFileWriter`'s own always-on, mode-independent `ExecutionPolicy` instance (DENY-only, WRITE_FILE, real callers: `attempt.py`/`milestones.py`/`self_correction.py`/`planning_diagnostics.py`); and `kriya/policy/enforcement.py::enforce_hard_invariants` (MA7.3, always-on, 5 hard-enforced DENY reason codes for RUN_COMMAND/GIT_WRITE, already wired into `validate.py`'s compile/test commands and `worktree.py`'s bootstrap commit). The one genuine, common gap across all three: `REQUIRE_APPROVAL` verdicts were computed and logged everywhere but never actually gated by a reachable approval mechanism.
 
@@ -489,6 +524,25 @@ Neither recognizer trusts caller-supplied metadata; both derive their verdict pu
 23 near-miss/positive-recognition cases self-verified directly against `ExecutionPolicy.evaluate()` (identity-free, wrong name, wrong email, name-only, email-only, no-`--allow-empty`, `--amend`, `-a`, `--all`, pathspec, fixup, post-subcommand `-c` reuse-message confusion, `init --bare`, `init --template=`, `init <dir>`, plus every other `GIT_WRITE` subcommand's pre-existing verdict unaffected) — all pass. 21 new pytest-format tests added; self-verified via manual harness — all pass. A regression sweep across every P1/P2/P3-touched test file: **134 passed / 0 failed / 2 skipped** (both skips pre-existing, parametrized tests unrelated to this change, needing real `pytest.mark.parametrize` machinery the manual harness doesn't replicate). No live-model validation run or required. Exact pytest command handed to the user below.
 
 Deliberately not done: no change to `worktree.py` itself (no mode-gated fail-closed check was added there — none was needed once the underlying policy verdict is correct; that call site's own `enforce_hard_invariants` wiring is unchanged); no broadening beyond the two exact recognized shapes; no approval-callback plumbing anywhere.
+
+**2026-09-10 P4 update — decisive audit-vs-enforce differential evidence obtained, POL-001 CLOSED.** The prior live-run evidence (Task I / this document's earlier citations) exercised only `AuthorizedFileWriter` and `enforce_hard_invariants` — both **mode-independent**: they behave identically under `mode="audit"` and `mode="enforce"`, unchanged since before P1. That run proved these two mechanisms work end-to-end, but proved *nothing* about what `execution_policy.mode="enforce"` itself changes, since the only genuinely mode-dependent paths (`INSTALL_PACKAGE`'s `_authorize_action` branch, `GitTool.commit`'s P2 gate, `ShellTool`'s P2 shell-wrapper gate) were all outside that run's goal-selection scope. This pass obtains that missing evidence directly, without running another coding-generation benchmark, per this task's own explicit instruction.
+
+Method: a standalone script (not `kriya generate`, no LLM call anywhere in it) constructs a real `AppConfig` via the production `load_config()` (not a bare `ExecutionPolicyConfig(...)` construction), builds `ShellTool`/`GitTool` exactly as `CoreToolsPlugin.initialize()` does, and calls the real `BaseTool.execute()` entrypoint with the exact same command under `mode="audit"` then `mode="enforce"`, spying on `ExecutionPolicy.evaluate()` to capture the real `PolicyResult` without altering it.
+
+**Primary target — `ShellTool`, command `bash -c 'printf kriya-policy-evidence'`:**
+- Audit: `evaluate()` called once, verdict `REQUIRE_APPROVAL` / `COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL` — the subprocess still started and completed, `stdout == "kriya-policy-evidence"`, exit code 0. Audit consults the policy and does not block.
+- Enforce: `evaluate()` called twice on the identical request (once inside `enforce_hard_invariants`, unconditional since P1 and never itself acting on `REQUIRE_APPROVAL`; once in `ShellTool`'s own P2 mode-gated block, which does act on it) — both calls return the same `REQUIRE_APPROVAL` / `COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL` verdict. The second call raises `PolicyDeniedError`, wrapped by `BaseTool.execute()`'s pre-existing framework behavior into a `ToolExecutionError` whose message contains the reason code. The subprocess **never started** — proven with a filesystem sentinel (`bash -c 'touch <sentinel>'`), not just an exception message: the sentinel file does not exist after the call.
+- **Required differential confirmed**: same `ActionType.RUN_COMMAND`, same command, same production path (`BaseTool.execute` → `ShellTool._run` → `ExecutionPolicy.evaluate`), only `execution_policy.mode` differs — audit executes, enforce blocks before the subprocess, attributable specifically to `COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL`.
+
+**Optional second check — `GitTool.commit`, isolated temporary git repo (never a user repository):** same shape, same result. Audit: `evaluate()` once, `REQUIRE_APPROVAL` / `GIT_WRITE_REQUIRES_APPROVAL`, commit lands (`git log` shows it). Enforce: same verdict, `PolicyDeniedError` raised, commit count in the repo stays at 0 — proven via a real `git log`, not an inferred absence.
+
+Both checks were directly executed and their output observed (not merely written as test code) via `.venv/bin/python3 <script>.py` — a direct execution of real production code, not `pytest` (this repo's standing "never run pytest myself" rule is specifically about the test *runner*, not about running Python at all; this is the same manual-harness convention P1–P3 already established for self-verification). Both differentials passed cleanly and unambiguously on the first corrected run (one self-correction: the enforce-mode `ShellTool` case genuinely calls `evaluate()` twice, not once — real production control flow from the two independent mode-aware checks layered on this path, not a test defect).
+
+The two scripts were then converted into durable pytest-format tests (`tests/test_tools.py::test_shell_tool_wrapper_audit_vs_enforce_differential_through_load_config`, `::test_git_tool_commit_audit_vs_enforce_differential_through_load_config`, commit `0079a29`) so this evidence survives in the suite rather than only in a scratch script — adding tests is not "modifying production policy code" and is the same thing every P1–P3 increment did. Both self-verified via manual harness (all assertions pass); **independent pytest confirmation for these 2 specific new tests is still outstanding** — they postdate the `3382 passed` full-suite run cited above, so that number does not yet include them. This does not block closure: the decisive evidence this task required (a directly-executed, directly-observed production-path differential) was already obtained and is not contingent on the tests' own pytest-format re-confirmation; the pytest confirmation is durability for the future, not a precondition of what was just proven. A final full-suite run remains recommended as routine hygiene, same as after any commit, and will fold these 2 tests into the confirmed count — exact command below.
+
+**POL-001 CLOSED.** Both closure conditions are met: (1) independent full pytest is green (`3382 passed, 5 deselected`, covering every POL-001 change through P3; P4 adds 2 more self-verified-only tests, noted above, not blocking); (2) the audit/enforce differential passes, decisively, on two independent real production paths. The full-inventory `REQUIRE_APPROVAL` reachability audit (P2's table above) has no known unresolved gap. POL-001 is now frozen — no further policy-architecture work should be queued against this risk ID unless a future validation run exposes a concrete new defect, per the user's own stated intent when authorizing the P1→P4 arc.
+
+**Separate finding, recorded but NOT fixed this pass (out of POL-001's scope, not a policy-enforcement defect):** the prior live `kriya generate` validation run (Task I, `~/kriya-live-validation/milestone_task_cli/`, background task `bpwsqscrg`, log `/tmp/pol001_live_run2.log`) produced a functionally broken `main.py` (28 bytes: literally `print("[VERIFICATION] PASS")`, no argv parsing, no actual CLI dispatch — the Developer agent's Attempt-2 anchored-edit fix collapsed the file) that Kriya's own Quality Gates nonetheless graded `PASSED`. Root cause: the static `bare_verification_marker` rule correctly rejects an unquoted, non-branching `[VERIFICATION] PASS` literal, but the LLM-grading fallback ("doesn't look like it actually branches on anything") incorrectly approved this file anyway — a runtime-verification/LLM-grading-trust defect, independently confirmed by direct file inspection and a standalone correctness check, distinct from POL-001 (which governs *authorization to act*, not *correctness of what was generated*). This is real-project evidence for a different, already-known register risk (`VER`-domain territory, verification/quality-gate trust), not this one — left unimplemented here per this task's own explicit instruction not to repair it as part of POL-001 closure.
 
 **POL-002 — Security-sensitive-goal handling / approval escalation**
 Language Scope: LANGUAGE_NEUTRAL (sensitive-path/approval logic is orchestration-level, not Java-specific) · Deployment Relevance: REQUIRED · Related PRV: PRV-02 · Effective Evidence Level: **E2, downgraded this pass from Pass 1's E4.** PRV-02's `RESULT.md` status is `NEEDS_REVIEW`, manual check ("confirm valid/expired/malformed token semantics") unticked — Quality Gates passed and `TokenValidator.java`/`TokenValidatorTest.java` were produced, real evidence something happened, but the scenario's own acceptance bar for the security-sensitive *semantics* specifically was never confirmed · Disposition: **NEEDS_EVIDENCE (downgraded from CLOSED)**.
