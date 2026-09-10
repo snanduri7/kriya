@@ -96,7 +96,7 @@ from kriya.workflow.acceptance import (
     subtask_owns_test_obligation,
 )
 from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
-from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
+from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
@@ -898,22 +898,27 @@ async def _run_coordinated_repair_generation(
     return results, candidate_view
 
 
-def _extract_grounded_contract_verdict(
+def _classify_grounded_contract_verdict(
     output: str, worktree_path: str, files_written: List[str]
-) -> Optional[Dict[str, Any]]:
-    """Wraps extract_contract_verdict() with the independent grounding check
-    from verification_contract.py::pass_verdict_is_grounded() - see that
-    function's own docstring for the full reasoning (independent brutal
-    review finding #4, 2026-08-15: a PASS marker is self-reported by the
-    same model that wrote the implementation, with nothing else checking it
-    really branches on anything). A single shared helper, not three copies
-    of the same logic - used identically at all three of run_attempt()'s
-    run_res-outcome branches (clean run / timed out / plain nonzero exit) so
-    a PASS verdict's trust is checked consistently everywhere, not just
-    wherever someone happened to add it first."""
-    verdict = extract_contract_verdict(output)
-    if verdict is None or not verdict["passed"]:
-        return verdict
+) -> Tuple[ContractVerdictState, Optional[Dict[str, Any]]]:
+    """IO wrapper around verification_contract.classify_contract_verdict()
+    (which stays pure/file-content-free, matching its own established
+    convention) - reads the written files from worktree_path, then
+    classifies. VER-006 (2026-09-10): this used to be
+    _extract_grounded_contract_verdict(), returning a bare Optional[Dict]
+    that collapsed two structurally different situations into the same
+    `None` - "no marker exists at all" (ABSENT) and "a marker exists and was
+    deterministically rejected as ungrounded" (INDETERMINATE_DISTRUSTED) -
+    both of which then received identical, fully-trusted LLM grading. See
+    ContractVerdictState's own docstring for the live incident (run
+    `bpwsqscrg`) that exploited exactly this collapse. A single shared
+    helper, not seven copies of the same logic - used identically at every
+    run_res-outcome branch in both run_attempt() and
+    _execute_runtime_verification_directly() (clean run / timed out / plain
+    nonzero exit / post-self-correction re-verification) via
+    _resolve_runtime_verification_grade() below, so classification is
+    consistent everywhere, not just wherever someone happened to add it
+    first."""
     files_content = []
     for filepath in files_written:
         full_path = os.path.join(worktree_path, filepath)
@@ -922,15 +927,123 @@ def _extract_grounded_contract_verdict(
                 files_content.append(f.read())
         except Exception:
             continue
-    if not pass_verdict_is_grounded(files_content):
+    state, verdict = classify_contract_verdict(output, files_content)
+    if state is ContractVerdictState.INDETERMINATE_DISTRUSTED:
         logger.info(
             "Runtime verification: a deterministic '[VERIFICATION] PASS' marker was found, but "
             "none of the written files contain a '[VERIFICATION] FAIL' string anywhere - the "
             "check doesn't look like it actually branches on anything. Not trusting it; falling "
-            "back to LLM grading instead."
+            "back to LLM grading instead, disclosed as distrusted (VER-006) - it cannot become "
+            "a terminal PASS on that evidence alone."
         )
-        return None
-    return verdict
+    return state, verdict
+
+
+_DISTRUST_DISCLOSURE_NOTE = (
+    "A deterministic check already inspected the captured output above and found a "
+    "self-reported '[VERIFICATION] PASS' marker, but rejected it as ungrounded: none of the "
+    "written files contain a '[VERIFICATION] FAIL' string anywhere, meaning this marker does "
+    "not appear to be gated behind any real comparison and could have been printed "
+    "unconditionally regardless of outcome. Do not cite this marker, by itself, as evidence "
+    "the goal was achieved. Evaluate only evidence independent of that marker. If no such "
+    "independent evidence exists in the captured output, you must return passed: false and "
+    "say so explicitly - a distrusted marker does not become trustworthy because it is "
+    "reinterpreted."
+)
+
+
+async def _resolve_runtime_verification_grade(
+    ctx: "AttemptContext", state: ContractVerdictState,
+    contract_verdict: Optional[Dict[str, Any]], grade_kwargs: Dict[str, Any],
+) -> Tuple[Dict[str, Any], str]:
+    """VER-006 containment (2026-09-10) - the single place every run_res-
+    outcome branch (clean run / timed out / plain nonzero exit / post-self-
+    correction re-verification, in both run_attempt() and
+    _execute_runtime_verification_directly()) must route through once
+    _classify_grounded_contract_verdict() has produced a state, so
+    'deterministically distrusted evidence cannot become terminal PASS via
+    LLM judgment over that same evidence' is enforced identically
+    everywhere rather than in seven hand-rolled copies that could drift out
+    of sync. Returns (grade, verification_authority) - grade is always a
+    {"passed", "reasoning", "likely_files"}-shaped dict, matching every
+    existing call site's expectations exactly.
+
+    PASS/FAIL: today's existing fast path, completely unchanged - the
+    grounded deterministic verdict IS the grade, grade() is never called.
+
+    ABSENT: today's existing LLM-fallback behavior, completely unchanged -
+    no deterministic contract evidence exists at all, so nothing here
+    should (or safely can) second-guess ctx.run_verifier.grade()'s own
+    authority over the raw captured output.
+
+    INDETERMINATE_DISTRUSTED: grade() may still be called - its reasoning/
+    likely_files remain useful diagnostic value for the retry loop, and
+    Invariant 5 (LLM grading may remain advisory where no stronger
+    contradictory/distrust evidence exists) does not forbid an advisory
+    call, only an AUTHORITATIVE one - but it is called with the distrust
+    disclosed as a separate, trusted (non-fenced) prompt section, never
+    folded into the untrusted captured-output text. Whatever it returns,
+    `passed` is force-set to False before it ever reaches a caller: this
+    verification path's only evidence channel is the same captured stdout/
+    stderr the deterministic check already distrusted (run_app_sequence()
+    captures nothing else), so there is no existing independent
+    corroboration source this function could check instead (VER-006 Task 2
+    explicitly forbids inventing one) - prompt wording alone is
+    acknowledged as insufficient enforcement (a grader could still ignore
+    the notice and hallucinate a PASS anyway), so the override here is
+    unconditional on the returned `passed` value, not merely a check that
+    the notice was heeded."""
+    if state in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
+        return contract_verdict, "contract"
+
+    if state is ContractVerdictState.ABSENT:
+        grade = await ctx.run_verifier.grade(**grade_kwargs)
+        return grade, "llm"
+
+    # INDETERMINATE_DISTRUSTED.
+    disclosed_kwargs = dict(grade_kwargs)
+    disclosed_kwargs["distrust_notice"] = _DISTRUST_DISCLOSURE_NOTE
+    try:
+        grade = await ctx.run_verifier.grade(**disclosed_kwargs)
+    except Exception as e:
+        logger.warning(f"Run Verifier grade() call failed during distrusted-evidence disclosure: {e}")
+        grade = {"passed": False, "reasoning": f"Grader call failed: {e}", "likely_files": []}
+    if grade.get("passed"):
+        logger.info(
+            "VER-006: LLM grader returned passed=true over deterministically distrusted "
+            "evidence with no independent corroboration available on this verification path - "
+            "overriding to non-PASS regardless. Grader's own (overridden) reasoning: %s",
+            grade.get("reasoning", ""),
+        )
+    grade = dict(grade)
+    grade["reasoning"] = (
+        "A deterministic check found a self-reported verification marker but rejected it as "
+        "ungrounded (present but never demonstrated to gate on anything). No independent "
+        "corroborating evidence exists on this verification path, so this cannot pass on LLM "
+        f"judgment over that same distrusted evidence alone. Grader's own verdict: "
+        f"{grade.get('reasoning', '')}"
+    )
+    grade["passed"] = False
+    return grade, "llm_over_distrusted_evidence"
+
+
+def _deterministic_result_provenance_field(verification_authority: str) -> Optional[str]:
+    """VER-006 provenance (Task 4): before this, gate_outcome's own
+    `deterministic_result` field was `"PASS"` for `verification_authority ==
+    "process_exit"` and `None` for EVERY other authority - including both
+    genuine ABSENT (no marker ever existed, ordinary LLM grading) and
+    INDETERMINATE_DISTRUSTED (a marker existed and was explicitly rejected,
+    then force-overridden to non-PASS) alike, destroying the distinction a
+    second time even after _classify_grounded_contract_verdict() itself
+    stopped collapsing it. `"llm_over_distrusted_evidence"` (this module's
+    own new verification_authority value) now maps to its own distinct
+    `"DISTRUSTED"` value instead; ordinary `"llm"` (ABSENT) and `"contract"`
+    stay exactly as before - unchanged legacy behavior for both."""
+    if verification_authority == "process_exit":
+        return "PASS"
+    if verification_authority == "llm_over_distrusted_evidence":
+        return "DISTRUSTED"
+    return None
 
 
 def _record_self_correction_scope_conflict(
@@ -2507,7 +2620,7 @@ async def _execute_runtime_verification_directly(
     existing sub-helper by reference (RunVerifierAgent.judge()/grade(),
     _resolve_run_command, ground_java_entrypoint_in_no_build_file_projects,
     the JDK/JVM-flag preflight corrections, run_app_sequence,
-    deterministic_sequence_kind, _extract_grounded_contract_verdict,
+    deterministic_sequence_kind, _classify_grounded_contract_verdict, _resolve_runtime_verification_grade,
     _build_quality_gate_failure) - none of their own internal logic is
     reimplemented here, only the SEQUENCE in which a verification-only
     subtask needs to call them is new.
@@ -2792,16 +2905,15 @@ async def _execute_runtime_verification_directly(
     gate_type = "test" if command_verification_kind == "test" else "run_verification"
     verification_authority = "llm"
     if run_res["timed_out"]:
-        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
-        if contract_verdict is not None:
-            verification_authority = "contract"
-            grade = contract_verdict
-        else:
-            grade = await ctx.run_verifier.grade(
-                goal=ctx.goal, success_criteria=judgment["success_criteria"],
-                output=run_res["output"], returncode=run_res["returncode"],
-                files_written=known_files, timed_out=True,
-            )
+        state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+        grade, verification_authority = await _resolve_runtime_verification_grade(
+            ctx, state_, contract_verdict,
+            {
+                "goal": ctx.goal, "success_criteria": judgment["success_criteria"],
+                "output": run_res["output"], "returncode": run_res["returncode"],
+                "files_written": known_files, "timed_out": True,
+            },
+        )
         timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
         if grade["passed"]:
             gate_type = "run_verification_hung"
@@ -2830,16 +2942,15 @@ async def _execute_runtime_verification_directly(
                 "likely_files": [],
             }
         else:
-            contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
-            if contract_verdict is not None:
-                verification_authority = "contract"
-                grade = contract_verdict
-            else:
-                grade = await ctx.run_verifier.grade(
-                    goal=ctx.goal, success_criteria=judgment["success_criteria"],
-                    output=run_res["output"], returncode=run_res["returncode"],
-                    files_written=known_files,
-                )
+            state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+            grade, verification_authority = await _resolve_runtime_verification_grade(
+                ctx, state_, contract_verdict,
+                {
+                    "goal": ctx.goal, "success_criteria": judgment["success_criteria"],
+                    "output": run_res["output"], "returncode": run_res["returncode"],
+                    "files_written": known_files,
+                },
+            )
         if grade.get("passed") and not runtime_application_step_started(run_res):
             grade["passed"] = False
             grade["reasoning"] = (
@@ -2860,16 +2971,15 @@ async def _execute_runtime_verification_directly(
                 "likely_files": [],
             }
         else:
-            contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
-            if contract_verdict is not None:
-                verification_authority = "contract"
-                grade = contract_verdict
-            else:
-                grade = await ctx.run_verifier.grade(
-                    goal=ctx.goal, success_criteria=judgment["success_criteria"],
-                    output=run_res["output"], returncode=run_res["returncode"],
-                    files_written=known_files,
-                )
+            state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+            grade, verification_authority = await _resolve_runtime_verification_grade(
+                ctx, state_, contract_verdict,
+                {
+                    "goal": ctx.goal, "success_criteria": judgment["success_criteria"],
+                    "output": run_res["output"], "returncode": run_res["returncode"],
+                    "files_written": known_files,
+                },
+            )
 
     if not grade["passed"]:
         message = (
@@ -2885,6 +2995,7 @@ async def _execute_runtime_verification_directly(
         failure_outcome.update({
             "graded_by": verification_authority, "commands": resolved_run_commands,
             "steps": run_res.get("steps", []),
+            "deterministic_result": _deterministic_result_provenance_field(verification_authority),
         })
         state.gate_outcomes.append(failure_outcome)
         raise QualityGateFailure(failure)
@@ -2894,7 +3005,7 @@ async def _execute_runtime_verification_directly(
         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
         "graded_by": verification_authority, "commands": resolved_run_commands,
         "steps": run_res.get("steps", []),
-        "deterministic_result": "PASS" if verification_authority == "process_exit" else None,
+        "deterministic_result": _deterministic_result_provenance_field(verification_authority),
     })
 
 
@@ -6178,23 +6289,23 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         # trying timeout-tuning fixes that could never fix a genuine
                         # resource leak, burning the whole retry budget on the wrong
                         # class of change.
-                        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
-                        if contract_verdict is not None:
-                            verification_authority = "contract"
+                        state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
+                        if state_ in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
                             logger.info(
                                 "Runtime verification: using deterministic verification-contract "
                                 "marker instead of LLM grading (timed-out run)."
                             )
-                            grade = contract_verdict
-                        else:
-                            grade = await ctx.run_verifier.grade(
-                                goal=ctx.goal,
-                                success_criteria=judgment["success_criteria"],
-                                output=run_res["output"],
-                                returncode=run_res["returncode"],
-                                files_written=list(state.all_files_written),
-                                timed_out=True,
-                            )
+                        grade, verification_authority = await _resolve_runtime_verification_grade(
+                            ctx, state_, contract_verdict,
+                            {
+                                "goal": ctx.goal,
+                                "success_criteria": judgment["success_criteria"],
+                                "output": run_res["output"],
+                                "returncode": run_res["returncode"],
+                                "files_written": list(state.all_files_written),
+                                "timed_out": True,
+                            },
+                        )
                         timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
                         if grade["passed"]:
                             # The goal's described behavior WAS genuinely produced -
@@ -6255,7 +6366,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         # generated program didn't comply with the contract.
                         deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
                         if deterministic_kind is not None:
-                            contract_verdict = None
                             verification_authority = "process_exit"
                             grade = {
                                 "passed": False,
@@ -6266,21 +6376,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 "likely_files": [],
                             }
                         else:
-                            contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
-                        if deterministic_kind is None and contract_verdict is not None:
-                            verification_authority = "contract"
-                            logger.info(
-                                "Runtime verification: using deterministic verification-contract "
-                                "marker instead of LLM grading (non-zero exit, no hang)."
-                            )
-                            grade = contract_verdict
-                        elif deterministic_kind is None:
-                            grade = await ctx.run_verifier.grade(
-                                goal=ctx.goal,
-                                success_criteria=judgment["success_criteria"],
-                                output=run_res["output"],
-                                returncode=run_res["returncode"],
-                                files_written=list(state.all_files_written),
+                            state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
+                            if state_ in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
+                                logger.info(
+                                    "Runtime verification: using deterministic verification-contract "
+                                    "marker instead of LLM grading (non-zero exit, no hang)."
+                                )
+                            grade, verification_authority = await _resolve_runtime_verification_grade(
+                                ctx, state_, contract_verdict,
+                                {
+                                    "goal": ctx.goal,
+                                    "success_criteria": judgment["success_criteria"],
+                                    "output": run_res["output"],
+                                    "returncode": run_res["returncode"],
+                                    "files_written": list(state.all_files_written),
+                                },
                             )
 
                         # A semantic expected-failure verdict is admissible
@@ -6387,7 +6497,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                     resolved_run_commands
                                 )
                                 if repaired_deterministic_kind is not None:
-                                    contract_verdict = None
                                     verification_authority = "process_exit"
                                     repaired_reasoning = (
                                         f"All deterministic {repaired_deterministic_kind} "
@@ -6403,19 +6512,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                         "likely_files": [],
                                     }
                                 else:
-                                    contract_verdict = _extract_grounded_contract_verdict(
+                                    state_, contract_verdict = _classify_grounded_contract_verdict(
                                         run_res["output"], ctx.worktree_path, list(state.all_files_written),
                                     )
-                                if repaired_deterministic_kind is None and contract_verdict is not None:
-                                    verification_authority = "contract"
-                                    grade = contract_verdict
-                                elif repaired_deterministic_kind is None:
-                                    grade = await ctx.run_verifier.grade(
-                                        goal=ctx.goal,
-                                        success_criteria=judgment["success_criteria"],
-                                        output=run_res["output"],
-                                        returncode=run_res["returncode"],
-                                        files_written=list(state.all_files_written),
+                                    grade, verification_authority = await _resolve_runtime_verification_grade(
+                                        ctx, state_, contract_verdict,
+                                        {
+                                            "goal": ctx.goal,
+                                            "success_criteria": judgment["success_criteria"],
+                                            "output": run_res["output"],
+                                            "returncode": run_res["returncode"],
+                                            "files_written": list(state.all_files_written),
+                                        },
                                     )
                     else:
                         deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
@@ -6424,7 +6532,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             # is its authoritative verdict. Quiet output is a
                             # normal success mode, not evidence of missing
                             # runtime behavior for an LLM to reinterpret.
-                            contract_verdict = None
                             verification_authority = "process_exit"
                             grade = {
                                 "passed": True,
@@ -6440,21 +6547,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 deterministic_kind,
                             )
                         else:
-                            contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
-                        if deterministic_kind is None and contract_verdict is not None:
-                            verification_authority = "contract"
-                            logger.info(
-                                "Runtime verification: using deterministic verification-contract "
-                                "marker instead of LLM grading."
-                            )
-                            grade = contract_verdict
-                        elif deterministic_kind is None:
-                            grade = await ctx.run_verifier.grade(
-                                goal=ctx.goal,
-                                success_criteria=judgment["success_criteria"],
-                                output=run_res["output"],
-                                returncode=run_res["returncode"],
-                                files_written=list(state.all_files_written),
+                            state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
+                            if state_ in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
+                                logger.info(
+                                    "Runtime verification: using deterministic verification-contract "
+                                    "marker instead of LLM grading."
+                                )
+                            grade, verification_authority = await _resolve_runtime_verification_grade(
+                                ctx, state_, contract_verdict,
+                                {
+                                    "goal": ctx.goal,
+                                    "success_criteria": judgment["success_criteria"],
+                                    "output": run_res["output"],
+                                    "returncode": run_res["returncode"],
+                                    "files_written": list(state.all_files_written),
+                                },
                             )
                     if not grade["passed"]:
                         # A compile error always names its own broken file
@@ -6510,6 +6617,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             "graded_by": verification_authority,
                             "commands": resolved_run_commands,
                             "steps": run_res.get("steps", []),
+                            "deterministic_result": _deterministic_result_provenance_field(verification_authority),
                         })
                         state.gate_outcomes.append(failure_outcome)
                         raise QualityGateFailure(failure)
@@ -6531,9 +6639,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         "graded_by": verification_authority,
                         "commands": resolved_run_commands,
                         "steps": run_res.get("steps", []),
-                        "deterministic_result": (
-                            "PASS" if verification_authority == "process_exit" else None
-                        ),
+                        "deterministic_result": _deterministic_result_provenance_field(verification_authority),
                     }
                     if self_correction_result is not None and self_correction_result.resolved:
                         # Same markers the compile gate's own self-correction
