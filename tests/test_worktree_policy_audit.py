@@ -4,6 +4,7 @@ create_git_worktree (the ONE real GIT_WRITE call site in Kriya's pipeline)
 must never affect whether the real bootstrap commit happens, under any
 condition including a misconfigured or outright broken policy engine.
 """
+import os
 import subprocess
 from unittest.mock import MagicMock
 
@@ -123,3 +124,78 @@ def test_audit_call_not_issued_when_repo_already_has_commits(tmp_path, monkeypat
     monkeypatch.setattr(worktree_mod._execution_policy, "evaluate", spy)
     create_git_worktree(str(tmp_path))
     assert called == []
+
+
+# --- POL-001-P3: the recognizer's real effect on the real bootstrap path ---
+
+def test_zero_commit_bootstrap_policy_verdict_is_now_allow_not_require_approval(tmp_path, monkeypatch):
+    """The recognizer added to kriya/policy/execution.py::_check_git_destructive
+    changes what the REAL bootstrap commit's own evaluate() call returns -
+    this is the actual gap POL-001-P3 closes (REQUIRE_APPROVAL was an honest
+    but wrong verdict for a Kriya-internal, zero-file-change control-plane
+    action). worktree.py's own _audit_git_write/enforce_hard_invariants
+    call is mode-independent and never blocked on REQUIRE_APPROVAL either
+    way, so this proves the SEMANTIC fix, independent of whether anything
+    was ever functionally blocked before."""
+    _init_zero_commit_repo(tmp_path)
+    captured = []
+    real_evaluate = worktree_mod._execution_policy.evaluate
+
+    def spy(request):
+        result = real_evaluate(request)
+        captured.append(result)
+        return result
+
+    monkeypatch.setattr(worktree_mod._execution_policy, "evaluate", spy)
+    worktree_path = create_git_worktree(str(tmp_path))
+
+    assert len(captured) == 1
+    assert captured[0].decision == PolicyDecision.ALLOW
+    assert captured[0].reason_code == "KRIYA_INTERNAL_BOOTSTRAP_COMMIT_ALLOWED"
+
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    assert len(log.stdout.strip().splitlines()) == 1
+    # Worktree isolation actually proceeded past the bootstrap step.
+    assert os.path.isdir(worktree_path)
+
+    # The bootstrap commit is --allow-empty - it must not have created or
+    # changed any file in the real user workspace.
+    tracked = subprocess.run(
+        ["git", "show", "--stat", "--format=", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    assert tracked.stdout.strip() == ""
+
+
+def test_greenfield_bootstrap_policy_verdict_is_allow(tmp_path, monkeypatch):
+    """_bootstrap_greenfield_repository issues TWO real GIT_WRITE requests,
+    `git init` then the bootstrap commit - both must resolve to their own
+    dedicated ALLOW, not just one of the two (an `any()` check over the
+    captured results would silently pass even if `git init` were still
+    stuck at REQUIRE_APPROVAL, which is exactly what a first draft of this
+    test did - caught and fixed by explicitly asserting both, in order)."""
+    captured = []
+    real_evaluate = worktree_mod._execution_policy.evaluate
+
+    def spy(request):
+        result = real_evaluate(request)
+        captured.append(result)
+        return result
+
+    monkeypatch.setattr(worktree_mod._execution_policy, "evaluate", spy)
+    # tmp_path is NOT a git repo at all yet - triggers _bootstrap_greenfield_repository.
+    worktree_path = create_git_worktree(str(tmp_path))
+
+    assert len(captured) == 2
+    assert captured[0].decision == PolicyDecision.ALLOW
+    assert captured[0].reason_code == "KRIYA_INTERNAL_BOOTSTRAP_INIT_ALLOWED"
+    assert captured[1].decision == PolicyDecision.ALLOW
+    assert captured[1].reason_code == "KRIYA_INTERNAL_BOOTSTRAP_COMMIT_ALLOWED"
+
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    assert len(log.stdout.strip().splitlines()) == 1
+    assert os.path.isdir(worktree_path)
+    assert os.path.isdir(worktree_path)

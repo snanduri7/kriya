@@ -280,6 +280,75 @@ def _targets_protected_ref(rest: Tuple[str, ...]) -> bool:
     return any(a in _GIT_PROTECTED_REFS for a in positional)
 
 
+# POL-001-P3 - the exact, fixed command-local identity override
+# kriya/workflow/worktree.py's two internal bootstrap commits use (and the
+# ONLY place in the codebase that constructs it - confirmed by a full-repo
+# grep before adding this recognizer). Order-sensitive and exact: this is
+# the "command-local identity is exactly the reserved Kriya identity"
+# structural proof, not a trust label - a caller cannot spoof this without
+# already being able to construct an identical git invocation, and neither
+# GitTool (its own commit construction never emits `-c`/`--allow-empty` at
+# all - user input only ever reaches `-m`'s value) nor ShellTool (raw shell
+# strings are classified RUN_COMMAND, never reach this GIT_WRITE stage) can
+# produce it.
+_KRIYA_BOOTSTRAP_IDENTITY: Tuple[str, ...] = ("-c", "user.name=Kriya", "-c", "user.email=kriya@local")
+
+
+def _is_kriya_internal_bootstrap_commit(command: Tuple[str, ...]) -> bool:
+    """POL-001-P3 - recognizes ONLY Kriya's own two fixed internal bootstrap
+    commits (kriya/workflow/worktree.py's create_git_worktree and
+    _bootstrap_greenfield_repository): an --allow-empty commit made under
+    the reserved Kriya-internal identity above, structurally incapable of
+    touching any file/history content. Deliberately a tiny, EXACT structural
+    match, not a general git-argv parser (`_git_subcommand_and_args`'s own
+    "first token after git" parsing would misread `-c` as the subcommand
+    here, since these global `-c key=value` options precede the subcommand
+    - this helper is intentionally independent of that parser). The commit
+    MESSAGE is never inspected - message content carries no authority here,
+    on purpose (an arbitrary message on a zero-file-change empty commit
+    cannot cause harm, and matching one specific literal string would be
+    exactly the "single command spelling" this stage's own docstring says
+    never to rely on).
+
+    A positive ALLOWLIST of the exact post-"commit" token shape, not a
+    blacklist of dangerous flags: anything other than precisely
+    `--allow-empty -m <one value>` (an extra flag, --amend, -a/--all, a
+    second -c reuse-message flag, a pathspec, wrong order, wrong count)
+    fails this check and falls through to ordinary GIT_WRITE policy
+    unchanged. A blacklist would need to name every dangerous flag and
+    could miss one; this allowlist is safe by construction - only the one
+    known-safe shape passes."""
+    args = list(command)
+    if args and os.path.basename(args[0]) == "git":
+        args = args[1:]
+    n = len(_KRIYA_BOOTSTRAP_IDENTITY)
+    if tuple(args[:n]) != _KRIYA_BOOTSTRAP_IDENTITY:
+        return False
+    rest = args[n:]
+    if not rest or rest[0] != "commit":
+        return False
+    rest = rest[1:]
+    return len(rest) == 3 and rest[0] == "--allow-empty" and rest[1] == "-m"
+
+
+def _is_kriya_internal_bootstrap_init(command: Tuple[str, ...]) -> bool:
+    """POL-001-P3 - recognizes ONLY the bare `git init` kriya/workflow/
+    worktree.py::_bootstrap_greenfield_repository issues (the ONLY `git
+    init` construction anywhere in the codebase, confirmed by a full-repo
+    grep) before its own bootstrap commit, when a workspace isn't a Git
+    repository at all yet. No identity override is possible for `init`
+    itself (there is no existing history for a command-local identity to
+    matter against), so the exact-argv-shape requirement carries the full
+    weight here: `--bare`, `--template=...`, a target-directory argument,
+    or any other flag routes this call to a DIFFERENT directory or a
+    different repository shape than the one Kriya just checked doesn't
+    exist yet, and must fall through to ordinary policy instead."""
+    args = list(command)
+    if args and os.path.basename(args[0]) == "git":
+        args = args[1:]
+    return tuple(args) == ("init",)
+
+
 _REQUIRED_FIELDS_BY_ACTION_TYPE = {
     ActionType.READ_FILE: ("target",),
     ActionType.WRITE_FILE: ("target",),
@@ -412,9 +481,42 @@ class ExecutionPolicy:
         section 32. Everything else well-formed GIT_WRITE (an ordinary
         commit, tag, merge, non-force push already handled above, a
         non-protected branch delete) requires approval - never a bare
-        ALLOW, mirroring MA4.7's INSTALL_PACKAGE precedent."""
+        ALLOW, mirroring MA4.7's INSTALL_PACKAGE precedent.
+
+        POL-001-P3 - the one deliberate exception to "never a bare ALLOW":
+        `_is_kriya_internal_bootstrap_commit` recognizes Kriya's own two
+        fixed, zero-file-change worktree-bootstrap commits (KRIYA_INTERNAL_
+        CONTROL_PLANE authority, not USER_DIRECTED or MODEL_DIRECTED - see
+        docs/design.md POL-001-P3 narrative) and ALLOWs only that exact
+        structural shape, checked before this stage's own subcommand
+        parsing (which would misread the bootstrap commits' leading `-c`
+        options as the subcommand)."""
         if request.action_type != ActionType.GIT_WRITE or not request.command:
             return None
+
+        if _is_kriya_internal_bootstrap_commit(request.command):
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="KRIYA_INTERNAL_BOOTSTRAP_COMMIT_ALLOWED",
+                explanation=(
+                    "Recognized as Kriya's own internal, fixed, zero-file-change worktree-"
+                    "bootstrap commit (reserved kriya-local identity + --allow-empty, no other "
+                    "options) - a control-plane action, not a user- or model-directed mutation."
+                ),
+                matched_rule="git_destructive.kriya_internal_bootstrap_commit_allowed",
+            )
+
+        if _is_kriya_internal_bootstrap_init(request.command):
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="KRIYA_INTERNAL_BOOTSTRAP_INIT_ALLOWED",
+                explanation=(
+                    "Recognized as Kriya's own internal, bare `git init` for a workspace "
+                    "confirmed not to be a Git repository yet - a control-plane action, not a "
+                    "user- or model-directed mutation."
+                ),
+                matched_rule="git_destructive.kriya_internal_bootstrap_init_allowed",
+            )
 
         subcommand, rest = _git_subcommand_and_args(request.command)
         if subcommand is None:
