@@ -213,23 +213,30 @@ async def test_git_tool_commit_require_approval_fails_closed_under_enforce(tmp_p
         os.chdir(old_cwd)
 
 
-def test_git_tool_commit_deny_never_starts_subprocess():
-    """Direct unit coverage of the DENY branch (no real rule reaches DENY
-    for a plain commit today - _check_git_destructive's DENY codes are all
-    push/config/remote-mutation specific - so this is forced via a
-    monkeypatched evaluate(), proving the code path itself, matching this
-    task's own required-proof list). _authorize_git_write is synchronous
-    and raises before any subprocess is ever constructed."""
+@pytest.mark.asyncio
+async def test_git_tool_commit_deny_never_starts_subprocess(tmp_path):
+    """No real rule reaches DENY for a plain commit today (_check_git_
+    destructive's DENY codes are all push/config/remote-mutation specific),
+    so this is forced via a monkeypatched evaluate() - but routed through
+    the real `execute()` -> `_run()` path, not the helper directly, so it
+    actually proves the required claim: the subprocess never starts and
+    nothing lands in git, not just that a helper function raises."""
     from kriya.config.config import ExecutionPolicyConfig
-    from kriya.policy.errors import PolicyDeniedError
     from kriya.policy.model import PolicyDecision, PolicyResult
 
-    tool = GitTool(execution_policy_cfg=ExecutionPolicyConfig(mode="enforce"))
-    tool._execution_policy.evaluate = lambda request: PolicyResult(
-        decision=PolicyDecision.DENY, reason_code="TEST_FORCED_DENY", explanation="forced for test",
-    )
-    with pytest.raises(PolicyDeniedError, match="TEST_FORCED_DENY"):
-        tool._authorize_git_write(["git", "commit", "-m", "x"])
+    _init_git_repo(tmp_path)
+    old_cwd = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        tool = GitTool(execution_policy_cfg=ExecutionPolicyConfig(mode="enforce"))
+        tool._execution_policy.evaluate = lambda request: PolicyResult(
+            decision=PolicyDecision.DENY, reason_code="TEST_FORCED_DENY", explanation="forced for test",
+        )
+        with pytest.raises(ToolExecutionError, match="TEST_FORCED_DENY"):
+            await tool.execute(subcommand="commit", message="should never land - forced deny")
+        assert "should never land" not in _git_log(tmp_path)
+    finally:
+        os.chdir(old_cwd)
 
 
 @pytest.mark.asyncio
