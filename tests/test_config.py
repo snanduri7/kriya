@@ -85,11 +85,15 @@ def test_runtime_profile_hardened_overrides_the_documented_fields(tmp_path):
 
 
 def test_runtime_profile_hardened_does_not_touch_execution_policy_mode():
-    """execution_policy.mode="enforce" has always been a distinct, separately
-    authorized decision (its own validator hard-rejects it) - this preset
-    does not silently reach around that restriction."""
-    with pytest.raises(Exception):
-        AppConfig(runtime_profile="hardened", execution_policy={"mode": "enforce"})
+    """execution_policy.mode is a distinct, separately authorized decision
+    (POL-001-P2, 2026-09-10) - the "hardened" preset does not silently
+    reach around or override whatever a project explicitly set it to,
+    in either direction."""
+    cfg_audit = AppConfig(runtime_profile="hardened")
+    assert cfg_audit.execution_policy.mode == "audit"
+
+    cfg_enforce = AppConfig(runtime_profile="hardened", execution_policy={"mode": "enforce"})
+    assert cfg_enforce.execution_policy.mode == "enforce"
 
 
 def test_runtime_profile_rejects_an_unknown_value():

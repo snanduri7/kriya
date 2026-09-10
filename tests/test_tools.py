@@ -128,7 +128,7 @@ async def test_git_tool(tmp_path):
     # Initialize a git repository in tmp_path
     import subprocess
     subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True)
-    
+
     old_cwd = os.getcwd()
     os.chdir(str(tmp_path))
     try:
@@ -137,3 +137,153 @@ async def test_git_tool(tmp_path):
         assert "On branch" in res or "No commits yet" in res
     finally:
         os.chdir(old_cwd)
+
+
+# --- POL-001-P2: GitTool's mutating boundary (`git commit`) ---
+# status/diff/log/branch(list)/blame are GIT_READ-shaped and never gated as
+# GIT_WRITE; commit is the only currently-supported mutating subcommand.
+
+def _init_git_repo(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(tmp_path), capture_output=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(tmp_path), capture_output=True)
+    (tmp_path / "a.txt").write_text("hello")
+    subprocess.run(["git", "add", "a.txt"], cwd=str(tmp_path), capture_output=True)
+
+
+def _git_log(tmp_path):
+    import subprocess
+    return subprocess.run(
+        ["git", "log", "--oneline"], cwd=str(tmp_path), capture_output=True, text=True,
+    ).stdout
+
+
+@pytest.mark.asyncio
+async def test_git_tool_read_only_command_remains_executable_under_enforce(tmp_path):
+    """status/diff/log/branch/blame are GIT_READ-shaped - never gated as
+    GIT_WRITE, unaffected regardless of execution_policy.mode."""
+    import subprocess
+    subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True)
+
+    old_cwd = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        from kriya.config.config import ExecutionPolicyConfig
+        tool = GitTool(execution_policy_cfg=ExecutionPolicyConfig(mode="enforce"))
+        res = await tool.execute(subcommand="status")
+        assert "On branch" in res or "No commits yet" in res
+    finally:
+        os.chdir(old_cwd)
+
+
+@pytest.mark.asyncio
+async def test_git_tool_commit_allow_executes_under_audit_default(tmp_path):
+    """audit mode (today's default, no execution_policy_cfg) preserves
+    current behavior - the commit still executes and actually lands."""
+    _init_git_repo(tmp_path)
+    old_cwd = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        tool = GitTool()
+        await tool.execute(subcommand="commit", message="pol001p2 audit commit")
+        assert "pol001p2 audit commit" in _git_log(tmp_path)
+    finally:
+        os.chdir(old_cwd)
+
+
+@pytest.mark.asyncio
+async def test_git_tool_commit_require_approval_fails_closed_under_enforce(tmp_path):
+    """An ordinary `git commit` reaches _check_git_destructive's own
+    catch-all rule (GIT_WRITE_REQUIRES_APPROVAL) - no approval_callback is
+    reachable at this plugin-tool boundary, so under mode="enforce" it
+    fails closed (Invariant 4) rather than executing. The subprocess must
+    never start - nothing lands in git."""
+    from kriya.config.config import ExecutionPolicyConfig
+
+    _init_git_repo(tmp_path)
+    old_cwd = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        tool = GitTool(execution_policy_cfg=ExecutionPolicyConfig(mode="enforce"))
+        with pytest.raises(ToolExecutionError, match="GIT_WRITE_REQUIRES_APPROVAL"):
+            await tool.execute(subcommand="commit", message="should never land")
+        assert "should never land" not in _git_log(tmp_path)
+    finally:
+        os.chdir(old_cwd)
+
+
+def test_git_tool_commit_deny_never_starts_subprocess():
+    """Direct unit coverage of the DENY branch (no real rule reaches DENY
+    for a plain commit today - _check_git_destructive's DENY codes are all
+    push/config/remote-mutation specific - so this is forced via a
+    monkeypatched evaluate(), proving the code path itself, matching this
+    task's own required-proof list). _authorize_git_write is synchronous
+    and raises before any subprocess is ever constructed."""
+    from kriya.config.config import ExecutionPolicyConfig
+    from kriya.policy.errors import PolicyDeniedError
+    from kriya.policy.model import PolicyDecision, PolicyResult
+
+    tool = GitTool(execution_policy_cfg=ExecutionPolicyConfig(mode="enforce"))
+    tool._execution_policy.evaluate = lambda request: PolicyResult(
+        decision=PolicyDecision.DENY, reason_code="TEST_FORCED_DENY", explanation="forced for test",
+    )
+    with pytest.raises(PolicyDeniedError, match="TEST_FORCED_DENY"):
+        tool._authorize_git_write(["git", "commit", "-m", "x"])
+
+
+@pytest.mark.asyncio
+async def test_git_tool_commit_audit_mode_evaluates_but_never_blocks(tmp_path):
+    """Explicit mode="audit" (not just the no-cfg default) also preserves
+    current behavior - evaluation happens (auditable), execution is never
+    blocked on the result."""
+    from kriya.config.config import ExecutionPolicyConfig
+
+    _init_git_repo(tmp_path)
+    old_cwd = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        tool = GitTool(execution_policy_cfg=ExecutionPolicyConfig(mode="audit"))
+        await tool.execute(subcommand="commit", message="pol001p2 explicit audit commit")
+        assert "pol001p2 explicit audit commit" in _git_log(tmp_path)
+    finally:
+        os.chdir(old_cwd)
+
+
+# --- POL-001-P2: ShellTool shell-wrapper REQUIRE_APPROVAL gap (Step 4 finding) ---
+
+@pytest.mark.asyncio
+async def test_shell_tool_shell_wrapper_require_approval_fails_closed_under_enforce():
+    """enforce_hard_invariants (P1) never acts on REQUIRE_APPROVAL - a raw
+    `bash -c "..."` invocation reaches COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL,
+    which P1's wiring silently let through. No approval_callback is
+    reachable at this boundary, so under mode="enforce" this now fails
+    closed, mirroring GitTool's own commit gate."""
+    from kriya.config.config import ExecutionPolicyConfig
+
+    tool = ShellTool(execution_policy_cfg=ExecutionPolicyConfig(mode="enforce"))
+    with pytest.raises(ToolExecutionError, match="COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL"):
+        await tool.execute(command="bash -c 'echo hi'")
+
+
+@pytest.mark.asyncio
+async def test_shell_tool_shell_wrapper_still_allowed_under_audit_default():
+    """No execution_policy_cfg (today's real default) - preserves P1's
+    existing behavior exactly, `bash -c` still executes."""
+    tool = ShellTool()
+    res = await tool.execute(command="bash -c 'echo hi'")
+    assert res["exit_code"] == 0
+    assert "hi" in res["stdout"]
+
+
+@pytest.mark.asyncio
+async def test_shell_tool_sudo_still_denied_under_enforce_mode_too():
+    """P1 regression check: the unconditional hard-invariant sudo block
+    must keep firing even when the new mode-gated REQUIRE_APPROVAL check is
+    also active under mode="enforce" - the two checks are additive, neither
+    should suppress the other."""
+    from kriya.config.config import ExecutionPolicyConfig
+
+    tool = ShellTool(execution_policy_cfg=ExecutionPolicyConfig(mode="enforce"))
+    with pytest.raises(ToolExecutionError, match="COMMAND_SUDO_DENIED"):
+        await tool.execute(command="sudo echo hi")

@@ -396,37 +396,30 @@ class ExecutionPolicyConfig(BaseModel):
     and kriya/workflow/workflow.py's own comments for the honestly-tracked
     boundary on that).
 
-    `mode` is the actual audit-vs-enforce gate, and is where this session's
-    binding constraint lives in code: MA4 was to roll out in AUDIT mode
+    `mode` is the actual audit-vs-enforce gate. MA4 rolled out in AUDIT mode
     only, "before any future ENFORCE mode is considered" - not "before it
     is implemented," which MA4.13 already did (WorkflowEngine.
-    _authorize_action's enforce=True branch is real, tested code). The
-    validator below is what actually keeps that promise: "enforce" is
-    accepted as a syntactically valid value (so a project can express
-    intent and see a clear, deliberate rejection) but is REJECTED at
-    validation time, exactly mirroring ProcessProfilesConfig.
-    enforce_verification_depth's own precedent immediately above - fail
-    loud at config-load time, never silently do nothing. Lifting this
-    restriction is a distinct, later, explicit decision, not something
-    accidentally reachable by editing a YAML file today."""
+    _authorize_action's enforce=True branch was real, tested code from the
+    start). POL-001-P2 (2026-09-10) is the explicit, confirmed-with-the-user
+    decision that restriction was always waiting on - mirroring how
+    workflow_controller.mode's own analogous "shadow"-only restriction was
+    lifted (§8.5 of docs/design.md) only after being asked first, never
+    silently. `mode` still defaults to `"audit"` - lifting the rejection
+    makes `"enforce"` SELECTABLE, it does not change what a project gets
+    without explicitly opting in. Every real call site this now actually
+    activates (WorkflowEngine._authorize_action's Stage 2A caller,
+    plugins/core_tools/__init__.py::GitTool's commit gate) was already
+    built, tested, and dormant specifically so no new architecture would
+    need to be invented under pressure once this moment arrived."""
 
     enabled: bool = Field(default=True)
     mode: str = Field(default="audit")
 
     @field_validator("mode")
     @classmethod
-    def _mode_must_be_audit_for_now(cls, v: str) -> str:
+    def _mode_must_be_audit_or_enforce(cls, v: str) -> str:
         if v not in ("audit", "enforce"):
             raise ValueError(f"execution_policy.mode must be 'audit' or 'enforce', got {v!r}")
-        if v == "enforce":
-            raise ValueError(
-                "execution_policy.mode: 'enforce' is not enabled yet. MA4's rollout "
-                "requires an explicit AUDIT-only period before ENFORCE mode is ever "
-                "turned on for real - setting this to 'enforce' would silently do "
-                "nothing useful without that separate, deliberate decision having been "
-                "made yet. Leave this as 'audit' until a future milestone lifts this "
-                "restriction."
-            )
         return v
 
 class WorkflowControllerConfig(BaseModel):

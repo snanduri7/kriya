@@ -9,12 +9,12 @@ from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 
-from kriya.config.config import AutonomyConfig
+from kriya.config.config import AutonomyConfig, ExecutionPolicyConfig
 from kriya.plugins.plugin import BasePlugin
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
-from kriya.policy.model import ActionRequest, ActionType
+from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 from kriya.tools.tool import BaseTool, ToolExecutionError
 
@@ -115,8 +115,12 @@ class FilesystemTool(BaseTool):
 
 
 class ShellTool(BaseTool):
-    def __init__(self, autonomy_cfg: Optional[AutonomyConfig] = None) -> None:
+    def __init__(
+        self, autonomy_cfg: Optional[AutonomyConfig] = None,
+        execution_policy_cfg: Optional[ExecutionPolicyConfig] = None,
+    ) -> None:
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
+        self._execution_policy_cfg = execution_policy_cfg
         # POL-001: this tool previously executed args.command with zero
         # ExecutionPolicy consultation - unlike kriya/tools/validate.py's
         # own Kriya-constructed compile/test commands, this string is
@@ -169,19 +173,49 @@ class ShellTool(BaseTool):
         except ValueError:
             parsed_command = (args.command,)
         if parsed_command:
+            request = ActionRequest(
+                action_type=ActionType.RUN_COMMAND,
+                command=parsed_command,
+                workspace_path=os.getcwd(),
+            )
+            # Unconditional (mode-independent) hard-invariant check - unchanged
+            # from P1, must keep blocking sudo etc. even under mode="audit".
             try:
-                enforce_hard_invariants(
-                    self._execution_policy,
-                    ActionRequest(
-                        action_type=ActionType.RUN_COMMAND,
-                        command=parsed_command,
-                        workspace_path=os.getcwd(),
-                    ),
-                )
+                enforce_hard_invariants(self._execution_policy, request)
             except PolicyDeniedError:
                 raise
             except Exception as e:
                 logger.debug("POL-001 policy check failed (ignored, fails open on a broken check only): %s", e)
+
+            # POL-001-P2: enforce_hard_invariants only ever escalates 5
+            # specific hard-DENY codes - it deliberately never acts on
+            # REQUIRE_APPROVAL (kriya/policy/enforcement.py's own
+            # docstring). A raw shell-wrapper invocation (`bash -c "..."`,
+            # `sh -c "..."`, etc.) typed through this tool genuinely reaches
+            # `_check_command_allowlist`'s COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL
+            # rule, which the check above silently let through - found via
+            # this task's own Step 4 re-audit, not by the P1 report. No
+            # approval_callback is reachable at this plugin-tool boundary
+            # (same as GitTool's own commit gate), so this mirrors that
+            # exact mode-gated fail-closed pattern rather than inventing new
+            # plumbing: audit-only under mode="audit" (today's default,
+            # preserves existing behavior), fails closed under mode="enforce".
+            #
+            # Deliberately scoped to REQUIRE_APPROVAL only, NOT every
+            # non-ALLOW decision - COMMAND_NOT_ALLOWLISTED DENY stays
+            # excluded here exactly as it is in enforce_hard_invariants
+            # itself (narrow starter allowlist, real risk of blocking
+            # legitimate commands never on that list yet). Broadening that
+            # is explicitly out of scope for this pass.
+            enforce = bool(self._execution_policy_cfg and self._execution_policy_cfg.mode == "enforce")
+            if enforce:
+                try:
+                    result = self._execution_policy.evaluate(request)
+                except Exception as e:
+                    logger.debug("POL-001 policy evaluation failed (ignored, audit-only): %s", e)
+                    result = None
+                if result is not None and result.decision == PolicyDecision.REQUIRE_APPROVAL:
+                    raise PolicyDeniedError(request=request, result=result)
 
         env = None
         preexec_fn = None
@@ -210,6 +244,21 @@ class ShellTool(BaseTool):
 
 
 class GitTool(BaseTool):
+    # POL-001-P2: status/diff/log/branch(list)/blame are GIT_READ-shaped -
+    # never gated as GIT_WRITE, matching ExecutionPolicy's own
+    # default-allow-for-reads backstop (MA4.2). commit is the only
+    # currently-supported mutating subcommand this tool exposes - no
+    # push/reset/ref-delete capability exists here to gate.
+    _MUTATING_SUBCOMMANDS = frozenset({"commit"})
+
+    def __init__(self, execution_policy_cfg: Optional[ExecutionPolicyConfig] = None) -> None:
+        self._execution_policy_cfg = execution_policy_cfg
+        # A bare ExecutionPolicy() with no override, matching every other
+        # real caller without config-derived sensitive-path patterns in
+        # scope (see kriya/policy/execution.py's own comment on this
+        # default) - same convention ShellTool's own POL-001 wiring uses.
+        self._execution_policy = ExecutionPolicy()
+
     @property
     def name(self) -> str:
         return "git"
@@ -221,6 +270,44 @@ class GitTool(BaseTool):
     @property
     def arguments_schema(self) -> Type[BaseModel]:
         return GitArgs
+
+    def _authorize_git_write(self, cmd: list) -> None:
+        """POL-001-P2: `_check_git_destructive`'s own catch-all rule
+        (kriya/policy/execution.py) returns REQUIRE_APPROVAL, never a bare
+        ALLOW, for an ordinary `git commit` - none of the 5
+        enforce_hard_invariants hard-DENY codes apply to a plain commit
+        (those are force-push/protected-ref/config/remote-mutation
+        specific), so P1's enforce_hard_invariants-only wiring would have
+        left this REQUIRE_APPROVAL completely unconsulted. Mirrors
+        WorkflowEngine._authorize_action's own established, already-tested
+        semantics exactly (same module cannot be called directly - this is
+        a plugin tool, not a WorkflowEngine method - so the same decision
+        shape is replicated inline rather than inventing a different one):
+        under mode="audit" (today's default), evaluate and let the caller
+        decide/log, but never raise - audit-only, preserves today's actual
+        behavior byte for byte. Under mode="enforce", DENY raises
+        immediately; REQUIRE_APPROVAL has no approval_callback reachable at
+        this boundary (a plugin tool, unlike run_generation_workflow, is
+        never handed one) - Invariant 5 forbids adding callback plumbing
+        for this, so it fails closed instead, exactly as this task's own
+        Step 2 instructs ("otherwise document the current semantic and
+        fail closed rather than inventing new architecture")."""
+        request = ActionRequest(action_type=ActionType.GIT_WRITE, command=tuple(cmd), workspace_path=os.getcwd())
+        try:
+            result = self._execution_policy.evaluate(request)
+        except Exception as e:
+            logger.debug("POL-001 policy evaluation failed (ignored, audit-only): %s", e)
+            return
+
+        enforce = bool(self._execution_policy_cfg and self._execution_policy_cfg.mode == "enforce")
+        if not enforce:
+            return
+
+        if result.decision in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_SANDBOXED):
+            return
+
+        # DENY, or REQUIRE_APPROVAL with no reachable approval path: fail closed.
+        raise PolicyDeniedError(request=request, result=result)
 
     async def _run(self, args: GitArgs) -> Any:
         sub = args.subcommand.lower()
@@ -244,6 +331,9 @@ class GitTool(BaseTool):
             cmd.extend(["blame", args.file_path])
         else:
             raise ToolExecutionError(f"Unsupported git subcommand: {args.subcommand}")
+
+        if sub in self._MUTATING_SUBCOMMANDS:
+            self._authorize_git_write(cmd)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -427,9 +517,12 @@ class CoreToolsPlugin(BasePlugin):
     async def initialize(self) -> None:
         from .validation_tool import ValidationTool
         autonomy_cfg = getattr(self.kernel.config, "autonomy", None) if self.kernel.config else None
+        execution_policy_cfg = getattr(self.kernel.config, "execution_policy", None) if self.kernel.config else None
         self.kernel.registry.register("tool", "filesystem", FilesystemTool())
-        self.kernel.registry.register("tool", "shell", ShellTool(autonomy_cfg=autonomy_cfg))
-        self.kernel.registry.register("tool", "git", GitTool())
+        self.kernel.registry.register(
+            "tool", "shell", ShellTool(autonomy_cfg=autonomy_cfg, execution_policy_cfg=execution_policy_cfg),
+        )
+        self.kernel.registry.register("tool", "git", GitTool(execution_policy_cfg=execution_policy_cfg))
         self.kernel.registry.register("tool", "search", SearchTool())
         self.kernel.registry.register("tool", "ast", ASTTool())
         self.kernel.registry.register("tool", "validate_refactor", ValidationTool())
