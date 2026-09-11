@@ -192,7 +192,18 @@ class NullContainmentBackend:
         # package's validator/service-runtime execution phase) also sets
         # network to DENIED or DEPENDENCY_REGISTRY_ONLY, so this one gate
         # covers the whole "requires real isolation" family in practice.
-        if profile.network is not NetworkAuthority.UNRESTRICTED:
+        #
+        # Scoped to `profile.backend_required` (SEC-001-P6, 2026-09-11):
+        # TRUSTED_KRIYA_INFRASTRUCTURE profiles (backend_required=False)
+        # are never subject to containment in the first place - trust is
+        # established by ExecutionPolicy/TrustClass, a SEPARATE layer from
+        # containment (Invariant: authorization/containment stay separate).
+        # Requiring every trusted-infra caller to also correctly set
+        # network=UNRESTRICTED just to avoid this gate would be a footgun
+        # with no security benefit (found live: GitTool's own trusted-infra
+        # migration tripped this gate on ContainmentProfile's network
+        # default of DENIED before this scoping was added).
+        if profile.backend_required and profile.network is not NetworkAuthority.UNRESTRICTED:
             raise BackendUnavailableError(
                 f"NullContainmentBackend cannot honor network authority "
                 f"{profile.network.value!r} - it provides no network "

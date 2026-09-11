@@ -1,5 +1,4 @@
 import ast
-import asyncio
 import fnmatch
 import logging
 import os
@@ -289,6 +288,12 @@ class GitTool(BaseTool):
     # currently-supported mutating subcommand this tool exposes - no
     # push/reset/ref-delete capability exists here to gate.
     _MUTATING_SUBCOMMANDS = frozenset({"commit"})
+    # SEC-001-P6: this tool had no wall-clock timeout at all before its
+    # ProcessController migration - every subcommand here is a fast,
+    # finite, local git operation, so a generous-but-bounded ceiling
+    # (matching ShellTool's own default) is a strict improvement with no
+    # real-world behavior change for a healthy repo.
+    _GIT_COMMAND_TIMEOUT_SECONDS = 60
 
     def __init__(self, execution_policy_cfg: Optional[ExecutionPolicyConfig] = None) -> None:
         self._execution_policy_cfg = execution_policy_cfg
@@ -379,20 +384,39 @@ class GitTool(BaseTool):
         if sub in self._MUTATING_SUBCOMMANDS:
             self._authorize_git_write(cmd)
 
+        # SEC-001-P6 (2026-09-11): migrated off a raw asyncio.create_subprocess_exec
+        # call with no timeout and no process-group isolation onto the common
+        # execution boundary - this tool's own execution-surface inventory
+        # entry (deferred in the earlier foundation package) is now closed.
+        # TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, not UNTRUSTED_EXECUTION:
+        # `cmd` is always ONE of this method's own fixed-shape git
+        # invocations (status/diff/log/branch/commit/blame) - `args.message`/
+        # `args.file_path` land as inert argv DATA (a `-m <message>` value,
+        # a path git reads), never as executed content, the same reasoning
+        # worktree.py's own bootstrap commands already rely on for their
+        # ALLOW classification (kriya/policy/execution.py's
+        # _is_kriya_internal_bootstrap_commit). backend_required is False
+        # for this trust class, so no containment backend is needed here -
+        # this migration is purely about gaining a real timeout and
+        # process-tree cleanup, which this tool had neither of before.
+        profile = ContainmentProfile(
+            trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE,
+            workspace_path=os.getcwd(),
+        )
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            result = await ProcessController().run_async(
+                cmd, cwd=os.getcwd(), timeout=self._GIT_COMMAND_TIMEOUT_SECONDS,
+                containment_profile=profile, containment_backend=resolve_containment_backend("none"),
             )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode != 0:
+            if result.timeout:
                 raise ToolExecutionError(
-                    f"Git command failed with exit code {process.returncode}: {stderr.decode('utf-8')}"
+                    f"Git command timed out after {self._GIT_COMMAND_TIMEOUT_SECONDS} seconds: {' '.join(cmd)}"
                 )
-                
-            return stdout.decode("utf-8")
+            if result.returncode != 0:
+                raise ToolExecutionError(
+                    f"Git command failed with exit code {result.returncode}: {result.stderr}"
+                )
+            return result.stdout
         except Exception as e:
             if isinstance(e, ToolExecutionError):
                 raise e

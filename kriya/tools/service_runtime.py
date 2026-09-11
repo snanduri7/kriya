@@ -47,6 +47,7 @@ from socket import create_connection
 from typing import Callable, Dict, List, Optional, Tuple
 
 from kriya.tools.process import ManagedProcess, ProcessController
+from kriya.tools.containment import ContainmentBackend, ContainmentProfile
 
 
 class ServiceVerificationOutcomeKind(str, Enum):
@@ -475,6 +476,8 @@ class _PreparationOutcome:
 def _prepare_required_artifact(
     service_command: List[str], cwd: str, *, controller: ProcessController,
     env: Optional[Dict[str, str]] = None, preexec_fn: Optional[Callable[[], None]] = None,
+    containment_profile: Optional[ContainmentProfile] = None,
+    containment_backend: Optional[ContainmentBackend] = None,
 ) -> _PreparationOutcome:
     """Artifact Preparation (P6 production-validation, 2026-09-07) - the
     deterministic PREPARE/BUILD phase that must complete, successfully,
@@ -497,6 +500,23 @@ def _prepare_required_artifact(
     different JDK than the one that just validated compilation - a real,
     confusing mismatch class this parameter exists to prevent, not a
     hypothetical one.
+
+    containment_profile/containment_backend (SEC-001-P6, 2026-09-11):
+    mutually exclusive with env/preexec_fn (ProcessController.run()'s own
+    rule) - a caller with `autonomy_cfg.contained_execution_required=True`
+    passes these instead, so the `mvn package` build this function runs
+    gets the exact same real containment PolymorphicValidator's own
+    compile/test commands get. Deliberately NOT threaded into the actual
+    LAUNCHED service below (`run_managed_service_verification`'s
+    `controller.start_managed()` call) this pass - that service is
+    reached by a HOST-side HTTP/TCP readiness probe
+    (`_check_readiness`/`_run_probe`), which needs the service's port
+    actually reachable from the host; a real network=DENIED container has
+    no reachable port by construction, and publishing one (`-p`) is a
+    different, weaker network posture than DENIED that needs its own
+    design pass, not squeezed into this build-step wiring. Named as a
+    residual limitation, not silently dropped - see this package's own
+    RETURN.
 
     Distinguishes exactly three failure shapes, matching the two dedicated
     outcome kinds above:
@@ -535,6 +555,7 @@ def _prepare_required_artifact(
     try:
         result = controller.run(
             build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS, env=env, preexec_fn=preexec_fn,
+            containment_profile=containment_profile, containment_backend=containment_backend,
         )
     except Exception as e:
         return _PreparationOutcome(
@@ -562,6 +583,8 @@ def _prepare_required_artifact(
 
 def run_managed_service_verification(
     spec: ManagedServiceVerificationSpec, *, controller: Optional[ProcessController] = None,
+    containment_profile: Optional[ContainmentProfile] = None,
+    containment_backend: Optional[ContainmentBackend] = None,
 ) -> ManagedServiceVerificationResult:
     """The whole start -> readiness -> probe -> evidence -> terminate ->
     cleanup lifecycle, run synchronously (the caller decides concurrency,
@@ -573,7 +596,10 @@ def run_managed_service_verification(
     skipped by an early return."""
     controller = controller or ProcessController()
 
-    preparation = _prepare_required_artifact(spec.service_command, spec.cwd, controller=controller)
+    preparation = _prepare_required_artifact(
+        spec.service_command, spec.cwd, controller=controller,
+        containment_profile=containment_profile, containment_backend=containment_backend,
+    )
     if preparation.outcome is not None:
         return ManagedServiceVerificationResult(
             outcome=preparation.outcome, passed=False, reasoning=preparation.reasoning,

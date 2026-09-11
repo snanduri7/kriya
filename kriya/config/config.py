@@ -121,6 +121,20 @@ class AutonomyConfig(BaseModel):
     # an unrecognized value fails closed (BackendUnavailableError), never
     # silently falls back to uncontained execution.
     containment_backend: str = Field(default="none")
+    # SEC-001-P6 (2026-09-11): opt-in gate for routing PolymorphicValidator's
+    # compile/test commands and service_runtime's application-under-test
+    # process through a real ContainmentProfile (network=DENIED, real
+    # filesystem/process isolation via `containment_backend`) instead of
+    # today's env-allowlist/rlimit-only behavior. Default False preserves
+    # "existing behavior must remain compatible when containment is not
+    # required by the current execution profile" exactly - flipping this to
+    # True with containment_backend still "none" fails CLOSED (Null backend
+    # now refuses any non-UNRESTRICTED-network profile), by design: this
+    # flag means "these paths must be really contained", not merely "try
+    # to". A repo's own `java_home_override`-selected JDK is NOT threaded
+    # into the contained path this pass - see validate.py's own comment on
+    # build_subprocess_env_and_preexec for the residual limitation.
+    contained_execution_required: bool = Field(default=False)
     # ShellTool previously had no wall-clock timeout at all (SEC-001
     # execution-surface inventory finding, 2026-09-11) - every other real
     # command primitive in this codebase (ProcessController.run(), used by

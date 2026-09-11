@@ -2593,7 +2593,16 @@ async def _execute_managed_service_verification(
     )
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
     _managed_service_started = time.monotonic()
-    result = run_managed_service_verification(spec)
+    # SEC-001-P6: the SAME containment profile/backend PolymorphicValidator's
+    # own compile/test commands would get (gated by autonomy_cfg.
+    # contained_execution_required, default False/unchanged) - applies only
+    # to the artifact-preparation build step inside
+    # run_managed_service_verification, not the launched service itself
+    # (see service_runtime.py's own docstring on that residual limitation).
+    containment_profile, containment_backend = validator.build_containment_profile_and_backend()
+    result = run_managed_service_verification(
+        spec, containment_profile=containment_profile, containment_backend=containment_backend,
+    )
     # R1 Deliverable 5 - observational only, coarse phase only: prepare/
     # launch/readiness/probe/shutdown are not separately timed here because
     # they are not separable from OUTSIDE run_managed_service_verification()

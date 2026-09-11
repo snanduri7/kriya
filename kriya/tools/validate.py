@@ -16,6 +16,13 @@ from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 from kriya.tools.process import ProcessController
+from kriya.tools.containment import (
+    ContainmentBackend,
+    ContainmentProfile,
+    NetworkAuthority,
+    TrustClass,
+    resolve_containment_backend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -547,10 +554,56 @@ class PolymorphicValidator:
             env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
         return env, preexec_fn
 
+    def build_containment_profile_and_backend(
+        self,
+    ) -> Tuple[Optional[ContainmentProfile], Optional[ContainmentBackend]]:
+        """SEC-001-P6 (2026-09-11): the real-containment counterpart to
+        `build_subprocess_env_and_preexec`, gated by
+        `autonomy_cfg.contained_execution_required` (default False -
+        "existing behavior must remain compatible when containment is not
+        required" is preserved exactly by staying on the raw env/preexec_fn
+        path below until this is explicitly opted into).
+
+        Residual limitation, stated honestly rather than silently dropped:
+        `self.java_home_override` (a specific JDK version this validator
+        detected/selected on the HOST to match the compile gate) is NOT
+        threaded into the contained path - a containerized compile/test
+        run uses whichever JDK ships in the OCI backend's own toolchain
+        image, not the host-detected one. Reproducing per-repo JDK
+        selection INSIDE a container would need either a matrix of
+        version-pinned images or installing a JDK into the container at
+        run time, neither of which this package implements. Compile/test
+        results under `contained_execution_required=True` are therefore
+        validated against the container image's fixed JDK, not
+        necessarily the same version the rest of Kriya's JDK-detection
+        logic would pick on the host - a real, named gap (see this
+        package's own RETURN, not a silent behavior change: any caller
+        that sets BOTH `contained_execution_required=True` and relies on
+        `java_home_override` is getting the container's JDK, and that is
+        what this docstring documents)."""
+        if not self.autonomy_cfg.contained_execution_required:
+            return None, None
+        profile = ContainmentProfile(
+            trust_class=TrustClass.UNTRUSTED_EXECUTION,
+            workspace_path=self.workspace_path,
+            network=NetworkAuthority.DENIED,
+            env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
+            cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
+            memory_mb=self.autonomy_cfg.sandbox_memory_mb,
+        )
+        backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
+        return profile, backend
+
     def _run_cmd_with_timeout(
         self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._audit_run_command(cmd, cwd)
+        profile, backend = self.build_containment_profile_and_backend()
+        if profile is not None:
+            return ProcessController().run(
+                cmd, cwd=cwd, timeout=timeout, stdin_payload=stdin_payload,
+                containment_profile=profile, containment_backend=backend,
+            ).to_dict()
         env, preexec_fn = self.build_subprocess_env_and_preexec()
         return ProcessController().run(
             cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn, stdin_payload=stdin_payload,
