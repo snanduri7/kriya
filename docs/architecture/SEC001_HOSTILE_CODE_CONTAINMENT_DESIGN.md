@@ -621,6 +621,111 @@ containment-profile-aware). This is a real, deliberate scope boundary of
 the foundation package, not a silent gap - see that package's own
 completeness-gate accounting.
 
+---
+
+**OCI containment backend work package IMPLEMENTED 2026-09-11** (SEC-001-P6
++ closes the foundation package's own named deferrals; this design's
+DESIGN_INVESTIGATION status is retired - see this block for what SEC-001's
+remaining status actually is):
+
+- **Foundation gate correction** (prerequisite, done first): `NullContainmentBackend`
+  previously never checked `profile.network` at all - a profile explicitly
+  requiring real network isolation would be silently "satisfied" by a
+  backend providing none. Now raises `BackendUnavailableError` whenever
+  `profile.backend_required and profile.network is not UNRESTRICTED`.
+  Scoped to `backend_required` (not every profile) after a real regression
+  surfaced during GitTool's own migration: a `TRUSTED_KRIYA_INFRASTRUCTURE`
+  profile using `ContainmentProfile`'s `network=DENIED` default was never
+  meant to be network-gated at all (trust is established by
+  `ExecutionPolicy`, a separate layer from containment).
+- **SEC-001-P6 (OCI backend): DONE.** `kriya/tools/containment_oci.py` -
+  `OCIContainmentBackend`, a real `docker run`-based `ContainmentBackend`.
+  Filesystem: only `workspace_path`/`temp_path`/`dependency_cache_paths`
+  are ever mounted (no host root/home/Kriya source), tool-aware cache
+  mount points (`/root/.m2`, `/root/.cache/pip`). Network: `DENIED` ->
+  `--network none` (verified live); `UNRESTRICTED` -> default bridge;
+  `DEPENDENCY_REGISTRY_ONLY` fails closed (`BackendUnavailableError`) -
+  no proxy/firewall layer is implemented, so this backend is honest about
+  not providing registry-scoped network authority rather than silently
+  equating it with unrestricted access. Process/resources: `--cap-drop
+  ALL`, `--pids-limit`, real `--memory` (cgroup-enforced); `--cpus` is a
+  coarse rate cap, NOT equivalent to `RLIMIT_CPU`'s total-seconds budget -
+  the real wall-clock backstop stays `ProcessController`'s own `timeout`.
+  Daemon reachability is probed explicitly before every `prepare()` so an
+  unreachable daemon fails closed as `BackendUnavailableError`, not as an
+  ordinary command failure. Adversarial acceptance proven against a live
+  Docker daemon (`tests/test_containment_oci.py`, 13 tests): host sentinel
+  unreadable/unwritable outside workspace, unallowlisted host env secret
+  never reaches the container (positive control included), network denied
+  blocks a real outbound connection (positive control included), no
+  surviving container after a timeout (checked via `docker ps`, not the
+  container's own exit code), an enforced memory limit terminates the
+  process, `DEPENDENCY_REGISTRY_ONLY` fails closed. Legitimate execution
+  proven too: workspace write+read, a real `javac`/`java` compile+run, a
+  real `python3` script run.
+- **Backend contract extension** (`kriya/tools/containment.py`,
+  `kriya/tools/process.py`): `ContainmentBackend.prepare()` now also
+  receives the real command (backend-internal setup choices only, e.g.
+  image selection - never a policy/authorization input).
+  `PreparedContainment` gains `command_prefix` (a container backend's real
+  `docker run ...` wrapping, composed in the ONE place
+  `ProcessController` resolves execution - no parallel spawn path) and
+  `cleanup` (an authoritative `docker rm -f` - `ProcessController`'s own
+  host-side process-group kill on timeout does not reliably propagate
+  into a VM-mediated container runtime; proven via `docker ps`, not the
+  container's own exit status).
+- **`validate.py`/`service_runtime.py` migration: DONE, opt-in.** New
+  `AutonomyConfig.contained_execution_required` (default `False` -
+  preserves existing behavior exactly). `PolymorphicValidator.
+  build_containment_profile_and_backend()` and every
+  `_run_cmd_with_timeout` call site (compile checks, tests,
+  `run_app_sequence`'s finite commands) can now request real containment.
+  `service_runtime.py`'s `_prepare_required_artifact` (the `mvn package`
+  build step) gained the same optional `containment_profile`/
+  `containment_backend`, wired from `attempt.py`. **Residual limitations,
+  named not silently dropped:** (1) `java_home_override` (per-repo JDK
+  selection) is not threaded into the contained path - a containerized
+  compile/test uses the OCI backend's own fixed toolchain image; (2) the
+  actual LAUNCHED, HTTP/TCP-probed managed service is NOT
+  containment-routed - a real `network=DENIED` container has no
+  host-reachable port by construction, and publishing one is a different,
+  weaker posture than `DENIED` that needs its own design pass.
+- **GitTool: DONE**, closing the foundation package's own deferred item.
+  Migrated onto `ProcessController.run_async()`,
+  `TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE` (its argv is always one of
+  its own fixed shapes; commit messages/file paths are inert argv data,
+  never executed content) - gains a real 60s timeout and process-tree
+  cleanup it had neither of before. `MCPClient` remains explicitly out of
+  scope (SEC-003/SEC-005 ownership, unchanged).
+- **SEC-001-P4 (two-phase dependency execution): DONE.**
+  `kriya/tools/dependency_execution.py` - `controlled acquisition (network
+  UNRESTRICTED, still contained) -> cache -> network-denied execution`,
+  implemented and proven end-to-end (live Docker, real network
+  acquisition of a real PyPI package and a real Maven Central round-trip)
+  for both Maven (`dependency:go-offline` then `mvn -o`) and Python (`pip
+  download --only-binary=:all:` then an offline `pip install --target`).
+  A missing dependency/plugin during offline execution surfaces as a
+  typed `OfflineFailureKind.MISSING_DEPENDENCY` (real Maven/pip
+  offline-mode error text, pattern-matched against actual output) -
+  never a silent fallback to unrestricted networking; the caller decides
+  whether to re-run acquisition. Not wired into `validate.py`'s own
+  compile/test call sites this pass (those still call `mvn`/`pytest`
+  directly under a single containment profile, not through this
+  module's own two-phase split) - `dependency_execution.py` is a
+  standalone, tested primitive ready for that wiring, not yet the
+  default path.
+
+**SEC-001 status after this package**: the `ContainmentProfile`/
+`ContainmentBackend` contract, the OCI backend, and the two-phase
+dependency-execution primitive are all real, live-tested, and
+production-usable once `containment_backend: "oci"` +
+`contained_execution_required: true` are configured. SEC-001 is NOT yet
+CLOSED: the packaged default remains `containment_backend: "none"` +
+`contained_execution_required: false` (zero behavior change out of the
+box), the managed-service launch path and `dependency_execution.py`'s
+own wiring into `validate.py` remain open, and `DEPENDENCY_REGISTRY_ONLY`
+has no real implementation on any backend.
+
 ## 11. Implementation decomposition (original decomposition, kept for reference)
 
 Deliberately not a monolithic sandbox manager, per Invariant 14 and
