@@ -3458,11 +3458,23 @@ class WorkflowEngine:
                 bool(state.environment_failure)
                 and state.environment_failure.startswith("GENERATION TIME BUDGET EXHAUSTED:")
             )
+            # SEC-001 (2026-09-11): same message-prefix convention as the
+            # three categories above - kriya/tools/containment.py's
+            # ContainmentSetupError means ProcessController refused to run
+            # a command uncontained, which is neither an environment/
+            # toolchain problem (kriya doctor cannot fix a missing/
+            # misconfigured containment backend the same way it diagnoses
+            # Java/Maven) nor an ordinary retryable code defect.
+            is_containment_setup_failed_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("CONTAINMENT_SETUP_FAILED:")
+            )
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
                 else "unauthorized_generation_target" if is_scope_defect_stop
                 else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure
                 else "generation_budget_exhausted" if is_generation_budget_exhausted_stop
+                else "containment_setup_failed" if is_containment_setup_failed_stop
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )

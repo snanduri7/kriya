@@ -13845,6 +13845,32 @@ async def test_handle_attempt_failure_stops_immediately_on_environment_failure(t
 
 
 @pytest.mark.asyncio
+async def test_handle_attempt_failure_classifies_containment_setup_error_deterministically(tmp_path):
+    """SEC-001 (2026-09-11): a raw ContainmentSetupError (no .failure
+    attribute - unlike QualityGateFailure) reaching handle_attempt_failure
+    must be classified as containment_setup_failed and stop the retry loop
+    immediately, exactly like time_budget_exhausted/internal_framework_error -
+    never fed back to the Developer as an ordinary retryable failure, and
+    never misreported as environment_failure's generic toolchain category."""
+    from kriya.tools.containment import ContainmentSetupError
+
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = ContainmentSetupError("simulated backend unavailable for this test")
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.environment_failure is not None
+    assert state.environment_failure.startswith("CONTAINMENT_SETUP_FAILED:")
+    assert "simulated backend unavailable" in state.environment_failure
+    assert state.last_failure.type == "containment_setup_failed"
+    assert state.budgets.retry_count == 1
+
+
+@pytest.mark.asyncio
 async def test_handle_attempt_failure_stops_immediately_on_missing_external_dependency(tmp_path):
     """PRV-17 (2026-09-03): a deterministically missing external Python
     package (`ModuleNotFoundError: No module named 'django'`) with NO legal

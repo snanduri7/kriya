@@ -161,14 +161,17 @@ def test_command_without_a_leading_git_token_is_still_classified_correctly():
 
 
 # --- POL-001-P3: the Kriya-internal bootstrap-commit recognizer ---
-# The exact two commands kriya/workflow/worktree.py constructs.
+# The exact two commands kriya/workflow/worktree.py constructs. SEC-001-P1
+# (2026-09-11) prepends "-c core.hooksPath=/dev/null" to both real
+# commands (and to the real "git init" below) - these fixtures must match
+# the real shape or these tests stop proving anything about the real path.
 
 _ZERO_COMMIT_BOOTSTRAP = (
-    "git", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
+    "git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
     "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation",
 )
 _GREENFIELD_BOOTSTRAP = (
-    "git", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
+    "git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
     "commit", "--allow-empty", "-m", "Kriya: initial commit to enable isolation",
 )
 
@@ -298,9 +301,20 @@ def test_other_git_write_subcommands_unaffected_by_the_bootstrap_recognizer():
 # commit, and was still reachable with no approval path until this). ---
 
 def test_exact_greenfield_init_is_allowed_with_dedicated_reason():
-    result = _evaluate(("git", "init"))
+    # SEC-001-P1 (2026-09-11): the real command now includes worktree.py's
+    # hooks-disabled prefix - see the module comment above.
+    result = _evaluate(("git", "-c", "core.hooksPath=/dev/null", "init"))
     assert result.decision == PolicyDecision.ALLOW
     assert result.reason_code == "KRIYA_INTERNAL_BOOTSTRAP_INIT_ALLOWED"
+
+
+def test_bare_init_without_hooks_prefix_is_not_exempt():
+    """The recognizer's positive allowlist now includes the hooks-disabled
+    prefix as part of the exact required shape - a bare `git init` with no
+    prefix at all (never constructed by any real Kriya caller) must not be
+    silently treated as equivalent."""
+    result = _evaluate(("git", "init"))
+    assert result.decision == PolicyDecision.REQUIRE_APPROVAL
 
 
 def test_init_with_bare_flag_is_not_exempt():

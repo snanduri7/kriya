@@ -1,20 +1,37 @@
-"""One owner for bounded, local subprocess execution.
+"""One owner for bounded, local subprocess execution - the SEC-001 common
+execution boundary (docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md
+§6/§11, SEC-001-P3a/P3b/P5).
 
-Two lifecycles are supported: `run()` (finite, blocking - Kriya owns the
-complete process tree and terminates it before returning, unchanged since
-before Managed Runtime Verification) and `start_managed()` (Managed Runtime
-Verification, 2026-09-03 - a long-lived service a caller wants to poll for
-readiness and probe while it's still running). Both share the exact same
-process-group isolation and termination primitive (`_terminate_tree`) - a
-managed process is still fully owned and torn down by its caller, just not
-synchronously inside a single blocking call the way `run()`'s callers need.
-"""
-from dataclasses import dataclass
+Three lifecycles are supported: `run()`/`run_async()` (finite, blocking or
+awaited - Kriya owns the complete process tree and terminates it before
+returning) and `start_managed()` (Managed Runtime Verification, 2026-09-03 -
+a long-lived service a caller wants to poll for readiness and probe while
+it's still running). All three share the exact same process-group
+isolation and termination primitive (`_terminate_tree`), the exact same
+`ContainmentProfile`/`ContainmentBackend` composition (`_prepare_env_and_preexec`),
+and the exact same fail-closed classification of a resource/containment
+setup failure (`_spawn_popen`/`_spawn_subprocess_exec` both convert the one
+`subprocess.SubprocessError` shape a broken `preexec_fn` produces into a
+real, typed `ContainmentSetupError` - see kriya/tools/containment.py and
+kriya/tools/sandbox.py's own 2026-09-11 fail-closed correction) -
+per Invariant 14 ("prefer one execution-control abstraction over scattered
+sandbox logic"), this is deliberately ONE set of security semantics shared
+by sync and async callers, not two parallel implementations that happen to
+look similar."""
+import asyncio
 import os
 import signal
 import subprocess
 import threading
-from typing import Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from kriya.tools.containment import (
+    ContainmentBackend,
+    ContainmentProfile,
+    ContainmentSetupError,
+    PreparedContainment,
+)
 
 
 @dataclass(frozen=True)
@@ -136,6 +153,67 @@ class ManagedProcess:
             return False
 
 
+def _prepare_env_and_preexec(
+    *,
+    containment_profile: Optional[ContainmentProfile],
+    containment_backend: Optional[ContainmentBackend],
+    env: Optional[Dict[str, str]],
+    preexec_fn: Optional[Callable[[], None]],
+) -> Tuple[Optional[Dict[str, str]], Optional[Callable[[], None]]]:
+    """The single place `env`/`preexec_fn` get resolved, for every caller
+    of every lifecycle in this module. A caller passes EITHER a raw
+    `env`/`preexec_fn` pair directly (every pre-SEC-001 caller, unchanged
+    behavior) OR a `ContainmentProfile` + `ContainmentBackend` (new,
+    SEC-001-aware callers) - never both; a caller supplying a profile
+    without a backend (or vice versa) is a programming error, not a
+    silent no-op. `backend.prepare()` raising `ContainmentSetupError` is
+    NOT caught here - it propagates to the caller, which must fail the
+    command closed rather than run it (Invariant: containment/resource
+    setup failure must block execution)."""
+    if containment_profile is None and containment_backend is None:
+        return env, preexec_fn
+    if containment_profile is None or containment_backend is None:
+        raise ValueError(
+            "containment_profile and containment_backend must both be provided together, or neither."
+        )
+    if env is not None or preexec_fn is not None:
+        raise ValueError(
+            "Pass either (env, preexec_fn) or (containment_profile, containment_backend), never both."
+        )
+    prepared: PreparedContainment = containment_backend.prepare(containment_profile)
+    return prepared.env, prepared.preexec_fn
+
+
+def _spawn_popen(*args: Any, **kwargs: Any) -> subprocess.Popen:
+    """`subprocess.Popen` construction, with the one real fail-closed
+    correction this module makes: a `preexec_fn` that raises (SEC-001's
+    fail-closed resource-limit fix, kriya/tools/sandbox.py) surfaces here
+    as a generic `subprocess.SubprocessError("Exception occurred in
+    preexec_fn.")` - confirmed empirically that CPython does not preserve
+    the original exception's type or message across the errpipe, only
+    this generic shape. Converted here into a real, typed
+    `ContainmentSetupError` so callers can distinguish "the command itself
+    failed" from "we refused to even start it uncontained"."""
+    try:
+        return subprocess.Popen(*args, **kwargs)
+    except subprocess.SubprocessError as e:
+        raise ContainmentSetupError(
+            f"Resource-limit/containment setup failed before the command could start: {e}"
+        ) from e
+
+
+async def _spawn_subprocess_exec(*args: Any, **kwargs: Any) -> "asyncio.subprocess.Process":
+    """Async sibling of `_spawn_popen` - identical fail-closed conversion,
+    confirmed empirically to raise the same `subprocess.SubprocessError`
+    shape for a failing `preexec_fn` under `asyncio.create_subprocess_exec`."""
+    try:
+        return await asyncio.create_subprocess_exec(*args, **kwargs)
+    except subprocess.SubprocessError as e:
+        raise ContainmentSetupError(
+            f"Resource-limit/containment setup failed before the command could start: {e}"
+        ) from e
+
+
 class ProcessController:
     def __init__(self, *, max_output_chars: int = 2_000_000, reap_timeout: int = 10) -> None:
         self.max_output_chars = max_output_chars
@@ -150,6 +228,8 @@ class ProcessController:
         env: Optional[Dict[str, str]] = None,
         preexec_fn: Optional[Callable[[], None]] = None,
         stdin_payload: Optional[str] = None,
+        containment_profile: Optional[ContainmentProfile] = None,
+        containment_backend: Optional[ContainmentBackend] = None,
     ) -> ProcessResult:
         # Runtime Verification Contract (PRV-06, 2026-08-29): stdin is now
         # ALWAYS an explicit pipe, never left as the default (which inherits
@@ -163,7 +243,11 @@ class ProcessController:
         # that never reads it, so this is a strict improvement for every
         # existing caller (compile/test/pom-validate/version-check), not
         # just the one that supplies a real payload.
-        process = subprocess.Popen(
+        env, preexec_fn = _prepare_env_and_preexec(
+            containment_profile=containment_profile, containment_backend=containment_backend,
+            env=env, preexec_fn=preexec_fn,
+        )
+        process = _spawn_popen(
             command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE, text=True, env=env, preexec_fn=preexec_fn,
             start_new_session=(os.name == "posix"),
@@ -196,6 +280,69 @@ class ProcessController:
             stderr_truncated=stderr_truncated,
         )
 
+    async def run_async(
+        self,
+        command: List[str],
+        *,
+        cwd: str,
+        timeout: int,
+        env: Optional[Dict[str, str]] = None,
+        preexec_fn: Optional[Callable[[], None]] = None,
+        stdin_payload: Optional[str] = None,
+        containment_profile: Optional[ContainmentProfile] = None,
+        containment_backend: Optional[ContainmentBackend] = None,
+    ) -> ProcessResult:
+        """Async sibling of `run()` - the SEC-001-P3a design decision
+        (docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md,
+        SEC-001-P3a/P3b): a thin async-native method on THIS SAME class,
+        sharing `_prepare_env_and_preexec`/`_terminate_tree`/`_bounded_tail`/
+        `ProcessResult` with `run()` rather than a parallel implementation.
+        Only the low-level spawn/wait/kill-on-timeout primitives differ
+        (asyncio vs. blocking I/O) - not a duplicated security semantic,
+        per Invariant 14. This is what `ShellTool`/`MCPClient` (both async
+        callers) route through instead of their own raw
+        `asyncio.create_subprocess_*` calls."""
+        env, preexec_fn = _prepare_env_and_preexec(
+            containment_profile=containment_profile, containment_backend=containment_backend,
+            env=env, preexec_fn=preexec_fn,
+        )
+        process = await _spawn_subprocess_exec(
+            *command, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE, env=env, preexec_fn=preexec_fn,
+            start_new_session=(os.name == "posix"),
+        )
+        timed_out = False
+        stdin_bytes = (stdin_payload or "").encode("utf-8")
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                process.communicate(input=stdin_bytes), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            timed_out = True
+            self._terminate_tree(process)
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(
+                    process.communicate(), timeout=self.reap_timeout,
+                )
+            except asyncio.TimeoutError:
+                stdout_b, stderr_b = b"", b"[REAP TIMEOUT] Process tree did not exit after termination.".encode()
+        stdout = (stdout_b or b"").decode("utf-8", errors="replace")
+        stderr = (stderr_b or b"").decode("utf-8", errors="replace")
+        stdout, stdout_truncated = _bounded_tail(stdout, self.max_output_chars)
+        stderr, stderr_truncated = _bounded_tail(stderr, self.max_output_chars)
+        if timed_out:
+            stderr += f"\n[TIMEOUT] Command timed out after {timeout} seconds."
+        return ProcessResult(
+            returncode=-1 if timed_out else (
+                process.returncode if process.returncode is not None else -1
+            ),
+            stdout=stdout,
+            stderr=stderr,
+            timeout=timed_out,
+            stdout_truncated=stdout_truncated,
+            stderr_truncated=stderr_truncated,
+        )
+
     def start_managed(
         self,
         command: List[str],
@@ -203,6 +350,8 @@ class ProcessController:
         cwd: str,
         env: Optional[Dict[str, str]] = None,
         preexec_fn: Optional[Callable[[], None]] = None,
+        containment_profile: Optional[ContainmentProfile] = None,
+        containment_backend: Optional[ContainmentBackend] = None,
     ) -> ManagedProcess:
         """Starts a process the caller will observe WHILE it keeps running
         (Managed Runtime Verification, 2026-09-03) - the one thing this
@@ -219,7 +368,11 @@ class ProcessController:
         an explicit closed pipe (run()'s own fix for the same hang class) -
         a managed service is never fed a payload the way a finite
         command's last step can be, so there's nothing to close after."""
-        process = subprocess.Popen(
+        env, preexec_fn = _prepare_env_and_preexec(
+            containment_profile=containment_profile, containment_backend=containment_backend,
+            env=env, preexec_fn=preexec_fn,
+        )
+        process = _spawn_popen(
             command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL, text=True, env=env, preexec_fn=preexec_fn,
             start_new_session=(os.name == "posix"),
@@ -227,7 +380,7 @@ class ProcessController:
         return ManagedProcess(process, max_output_chars=self.max_output_chars)
 
     @staticmethod
-    def _terminate_tree(process: subprocess.Popen) -> None:
+    def _terminate_tree(process: Any) -> None:
         try:
             if os.name == "posix":
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)

@@ -15,7 +15,14 @@ from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
-from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+from kriya.tools.containment import (
+    ContainmentProfile,
+    ContainmentSetupError,
+    NetworkAuthority,
+    TrustClass,
+    resolve_containment_backend,
+)
+from kriya.tools.process import ProcessController
 from kriya.tools.tool import BaseTool, ToolExecutionError
 
 logger = logging.getLogger(__name__)
@@ -217,30 +224,62 @@ class ShellTool(BaseTool):
                 if result is not None and result.decision == PolicyDecision.REQUIRE_APPROVAL:
                     raise PolicyDeniedError(request=request, result=result)
 
-        env = None
-        preexec_fn = None
+        # SEC-001 (2026-09-11): migrated off a raw asyncio.create_subprocess_shell
+        # call with no timeout and no process-group isolation (the single
+        # most dangerous, least-contained primitive found by the SEC-001
+        # execution-surface inventory - see
+        # docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md §1)
+        # onto ProcessController.run_async(), the same common execution
+        # boundary PolymorphicValidator/service_runtime already use.
+        # `["/bin/sh", "-c", args.command]` reproduces
+        # asyncio.create_subprocess_shell's own exact POSIX invocation
+        # shape, so shell-metacharacter/pipe/redirect semantics are
+        # unchanged - only the execution PRIMITIVE moved, not what the
+        # command string is allowed to contain.
+        #
+        # A ContainmentProfile is always constructed (this tool's content
+        # is caller/model-supplied, never Kriya-authored - TrustClass is
+        # UNTRUSTED_EXECUTION, never inferred from the command text
+        # itself), but the packaged default containment_backend ("none" -
+        # NullContainmentBackend) reproduces sandbox_execution's exact
+        # prior env-allowlist/rlimit-only behavior, so nothing about
+        # ordinary shell-command results changes until a real backend is
+        # configured. Backend/resource setup failure now genuinely blocks
+        # the command (ContainmentSetupError propagates below) rather than
+        # being silently caught by the generic ToolExecutionError wrap -
+        # a caller needs to be able to tell "the shell command itself
+        # failed" from "Kriya refused to run it uncontained".
+        profile = None
+        backend = None
         if self.autonomy_cfg.sandbox_execution:
-            env = build_restricted_env(self.autonomy_cfg.sandbox_env_allowlist)
-            preexec_fn = posix_resource_limits_preexec_fn(
-                self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
+            profile = ContainmentProfile(
+                trust_class=TrustClass.UNTRUSTED_EXECUTION,
+                workspace_path=os.getcwd(),
+                network=NetworkAuthority.UNRESTRICTED,  # unchanged from today - no network gate existed here before either
+                env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
+                cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
+                memory_mb=self.autonomy_cfg.sandbox_memory_mb,
             )
+            backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
+        controller = ProcessController()
         try:
-            process = await asyncio.create_subprocess_shell(
-                args.command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                preexec_fn=preexec_fn,
+            result = await controller.run_async(
+                ["/bin/sh", "-c", args.command],
+                cwd=os.getcwd(),
+                timeout=self.autonomy_cfg.shell_command_timeout_seconds,
+                containment_profile=profile,
+                containment_backend=backend,
             )
-            stdout, stderr = await process.communicate()
-
-            return {
-                "exit_code": process.returncode,
-                "stdout": stdout.decode("utf-8", errors="replace"),
-                "stderr": stderr.decode("utf-8", errors="replace")
-            }
+        except ContainmentSetupError:
+            raise
         except Exception as e:
             raise ToolExecutionError(f"Shell command execution failed: {e}") from e
+
+        return {
+            "exit_code": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
 
 
 class GitTool(BaseTool):
@@ -324,7 +363,12 @@ class GitTool(BaseTool):
         elif sub == "commit":
             if not args.message:
                 raise ToolExecutionError("Commit message is required for git commit.")
-            cmd.extend(["commit", "-m", args.message])
+            # SEC-001-P1 (2026-09-11): suppresses any repository-defined
+            # pre-commit/commit-msg/post-commit hook - this call can commit
+            # into a real, possibly-adversarial target repository, and
+            # nothing about this tool's job is "also run whatever hook that
+            # repository happens to define".
+            cmd.extend(["-c", "core.hooksPath=/dev/null", "commit", "-m", args.message])
         elif sub == "blame":
             if not args.file_path:
                 raise ToolExecutionError("file_path is required for git blame.")

@@ -99,8 +99,11 @@ def test_audit_call_observes_the_real_bootstrap_command(tmp_path, monkeypatch):
 
     monkeypatch.setattr(worktree_mod._execution_policy, "evaluate", spy)
     create_git_worktree(str(tmp_path))
+    # SEC-001-P1 (2026-09-11): worktree.py now prepends
+    # `-c core.hooksPath=/dev/null` to every git invocation capable of
+    # triggering a repository hook, including this bootstrap commit.
     assert captured["command"] == (
-        "git", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
+        "git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
         "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation",
     )
 

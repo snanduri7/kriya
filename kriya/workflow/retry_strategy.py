@@ -25,6 +25,7 @@ from typing import Optional
 
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.tools.containment import ContainmentSetupError
 from kriya.workflow.attribution import AttributionResult, DETERMINISTIC_ATTRIBUTION_TIERS, _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.deterministic_failure_diagnostic import (
@@ -333,13 +334,32 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         and not scope_denial_failure
         and isinstance(e, (UnboundLocalError, TypeError, KeyError, AssertionError))
     )
+    # SEC-001 (2026-09-11): a ContainmentSetupError means ProcessController
+    # refused to run a command uncontained rather than silently degrading -
+    # this is exactly as unfixable-by-retrying as time_budget_exhausted/
+    # verification_infrastructure_failure/internal_framework_error above
+    # (no amount of Developer regeneration changes whether a containment
+    # backend is available), and must never be fed back to the Developer as
+    # diagnosis/repair evidence or misreported as an ordinary command/
+    # compile/test/environment failure - see kriya/tools/containment.py's
+    # own docstring.
+    is_containment_setup_failure = (
+        attached_failure is None
+        and not scope_denial_failure
+        and isinstance(e, ContainmentSetupError)
+    )
     failure: Failure = (
         attached_failure
         or scope_denial_failure
         or Failure(
-            type="internal_framework_error" if is_internal_framework_bug else "general_error",
+            type=(
+                "containment_setup_failed" if is_containment_setup_failure
+                else "internal_framework_error" if is_internal_framework_bug
+                else "general_error"
+            ),
             message=(
-                f"INTERNAL KRIYA ERROR (not a generated-application defect): {raw_error_context}"
+                f"CONTAINMENT_SETUP_FAILED: {raw_error_context}" if is_containment_setup_failure
+                else f"INTERNAL KRIYA ERROR (not a generated-application defect): {raw_error_context}"
                 if is_internal_framework_bug else raw_error_context
             ),
             raw_output=raw_error_context, source="orchestrator",
@@ -454,6 +474,9 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # which were never designed to recognize an arbitrary internal
             # traceback.
             "internal_framework_error",
+            # SEC-001 (2026-09-11): same reasoning - see the
+            # is_containment_setup_failure comment above.
+            "containment_setup_failed",
         }
         else classify_environment_failure(
             raw_error_context,

@@ -110,6 +110,22 @@ class AutonomyConfig(BaseModel):
     ])
     sandbox_cpu_seconds: int = Field(default=240)
     sandbox_memory_mb: int = Field(default=4096)
+    # SEC-001 foundation (2026-09-11): which ContainmentBackend
+    # (kriya/tools/containment.py) ProcessController composes for a
+    # profile that requires one. "none" (NullContainmentBackend) is the
+    # ONLY packaged value today - it reproduces the exact env-allowlist +
+    # best-effort-rlimit behavior sandbox_execution already provided
+    # before this field existed, so this default changes nothing about
+    # current behavior. No production (OCI/sandbox-exec) backend name is
+    # registered yet - see docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md;
+    # an unrecognized value fails closed (BackendUnavailableError), never
+    # silently falls back to uncontained execution.
+    containment_backend: str = Field(default="none")
+    # ShellTool previously had no wall-clock timeout at all (SEC-001
+    # execution-surface inventory finding, 2026-09-11) - every other real
+    # command primitive in this codebase (ProcessController.run(), used by
+    # PolymorphicValidator/service_runtime) always has one.
+    shell_command_timeout_seconds: int = Field(default=300)
     run_verification_enabled: bool = Field(default=True)
     run_verification_timeout_seconds: int = Field(default=90)
     # Gates on SpecComplianceAgent (kriya/agents/agent.py): unlike compile/test/

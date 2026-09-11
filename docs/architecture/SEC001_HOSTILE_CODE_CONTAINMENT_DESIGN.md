@@ -585,7 +585,43 @@ CLOSED" is defined to require a supported backend, per the amendment.*
 
 ---
 
-## 11. Implementation decomposition (not implemented — investigation only)
+**Foundation work package IMPLEMENTED 2026-09-11** (this design's own
+DESIGN_INVESTIGATION status now applies only to the production
+containment BACKEND, not the foundation below it):
+
+- SEC-001-P1 (git-hook suppression): DONE.
+- SEC-001-P2 (fail-closed resource-limit setup): DONE, with one real
+  correction found during implementation - `RLIMIT_AS` genuinely fails to
+  set on macOS (not just weakly enforced once set, confirmed empirically);
+  fails closed everywhere except that one platform-specific case.
+- SEC-001-P3a (async-compatibility design decision): DONE - a thin
+  `run_async()` sibling on `ProcessController` itself, sharing every
+  security-relevant helper with `run()`.
+- SEC-001-P3b (ShellTool/MCPClient migration): ShellTool DONE. MCPClient
+  explicitly NOT migrated this pass (out of scope, preserves SEC-003
+  ownership - see the implementation work package's own instruction).
+- SEC-001-P4 (two-phase dependency acquisition split): NOT implemented
+  this pass - out of this foundation package's scope.
+- SEC-001-P5 (`ContainmentProfile` + backend): the CONTRACT and a dummy/
+  test backend are DONE (`kriya/tools/containment.py`), proving
+  composition and fail-closed semantics. The `sandbox-exec` backend
+  itself is NOT implemented - per the amended Section 10 decision, that
+  backend is now explicitly experimental/non-closing even once built, and
+  building it was not requested by the foundation work package.
+- SEC-001-P6 (OCI backend): NOT implemented - explicitly deferred, per
+  both this design's own amendment and the implementation work package's
+  own "do not implement the production container backend yet" instruction.
+
+`validate.py`/`service_runtime.py` (the compile/test/finite_command
+surface) were NOT migrated onto `ContainmentProfile` this pass - they
+still call `ProcessController.run()` with the same raw `env`/`preexec_fn`
+convention as before (now fail-closed on resource-setup failure, since
+that fix is universal to `ProcessController`, but not yet
+containment-profile-aware). This is a real, deliberate scope boundary of
+the foundation package, not a silent gap - see that package's own
+completeness-gate accounting.
+
+## 11. Implementation decomposition (original decomposition, kept for reference)
 
 Deliberately not a monolithic sandbox manager, per Invariant 14 and
 Task 11's own instruction — each slice is independently shippable and

@@ -292,6 +292,16 @@ def _targets_protected_ref(rest: Tuple[str, ...]) -> bool:
 # strings are classified RUN_COMMAND, never reach this GIT_WRITE stage) can
 # produce it.
 _KRIYA_BOOTSTRAP_IDENTITY: Tuple[str, ...] = ("-c", "user.name=Kriya", "-c", "user.email=kriya@local")
+# SEC-001-P1 (2026-09-11): kriya/workflow/worktree.py now prepends this
+# exact prefix to every Kriya-internal git invocation capable of
+# triggering a repository hook (see that module's own _HOOKS_DISABLED),
+# INCLUDING the two bootstrap shapes these recognizers exist for - so the
+# exact-shape match below must expect it too, or a real, intended change
+# to worktree.py's own commands falls through to ordinary (REQUIRE_APPROVAL)
+# GIT_WRITE policy instead of its dedicated ALLOW. Still a positive
+# allowlist of one exact prefix, not a blacklist - nothing about the
+# recognizer's own "reject anything else" behavior changes.
+_KRIYA_HOOKS_DISABLED_PREFIX: Tuple[str, ...] = ("-c", "core.hooksPath=/dev/null")
 
 
 def _is_kriya_internal_bootstrap_commit(command: Tuple[str, ...]) -> bool:
@@ -321,6 +331,10 @@ def _is_kriya_internal_bootstrap_commit(command: Tuple[str, ...]) -> bool:
     args = list(command)
     if args and os.path.basename(args[0]) == "git":
         args = args[1:]
+    hp = len(_KRIYA_HOOKS_DISABLED_PREFIX)
+    if tuple(args[:hp]) != _KRIYA_HOOKS_DISABLED_PREFIX:
+        return False
+    args = args[hp:]
     n = len(_KRIYA_BOOTSTRAP_IDENTITY)
     if tuple(args[:n]) != _KRIYA_BOOTSTRAP_IDENTITY:
         return False
@@ -346,7 +360,10 @@ def _is_kriya_internal_bootstrap_init(command: Tuple[str, ...]) -> bool:
     args = list(command)
     if args and os.path.basename(args[0]) == "git":
         args = args[1:]
-    return tuple(args) == ("init",)
+    hp = len(_KRIYA_HOOKS_DISABLED_PREFIX)
+    if tuple(args[:hp]) != _KRIYA_HOOKS_DISABLED_PREFIX:
+        return False
+    return tuple(args[hp:]) == ("init",)
 
 
 _REQUIRED_FIELDS_BY_ACTION_TYPE = {

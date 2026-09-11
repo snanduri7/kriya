@@ -1658,7 +1658,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 # advice must not fire for it.
                 if res.get("environment_failure") and res.get("failure_category") not in (
                     "unauthorized_generation_target", "candidate_independent_deterministic_failure",
-                    "generation_budget_exhausted",
+                    "generation_budget_exhausted", "containment_setup_failed",
                 ):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
@@ -1708,6 +1708,23 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         "engineering failure from a prior attempt (if one occurred) remains in "
                         "this run's own persisted gate_outcomes/trace record, distinct from this "
                         "stop reason.",
+                        fg="yellow", bold=True
+                    )
+                # SEC-001 (2026-09-11): a required containment backend was
+                # unavailable/misconfigured/failed to prepare - Kriya
+                # refused to run the command uncontained rather than
+                # silently degrading. Not an environment/toolchain problem
+                # `kriya doctor` can diagnose, and not something further
+                # Developer retries can fix.
+                if res.get("failure_category") == "containment_setup_failed":
+                    click.secho(
+                        f"\n[CONTAINMENT SETUP FAILED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying because a required execution-containment "
+                        "backend could not be established for a command that needed one - "
+                        "this is a configuration/environment problem with the containment "
+                        "backend itself (not the generated code), and `kriya doctor` will not "
+                        "help. Check autonomy.containment_backend and the backend's own "
+                        "availability.",
                         fg="yellow", bold=True
                     )
                 if res.get("run_id"):
@@ -2711,7 +2728,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             # problem, and must not print this Java/Maven-specific advice.
             if res.get("environment_failure") and res.get("failure_category") not in (
                 "unauthorized_generation_target", "candidate_independent_deterministic_failure",
-                "generation_budget_exhausted",
+                "generation_budget_exhausted", "containment_setup_failed",
             ):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
@@ -2746,6 +2763,19 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                     "engineering failure from a prior attempt (if one occurred) remains in "
                     "this run's own persisted gate_outcomes/trace record, distinct from this "
                     "stop reason.",
+                    fg="yellow", bold=True
+                )
+            # SEC-001 (2026-09-11): see the matching branch above in this
+            # file's other quality-gates-failure branch.
+            if res.get("failure_category") == "containment_setup_failed":
+                click.secho(
+                    f"\n[CONTAINMENT SETUP FAILED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying because a required execution-containment "
+                    "backend could not be established for a command that needed one - "
+                    "this is a configuration/environment problem with the containment "
+                    "backend itself (not the generated code), and `kriya doctor` will not "
+                    "help. Check autonomy.containment_backend and the backend's own "
+                    "availability.",
                     fg="yellow", bold=True
                 )
             if res.get("run_id"):

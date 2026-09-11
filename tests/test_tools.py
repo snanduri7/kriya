@@ -123,6 +123,58 @@ async def test_shell_tool_env_full_when_sandbox_disabled(monkeypatch):
     res = await tool.execute(command="echo $KRIYA_TEST_SECRET")
     assert res["stdout"].strip() == "super-secret-value"
 
+
+# --- SEC-001 (2026-09-11): ShellTool migrated onto ProcessController.run_async -
+# gains real timeout + process-tree termination, previously entirely absent
+# (the SEC-001 execution-surface inventory's own finding: ShellTool was the
+# single least-contained primitive in the codebase). ---
+
+@pytest.mark.asyncio
+async def test_shell_tool_has_a_timeout():
+    from kriya.config import AppConfig
+    cfg = AppConfig()
+    cfg.autonomy.shell_command_timeout_seconds = 1
+    tool = ShellTool(autonomy_cfg=cfg.autonomy)
+
+    res = await tool.execute(command="sleep 30")
+    assert res["exit_code"] == -1
+    assert "TIMEOUT" in res["stderr"]
+
+
+@pytest.mark.asyncio
+async def test_shell_tool_timeout_leaves_no_surviving_process():
+    """Independent, non-self-reported confirmation via a real `pgrep`, not
+    just that the call returned - same discipline as
+    test_process_controller_containment.py's own equivalent check."""
+    import asyncio
+
+    from kriya.config import AppConfig
+    cfg = AppConfig()
+    cfg.autonomy.shell_command_timeout_seconds = 1
+    tool = ShellTool(autonomy_cfg=cfg.autonomy)
+
+    await tool.execute(command="sleep 41")
+    await asyncio.sleep(0.3)
+
+    check = await asyncio.create_subprocess_exec(
+        "pgrep", "-f", "sleep 41", stdout=asyncio.subprocess.PIPE,
+    )
+    out, _ = await check.communicate()
+    remaining_pids = [p for p in out.decode().split() if p.strip()]
+    assert remaining_pids == []
+
+
+@pytest.mark.asyncio
+async def test_shell_tool_preserves_shell_metacharacter_semantics():
+    """The migration off asyncio.create_subprocess_shell onto
+    ["/bin/sh", "-c", command] must not change what the command string is
+    allowed to contain - pipes, redirects, and command chaining must still
+    work exactly as they did with the raw shell primitive."""
+    tool = ShellTool()
+    res = await tool.execute(command="echo hello | tr a-z A-Z")
+    assert res["exit_code"] == 0
+    assert res["stdout"].strip() == "HELLO"
+
 @pytest.mark.asyncio
 async def test_git_tool(tmp_path):
     # Initialize a git repository in tmp_path
