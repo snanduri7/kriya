@@ -726,6 +726,85 @@ box), the managed-service launch path and `dependency_execution.py`'s
 own wiring into `validate.py` remain open, and `DEPENDENCY_REGISTRY_ONLY`
 has no real implementation on any backend.
 
+---
+
+**Production execution-path completion package IMPLEMENTED 2026-09-11**
+(closes every gap the prior package's own status block named open,
+except `DEPENDENCY_REGISTRY_ONLY`, which is reported as a new,
+explicitly-scoped risk candidate below - not silently absorbed into
+SEC-001):
+
+- **Maven two-phase wired into the real validation path (Stage 2):
+  DONE.** `PolymorphicValidator._run_maven_cmd` (`kriya/tools/validate.py`)
+  - a persistent per-workspace `.kriya/m2_cache`, warmed once via
+  `dependency:go-offline` (network=UNRESTRICTED, still fully contained),
+  every real goal (pom validate, compile, test) then runs offline
+  (`-o`, network=DENIED); a genuine `MISSING_DEPENDENCY` offline failure
+  (Maven's own real error text, not a guess) triggers exactly one
+  bounded reacquisition + one more offline retry, never unrestricted
+  networking for the goals themselves. Host mode (the packaged default)
+  is a byte-for-byte pass-through - no flags added, no behavior change.
+  Proven through the real `run_compile_check()` entry point with a real
+  Maven Central dependency the fresh worktree had never cached
+  (`tests/test_validate_oci.py`).
+- **Python two-phase: already wired as a byproduct of Stage 3** (the
+  venv-creation/interpreter fix below made `_ensure_project_venv`'s own
+  `pip install` the acquisition step - network=UNRESTRICTED, still
+  contained - with everything else, including the venv itself, staying
+  network=DENIED). No separate wiring needed; `dependency_execution.py`'s
+  own standalone two-phase functions remain a second, independently
+  tested primitive, still not the path `validate.py` itself uses.
+- **Host `sys.executable` removed from contained Python execution
+  (Stage 3): DONE.** Venv creation now uses the container's own
+  `"python3"`, the venv is referenced by a workspace-relative path
+  (never a host-absolute one - no path-translation hack, the SAME
+  cwd/workdir mechanism every other contained command already relies
+  on), and the "no manifest" fallback resolves to a bare `"python3"`
+  token. Proven end-to-end via `run_tests()` with a real PyPI dependency.
+- **Managed-service containment (Stage 4): DONE**, and with a STRONGER
+  isolation posture than the design's own preferred "loopback-only
+  publish" framing asked for. Three real Docker probes were run before
+  committing to a mechanism: `--network internal` + port publish (outbound
+  genuinely blocked, but Docker structurally refuses to publish ANY port
+  on an internal network); a masquerade-disabled bridge (port publish
+  works, but Docker Desktop's VM-mediated stack routes around the
+  disabled masquerade flag - outbound still succeeds); the mechanism
+  actually shipped keeps the SAME `--network none` posture already used
+  for compile/test and issues readiness/probe checks via `docker exec
+  <container> bash -c '...'`, from inside the container's own network
+  namespace against its own loopback - no port is EVER published to the
+  host at all, exceeding "loopback-only" (there is no host-reachable
+  surface whatsoever; the only channel in is Kriya's own trusted `docker
+  exec`, the same trust class its `docker rm -f` cleanup already uses).
+- **`DEPENDENCY_REGISTRY_ONLY` (Stage 5): reported as SEC-006 (new risk
+  candidate), not folded into SEC-001** - see this package's own RETURN
+  for the exact proposed wording/severity/dependency. Neither SEC-001
+  nor SEC-005 (confirmed against this design's own §9 SEC-005
+  reconciliation - different scope, a broker that was never built and
+  was explicitly never a SEC-001 prerequisite) precisely own this gap.
+
+**Named, not-fixed-this-pass residual limitations** (each documented at
+its own call site, not silently dropped): `resolve_maven_classpath`
+returns `None` under containment (its own pre-existing "never raises"
+contract - the `-Dmdep.outputFile` target lives outside the workspace
+mount, a container cannot see it; an optional recovery-tool lookup, not
+a Quality Gate); Gradle commands are still fully contained but not
+two-phase (a fresh Gradle repo may fail offline for a genuinely missing
+dependency); `java_home_override` (per-repo JDK selection) still isn't
+threaded into the contained path (a containerized build uses the OCI
+backend's own fixed toolchain image).
+
+**SEC-001 status after this package**: every execution path this
+design's own inventory names is now either routed through the common,
+containment-capable boundary, explicitly classified as trusted
+infrastructure, or an explicitly owned/deferred gap (MCP, SEC-003/
+SEC-005) - zero unexplained, zero unowned. Still NOT CLOSED: the
+packaged default remains fully backward-compatible
+(`containment_backend: "none"`, `contained_execution_required: false`),
+`DEPENDENCY_REGISTRY_ONLY` has no real backend implementation anywhere
+(SEC-006 candidate), and closure requires the separate production-path/
+live-validation gate this package's own task explicitly deferred.
+
 ## 11. Implementation decomposition (original decomposition, kept for reference)
 
 Deliberately not a monolithic sandbox manager, per Invariant 14 and
