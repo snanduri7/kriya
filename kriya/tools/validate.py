@@ -23,6 +23,8 @@ from kriya.tools.containment import (
     TrustClass,
     resolve_containment_backend,
 )
+from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT
+from kriya.tools.dependency_execution import OfflineFailureKind, classify_maven_offline_failure_text
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +188,11 @@ class PolymorphicValidator:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
+        # SEC-001-P6 Stage 2: tracks whether _ensure_maven_cache_warm's one
+        # upfront dependency:go-offline acquisition has already run for
+        # THIS instance - never re-acquired just because a second gate
+        # (compile, then test) also needs the cache.
+        self._maven_cache_warmed = False
         self.stack = self._detect_stack()
         # 'group:artifact' keys the caller has already determined are
         # explicitly authorized for removal by the goal (kriya/workflow/
@@ -608,6 +615,7 @@ class PolymorphicValidator:
 
     def build_containment_profile_and_backend(
         self, *, network: NetworkAuthority = NetworkAuthority.DENIED,
+        dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
     ) -> Tuple[Optional[ContainmentProfile], Optional[ContainmentBackend]]:
         """SEC-001-P6 (2026-09-11): the real-containment counterpart to
         `build_subprocess_env_and_preexec`, gated by
@@ -663,6 +671,8 @@ class PolymorphicValidator:
             env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
             cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
             memory_mb=self.autonomy_cfg.sandbox_memory_mb,
+            dependency_cache_paths=[dependency_cache_path] if dependency_cache_path else [],
+            dependency_cache_writable=dependency_cache_writable,
         )
         backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
         return profile, backend
@@ -670,9 +680,13 @@ class PolymorphicValidator:
     def _run_cmd_with_timeout(
         self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
         network: NetworkAuthority = NetworkAuthority.DENIED,
+        dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
     ) -> Dict[str, Any]:
         self._audit_run_command(cmd, cwd)
-        profile, backend = self.build_containment_profile_and_backend(network=network)
+        profile, backend = self.build_containment_profile_and_backend(
+            network=network, dependency_cache_path=dependency_cache_path,
+            dependency_cache_writable=dependency_cache_writable,
+        )
         if profile is not None:
             return ProcessController().run(
                 cmd, cwd=cwd, timeout=timeout, stdin_payload=stdin_payload,
@@ -682,6 +696,93 @@ class PolymorphicValidator:
         return ProcessController().run(
             cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn, stdin_payload=stdin_payload,
         ).to_dict()
+
+    def _maven_cache_dir(self) -> str:
+        """A persistent, per-workspace Maven local-repository cache
+        (SEC-001-P6 Stage 2) - lives under the same already-git-untracked,
+        worktree-scoped `.kriya/` directory `_ensure_project_venv` already
+        uses for the Python venv, reused across retries/gate calls within
+        the same run the same way. Created on demand - `OCIContainmentBackend`
+        refuses to mount a `dependency_cache_paths` entry that does not
+        already exist as a real directory."""
+        cache_dir = os.path.join(self.workspace_path, ".kriya", "m2_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        return cache_dir
+
+    def _ensure_maven_cache_warm(self, cache_dir: str) -> None:
+        """One `dependency:go-offline` acquisition (network=UNRESTRICTED,
+        still fully filesystem/process-contained), run at most once per
+        validator instance - populates `cache_dir` BEFORE any offline
+        goal runs, so an ordinary `mvn validate`/`compile`/`test` on a
+        freshly-created worktree doesn't have to fail-then-reacquire just
+        to get its first real dependency resolution. Best-effort: a
+        failure here is logged, not raised - `_run_maven_cmd`'s own
+        per-command bounded reacquisition (triggered by a real
+        MISSING_DEPENDENCY classification) is the backstop for whatever
+        this upfront pass didn't catch, matching
+        `dependency_execution.py`'s own "does not guarantee every
+        subsequent offline build will succeed" acknowledgment for
+        `maven_acquire_dependencies`."""
+        if self._maven_cache_warmed:
+            return
+        self._maven_cache_warmed = True
+        try:
+            self._run_cmd_with_timeout(
+                ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", "dependency:go-offline"],
+                cwd=self.workspace_path, timeout=300, network=NetworkAuthority.UNRESTRICTED,
+                dependency_cache_path=cache_dir, dependency_cache_writable=True,
+            )
+        except Exception as e:
+            logger.warning(f"Maven dependency:go-offline acquisition failed (continuing, offline goals may fail and trigger a bounded reacquisition): {e}")
+
+    def _run_maven_cmd(self, goals: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
+        """The `contained_execution_required`-aware replacement for a
+        direct `_run_cmd_with_timeout(["mvn"] + goals, ...)` call -
+        SEC-001-P6 Stage 2's two-phase concept applied to every real Maven
+        gate this class runs (pom validate, classpath resolution, compile,
+        test): host mode is a byte-for-byte pass-through (no `-o`/
+        `-Dmaven.repo.local` flags added, exact prior behavior); contained
+        mode warms the persistent cache once, runs OFFLINE
+        (network=DENIED) against it, and - only if Maven's own offline-
+        mode error text indicates a genuinely missing dependency/plugin
+        (`OfflineFailureKind.MISSING_DEPENDENCY`, not just any nonzero
+        exit) - runs exactly ONE bounded reacquisition followed by exactly
+        one more offline retry. Never falls back to unrestricted
+        networking for the goals themselves; never loops more than once."""
+        if not self.autonomy_cfg.contained_execution_required:
+            return self._run_cmd_with_timeout(["mvn"] + goals, cwd=cwd, timeout=timeout)
+
+        cache_dir = self._maven_cache_dir()
+        self._ensure_maven_cache_warm(cache_dir)
+
+        def _offline_attempt() -> Dict[str, Any]:
+            return self._run_cmd_with_timeout(
+                ["mvn", "-B", "-o", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
+                cwd=cwd, timeout=timeout, network=NetworkAuthority.DENIED,
+                dependency_cache_path=cache_dir, dependency_cache_writable=True,
+            )
+
+        result = _offline_attempt()
+        if result["returncode"] == 0:
+            return result
+        combined_output = result.get("stdout", "") + result.get("stderr", "")
+        if classify_maven_offline_failure_text(combined_output) != OfflineFailureKind.MISSING_DEPENDENCY:
+            return result
+
+        logger.info(
+            "mvn %s failed offline with a missing-dependency signature - running one bounded "
+            "reacquisition then one more offline attempt.", " ".join(goals),
+        )
+        try:
+            self._run_cmd_with_timeout(
+                ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", "dependency:go-offline"],
+                cwd=self.workspace_path, timeout=300, network=NetworkAuthority.UNRESTRICTED,
+                dependency_cache_path=cache_dir, dependency_cache_writable=True,
+            )
+        except Exception as e:
+            logger.warning(f"Bounded Maven reacquisition failed: {e}")
+            return result
+        return _offline_attempt()
 
     def run_pom_validate(self) -> Dict[str, Any]:
         """Cheap, semantic-level pre-check for a Maven pom.xml - catches a
@@ -716,7 +817,7 @@ class PolymorphicValidator:
         if not os.path.exists(pom_path):
             return {"success": True, "output": "No pom.xml to validate."}
         try:
-            res = self._run_cmd_with_timeout(["mvn", "validate"], cwd=self.workspace_path, timeout=120)
+            res = self._run_maven_cmd(["validate"], cwd=self.workspace_path, timeout=120)
             if res["returncode"] == 0:
                 return {"success": True, "output": "Maven POM validation succeeded."}
             return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
@@ -747,6 +848,17 @@ class PolymorphicValidator:
         unresolvable dependencies, timeout) - never raises, since this is
         used from an optional recovery tool call, not a Quality Gate."""
         if self.stack != "java" or not os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
+            return None
+        if self.autonomy_cfg.contained_execution_required:
+            # SEC-001-P6 Stage 2: NOT wired onto the contained path this
+            # pass - `-Dmdep.outputFile` needs a path OUTSIDE the workspace
+            # mount (tempfile.mkstemp's own system temp dir), which a
+            # container cannot see or write to; this method's own contract
+            # ("never raises, returns None on any failure") already covers
+            # this cleanly - an optional recovery-tool lookup returning
+            # nothing is a correct, honest degrade, not a silent bypass of
+            # anything security-relevant (this reads dependency classpath
+            # info, it doesn't execute untrusted code any differently).
             return None
         fd, cp_file = tempfile.mkstemp(suffix=".kriya-classpath.txt")
         os.close(fd)
@@ -861,13 +973,13 @@ class PolymorphicValidator:
                     # error) now shows up as an explicit, precisely-located "rawtypes"
                     # warning alongside the hard error, rather than the model having
                     # to infer the root cause from the type-mismatch message alone.
-                    res = self._run_cmd_with_timeout(
+                    res = self._run_maven_cmd(
                         [
-                            "mvn", "clean", "compile",
+                            "clean", "compile",
                             "-Dmaven.compiler.showWarnings=true",
                             "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked",
                         ],
-                        cwd=self.workspace_path,
+                        cwd=self.workspace_path, timeout=300,
                     )
                     if res["returncode"] == 0:
                         # Found live, 2026-08-22 (ignite_qpid_protocol): a
@@ -1146,10 +1258,10 @@ class PolymorphicValidator:
                     os.path.splitext(os.path.basename(target_test))[0] if target_test else None
                 )
                 if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
-                    cmd = ["mvn", "test"]
+                    goals = ["test"]
                     if java_test_class:
-                        cmd.append(f"-Dtest={java_test_class}")
-                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                        goals.append(f"-Dtest={java_test_class}")
+                    res = self._run_maven_cmd(goals, cwd=self.workspace_path, timeout=300)
                     return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"

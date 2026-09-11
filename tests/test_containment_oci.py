@@ -174,6 +174,29 @@ def test_allowlisted_env_var_does_reach_the_container(monkeypatch, workspace):
     assert "VALUE:[should-be-visible]" in result.stdout
 
 
+def test_host_only_env_vars_never_leak_even_when_allowlisted(monkeypatch, workspace):
+    """Found live, 2026-09-11: AutonomyConfig's own packaged
+    sandbox_env_allowlist default includes JAVA_HOME - a real host JDK
+    path this exact developer machine has set - which broke Maven's own
+    launcher when forwarded verbatim into a container ("JAVA_HOME
+    environment variable is not defined correctly"). JAVA_HOME/HOME/
+    TMPDIR/etc. must never reach the container even when a caller's own
+    env_allowlist explicitly names them (Invariant: host paths/
+    interpreters must not leak accidentally into container execution) -
+    the container keeps whatever value its OWN image already sets."""
+    monkeypatch.setenv("JAVA_HOME", "/definitely/not/a/real/container/path")
+    controller = ProcessController()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=str(workspace),
+        network=NetworkAuthority.DENIED, env_allowlist=["JAVA_HOME"],
+    )
+    result = controller.run(
+        ["/bin/sh", "-c", "echo VALUE:[$JAVA_HOME]"],
+        cwd=".", timeout=60, containment_profile=profile, containment_backend=OCIContainmentBackend(),
+    )
+    assert "/definitely/not/a/real/container/path" not in result.stdout
+
+
 # --- adversarial: no prohibited network connection under DENIED ---
 
 def test_network_denied_blocks_outbound_connection(workspace):

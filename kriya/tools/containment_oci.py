@@ -66,6 +66,19 @@ _PIDS_LIMIT = "256"
 _CPU_RATE_CAP = "2"
 _TMPFS_SIZE = "512m"
 
+# Never forwarded into the container even when present in a caller's own
+# env_allowlist (SEC-001-P6, found live 2026-09-11 - see prepare()'s own
+# comment at the forwarding loop for the incident this closes): every one
+# of these is a real HOST FILESYSTEM PATH in AutonomyConfig's own packaged
+# `sandbox_env_allowlist` default, written for host-mode execution - under
+# containment, the image itself already provides a correct value for each
+# (HOME=/root, JAVA_HOME=<image's own JDK>, etc.), and the host's own
+# value can only ever be wrong there.
+_HOST_ONLY_ENV_VARS = frozenset({
+    "PATH", "HOME", "TMPDIR", "TEMP", "TMP",
+    "JAVA_HOME", "M2_HOME", "GRADLE_HOME", "VIRTUAL_ENV", "PYTHONPATH",
+})
+
 
 _MAVEN_EXE_RE = re.compile(r"\b(mvn|mvnw|javac|java|jar)\b")
 _PYTHON_EXE_RE = re.compile(r"\b(python3?|pytest|pip3?)\b")
@@ -244,16 +257,27 @@ class OCIContainmentBackend:
         # environment, which stays untouched/full - the docker CLI is
         # trusted Kriya-invoked tooling, not the sandboxed payload; only
         # names EXPLICITLY on profile.env_allowlist ever reach the
-        # container). PATH is deliberately excluded even if present in
-        # the allowlist's resolved dict - a host macOS PATH would be
-        # meaningless/wrong for a Linux container's own image-provided
-        # toolchain PATH.
-        if profile.env_allowlist:
-            restricted_env = build_restricted_env(profile.env_allowlist)
-            for key, value in restricted_env.items():
-                if key == "PATH":
-                    continue
-                args += ["-e", f"{key}={value}"]
+        # container). `_HOST_ONLY_ENV_VARS` is excluded even when present
+        # in the allowlist's resolved dict - found live, 2026-09-11: this
+        # host's own `JAVA_HOME` (a macOS JDK path,
+        # `sandbox_env_allowlist`'s own packaged default includes
+        # "JAVA_HOME") was forwarded into a Maven container verbatim,
+        # breaking Maven's own launcher script ("JAVA_HOME environment
+        # variable is not defined correctly") since that path does not
+        # exist inside the container at all. `sandbox_env_allowlist`'s
+        # default list was written for host-mode execution, where
+        # forwarding these is exactly right; every name in it is a real
+        # host FILESYSTEM PATH with its own correct, image-provided
+        # default already set inside any real toolchain container (HOME,
+        # JAVA_HOME, etc.) - forwarding the host's own value can only ever
+        # be wrong there, never merely redundant, so these never reach the
+        # container regardless of what a caller's env_allowlist contains
+        # (Invariant: host paths/interpreters must not leak accidentally
+        # into container execution).
+        for key, value in build_restricted_env(profile.env_allowlist).items():
+            if key in _HOST_ONLY_ENV_VARS:
+                continue
+            args += ["-e", f"{key}={value}"]
 
         # RESOURCES: --memory is a real, cgroup-enforced hard limit (accurate
         # mapping of profile.memory_mb). --cpus is a RATE cap (cores), not a

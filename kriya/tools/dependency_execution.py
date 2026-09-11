@@ -79,20 +79,38 @@ _PIP_OFFLINE_MISSING_RE = re.compile(
 )
 
 
+def classify_maven_offline_failure_text(combined_output: str) -> OfflineFailureKind:
+    """The text-only half of `_classify_maven_offline_failure`, factored
+    out (SEC-001-P6 Stage 2, 2026-09-11) so a caller with its own
+    dict-shaped result (kriya/tools/validate.py's `_run_cmd_with_timeout`,
+    which predates - and is not itself migrated onto -
+    `kriya.tools.process.ProcessResult`) can reuse the SAME real,
+    empirically-verified Maven offline-error patterns instead of
+    duplicating the regex. Callers decide success/failure themselves first
+    (this function only classifies WHY a known failure happened)."""
+    if _MAVEN_OFFLINE_MISSING_RE.search(combined_output):
+        return OfflineFailureKind.MISSING_DEPENDENCY
+    return OfflineFailureKind.ORDINARY_FAILURE
+
+
+def classify_pip_offline_failure_text(combined_output: str) -> OfflineFailureKind:
+    """Text-only half of `_classify_pip_offline_failure` - see
+    `classify_maven_offline_failure_text`'s own docstring for why."""
+    if _PIP_OFFLINE_MISSING_RE.search(combined_output):
+        return OfflineFailureKind.MISSING_DEPENDENCY
+    return OfflineFailureKind.ORDINARY_FAILURE
+
+
 def _classify_maven_offline_failure(result: ProcessResult) -> Optional[OfflineFailureKind]:
     if result.returncode == 0 and not result.timeout:
         return None
-    if _MAVEN_OFFLINE_MISSING_RE.search(result.stdout + result.stderr):
-        return OfflineFailureKind.MISSING_DEPENDENCY
-    return OfflineFailureKind.ORDINARY_FAILURE
+    return classify_maven_offline_failure_text(result.stdout + result.stderr)
 
 
 def _classify_pip_offline_failure(result: ProcessResult) -> Optional[OfflineFailureKind]:
     if result.returncode == 0 and not result.timeout:
         return None
-    if _PIP_OFFLINE_MISSING_RE.search(result.stdout + result.stderr):
-        return OfflineFailureKind.MISSING_DEPENDENCY
-    return OfflineFailureKind.ORDINARY_FAILURE
+    return classify_pip_offline_failure_text(result.stdout + result.stderr)
 
 
 def _acquisition_profile(workspace_path: str, cache_path: str, env_allowlist: List[str]) -> ContainmentProfile:
