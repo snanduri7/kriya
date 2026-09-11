@@ -286,4 +286,19 @@ class OCIContainmentBackend:
         return PreparedContainment(
             env=None, preexec_fn=None, backend_name=self.name,
             command_prefix=args, cleanup=_cleanup,
+            # SEC-001-P6 (managed-service containment): lets a caller
+            # (service_runtime.py, for a long-lived container started via
+            # start_managed()) run a FOLLOW-UP command inside this exact
+            # container after it starts - e.g. a readiness/probe check
+            # issued from the host but executed in the container's own
+            # network namespace, with zero ports ever published.
+            # `-i` (interactive/stdin-attached) is required for a caller's
+            # own stdin_payload (a raw HTTP request, for the readiness/probe
+            # exec scripts in service_runtime.py) to actually reach the
+            # exec'd process - `docker exec` without `-i` leaves stdin
+            # unattached, so a `cat >&3` inside the script would read EOF
+            # immediately and the request would never be sent (confirmed
+            # empirically: readiness/probe hung until ProcessController's
+            # own timeout, not a docker-level failure).
+            exec_target=[docker_path, "exec", "-i", container_name],
         )

@@ -130,6 +130,22 @@ class PreparedContainment:
       backend's own authoritative "make sure the container is actually
       gone" step (e.g. `docker rm -f <name>`), checked adversarially via
       `docker ps` from the host, not by trusting the CLI's own exit code.
+
+    `exec_target` (SEC-001-P6, managed-service containment, 2026-09-11):
+    a ready-made argv prefix (e.g. `["docker", "exec", "<container>"]`) a
+    caller can prepend to run a NEW command INSIDE an already-started,
+    still-running container - only meaningful for `start_managed()`'s
+    long-lived-service lifecycle (finite `run()`/`run_async()` calls have
+    nothing to "exec into" once they're done). This is how a managed
+    service under `network=DENIED` (zero host-published ports, zero
+    outbound) can still be readiness-checked/probed from the host: Kriya
+    issues `docker exec <container> ...` (itself TRUSTED_KRIYA_INFRASTRUCTURE
+    execution, not the untrusted payload) to run the check FROM INSIDE the
+    container's own network namespace, against its own loopback - no port
+    is ever published to the host, no bridge network is ever created, and
+    the container's isolation posture is identical to any other contained
+    command (see kriya/tools/service_runtime.py's exec-based readiness/
+    probe functions).
     """
 
     env: Optional[Dict[str, str]]
@@ -137,6 +153,7 @@ class PreparedContainment:
     backend_name: str
     command_prefix: Optional[List[str]] = None
     cleanup: Optional[Callable[[], None]] = None
+    exec_target: Optional[List[str]] = None
 
 
 class ContainmentBackend(Protocol):

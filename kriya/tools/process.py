@@ -76,10 +76,17 @@ class ManagedProcess:
 
     def __init__(
         self, popen: subprocess.Popen, *, max_output_chars: int, cleanup: Optional[Callable[[], None]] = None,
+        exec_target: Optional[List[str]] = None,
     ) -> None:
         self._popen = popen
         self._max_output_chars = max_output_chars
         self._cleanup = cleanup
+        # SEC-001-P6: a container backend's `["docker", "exec", "<name>"]`
+        # prefix - lets a caller run a follow-up command INSIDE this still-
+        # running process (a readiness/probe check executed in the
+        # container's own network namespace) without publishing any port.
+        # None for every non-container backend/host process, unchanged.
+        self.exec_target: Optional[List[str]] = exec_target
         self._stdout_chunks: List[str] = []
         self._stderr_chunks: List[str] = []
         self._lock = threading.Lock()
@@ -166,6 +173,7 @@ class _ResolvedExecution:
     preexec_fn: Optional[Callable[[], None]]
     command: List[str]
     cleanup: Optional[Callable[[], None]] = None
+    exec_target: Optional[List[str]] = None
 
 
 def _prepare_env_and_preexec(
@@ -204,6 +212,7 @@ def _prepare_env_and_preexec(
     effective_command = (list(prepared.command_prefix) + command) if prepared.command_prefix else command
     return _ResolvedExecution(
         env=prepared.env, preexec_fn=prepared.preexec_fn, command=effective_command, cleanup=prepared.cleanup,
+        exec_target=prepared.exec_target,
     )
 
 
@@ -417,7 +426,10 @@ class ProcessController:
             stdin=subprocess.DEVNULL, text=True, env=resolved.env, preexec_fn=resolved.preexec_fn,
             start_new_session=(os.name == "posix"),
         )
-        return ManagedProcess(process, max_output_chars=self.max_output_chars, cleanup=resolved.cleanup)
+        return ManagedProcess(
+            process, max_output_chars=self.max_output_chars, cleanup=resolved.cleanup,
+            exec_target=resolved.exec_target,
+        )
 
     @staticmethod
     def _terminate_tree(process: Any) -> None:

@@ -288,8 +288,137 @@ def _run_probe(spec: ProbeSpec, *, timeout: float) -> Tuple[Optional[int], Optio
     return status, body, passed, reasoning
 
 
+def _build_raw_http_request(
+    method: str, path: str, host: str, port: int, headers: Dict[str, str], body: Optional[str],
+) -> str:
+    """A minimal, hand-built HTTP/1.1 request line-for-line - used only by
+    the exec-based (contained) readiness/probe path below, which has no
+    host-side socket to hand to `http.client`. `Connection: close` is
+    always forced so the peer closes the connection once it has written
+    its full response, giving the exec script's `cat <&3` a natural EOF to
+    stop reading on without needing chunked-transfer-encoding awareness."""
+    body_text = body or ""
+    header_lines = "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k.lower() != "connection")
+    content_length = f"Content-Length: {len(body_text.encode('utf-8'))}\r\n" if body_text else ""
+    return (
+        f"{method} {path} HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        f"Connection: close\r\n"
+        f"{content_length}{header_lines}\r\n"
+        f"{body_text}"
+    )
+
+
+def _parse_raw_http_response(raw: str) -> Tuple[Optional[int], str]:
+    # Split on "\n\n", NOT "\r\n\r\n" (found live, 2026-09-11):
+    # `ProcessController.run()` reads this text via `subprocess.Popen(...,
+    # text=True)`, which applies Python's universal-newline translation by
+    # default - every "\r\n" in the captured stdout has already become a
+    # bare "\n" by the time this function sees it, so a "\r\n\r\n" search
+    # silently never matches (the whole response lands in `head`, body
+    # comes back empty - confirmed by a live repro against a real
+    # container: status parsed correctly, body silently lost).
+    head, _sep, body = raw.partition("\n\n")
+    lines = head.split("\n")
+    status: Optional[int] = None
+    if lines and lines[0].startswith("HTTP/"):
+        parts = lines[0].split(" ", 2)
+        if len(parts) >= 2 and parts[1].isdigit():
+            status = int(parts[1])
+    return status, body
+
+
+def _dev_tcp_exec_script(host: str, port: int) -> str:
+    """Opens a TCP connection to HOST:PORT on fd 3 using bash's own
+    `/dev/tcp` pseudo-device (confirmed present in every image this
+    backend selects - maven/python/debian are all Debian-family with bash
+    preinstalled) - no `curl`/`nc`/network-utility dependency on the
+    target image. Any stdin given to the exec'd process is written to the
+    socket, then whatever the peer sends back is read to stdout - this one
+    script serves both a bare TCP-connect readiness check (nothing written,
+    nothing read) and a full HTTP request/response round-trip (the raw
+    request text piped in via stdin_payload)."""
+    return f"exec 3<>/dev/tcp/{host}/{port} && cat >&3; cat <&3"
+
+
+def _check_readiness_via_exec(managed: ManagedProcess, spec: ReadinessSpec, *, controller: ProcessController) -> bool:
+    """The `managed.exec_target is not None` counterpart to
+    `_check_readiness` - runs the SAME kind of check, but FROM INSIDE the
+    container (`docker exec <name> bash -c ...`) against the service's own
+    loopback, since a `network=DENIED` container has no host-published
+    port for a host-side socket to reach at all. Less strict about exact
+    wall-clock precision than the host-side check (bounded by
+    ProcessController's own timeout, not a byte-by-byte remaining-budget
+    tracker) - an accepted, documented difference in rigor for this
+    separate, opt-in, containment-only path."""
+    assert managed.exec_target is not None
+    if spec.kind == "tcp":
+        script = f"exec 3<>/dev/tcp/{spec.host}/{spec.port}"
+        stdin_payload = None
+    elif spec.kind == "http":
+        script = _dev_tcp_exec_script(spec.host, spec.port)
+        stdin_payload = _build_raw_http_request("GET", spec.path, spec.host, spec.port, {}, None)
+    else:
+        raise ValueError(f"Unsupported readiness kind: {spec.kind!r}")
+    try:
+        result = controller.run(
+            managed.exec_target + ["bash", "-c", script], cwd=".",
+            timeout=max(spec.request_timeout_seconds, 1.0) + 2, stdin_payload=stdin_payload,
+        )
+    except Exception:
+        return False
+    if result.timeout or result.returncode != 0:
+        return False
+    if spec.kind == "tcp":
+        return True
+    status, _body = _parse_raw_http_response(result.stdout)
+    return status is not None and spec.expected_status_min <= status <= spec.expected_status_max
+
+
+def _run_probe_via_exec(
+    managed: ManagedProcess, spec: ProbeSpec, *, controller: ProcessController, timeout: float,
+) -> Tuple[Optional[int], Optional[str], bool, str]:
+    """The `managed.exec_target is not None` counterpart to `_run_probe` -
+    same contract (status, body, passed, reasoning), same OSError-for-
+    behavioral-failure / other-exception-for-internal-error split the
+    caller (`_run_lifecycle`) already relies on, just executed via
+    `docker exec` into the container's own network namespace rather than a
+    host socket. `ProcessController.run()`'s own timeout is the bound here
+    (not the host-side function's byte-by-byte remaining-deadline
+    tracking) - a real, accepted difference in rigor for this separate,
+    opt-in path, documented rather than silently assumed equivalent."""
+    assert managed.exec_target is not None
+    if spec.kind != "http":
+        raise ValueError(f"Unsupported probe kind: {spec.kind!r}")
+    request_text = _build_raw_http_request(spec.method, spec.path, spec.host, spec.port, spec.headers, spec.body)
+    result = controller.run(
+        managed.exec_target + ["bash", "-c", _dev_tcp_exec_script(spec.host, spec.port)],
+        cwd=".", timeout=timeout, stdin_payload=request_text,
+    )
+    if result.timeout:
+        raise TimeoutError(f"contained probe against {spec.host}:{spec.port}{spec.path} timed out after {timeout}s")
+    if result.returncode != 0:
+        raise OSError(f"docker exec probe failed (exit {result.returncode}): {result.stderr.strip()[:500]}")
+    status, body = _parse_raw_http_response(result.stdout)
+    if status is None:
+        raise OSError(f"contained probe against {spec.host}:{spec.port}{spec.path} produced no parseable HTTP response")
+    passed = status == spec.expected_status
+    if passed and spec.expected_body_contains is not None:
+        passed = spec.expected_body_contains in body
+    reasoning = (
+        f"probe (contained, via docker exec) {spec.method} http://{spec.host}:{spec.port}{spec.path} "
+        f"-> status={status}, expected={spec.expected_status}"
+    )
+    if spec.expected_body_contains is not None:
+        reasoning += (
+            f", expected_body_contains={spec.expected_body_contains!r} present={spec.expected_body_contains in body}"
+        )
+    return status, body, passed, reasoning
+
+
 def _wait_for_ready_or_exit(
     managed: ManagedProcess, readiness: ReadinessSpec, *, startup_timeout_seconds: float,
+    controller: Optional[ProcessController] = None,
 ) -> Tuple[bool, bool, Optional[int]]:
     """Returns (ready, exited_before_ready, returncode). Bounded entirely by
     startup_timeout_seconds - readiness and process-exit are checked every
@@ -299,7 +428,11 @@ def _wait_for_ready_or_exit(
         returncode = managed.poll()
         if returncode is not None:
             return False, True, returncode
-        if _check_readiness(readiness):
+        ready = (
+            _check_readiness_via_exec(managed, readiness, controller=controller or ProcessController())
+            if managed.exec_target is not None else _check_readiness(readiness)
+        )
+        if ready:
             return True, False, None
         if time.monotonic() >= deadline:
             return False, False, None
@@ -307,13 +440,14 @@ def _wait_for_ready_or_exit(
 
 
 def _run_lifecycle(
-    managed: ManagedProcess, spec: ManagedServiceVerificationSpec,
+    managed: ManagedProcess, spec: ManagedServiceVerificationSpec, *, controller: Optional[ProcessController] = None,
 ) -> Tuple[ServiceVerificationOutcomeKind, bool, str, Optional[int], Optional[int], Optional[str]]:
     """(outcome, passed, reasoning, returncode, probe_status, probe_body) -
     everything BEFORE cleanup, which the caller always runs afterward
     regardless of what this returns or raises."""
+    controller = controller or ProcessController()
     ready, exited_before_ready, returncode = _wait_for_ready_or_exit(
-        managed, spec.readiness, startup_timeout_seconds=spec.startup_timeout_seconds,
+        managed, spec.readiness, startup_timeout_seconds=spec.startup_timeout_seconds, controller=controller,
     )
     if exited_before_ready:
         return (
@@ -328,8 +462,10 @@ def _run_lifecycle(
             None, None, None,
         )
     try:
-        probe_status, probe_body, probe_passed, reasoning = _run_probe(
-            spec.probe, timeout=spec.probe_timeout_seconds,
+        probe_status, probe_body, probe_passed, reasoning = (
+            _run_probe_via_exec(managed, spec.probe, controller=controller, timeout=spec.probe_timeout_seconds)
+            if managed.exec_target is not None
+            else _run_probe(spec.probe, timeout=spec.probe_timeout_seconds)
         )
     except OSError as e:
         # External review, 2026-09-03: expected, BEHAVIORAL probe-request
@@ -607,7 +743,19 @@ def run_managed_service_verification(
         )
 
     try:
-        managed = controller.start_managed(spec.service_command, cwd=spec.cwd, env=spec.env)
+        # SEC-001-P6 (managed-service containment): the actual LAUNCHED
+        # service now gets the same containment as its own build-prep step
+        # above, closing this package's own previously-named gap ("the
+        # actual LAUNCHED, HTTP/TCP-probed managed service is NOT
+        # containment-routed"). `network=DENIED` (via the caller's profile)
+        # means zero outbound from the running service and no published
+        # host port at all - readiness/probe below detect this via
+        # `managed.exec_target` and route accordingly (docker exec into the
+        # container's own loopback) instead of a host-side socket connect.
+        managed = controller.start_managed(
+            spec.service_command, cwd=spec.cwd, env=spec.env,
+            containment_profile=containment_profile, containment_backend=containment_backend,
+        )
     except Exception as e:
         return ManagedServiceVerificationResult(
             outcome=ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
@@ -616,7 +764,9 @@ def run_managed_service_verification(
         )
 
     try:
-        outcome, passed, reasoning, returncode, probe_status, probe_body = _run_lifecycle(managed, spec)
+        outcome, passed, reasoning, returncode, probe_status, probe_body = _run_lifecycle(
+            managed, spec, controller=controller,
+        )
     except Exception as e:
         # A genuinely unexpected failure somewhere in readiness-checking
         # itself (not the probe's own request, already split into
