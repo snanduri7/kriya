@@ -42,6 +42,7 @@ def test_null_backend_prepare_returns_env_allowlist_and_no_rlimit_by_default():
     backend = NullContainmentBackend()
     profile = ContainmentProfile(
         trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp", env_allowlist=["PATH"],
+        network=NetworkAuthority.UNRESTRICTED,
     )
     prepared = backend.prepare(profile)
     assert prepared.backend_name == "none"
@@ -53,10 +54,64 @@ def test_null_backend_prepare_builds_rlimit_preexec_when_requested():
     backend = NullContainmentBackend()
     profile = ContainmentProfile(
         trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
-        cpu_seconds=60, memory_mb=256,
+        cpu_seconds=60, memory_mb=256, network=NetworkAuthority.UNRESTRICTED,
     )
     prepared = backend.prepare(profile)
     assert prepared.preexec_fn is not None
+
+
+def test_null_backend_prepare_allows_unrestricted_network_profile():
+    """Foundation gate item 1: a profile NOT requiring OS isolation (the
+    current compatibility shape every existing caller - ShellTool - uses,
+    network=UNRESTRICTED) must still be allowed under NullContainmentBackend,
+    unchanged."""
+    backend = NullContainmentBackend()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
+        network=NetworkAuthority.UNRESTRICTED,
+    )
+    prepared = backend.prepare(profile)
+    assert prepared.backend_name == "none"
+
+
+def test_null_backend_prepare_blocks_network_denied_profile():
+    """Foundation gate item 2: a profile requiring real network isolation
+    (DENIED) must be BLOCKED before the command ever runs, not silently
+    satisfied by a backend that provides no network control at all."""
+    backend = NullContainmentBackend()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
+        network=NetworkAuthority.DENIED,
+    )
+    with pytest.raises(BackendUnavailableError):
+        backend.prepare(profile)
+
+
+def test_null_backend_prepare_blocks_dependency_registry_only_profile():
+    backend = NullContainmentBackend()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
+        network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY,
+    )
+    with pytest.raises(BackendUnavailableError):
+        backend.prepare(profile)
+
+
+def test_null_backend_block_is_a_containment_setup_error():
+    """Foundation gate item 3: the failure must be classifiable as
+    `containment_setup_failed`, which keys off `isinstance(e,
+    ContainmentSetupError)` in kriya/workflow/retry_strategy.py - not a
+    bespoke exception type a caller would need new handling for."""
+    backend = NullContainmentBackend()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
+        network=NetworkAuthority.DENIED,
+    )
+    try:
+        backend.prepare(profile)
+        assert False, "expected BackendUnavailableError"
+    except ContainmentSetupError:
+        pass
 
 
 def test_null_backend_prepare_partial_rlimit_profile_leaves_unset_dimension_untouched():
@@ -67,7 +122,7 @@ def test_null_backend_prepare_partial_rlimit_profile_leaves_unset_dimension_unto
     backend = NullContainmentBackend()
     profile = ContainmentProfile(
         trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
-        cpu_seconds=60, memory_mb=None,
+        cpu_seconds=60, memory_mb=None, network=NetworkAuthority.UNRESTRICTED,
     )
     prepared = backend.prepare(profile)
     assert prepared.preexec_fn is not None

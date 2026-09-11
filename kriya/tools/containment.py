@@ -142,6 +142,31 @@ class NullContainmentBackend:
     name = "none"
 
     def prepare(self, profile: ContainmentProfile) -> PreparedContainment:
+        # SEC-001 foundation gate (2026-09-11): this backend provides NO
+        # filesystem or network isolation at all - only env allowlisting and
+        # best-effort rlimits. A profile that asks for anything stronger
+        # than UNRESTRICTED network is asking for a guarantee this backend
+        # structurally cannot provide; silently returning a PreparedContainment
+        # anyway would let "a profile exists" stand in for "containment was
+        # actually established" (the exact confusion Invariant 4 forbids) and
+        # would let a null/no-isolation backend satisfy an isolation-required
+        # profile (Invariant 2). `network` is the one field in today's
+        # ContainmentProfile shape that distinguishes "no isolation asked"
+        # from "isolation asked" without a schema change - every real
+        # call site that needs filesystem/process confinement (the OCI
+        # package's validator/service-runtime execution phase) also sets
+        # network to DENIED or DEPENDENCY_REGISTRY_ONLY, so this one gate
+        # covers the whole "requires real isolation" family in practice.
+        if profile.network is not NetworkAuthority.UNRESTRICTED:
+            raise BackendUnavailableError(
+                f"NullContainmentBackend cannot honor network authority "
+                f"{profile.network.value!r} - it provides no network "
+                f"isolation at all (nor filesystem/process isolation). A "
+                f"profile requesting anything other than UNRESTRICTED "
+                f"network needs a real containment backend (e.g. 'oci'), "
+                f"not 'none'. Refusing rather than silently running the "
+                f"command uncontained."
+            )
         env = build_restricted_env(profile.env_allowlist) if profile.env_allowlist else None
         preexec_fn = None
         if profile.cpu_seconds is not None or profile.memory_mb is not None:

@@ -11,6 +11,7 @@ from kriya.tools.containment import (
     BackendUnavailableError,
     ContainmentProfile,
     ContainmentSetupError,
+    NetworkAuthority,
     NullContainmentBackend,
     DummyContainmentBackend,
     TrustClass,
@@ -19,11 +20,17 @@ from kriya.tools.process import ProcessController
 
 
 # --- happy path: containment-aware calls behave identically to today's
-# raw env/preexec_fn calls (existing behavior preserved) ---
+# raw env/preexec_fn calls (existing behavior preserved). network=UNRESTRICTED
+# throughout this block - ShellTool's own real profile shape (the foundation
+# gate's "not requiring OS isolation" case) - since NullContainmentBackend
+# now refuses anything stricter (SEC-001 foundation gate, 2026-09-11). ---
 
 def test_run_with_null_backend_profile_matches_plain_run():
     controller = ProcessController()
-    profile = ContainmentProfile(trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=".")
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=".",
+        network=NetworkAuthority.UNRESTRICTED,
+    )
     res = controller.run(
         ["echo", "hello"], cwd=".", timeout=5,
         containment_profile=profile, containment_backend=NullContainmentBackend(),
@@ -35,7 +42,10 @@ def test_run_with_null_backend_profile_matches_plain_run():
 @pytest.mark.asyncio
 async def test_run_async_with_null_backend_profile_matches_plain_run():
     controller = ProcessController()
-    profile = ContainmentProfile(trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=".")
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=".",
+        network=NetworkAuthority.UNRESTRICTED,
+    )
     res = await controller.run_async(
         ["echo", "hello"], cwd=".", timeout=5,
         containment_profile=profile, containment_backend=NullContainmentBackend(),
@@ -49,6 +59,7 @@ def test_run_env_allowlist_via_profile_matches_direct_env(monkeypatch):
     controller = ProcessController()
     profile = ContainmentProfile(
         trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=".", env_allowlist=["PATH"],
+        network=NetworkAuthority.UNRESTRICTED,
     )
     res = controller.run(
         ["/bin/sh", "-c", "echo $KRIYA_TEST_SECRET_PC"], cwd=".", timeout=5,
@@ -83,6 +94,28 @@ async def test_run_async_backend_unavailable_blocks_execution(tmp_path):
         await controller.run_async(
             ["touch", str(sentinel)], cwd=".", timeout=5,
             containment_profile=profile, containment_backend=failing_backend,
+        )
+    assert not sentinel.exists()
+
+
+def test_run_null_backend_blocks_network_restricted_profile_end_to_end(tmp_path):
+    """Foundation gate: proving the NullContainmentBackend network-authority
+    check (kriya/tools/containment.py) actually blocks the real command at
+    the ProcessController boundary, not just at the backend's own unit
+    level - a profile requiring real network isolation must never reach
+    subprocess.Popen under the null backend."""
+    from kriya.tools.containment import NetworkAuthority, NullContainmentBackend
+
+    sentinel = tmp_path / "should_not_exist_network_gate.txt"
+    controller = ProcessController()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=".",
+        network=NetworkAuthority.DENIED,
+    )
+    with pytest.raises(BackendUnavailableError):
+        controller.run(
+            ["touch", str(sentinel)], cwd=".", timeout=5,
+            containment_profile=profile, containment_backend=NullContainmentBackend(),
         )
     assert not sentinel.exists()
 
