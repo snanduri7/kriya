@@ -30,11 +30,13 @@ from kriya.core.kernel import Kernel
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode, normalize_workspace_relpath
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.tools.process import ProcessController
 from kriya.tools.service_runtime import (
     ManagedServiceVerificationSpec,
     ProbeSpec,
     ReadinessSpec,
     ServiceVerificationOutcomeKind,
+    _prepare_required_artifact,
     run_managed_service_verification,
 )
 from kriya.tools.validate import get_pom_dependencies
@@ -1483,6 +1485,108 @@ def _raise_ungrounded_child_process_test_candidate(
     raise QualityGateFailure(failure)
 
 
+def _prepare_finite_command_runtime_artifacts(
+    resolved_run_commands: List[List[str]],
+    validator: "PolymorphicValidator",
+    ctx: "AttemptContext",
+    state: GenerationState,
+) -> None:
+    """finite_command artifact preparation (2026-09-11) - the finite_command
+    counterpart to Managed Runtime Verification's own P6 fix
+    (kriya/tools/service_runtime.py's _prepare_required_artifact). Real live
+    incident this closes: a `java -jar target/artemis-demo-1.0-SNAPSHOT.jar`
+    finite_command failed with "Unable to access jarfile" on every attempt,
+    because neither run_compile_check() (`mvn clean compile`) nor run_tests()
+    (`mvn test`) ever reaches Maven's `package` phase - only managed_service
+    verification had ever run `mvn package` before this. Reuses the EXACT
+    SAME detection/staleness/build primitive managed_service already uses
+    (never a second Maven-specific implementation) - only the caller and the
+    failure-shape mapping below are new.
+
+    Called for every command in the sequence, not just the last - REQUIRED
+    BEHAVIOR 3/4: `_prepare_required_artifact` is itself a fast no-op for any
+    command that doesn't reference a `-jar`/single-jar `-cp` artifact, or
+    whose artifact already exists and is current relative to pom.xml/src -
+    this function never runs `mvn package` unconditionally.
+
+    Threads the validator's own JAVA_HOME/sandbox policy
+    (build_subprocess_env_and_preexec()) into the SAME preparation call, so
+    `mvn package` never silently runs under a different JDK than the one
+    the compile gate already validated against.
+
+    Failure-shape mapping (REQUIRED BEHAVIOR 5/6): a build command that
+    actually ran and failed (non-zero exit/timeout) - real evidence about
+    THIS project's own pom.xml/content - is raised as an ordinary,
+    repair-eligible "compile" Quality Gate failure, exactly like any other
+    compile failure; a build that reported success but still didn't produce
+    the expected artifact gets its own distinct, also repair-eligible
+    "package_preparation_failed" type (neither of these ever sets
+    state.environment_failure - see retry_strategy.py's STOP_ENVIRONMENT
+    type-set, which deliberately does not include either). Only a genuine
+    inability to even ATTEMPT a build - no pom.xml, or the build command
+    itself could not be invoked (e.g. 'mvn' missing from PATH) - remains
+    "verification_infrastructure_failure", the existing, correct
+    environment/toolchain-eligible classification."""
+    env, preexec_fn = validator.build_subprocess_env_and_preexec()
+    controller = ProcessController()
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    for command in resolved_run_commands:
+        outcome = _prepare_required_artifact(
+            command, ctx.worktree_path, controller=controller, env=env, preexec_fn=preexec_fn,
+        )
+        if outcome.outcome is None:
+            continue
+        output = f"stdout:\n{outcome.stdout}\n\nstderr:\n{outcome.stderr}"
+        build_command_desc = " ".join(outcome.command) if outcome.command else "(none invoked)"
+
+        if outcome.outcome == ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED:
+            message = (
+                f"PACKAGE_PREPARATION_FAILED: {outcome.reasoning} This means either the "
+                "run command's artifact path/name doesn't match what this project's "
+                "pom.xml (artifactId/version/finalName) actually produces, or a "
+                "packaging plugin configuration issue silently produced no output there "
+                "- not an environment/toolchain problem (the build itself exited "
+                f"successfully).\n\nBuild command: {build_command_desc}\n\n{output}"
+            )
+            failure = _build_quality_gate_failure(
+                type_="package_preparation_failed", message=message, raw_output=output,
+                worktree_path=ctx.worktree_path, known_files=known_files,
+                attempt=state.attempt_number, extra_likely_files=["pom.xml"],
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        # PREPARATION_FAILED - distinguish "the build command actually ran
+        # and failed" (command+returncode both set - ProcessController.run()
+        # never leaves returncode as None, see its own RunResult) from
+        # "never got that far" (no pom.xml, or the invocation itself raised
+        # before producing any process result - command may be set but
+        # returncode stays the dataclass default None either way).
+        if outcome.command is not None and outcome.returncode is not None:
+            message = (
+                f"PACKAGE_PREPARATION_FAILED: {outcome.reasoning}\n\n"
+                f"Build command: {build_command_desc}\n\n{output}"
+            )
+            failure = _build_quality_gate_failure(
+                type_="compile", message=message, raw_output=output,
+                worktree_path=ctx.worktree_path, known_files=known_files,
+                attempt=state.attempt_number, extra_likely_files=["pom.xml"],
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        message = (
+            "VERIFICATION_INFRASTRUCTURE_FAILURE: runtime behavior was not observed "
+            f"because Kriya's own artifact-preparation step failed: {outcome.reasoning}."
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=outcome.stderr or outcome.reasoning, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+
+
 def _raise_runtime_verification_infrastructure_failure(
     state: GenerationState,
     run_result: Dict[str, Any],
@@ -2892,6 +2996,7 @@ async def _execute_runtime_verification_directly(
         % (command_verification_kind or "application_runtime")
         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
     )
+    _prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
     _run_app_sequence_started = time.monotonic()
     run_res = validator.run_app_sequence(
@@ -6264,6 +6369,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     # N's run started from attempt N-1's leftover state instead
                     # of a fresh one, producing task-ID drift and "not found"
                     # failures that had nothing to do with the generated code.
+                    _prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
                     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
                     run_res = validator.run_app_sequence(
                         resolved_run_commands,
@@ -6499,6 +6605,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                     f"infrastructure issue in {self_correction_result.turns_used} "
                                     "turn(s) - re-running the actual application to confirm."
                                 )
+                                _prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
                                 pre_run_untracked_after_repair = snapshot_untracked_files(ctx.worktree_path)
                                 run_res = validator.run_app_sequence(
                                     resolved_run_commands,

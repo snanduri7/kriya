@@ -44,7 +44,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
 from socket import create_connection
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from kriya.tools.process import ManagedProcess, ProcessController
 
@@ -371,23 +371,38 @@ def _cleanup(managed: ManagedProcess, *, shutdown_timeout_seconds: float) -> Opt
 
 
 _JAR_LAUNCH_FLAG = "-jar"
+_CLASSPATH_FLAGS = ("-cp", "-classpath", "--class-path")
 _MAVEN_PACKAGE_TIMEOUT_SECONDS = 300
 _MAVEN_PACKAGE_ARGS = ["package", "-DskipTests"]
 
 
 def _detect_required_artifact(service_command: List[str], cwd: str) -> Optional[str]:
     """If `service_command` launches a pre-built artifact that must already
-    exist on disk, returns its absolute path - otherwise None. Deliberately
-    narrow: only the JVM `-jar <path>` pattern is recognized today (the
-    exact P6 shape). A directly runnable command with no separate artifact
-    dependency - `mvn spring-boot:run`, `python manage.py runserver`, a
-    script invoked in place - returns None and triggers no preparation at
-    all; this function's job is detecting a REQUIREMENT, not guessing one
-    into existence."""
+    exist on disk, returns its absolute path - otherwise None. Recognizes two
+    JVM launch shapes: `-jar <path>` (the original P6 shape) and a
+    `-cp`/`-classpath`/`--class-path` value that is a SINGLE jar entry (no
+    `os.pathsep`-joined multi-entry classpath, no glob) - added for the
+    finite_command generalization (2026-09-11) after a real live run used
+    `java -cp target/artemis-demo-1.0-SNAPSHOT.jar com.example.ArtemisDemo`
+    as its recovery attempt's own runtime command, which the `-jar`-only
+    check would have silently let through unprepared, reproducing the exact
+    ClassNotFoundException this whole mechanism exists to prevent. A
+    multi-entry or wildcard classpath is deliberately left undetected - it
+    names no single artifact this layer could deterministically prepare
+    without guessing which entry (if any) is the missing one. A directly
+    runnable command with no separate artifact dependency - `mvn
+    spring-boot:run`, `python manage.py runserver`, a script invoked in
+    place - returns None and triggers no preparation at all; this
+    function's job is detecting a REQUIREMENT, not guessing one into
+    existence."""
     for i, token in enumerate(service_command):
         if token == _JAR_LAUNCH_FLAG and i + 1 < len(service_command):
             artifact = service_command[i + 1]
             return artifact if os.path.isabs(artifact) else os.path.join(cwd, artifact)
+        if token in _CLASSPATH_FLAGS and i + 1 < len(service_command):
+            cp_value = service_command[i + 1]
+            if cp_value.endswith(".jar") and "*" not in cp_value and os.pathsep not in cp_value:
+                return cp_value if os.path.isabs(cp_value) else os.path.join(cwd, cp_value)
     return None
 
 
@@ -459,6 +474,7 @@ class _PreparationOutcome:
 
 def _prepare_required_artifact(
     service_command: List[str], cwd: str, *, controller: ProcessController,
+    env: Optional[Dict[str, str]] = None, preexec_fn: Optional[Callable[[], None]] = None,
 ) -> _PreparationOutcome:
     """Artifact Preparation (P6 production-validation, 2026-09-07) - the
     deterministic PREPARE/BUILD phase that must complete, successfully,
@@ -471,6 +487,17 @@ def _prepare_required_artifact(
     derived entirely from the existing service_command plus detected build
     system, never a new plan-facing field.
 
+    env/preexec_fn (finite_command generalization, 2026-09-11): optional,
+    default None for both, so every EXISTING managed_service caller (which
+    never passed these) is byte-for-byte unchanged. A caller that already
+    enforces a specific JDK/sandbox policy for its OTHER subprocess calls
+    (kriya/tools/validate.py's PolymorphicValidator, forcing JAVA_HOME to
+    match whatever the compile gate already resolved) passes the SAME
+    env/preexec_fn here, so `mvn package` never silently builds under a
+    different JDK than the one that just validated compilation - a real,
+    confusing mismatch class this parameter exists to prevent, not a
+    hypothetical one.
+
     Distinguishes exactly three failure shapes, matching the two dedicated
     outcome kinds above:
     - no known way to prepare a genuinely required, missing artifact (no
@@ -479,7 +506,19 @@ def _prepare_required_artifact(
     - the build command reported success but the artifact still does not
       exist afterward -> ARTIFACT_MATERIALIZATION_FAILED (a more surprising
       case worth its own distinct signal, never conflated with an ordinary
-      build failure)."""
+      build failure).
+
+    Callers needing to distinguish "no build system" / "could not invoke
+    the build command at all" (both genuine, unfixable-by-retry environment
+    gaps) from "the build command ran and exited non-zero/timed out" (real,
+    repair-eligible evidence about the project's OWN content) can do so
+    from the returned _PreparationOutcome alone, with no new field: the
+    former two leave `command`/`returncode` at their dataclass defaults
+    (None) or set only `command` (never `returncode`, since no process
+    result was ever obtained); the latter always sets both `command` and a
+    real `returncode` (ProcessController.run()'s own return type - see
+    kriya/tools/process.py's RunResult - never leaves returncode as None,
+    using -1 on timeout instead)."""
     artifact = _detect_required_artifact(service_command, cwd)
     if artifact is None:
         return _PreparationOutcome(None, "service command references no artifact this layer must prepare")
@@ -494,7 +533,9 @@ def _prepare_required_artifact(
             f"{artifact} does not exist and {cwd} has no known build system (no pom.xml) to prepare it",
         )
     try:
-        result = controller.run(build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS)
+        result = controller.run(
+            build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS, env=env, preexec_fn=preexec_fn,
+        )
     except Exception as e:
         return _PreparationOutcome(
             ServiceVerificationOutcomeKind.PREPARATION_FAILED,

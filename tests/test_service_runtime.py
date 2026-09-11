@@ -760,6 +760,40 @@ def test_detect_required_artifact_returns_none_for_non_artifact_command(tmp_path
     assert _detect_required_artifact(["python", "manage.py", "runserver"], str(tmp_path)) is None
 
 
+def test_detect_required_artifact_recognizes_classpath_single_jar(tmp_path):
+    """The exact real shape a live run's own recovery attempt used (2026-09-11):
+    `java -cp target/app.jar com.example.Main` - the -jar-only detection
+    that originally shipped with Managed Runtime Verification would have
+    silently let this through unprepared, reproducing the same
+    ClassNotFoundException that live run hit."""
+    artifact = _detect_required_artifact(
+        ["java", "-cp", "target/app.jar", "com.example.Main"], str(tmp_path),
+    )
+    assert artifact == os.path.join(str(tmp_path), "target/app.jar")
+
+
+def test_detect_required_artifact_recognizes_long_classpath_flag(tmp_path):
+    artifact = _detect_required_artifact(
+        ["java", "-classpath", "target/app.jar", "com.example.Main"], str(tmp_path),
+    )
+    assert artifact == os.path.join(str(tmp_path), "target/app.jar")
+
+
+def test_detect_required_artifact_ignores_multi_entry_classpath(tmp_path):
+    """A multi-entry classpath names no SINGLE artifact this layer could
+    deterministically prepare without guessing - must not be detected."""
+    multi_entry = "target/app.jar" + os.pathsep + "target/classes"
+    assert _detect_required_artifact(["java", "-cp", multi_entry, "com.example.Main"], str(tmp_path)) is None
+
+
+def test_detect_required_artifact_ignores_classpath_wildcard(tmp_path):
+    assert _detect_required_artifact(["java", "-cp", "target/lib/*", "com.example.Main"], str(tmp_path)) is None
+
+
+def test_detect_required_artifact_ignores_classpath_non_jar(tmp_path):
+    assert _detect_required_artifact(["java", "-cp", "target/classes", "com.example.Main"], str(tmp_path)) is None
+
+
 # --- staleness / currency -----------------------------------------------
 
 def test_artifact_is_current_false_when_artifact_missing(tmp_path):
@@ -912,6 +946,47 @@ def test_prepare_required_artifact_no_pom_reports_preparation_failed(tmp_path):
         ["java", "-jar", "target/app.jar"], str(tmp_path), controller=_AssertNoRunController(),
     )
     assert outcome.outcome == ServiceVerificationOutcomeKind.PREPARATION_FAILED
+
+
+def test_prepare_required_artifact_threads_env_and_preexec_fn_to_build_command(tmp_path):
+    """finite_command generalization's own load-bearing plumbing: a caller-
+    supplied env/preexec_fn must reach the actual `mvn package` subprocess,
+    so it runs under the SAME JDK/sandbox policy the compile gate already
+    used - not a bare, unconstrained ProcessController() default."""
+    _write_pom(tmp_path)
+    _write_mvnw(tmp_path, jar_relpath="target/app.jar")
+
+    captured = {}
+
+    class _CapturingController(ProcessController):
+        def run(self, command, **kwargs):
+            captured.update(kwargs)
+            return super().run(command, **kwargs)
+
+    sentinel_env = dict(os.environ)
+    sentinel_env["JAVA_HOME"] = "/nonexistent/sentinel-jdk-marker"
+    sentinel_preexec = lambda: None  # noqa: E731 - identity check only, never actually invoked here
+
+    outcome = _prepare_required_artifact(
+        ["java", "-jar", "target/app.jar"], str(tmp_path),
+        controller=_CapturingController(), env=sentinel_env, preexec_fn=sentinel_preexec,
+    )
+    assert outcome.outcome is None
+    assert captured["env"] is sentinel_env
+    assert captured["preexec_fn"] is sentinel_preexec
+
+
+def test_prepare_required_artifact_omitted_env_preserves_managed_service_behavior(tmp_path):
+    """Regression guard: every EXISTING managed_service call site never
+    passes env/preexec_fn - both must keep defaulting to None and the
+    build must still succeed exactly as before this change."""
+    _write_pom(tmp_path)
+    _write_mvnw(tmp_path, jar_relpath="target/app.jar")
+    outcome = _prepare_required_artifact(
+        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=ProcessController(),
+    )
+    assert outcome.outcome is None
+    assert (tmp_path / "target" / "app.jar").is_file()
 
 
 # --- end-to-end through run_managed_service_verification -------------------

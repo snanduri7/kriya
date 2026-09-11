@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.config.config import AutonomyConfig
 from kriya.policy.enforcement import enforce_hard_invariants
@@ -512,10 +512,19 @@ class PolymorphicValidator:
         except Exception as e:
             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
-    def _run_cmd_with_timeout(
-        self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        self._audit_run_command(cmd, cwd)
+    def build_subprocess_env_and_preexec(self) -> Tuple[Optional[Dict[str, str]], Optional[Callable[[], None]]]:
+        """Shared sandbox-env + JAVA_HOME-override construction for every
+        subprocess this validator launches - factored out of
+        _run_cmd_with_timeout (2026-09-11) so a second caller (finite_command
+        runtime-artifact preparation, kriya/workflow/attempt.py, reusing
+        kriya/tools/service_runtime.py's _prepare_required_artifact for its
+        own `mvn package` call) gets the IDENTICAL policy instead of
+        reimplementing it - an `mvn package` that silently ran under a
+        different JDK than the one the compile gate just validated against
+        would be a real, confusing mismatch, not a hypothetical one. Pure
+        extraction: _run_cmd_with_timeout's own behavior is unchanged by
+        this refactor - no leading underscore, since it's now a shared
+        cross-module policy accessor, not a validator-internal detail."""
         env = None
         preexec_fn = None
         if self.autonomy_cfg.sandbox_execution:
@@ -536,6 +545,13 @@ class PolymorphicValidator:
             env = dict(env) if env is not None else dict(os.environ)
             env["JAVA_HOME"] = self.java_home_override
             env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
+        return env, preexec_fn
+
+    def _run_cmd_with_timeout(
+        self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        self._audit_run_command(cmd, cwd)
+        env, preexec_fn = self.build_subprocess_env_and_preexec()
         return ProcessController().run(
             cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn, stdin_payload=stdin_payload,
         ).to_dict()
