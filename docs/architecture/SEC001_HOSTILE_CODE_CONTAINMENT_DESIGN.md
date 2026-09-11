@@ -210,21 +210,22 @@ SBPL syntax should be verified with the same discipline before
 implementation, not assumed to work identically from this filesystem
 result alone.)
 
-**STOP-condition reading, stated explicitly rather than resolved
-silently:** Task's own STOP conditions include *"recommendation relies on
-an unsupported macOS primitive"* — the PRIMARY recommendation below does
-exactly that. Two readings are available: (a) that STOP fires
-unconditionally, and the FALLBACK (container-only) becomes the true
-recommendation; (b) Task 5's own instruction — explicitly requiring an
-"evidence-based" determination of whether macOS-native containment is
-achievable, and requiring deprecated/unsupported reliance to be
-*documented*, not forbidden — governs, and the STOP is satisfied by the
-verified-and-disclosed treatment above rather than triggered by it. This
-document takes reading (b) and presents `sandbox-exec` as PRIMARY on that
-basis, but flags the choice explicitly here rather than picking silently:
-**a reviewer who intends reading (a) should treat the FALLBACK
-(container-only, Section 10) as this design's actual recommendation
-instead.**
+**STOP-condition reading — since resolved by explicit product decision
+(2026-09-11 design-correction pass, see Section 10):** the original draft
+of this section surfaced a live ambiguity — the task's own STOP list
+includes *"recommendation relies on an unsupported macOS primitive,"*
+which a `sandbox-exec`-as-PRIMARY recommendation would trigger — and left
+the choice of reading to a future reviewer rather than picking silently.
+That choice has now been made explicitly, not inferred: **production-grade
+SEC-001 closure relies on a supported OCI/container isolation backend.
+`sandbox-exec` remains available only as an experimental/local backend —
+real, verified-working (below), useful for local development ergonomics
+and as evidence the containment *contract* is implementable — but it is
+not, and will not become, the production security guarantee, and cannot
+by itself satisfy a CLOSED disposition for `SEC-001`.** Section 10 reflects
+this directly; the empirical verification below is retained as real
+evidence the mechanism works, not as an argument for using it in
+production.
 
 No other macOS-native mechanism is practical for this use case:
 - **App Sandbox** requires code-signing + entitlement provisioning
@@ -470,89 +471,117 @@ instruction not to fold `SEC-005` into `SEC-001`'s implementation.
 
 ## 10. Recommendation
 
-**PRIMARY: Hybrid two-phase execution over an extended `ProcessController`,
-with `sandbox-exec` as the macOS enforcement backend and a pluggable
-`ContainmentProfile` abstraction so a container backend can be added
-later without a second sandboxing implementation.**
+**AMENDED 2026-09-11, by explicit product decision (design-correction
+pass preceding implementation) — this supersedes the original PRIMARY/
+FALLBACK framing below in place, not by deletion, so the reasoning that
+led here stays visible.**
 
-- **Security properties guaranteed:** real filesystem containment
-  (workspace read-write, dependency cache read-write-then-read-only,
-  everything else denied) and real network containment (denied during
-  execution, registry-scoped during acquisition) via `sandbox-exec`
-  profiles; environment allowlisting (existing); CPU/wall-clock
-  containment (existing, extended to `ShellTool`/MCP); process-tree
-  termination (existing, extended); git-hook suppression for all
-  Kriya-internal git operations (new, cheap).
-- **Security properties NOT guaranteed:** memory containment on macOS
-  remains advisory only (XNU limitation, inherent to every macOS-native
-  backend including this one); resistance to a determined SBPL-profile
-  escape is not proven and cannot be, given the profile language is
-  private and undocumented — this is the core trade-off of choosing this
-  backend over a container/VM boundary; child-process-count containment
-  is not achieved on macOS in this design (SHOULD CONTAIN, deferred);
-  disk-growth containment is best-effort polling, not a hard limit.
-- **macOS implementation:** `sandbox-exec` profile generated per
-  `ContainmentProfile` (workspace path, dependency-cache path, temp dir,
-  network posture), composed with existing env-allowlist/rlimit
-  `preexec_fn`, invoked by the extended `ProcessController`. Explicitly
-  documented in code and in this file as resting on a deprecated, private
-  Apple mechanism — Invariant 9's fail-closed requirement means: if
-  `sandbox-exec` is absent or a generated profile is rejected by the OS,
-  `ProcessController` refuses to run the command rather than silently
-  falling back to unsandboxed execution.
-- **CI/Linux implementation:** the same `ContainmentProfile` abstraction
-  backed by a container runtime (Docker/Podman — whichever CI already
-  provides) instead of `sandbox-exec`, giving CI the strongest available
-  guarantee for free (no macOS-specific deprecation risk there) and
-  proving the abstraction is genuinely backend-agnostic, not a
-  macOS-only bolt-on.
-- **Required external dependencies:** none new for the macOS default path
-  (`sandbox-exec` ships with the OS); a container runtime for CI/Linux
-  and for any local user who opts into the stronger backend — this is
-  the one place the design does add a real external dependency, but only
-  for those who choose it, not by default.
-- **Performance implications:** low for the macOS default (process-level,
-  no VM boot); real but CI-acceptable overhead for the container backend.
-- **Developer UX:** default-on, invisible in the common case (matches
-  `sandbox_execution: True`'s existing default posture) — a
-  `containment.backend: sandbox-exec | container | none` config knob,
-  with `none` requiring explicit opt-in and a loud warning, never a silent
-  default (Invariant 9).
-- **Migration path:** ship the `ProcessController` extension and the
-  `sandbox-exec` backend first (closes the largest gap, zero new external
-  dependency); ship the container backend as an additive, opt-in second
-  phase; the two-phase dependency-acquisition split (Task 7) can land
-  independently of either backend, since it's a workflow-sequencing change
-  more than a sandboxing one.
-- **Fail-closed behavior:** containment-mechanism failure (backend
-  unavailable, profile rejected, rlimit `setrlimit` failure) must itself
-  become a distinct, evidence-visible terminal state (Task 6's
-  `ContainmentResult`/failure-category point) — never silently downgrade
-  to unsandboxed execution.
+**Decision:**
+1. Production-grade `SEC-001` closure will rely on a supported OCI/
+   container isolation backend, not `sandbox-exec`.
+2. `sandbox-exec` may remain available as an experimental/local backend —
+   it is real and verified-working (Section 5), useful for local
+   development ergonomics and as a concrete proof the `ContainmentProfile`
+   contract is implementable — but it is explicitly **not sufficient for
+   a `SEC-001` `CLOSED` disposition**, because it is deprecated/private
+   with no committed future.
+3. Containment-required execution must fail closed whenever no qualifying
+   backend is available — this was already Invariant 9 in the original
+   design and is unchanged; what changes is that `sandbox-exec` no longer
+   counts as "qualifying" for production/closure purposes, only for
+   experimental/local use explicitly opted into.
 
-**FALLBACK: container-only (Docker/OCI) from the start, no `sandbox-exec`
-backend at all.** Strictly stronger security guarantee and a simpler
-single-backend implementation (no macOS-specific profile-generation code,
-no deprecated-API risk to carry), at the cost of making Docker (or
-equivalent) a hard new dependency for every macOS user on day one —
-directly in tension with this project's local-first positioning, which is
-why it is the fallback, not the primary recommendation, but is the right
-choice if the product decision favors "never build on an unsupported
-API" over "no new required dependency."
+**Revised architecture (what this changes about Sections 6/9 above):**
+the `ContainmentProfile` abstraction, the `ProcessController` extension,
+and the two-phase dependency-acquisition split are all **unchanged** —
+they were always backend-agnostic by design (Section 6's own point:
+"the actual FS/network containment mechanism" is a pluggable backend
+question, not baked into the profile contract). What changes is only
+which backend is authoritative for closure: the OCI/container backend
+(Section 4.B in the original survey) is now PRIMARY for production;
+`sandbox-exec` (Section 4.A) is demoted to an explicitly-labeled
+EXPERIMENTAL/LOCAL backend, selectable but never the default answer to
+"is `SEC-001` closed."
 
-**CAN SEC-001 BE CLOSED ON MACOS WITHOUT CONTAINERS/VMs? CONDITIONAL.**
-Yes, for the actual security properties DE-06 names (filesystem, network,
-process, environment, CPU/time containment) — `sandbox-exec` genuinely
-provides these today, verifiably, and the design above shows a concrete
-integration path. Conditional because: (1) memory containment stays
-advisory-only on macOS regardless of backend choice short of a VM, an
-inherent platform limitation, not a design gap; (2) the mechanism itself
-rests on a deprecated, privately-specified Apple API with no committed
-future — whether that is an acceptable foundation for a **CLOSED**
-disposition (vs. permanently capped at some lower evidence level with a
-standing platform-risk note) is a closure-bar policy question for
-whoever reviews this design, not something this investigation can resolve
-unilaterally.
+- **Security properties guaranteed (OCI backend, production):** real
+  kernel-level filesystem containment (bind-mount-defined), real network
+  isolation (network-mode-defined, composing directly with the two-phase
+  acquisition/execution split), real process (PID-namespace) isolation,
+  real resource isolation (cgroups: CPU/memory/pids all real, unlike the
+  macOS-advisory-memory limitation), environment isolation (trivial —
+  nothing inherited by default), git-hook suppression (backend-independent,
+  applies regardless).
+- **Security properties NOT guaranteed even under the OCI backend:**
+  resistance to a kernel-namespace-escape-class vulnerability (rare,
+  monitored, but not zero); this design does not attempt seccomp-profile
+  or capability-drop hardening beyond a container runtime's own secure
+  defaults — a further hardening pass, not scoped here.
+- **macOS implementation:** a container runtime (Docker Desktop, OrbStack,
+  or Podman — whichever the host has) invoked as the `ContainmentProfile`
+  backend; on Apple Silicon this is always VM-mediated under the hood
+  (Section 5's own finding, unchanged) — a real, new external dependency,
+  not zero-install, which is the explicit trade this product decision
+  makes in exchange for resting on a supported primitive.
+- **CI/Linux implementation:** the same backend, natively available on
+  most CI runners already — no VM-mediation overhead there, strongest
+  case for this backend.
+- **Required external dependencies:** a container runtime, required for
+  any containment-required execution to succeed at all once this ships —
+  this is the real cost of the amended decision, explicitly accepted
+  here rather than glossed over.
+- **Performance implications:** real VM-boot/image-overlay cost on macOS
+  (Section 4's own comparison table, unchanged); CI-acceptable elsewhere.
+- **Developer UX:** `containment.backend: oci | sandbox-exec (experimental)
+  | none` config knob; `oci` is the packaged default target once the
+  backend is implemented (not in this design-correction pass — see the
+  companion implementation work package), `sandbox-exec` requires
+  explicit, clearly-labeled opt-in ("experimental, not sufficient for
+  SEC-001 closure" surfaced in its own config docstring/CLI warning, not
+  buried), `none` requires the loudest warning of the three (Invariant 9).
+- **Migration path:** ship the `ContainmentProfile` contract and
+  `ProcessController` extension first, backend-agnostic, with a minimal
+  test/dummy backend proving composition and fail-closed semantics (no
+  production backend yet — this is the companion implementation work
+  package's actual scope); ship the OCI backend as the following,
+  separate package; `sandbox-exec` may ship alongside as the
+  explicitly-experimental option, never gating `CLOSED`.
+- **Fail-closed behavior, restated under the amended decision:**
+  containment-required execution with no qualifying (i.e. non-experimental,
+  for production) backend configured/available must block execution
+  deterministically — this is now the ONLY way `SEC-001`'s fail-closed
+  invariant can be satisfied when a container runtime isn't present,
+  since silently downgrading to `sandbox-exec` would itself be an
+  unauthorized, undisclosed weakening of the closure guarantee.
+
+**CAN SEC-001 BE CLOSED ON MACOS WITHOUT CONTAINERS/VMs? NO, under this
+amended decision** — this directly supersedes the original CONDITIONAL
+answer below. `sandbox-exec` remains real, working evidence that the
+`ContainmentProfile` contract is soundly implementable (Section 5), but
+by explicit product decision it is not an acceptable production
+closure mechanism. A container/VM backend is therefore required for
+`SEC-001 → CLOSED`, on any platform, including macOS.
+
+---
+
+**Original PRIMARY/FALLBACK framing (2026-09-11, pre-correction) — kept
+verbatim below for provenance; superseded by the amendment above, not
+authoritative:**
+
+*PRIMARY (superseded): Hybrid two-phase execution over an extended
+`ProcessController`, with `sandbox-exec` as the macOS enforcement backend
+and a pluggable `ContainmentProfile` abstraction so a container backend
+can be added later without a second sandboxing implementation — argued on
+the basis of zero new local dependency and low overhead. FALLBACK
+(now PRIMARY under the amendment): container-only (Docker/OCI) from the
+start, argued as the right choice "if the product decision favors 'never
+build on an unsupported API' over 'no new required dependency'" — that
+product decision has now been made explicitly (see above), so this
+FALLBACK is the operative recommendation going forward. Original
+CONDITIONAL answer to "can SEC-001 close without containers/VMs":
+CONDITIONAL, on the grounds that sandbox-exec genuinely provides the
+DE-06-named properties — technically still true as a statement about the
+mechanism, but no longer the governing answer once "sufficient for
+CLOSED" is defined to require a supported backend, per the amendment.*
 
 ---
 
