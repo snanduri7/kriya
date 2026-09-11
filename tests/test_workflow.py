@@ -9984,6 +9984,100 @@ async def test_workflow_run_verification_gate_outcome_records_distrusted_provena
     assert rv_outcome["deterministic_result"] == "DISTRUSTED"
 
 
+# --- Reviewer disposition override on a terminally-rejected candidate -----
+# (Demo-01 Run A finding, 2026-09-11): the CLI-level fix (differentiated
+# header) is necessary but not sufficient on its own - this proves the
+# ACTUAL run_generation_workflow() wiring passes the disposition-aware
+# system_prompt_override to self.reviewer.run() when quality gates never
+# pass, not just that ReviewerAgent's own method produces the right text
+# in isolation (tests/test_agents.py already covers that).
+
+@pytest.mark.asyncio
+async def test_workflow_rejected_candidate_reviewer_gets_disposition_override(tmp_path):
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    # Deterministically broken (a real syntax error) so every attempt fails
+    # the compile gate identically and cheaply - no real LLM involved for
+    # Developer/compile, exhausting the retry budget quickly.
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "this is not valid python("}
+    ])
+
+    captured_reviewer_calls = []
+
+    async def spy_reviewer_run(*args, **kwargs):
+        captured_reviewer_calls.append(kwargs)
+        return "Diagnostic-only stand-in review text."
+
+    we.reviewer.run = spy_reviewer_run
+
+    res = await we.run_generation_workflow(
+        goal="Write a small Python script (deliberately broken for this test)",
+        workspace_path=str(tmp_path),
+    )
+
+    assert res["quality_gates_passed"] is False
+    assert len(captured_reviewer_calls) >= 1
+    override = captured_reviewer_calls[-1].get("system_prompt_override")
+    assert override is not None
+    assert "candidate_status: REJECTED" in override
+    assert "workspace_applied: false" in override
+
+
+@pytest.mark.asyncio
+async def test_workflow_accepted_candidate_reviewer_gets_no_disposition_override(tmp_path):
+    """Non-regression: an ordinary, accepted candidate must not receive the
+    rejected-candidate override - system_prompt_override stays None/absent,
+    letting ReviewerAgent.run() fall back to its own plain system_prompt."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+    ])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+
+    captured_reviewer_calls = []
+
+    async def spy_reviewer_run(*args, **kwargs):
+        captured_reviewer_calls.append(kwargs)
+        return "Looks fine."
+
+    we.reviewer.run = spy_reviewer_run
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Write a small Python script that prints hi",
+            workspace_path=str(tmp_path),
+        )
+
+    assert res["quality_gates_passed"] is True
+    assert len(captured_reviewer_calls) >= 1
+    assert captured_reviewer_calls[-1].get("system_prompt_override") is None
+
+
 @pytest.mark.asyncio
 async def test_quiet_successful_maven_compile_uses_process_authority(tmp_path):
     """A quiet build success must not become a speculative behavioral failure."""

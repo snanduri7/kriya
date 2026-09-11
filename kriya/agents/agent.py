@@ -3178,6 +3178,46 @@ class ReviewerAgent(BaseAgent):
             "   - REQUIRES PROFILING OR RUNTIME EVIDENCE: the concern primarily depends on runtime characteristics such as latency, throughput, allocation pressure, database cardinality, query count, lock contention, production traffic, cache behavior, or I/O cost - e.g. an unbounded query/listing method can represent a scalability concern as dataset size grows, but without runtime cardinality/load evidence that belongs here, not at a higher confidence tier."
         )
 
+    def rejected_candidate_system_prompt(self, terminal_reason: str) -> str:
+        """Demo-01 Run A finding (2026-09-11): guideline 3 of `system_prompt`
+        above unconditionally instructs the Reviewer to "always include a
+        section 'How to Run the Application'" - correct for an accepted
+        candidate, actively misleading for one Quality Gates rejected. Found
+        live: a real terminal Quality-Gates FAILURE with nothing applied to
+        the workspace was followed by a Reviewer report opening "the
+        application successfully..." with run instructions and an expected
+        runtime output, directly contradicting the FAILED banner printed
+        immediately above it by the CLI.
+
+        The existing call site already tells the Reviewer, via a plain
+        prompt-text NOTE, that the shown files were not applied - that alone
+        was not enough; passive context not guaranteeing model compliance is
+        a pattern already established elsewhere in this codebase. This is a
+        deliberately narrow, structural override of guideline 3 specifically
+        for the one case it is wrong for - every other evidence-discipline
+        guideline in `system_prompt` is preserved unchanged, this is not a
+        general prompt rewrite. kriya/cli.py's own rendering is the second,
+        independent half of this fix (differentiated header for a rejected
+        candidate) - this system prompt is not relied on alone."""
+        return (
+            self.system_prompt
+            + "\n\n=== AUTHORITATIVE RUN DISPOSITION (deterministic control-plane fact, not your own assessment) ===\n"
+            "run_status: FAILED\n"
+            "quality_gates_passed: false\n"
+            "candidate_status: REJECTED\n"
+            "workspace_applied: false\n"
+            f"terminal_reason: {terminal_reason}\n"
+            "You are reviewing a REJECTED candidate that Quality Gates refused - it was NEVER "
+            "applied to the user's workspace. Only the last failing attempt's content is shown to "
+            "you, for diagnostic purposes only. This overrides guideline 3 above: do NOT include a "
+            "'How to Run the Application' section or any run/usage instructions. Do not state or "
+            "imply anywhere in your report that the application works, succeeded, is runnable, is "
+            "complete, was accepted, or is present in the user's workspace. Describe only what the "
+            "shown source does and why it was rejected. Deterministic verification results are "
+            "authoritative over your own reading of the code.\n"
+            "=== END AUTHORITATIVE RUN DISPOSITION ==="
+        )
+
     @property
     def structured_system_prompt(self) -> str:
         """A1-E2: used only for the structured single-Java-file review path

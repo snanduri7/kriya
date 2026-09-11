@@ -276,6 +276,60 @@ def test_fix_reprints_full_reviewer_report(runner, tmp_path):
     assert long_review in result.output
 
 
+def test_generate_labels_rejected_candidate_review_distinctly(runner, tmp_path):
+    """Demo-01 Run A finding (2026-09-11): a real terminal Quality-Gates
+    FAILURE with nothing applied to the workspace was previously followed by
+    a Reviewer report under the SAME "Reviewer Report & Run Instructions"
+    header used for an accepted candidate - reading like delivery
+    instructions for code that was never applied. The header must now
+    reflect quality_gates_passed, not just whether a review exists."""
+    rejected_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        review="The application successfully starts and prints the expected value.",
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert "=== Rejected Candidate Review" in result.output
+    assert "NOT applied to workspace" in result.output
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
+def test_generate_accepted_candidate_still_gets_run_instructions_header(runner, tmp_path):
+    """Non-regression: the ordinary, accepted-candidate path (quality_gates_
+    passed=True, the _FAKE_GENERATE_RESULT default) must keep the original
+    header - this fix must not suppress legitimate run instructions."""
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(dict(_FAKE_GENERATE_RESULT))), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert "=== Reviewer Report & Run Instructions ===" in result.output
+    assert "Rejected Candidate Review" not in result.output
+
+
+def test_fix_labels_rejected_candidate_review_distinctly(runner, tmp_path):
+    """Same fix as `generate` above, for the `fix` command's own reprint."""
+    rejected_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        review="The fix works correctly and resolves the reported error.",
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
+
+    assert "=== Rejected Candidate Review" in result.output
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
 def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tmp_path):
     """Independent review caught a real gap in the Finding 5 fix above: a
     human-rejected approval-gate run sets "review" to a one-line rejection notice

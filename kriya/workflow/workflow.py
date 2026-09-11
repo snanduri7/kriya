@@ -3337,6 +3337,21 @@ class WorkflowEngine:
                 file_contents_for_review, int(self.kernel.config.llm.context_window * 0.75),
             )
             reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
+            # Authoritative disposition override (2026-09-11, Demo-01 Run A
+            # finding): state.final_attempt_contents is populated ONLY on the
+            # terminal-failure paths (retry_strategy.py's scope-conflict and
+            # budget-exhausted branches) where this run will not succeed -
+            # the exact same, already-established signal goal_header above
+            # keys off of. Passing a disposition-aware system_prompt_override
+            # here, rather than relying solely on the plain-text NOTE already
+            # in goal_header, is what stops the Reviewer from writing "How to
+            # Run" instructions for a candidate that was never applied.
+            reviewer_system_prompt_override = (
+                self.reviewer.rejected_candidate_system_prompt(
+                    state.error_context or "Quality gates did not pass within the retry budget."
+                )
+                if state.final_attempt_contents else None
+            )
             review_parts = []
             for i, batch in enumerate(review_batches, 1):
                 batch_prompt = goal_header + batch
@@ -3345,6 +3360,7 @@ class WorkflowEngine:
                 review_text = await self.reviewer.run(
                     batch_prompt, stream_callback=reviewer_stream,
                     temperature_override=self.kernel.config.llm.reviewer_temperature,
+                    system_prompt_override=reviewer_system_prompt_override,
                 )
                 # R1 Deliverable 5 - observational only, same posture as the
                 # pre-approval reviewer wrapper above.

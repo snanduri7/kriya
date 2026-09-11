@@ -1691,7 +1691,20 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         fg="yellow"
                     )
             if res.get("review") and not res.get("review_included_in_approval"):
-                click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+                # Demo-01 Run A finding (2026-09-11): this used to print the
+                # same "Reviewer Report & Run Instructions" header regardless
+                # of quality_gates_passed - a rejected, unapplied candidate's
+                # review (already told not to include run instructions, see
+                # ReviewerAgent.rejected_candidate_system_prompt) still needs
+                # its own header, so the diagnostic-only nature is visually
+                # unambiguous even if the model imperfectly complies.
+                if res.get("quality_gates_passed"):
+                    click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+                else:
+                    click.secho(
+                        "\n=== Rejected Candidate Review (diagnostic only - NOT applied to workspace) ===",
+                        bold=True, fg="red",
+                    )
                 click.echo(res.get("review"))
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
@@ -2712,7 +2725,18 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             res.get("files") and res.get("review")
             and not res.get("review_included_in_approval")
         ):
-            click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+            # Demo-01 Run A finding (2026-09-11) - same fix as `generate`
+            # above: header must reflect accepted vs rejected disposition,
+            # not just presence of a review. `fix` shares run_generation_
+            # workflow() with `generate`, so ReviewerAgent.rejected_candidate_
+            # system_prompt is already applied upstream for this case too.
+            if res.get("quality_gates_passed"):
+                click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+            else:
+                click.secho(
+                    "\n=== Rejected Candidate Review (diagnostic only - NOT applied to workspace) ===",
+                    bold=True, fg="red",
+                )
             click.echo(res.get("review"))
 
     try:

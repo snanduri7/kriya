@@ -1035,6 +1035,53 @@ def test_reviewer_agent_system_prompt_applies_evidence_discipline_to_every_secti
     assert "This section is not exempt from guideline 6" in sp
 
 
+# --- rejected_candidate_system_prompt (Demo-01 Run A finding, 2026-09-11) ---
+
+def test_reviewer_rejected_candidate_prompt_forbids_run_instructions_and_success_language():
+    """Live finding: a real terminal Quality-Gates FAILURE with nothing
+    applied to the workspace was followed by a Reviewer report reading "the
+    application successfully..." with a 'How to Run the Application'
+    section and an expected runtime output - directly contradicting the
+    FAILED banner. system_prompt's own guideline 3 unconditionally demands a
+    How-to-Run section; this override must explicitly cancel it for a
+    rejected candidate."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.rejected_candidate_system_prompt("GENERATION TIME BUDGET EXHAUSTED")
+
+    assert "quality_gates_passed: false" in sp
+    assert "candidate_status: REJECTED" in sp
+    assert "workspace_applied: false" in sp
+    assert "GENERATION TIME BUDGET EXHAUSTED" in sp
+    assert "do NOT include a 'How to Run the Application' section" in sp
+    assert "works, succeeded, is runnable, is complete, was accepted" in sp
+    assert "overrides guideline 3 above" in sp
+
+
+def test_reviewer_rejected_candidate_prompt_preserves_base_evidence_discipline():
+    """The override must not be a full prompt replacement - every existing
+    evidence-discipline guideline (hallucination/evidence-boundary rules)
+    must still be present, only guideline 3's mandate is cancelled."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.rejected_candidate_system_prompt("some failure")
+
+    assert reviewer.system_prompt in sp
+    assert "does NOT provide evidence about that artifact's unseen contents" in sp
+
+
+def test_reviewer_normal_system_prompt_unaffected_by_rejected_override_method_existing():
+    """Non-regression: adding the new method must not change the existing
+    (accepted-candidate) system_prompt property at all."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    assert "AUTHORITATIVE RUN DISPOSITION" not in reviewer.system_prompt
+    assert "always include a section '## How to Run the Application'" in reviewer.system_prompt
+
+
 def test_reviewer_agent_system_prompt_requires_condition_and_consequence_for_proven_issue():
     """A1-R1: the live run classified Spring same-class @Transactional
     self-invocation as PROVEN ISSUE purely because the syntactic pattern was
