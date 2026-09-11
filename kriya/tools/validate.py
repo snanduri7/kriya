@@ -580,7 +580,30 @@ class PolymorphicValidator:
         package's own RETURN, not a silent behavior change: any caller
         that sets BOTH `contained_execution_required=True` and relies on
         `java_home_override` is getting the container's JDK, and that is
-        what this docstring documents)."""
+        what this docstring documents).
+
+        SECOND residual limitation, larger and NOT fixed this pass:
+        `_ensure_project_venv`/`resolve_python_interpreter`'s existing
+        Python-interpreter-selection logic (see their own docstrings)
+        falls back to `sys.executable` - Kriya's OWN host interpreter
+        path - whenever no project-local venv exists yet, or venv
+        creation fails. Under `contained_execution_required=True`, that
+        HOST path is meaningless inside a Linux container (wrong OS/
+        architecture, does not exist at that path) and the command fails
+        immediately and loudly (a real, visible "no such file or
+        directory", never a silent bypass or false success) rather than
+        running uncontained. This package did not redesign that
+        interpreter-selection logic to be container-aware (out of scope:
+        it is upstream of the call sites this package changed, not one of
+        them) - `contained_execution_required=True` is therefore proven
+        end-to-end for Maven/Java repos
+        (tests/test_dependency_execution.py, tests/test_containment_oci.py)
+        and for `dependency_execution.py`'s own standalone Python two-phase
+        functions (which always use a fixed "python3"/"pip" argv, never
+        `sys.executable`), but NOT yet for a Python repo going through
+        THIS validator's own venv-based compile/test path - see this
+        package's own RETURN for the explicit NEW-RISK-CANDIDATE this is
+        reported as, not silently left unstated."""
         if not self.autonomy_cfg.contained_execution_required:
             return None, None
         profile = ContainmentProfile(
