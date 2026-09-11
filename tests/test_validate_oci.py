@@ -132,10 +132,10 @@ def test_contained_maven_compile_succeeds_via_transparent_two_phase_acquisition(
     """A representative Java/Maven repo (a real Maven Central dependency
     the fresh worktree has never seen before, so the persistent cache
     starts genuinely empty) through the ACTUAL run_compile_check() entry
-    point - proves _run_maven_cmd's upfront `dependency:go-offline` +
-    offline compile cycle works transparently, with zero unrestricted
-    networking during the compile step itself (only the acquisition call
-    ever gets NetworkAuthority.UNRESTRICTED)."""
+    point - proves _run_maven_cmd's offline-first, acquire-on-miss cycle
+    works transparently, with zero unrestricted networking during the
+    authoritative compile attempt itself (only the bounded acquisition
+    call, using the SAME goals, ever gets NetworkAuthority.UNRESTRICTED)."""
     src_dir = tmp_path / "src" / "main" / "java" / "com" / "kriya" / "test"
     src_dir.mkdir(parents=True)
     (tmp_path / "pom.xml").write_text(_POM_WITH_A_REAL_DEPENDENCY)
@@ -156,25 +156,104 @@ def test_contained_maven_compile_succeeds_via_transparent_two_phase_acquisition(
 
 
 def test_contained_maven_offline_missing_dependency_triggers_bounded_reacquisition(tmp_path):
-    """A SECOND compile call, with the upfront cache-warming step forced
-    to look like it never ran (simulating a dependency added mid-run,
-    after the one-time upfront acquisition already happened) - proves the
-    PER-COMMAND bounded reacquisition backstop (not just the upfront warm)
-    genuinely recovers a missing dependency and succeeds, rather than
+    """A compile call against a genuinely cold, freshly-created cache
+    (nothing warmed yet) - proves the offline-first attempt fails, the
+    ONE bounded acquisition recovers it (network=UNRESTRICTED, same
+    goals), and the retried offline attempt then succeeds - rather than
     failing outright or falling back to unrestricted networking for the
-    compile step itself."""
+    authoritative compile step itself."""
     src_dir = tmp_path / "src" / "main" / "java" / "com" / "kriya" / "test"
     src_dir.mkdir(parents=True)
     (tmp_path / "pom.xml").write_text(_POM_WITH_A_REAL_DEPENDENCY)
     (src_dir / "Greeter.java").write_text(_JAVA_SOURCE_USING_DEPENDENCY)
 
     validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
-    # Pretend the upfront warm already happened (with an EMPTY cache) -
-    # forces the very first offline compile attempt to genuinely miss the
-    # dependency and exercise the per-command reacquisition path, not the
-    # upfront one.
-    validator._maven_cache_warmed = True
     validator._maven_cache_dir()  # creates the (still-empty) cache dir
 
     result = validator.run_compile_check([str(src_dir / "Greeter.java")])
     assert result["success"] is True, result["output"]
+
+
+_POM_WITH_JUNIT5 = """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.kriya.test</groupId>
+  <artifactId>sec001-junit-lifecycle-fixture</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+
+_JAVA_SOURCE_SIMPLE = """package com.kriya.test;
+
+public class Calc {
+    public static int add(int a, int b) {
+        return a + b;
+    }
+}
+"""
+
+_JUNIT5_TEST_SOURCE = """package com.kriya.test;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+public class CalcTest {
+    @Test
+    public void testAdd() {
+        assertEquals(5, Calc.add(2, 3));
+    }
+}
+"""
+
+
+def test_contained_maven_test_lifecycle_plugins_available_offline_after_acquisition(tmp_path):
+    """SEC-001 live-validation follow-up (2026-09-11): the exact defect
+    class the real live run found - `dependency:go-offline` alone does
+    NOT resolve build-lifecycle plugin artifacts (maven-resources-plugin,
+    maven-surefire-plugin) a real `mvn test` needs, only declared
+    <dependencies>. This test uses a FRESH, genuinely empty cache and a
+    real JUnit 5 dependency + a pinned Surefire version (mirroring the
+    live incident's own pom.xml shape) through the ACTUAL run_tests()
+    entry point - proving the fix (acquisition derived from the real
+    goal, not a static plugin list) actually resolves everything `mvn
+    test` needs and a REAL JUnit test genuinely executes offline."""
+    src_dir = tmp_path / "src" / "main" / "java" / "com" / "kriya" / "test"
+    test_dir = tmp_path / "src" / "test" / "java" / "com" / "kriya" / "test"
+    src_dir.mkdir(parents=True)
+    test_dir.mkdir(parents=True)
+    (tmp_path / "pom.xml").write_text(_POM_WITH_JUNIT5)
+    (src_dir / "Calc.java").write_text(_JAVA_SOURCE_SIMPLE)
+    (test_dir / "CalcTest.java").write_text(_JUNIT5_TEST_SOURCE)
+
+    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
+    assert validator.stack == "java"
+    validator._maven_cache_dir()  # confirms/creates a genuinely fresh, empty cache
+
+    result = validator.run_tests()
+    assert result["success"] is True, result["output"]
+    # A real JUnit 5 test actually ran offline (not just "build succeeded
+    # with zero tests collected") - Surefire's own summary line proves it.
+    assert "Tests run: 1" in result["output"] or "1 test" in result["output"].lower(), result["output"]

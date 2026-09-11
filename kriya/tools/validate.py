@@ -24,7 +24,11 @@ from kriya.tools.containment import (
     resolve_containment_backend,
 )
 from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT
-from kriya.tools.dependency_execution import OfflineFailureKind, classify_maven_offline_failure_text
+from kriya.tools.dependency_execution import (
+    OfflineFailureKind,
+    classify_maven_offline_failure_text,
+    maven_missing_artifact_signature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,11 +192,6 @@ class PolymorphicValidator:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
-        # SEC-001-P6 Stage 2: tracks whether _ensure_maven_cache_warm's one
-        # upfront dependency:go-offline acquisition has already run for
-        # THIS instance - never re-acquired just because a second gate
-        # (compile, then test) also needs the cache.
-        self._maven_cache_warmed = False
         self.stack = self._detect_stack()
         # 'group:artifact' keys the caller has already determined are
         # explicitly authorized for removal by the goal (kriya/workflow/
@@ -709,51 +708,52 @@ class PolymorphicValidator:
         os.makedirs(cache_dir, exist_ok=True)
         return cache_dir
 
-    def _ensure_maven_cache_warm(self, cache_dir: str) -> None:
-        """One `dependency:go-offline` acquisition (network=UNRESTRICTED,
-        still fully filesystem/process-contained), run at most once per
-        validator instance - populates `cache_dir` BEFORE any offline
-        goal runs, so an ordinary `mvn validate`/`compile`/`test` on a
-        freshly-created worktree doesn't have to fail-then-reacquire just
-        to get its first real dependency resolution. Best-effort: a
-        failure here is logged, not raised - `_run_maven_cmd`'s own
-        per-command bounded reacquisition (triggered by a real
-        MISSING_DEPENDENCY classification) is the backstop for whatever
-        this upfront pass didn't catch, matching
-        `dependency_execution.py`'s own "does not guarantee every
-        subsequent offline build will succeed" acknowledgment for
-        `maven_acquire_dependencies`."""
-        if self._maven_cache_warmed:
-            return
-        self._maven_cache_warmed = True
-        try:
-            self._run_cmd_with_timeout(
-                ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", "dependency:go-offline"],
-                cwd=self.workspace_path, timeout=300, network=NetworkAuthority.UNRESTRICTED,
-                dependency_cache_path=cache_dir, dependency_cache_writable=True,
-            )
-        except Exception as e:
-            logger.warning(f"Maven dependency:go-offline acquisition failed (continuing, offline goals may fail and trigger a bounded reacquisition): {e}")
+    _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
 
     def _run_maven_cmd(self, goals: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
         """The `contained_execution_required`-aware replacement for a
-        direct `_run_cmd_with_timeout(["mvn"] + goals, ...)` call -
-        SEC-001-P6 Stage 2's two-phase concept applied to every real Maven
-        gate this class runs (pom validate, classpath resolution, compile,
-        test): host mode is a byte-for-byte pass-through (no `-o`/
-        `-Dmaven.repo.local` flags added, exact prior behavior); contained
-        mode warms the persistent cache once, runs OFFLINE
-        (network=DENIED) against it, and - only if Maven's own offline-
-        mode error text indicates a genuinely missing dependency/plugin
-        (`OfflineFailureKind.MISSING_DEPENDENCY`, not just any nonzero
-        exit) - runs exactly ONE bounded reacquisition followed by exactly
-        one more offline retry. Never falls back to unrestricted
-        networking for the goals themselves; never loops more than once."""
+        direct `_run_cmd_with_timeout(["mvn"] + goals, ...)` call - SEC-001
+        live-validation follow-up (2026-09-11): the ORIGINAL version of
+        this method warmed the cache via a single, fixed `dependency:
+        go-offline` call - a real live run found this insufficient:
+        `dependency:go-offline` resolves declared `<dependencies>` but
+        does NOT reliably resolve build-LIFECYCLE PLUGIN artifacts
+        (confirmed live - `maven-resources-plugin`, a DEFAULT lifecycle
+        plugin the goal never even declared, and `maven-surefire-plugin`,
+        both failed the identical way `dependency:go-offline` had
+        supposedly already run for). Fixed by deriving acquisition from
+        the REAL goal about to run, not a static goal/plugin list:
+        whatever `mvn <goals>` actually needs - declared dependencies,
+        transitive plugin dependencies, anything the real lifecycle
+        resolves - gets cached, because acquisition runs THE SAME goals,
+        just with network permitted, instead of a narrower proxy goal.
+
+        Host mode: byte-for-byte pass-through, unchanged, no flags added.
+
+        Contained mode: tries OFFLINE first (network=DENIED, whatever is
+        already cached from a prior gate call in this same run). Only on
+        a genuine `OfflineFailureKind.MISSING_DEPENDENCY` (not just any
+        nonzero exit) does it run ONE bounded acquisition - `mvn <goals>`
+        again, network=UNRESTRICTED, still fully filesystem/process-
+        contained - then ONE more offline retry. The acquisition run's
+        own result/side effects are always discarded (logged, never
+        returned) - it is PREPARATION ONLY and must never be mistaken for
+        compile/test/runtime PASS evidence; only an offline attempt's
+        result is ever returned from this method. If the retry still
+        shows materially identical missing-artifact evidence (compared
+        via `maven_missing_artifact_signature`, falling back to "still
+        MISSING_DEPENDENCY" if the specific coordinate can't be
+        extracted from either message), this terminates deterministically
+        - the retry's own result is returned with a distinguishing
+        `MAVEN_ACQUISITION_INCOMPLETE:` marker prefixed onto stderr, so a
+        caller can tell "acquisition could not complete" apart from an
+        ordinary code-level test/compile failure - never a third
+        acquisition, never a loop, never a fallback to unrestricted
+        networking for the goals themselves."""
         if not self.autonomy_cfg.contained_execution_required:
             return self._run_cmd_with_timeout(["mvn"] + goals, cwd=cwd, timeout=timeout)
 
         cache_dir = self._maven_cache_dir()
-        self._ensure_maven_cache_warm(cache_dir)
 
         def _offline_attempt() -> Dict[str, Any]:
             return self._run_cmd_with_timeout(
@@ -762,27 +762,67 @@ class PolymorphicValidator:
                 dependency_cache_path=cache_dir, dependency_cache_writable=True,
             )
 
-        result = _offline_attempt()
-        if result["returncode"] == 0:
-            return result
-        combined_output = result.get("stdout", "") + result.get("stderr", "")
-        if classify_maven_offline_failure_text(combined_output) != OfflineFailureKind.MISSING_DEPENDENCY:
-            return result
+        def _acquire_for_this_goal() -> None:
+            # PREPARATION/ACQUISITION ONLY - network=UNRESTRICTED, same
+            # goals as the authoritative offline run, result discarded.
+            # Never contributes Quality Gate PASS evidence: the caller
+            # never sees this call's own return value.
+            try:
+                self._run_cmd_with_timeout(
+                    ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
+                    cwd=cwd, timeout=timeout, network=NetworkAuthority.UNRESTRICTED,
+                    dependency_cache_path=cache_dir, dependency_cache_writable=True,
+                )
+            except Exception as e:
+                logger.warning(f"Maven acquisition for goals {goals!r} failed: {e}")
+
+        first = _offline_attempt()
+        if first["returncode"] == 0:
+            return first
+        first_output = first.get("stdout", "") + first.get("stderr", "")
+        if classify_maven_offline_failure_text(first_output) != OfflineFailureKind.MISSING_DEPENDENCY:
+            return first
 
         logger.info(
-            "mvn %s failed offline with a missing-dependency signature - running one bounded "
-            "reacquisition then one more offline attempt.", " ".join(goals),
+            "mvn %s failed offline with a missing-dependency signature - running ONE bounded "
+            "acquisition (network-enabled, preparation only, goals=%s) then one more offline "
+            "attempt.", " ".join(goals), goals,
         )
-        try:
-            self._run_cmd_with_timeout(
-                ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", "dependency:go-offline"],
-                cwd=self.workspace_path, timeout=300, network=NetworkAuthority.UNRESTRICTED,
-                dependency_cache_path=cache_dir, dependency_cache_writable=True,
+        _acquire_for_this_goal()
+        second = _offline_attempt()
+        if second["returncode"] == 0:
+            return second
+        second_output = second.get("stdout", "") + second.get("stderr", "")
+        if classify_maven_offline_failure_text(second_output) != OfflineFailureKind.MISSING_DEPENDENCY:
+            return second
+
+        first_artifact = maven_missing_artifact_signature(first_output)
+        second_artifact = maven_missing_artifact_signature(second_output)
+        if first_artifact is not None and second_artifact is not None:
+            # Both messages named a specific artifact/plugin coordinate -
+            # compare them directly.
+            materially_identical = first_artifact == second_artifact
+        else:
+            # Couldn't extract a specific coordinate from at least one
+            # message - both are already confirmed MISSING_DEPENDENCY-
+            # classified at this point, so treat that shared classification
+            # as sufficient evidence of the same failure class rather than
+            # attempting a third acquisition on an unclear signal.
+            materially_identical = True
+        if materially_identical:
+            logger.warning(
+                "mvn %s still reports a missing dependency/plugin after one bounded "
+                "reacquisition - terminating deterministically as acquisition-incomplete, "
+                "not retrying further.", " ".join(goals),
             )
-        except Exception as e:
-            logger.warning(f"Bounded Maven reacquisition failed: {e}")
-            return result
-        return _offline_attempt()
+            second = dict(second)
+            second["stderr"] = (
+                f"{self._MAVEN_ACQUISITION_INCOMPLETE_MARKER} offline execution for goals "
+                f"{goals!r} still reports a missing dependency/plugin after one bounded, "
+                f"network-enabled reacquisition attempt - this is a dependency-acquisition "
+                f"gap, not necessarily a defect in the generated code.\n{second['stderr']}"
+            )
+        return second
 
     def run_pom_validate(self) -> Dict[str, Any]:
         """Cheap, semantic-level pre-check for a Maven pom.xml - catches a

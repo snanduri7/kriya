@@ -101,6 +101,29 @@ def classify_pip_offline_failure_text(combined_output: str) -> OfflineFailureKin
     return OfflineFailureKind.ORDINARY_FAILURE
 
 
+_MAVEN_MISSING_ARTIFACT_RE = re.compile(
+    r"the artifact ([^\s]+) has not been downloaded"
+    r"|Plugin ([^\s]+) or one of its dependencies could not be resolved"
+    r"|dependency:\s*\n?\s*([^\s(]+)",
+)
+
+
+def maven_missing_artifact_signature(combined_output: str) -> Optional[str]:
+    """Extracts the specific artifact/plugin coordinate Maven's own
+    offline-mode error text names as unresolvable (e.g.
+    'org.junit.jupiter:junit-jupiter:jar:5.10.2') - used ONLY to compare
+    two offline failures for "materially identical missing-artifact
+    evidence" (kriya/tools/validate.py's bounded-reacquisition deterministic-
+    termination check), never to build a static plugin/artifact allowlist.
+    Returns None if the text doesn't match any known Maven error shape -
+    callers fall back to comparing `OfflineFailureKind` alone in that
+    case."""
+    m = _MAVEN_MISSING_ARTIFACT_RE.search(combined_output)
+    if not m:
+        return None
+    return next((g for g in m.groups() if g), None)
+
+
 def _classify_maven_offline_failure(result: ProcessResult) -> Optional[OfflineFailureKind]:
     if result.returncode == 0 and not result.timeout:
         return None
