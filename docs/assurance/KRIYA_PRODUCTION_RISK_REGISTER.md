@@ -429,6 +429,16 @@ Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective 
 **REPO-003 — Write-authorization scope enforcement** (`AuthorizedFileWriter`, FI-01/FI-09)
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: **E3 (corrected down from E4, same reasoning as `CORR-002` — PRV-18 corroboration withdrawn, FI-01/FI-09 vertical evidence stands independently and directly confirmed by grep this pass)** · Disposition: CLOSED for its scope-authorization purpose at the required E3 bar · **Explicitly not sufficient for DE-06's hostile-code containment claim** — see `SEC-001`.
 
+**Post-demo evidence note (2026-09-11, no disposition change):** Demo 04
+(`~/kriya-live-demo/demo-04-control/`) live-exercised `AuthorizedFileWriter`
+directly and unmodified — a denied outside-scope write raised
+`PolicyDeniedError` with zero bytes written (independently confirmed via
+`os.path.exists()` and a directory listing), an allowed inside-scope write
+succeeded with byte-for-byte matching content. Further live-production
+confirmation of an already-CLOSED disposition, not new evidence changing
+it, and explicitly not evidence toward `SEC-001` (the demo's own
+`qualification.md` draws this same distinction before it was ever run).
+
 **REPO-004 — Workspace state isolation**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Related PRV: PRV-14 (no recorded results, fault/recovery invariant, manual check required by its own design) · Effective Evidence Level: E1 · Disposition: NEEDS_EVIDENCE.
 
@@ -441,6 +451,16 @@ Language Scope: **JAVA (genuinely intrinsic — Maven reactor semantics)** · De
 
 **VER-002 — Runtime verification, real evidence producer/consumer matching** (`INV-RUNTIME-001`/`002`, FI-07, FI-08)
 Language Scope: LANGUAGE_NEUTRAL (managed-service prepare→launch→probe→verify is a generic orchestration pattern; the "prepare" step's own content is language-specific, but the pattern and the producer/consumer-matching check are not) · Deployment Relevance: REQUIRED · Effective Evidence Level: Java E4 (P6's two real live defects, `e073d47`/`e790c1a` — memory-sourced); Python E0/E1 · Disposition: CLOSED (Java bar met).
+
+**Post-demo evidence note (2026-09-11, no disposition change):** commit
+`740ddfd` (Demo 02 Artemis rehearsal finding) generalized managed_service's
+existing artifact-preparation primitive to the `finite_command` runtime-
+verification path (a `mvn package` step was missing before `java -jar`/
+`-cp` invocation, previously misclassified as an environment/toolchain
+failure). This is further, real production-path evidence supporting
+`VER-002`/`VER-003`'s already-CLOSED dispositions — a same-day-fixed defect
+in the verification tooling itself, not a standing register gap that was
+ever open as its own tracked risk.
 
 **VER-003 — Java validation correctness (compile/test-selection/regression, general)**
 Language Scope: JAVA · Risk Family: `VER-LANGUAGE-VALIDATION` · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (P1–P8) · Disposition: CLOSED.
@@ -579,6 +599,14 @@ Language Scope: LANGUAGE_NEUTRAL (sensitive-path/approval logic is orchestration
 **POL-003 — Sandboxed execution policy under `execution_policy.mode: audit` (current, working as designed)**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: OPTIONAL (this is the current, correctly-functioning audit-only mode, not `POL-001`'s REQUIRED enforce capability) · Effective Evidence Level: E4 (exercised by every P-run) · Disposition: CLOSED for its own narrower scope.
 
+**Post-demo evidence note (2026-09-11, no disposition change):** Demo 04
+also exercised the generic `ExecutionPolicy().evaluate()` path directly
+against the same denied target used for the `REPO-003` differential above,
+confirming it independently reaches the same DENY verdict (its own,
+distinct reason code, `PATH_OUTSIDE_WORKSPACE_DENIED`) but never gates
+anything on its own — computed and logged only, exactly as this row
+already documented. Confirming evidence, not new.
+
 ---
 
 ## §8. TOOL — Tools / MCP execution authority
@@ -616,6 +644,22 @@ Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Related PR
 ## §10. CTX — Context / retrieval
 
 *(Unchanged from Pass 1 in substance — no PRV/P-series E4 claims existed here to re-audit.)*
+
+**Gap flagged, not filled (2026-09-11).** Demo 02's Qpid→Artemis
+qualification experience surfaced a distinct pattern this section does not
+cover: `kriya learn`'s untrusted external-knowledge RAG path (see
+`CLAUDE.md`'s "Untrusted learned-knowledge RAG" note — the fencing there
+addresses *safety*, i.e. prompt-injection, not *relevance*) has no risk row
+anywhere in this register addressing whether ingested content is actually
+relevant/correct for the library/version in use — "safe acquisition !=
+relevant acquisition." Grepped this pass: zero mentions of `learn`/
+`learned_knowledge`/RAG-relevance outside this section header and `CTX`'s
+own repo-context rows (`CTX-001`–`003`, which govern internal-repository
+retrieval, not externally-ingested knowledge). Genuinely uncovered, but not
+added as a new row in this reconciliation-only pass — out of this task's
+scope (no new-risk authorization given here, unlike the dedicated A1-P1/
+VER-006 passes that added rows explicitly). Recommend a dedicated pass to
+formalize this as a new risk row if it isn't picked up otherwise.
 
 **CTX-001 — Dependency-graph/context freshness and health**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION · graphify candidate mechanism retained unchanged from the original seed entry.
@@ -666,6 +710,32 @@ Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective 
 
 **OBS-002 — Operator-facing run summary**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+
+**Post-demo evidence note (2026-09-11).** Two Demo-01-rehearsal findings,
+both fixed same-day pre-demo (commits `9726ff4`, `3e27e54`), are new,
+concrete implementation evidence within this row's scope, not evidence for
+any other existing risk (grepped: no other row names Reviewer-narrative or
+failure-category truthfulness specifically):
+1. **Rejected-candidate truthfulness** — a real terminal Quality-Gates
+   FAILURE was followed by a Reviewer report opening "the application
+   successfully..." with a "How to Run" section, contradicting the FAILED
+   banner immediately above it. Fixed with deterministic, marker-based
+   extraction (`ReviewerAgent.extract_rejected_candidate_diagnostic()`,
+   fail-closed if markers are missing) rather than prompt wording alone —
+   `3e27e54`'s own commit message documents a live run that proved prompt
+   compliance alone was insufficient before this structural fix landed.
+2. **`generation_budget_exhausted` mislabeling** — a run that simply ran
+   out of configured time was funneled into the same
+   `state.environment_failure`/`STOP_ENVIRONMENT` path genuine toolchain
+   failures use, so the CLI printed misleading `kriya doctor` advice. Fixed
+   with its own failure_category and dedicated CLI message.
+
+Both are real, deterministic, tested (20 new tests combined) narrow slices
+of "truthful operator-facing summary" — specifically for the
+run-failed/rejected-candidate case. Disposition stays
+`NEEDS_IMPLEMENTATION`: this row's evident scope is the general
+operator-facing summary (including successful/retried/escalated runs),
+which these two fixes do not cover.
 
 **OBS-003 — Secret redaction in logs/traces/evidence**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE first (confirm absence precisely before assuming NEEDS_IMPLEMENTATION — not done this pass).
