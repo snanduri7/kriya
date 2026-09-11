@@ -44,7 +44,7 @@ def test_null_backend_prepare_returns_env_allowlist_and_no_rlimit_by_default():
         trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp", env_allowlist=["PATH"],
         network=NetworkAuthority.UNRESTRICTED,
     )
-    prepared = backend.prepare(profile)
+    prepared = backend.prepare(profile, ["echo", "test"])
     assert prepared.backend_name == "none"
     assert prepared.env is not None and "PATH" in prepared.env
     assert prepared.preexec_fn is None  # no cpu_seconds/memory_mb requested
@@ -56,7 +56,7 @@ def test_null_backend_prepare_builds_rlimit_preexec_when_requested():
         trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
         cpu_seconds=60, memory_mb=256, network=NetworkAuthority.UNRESTRICTED,
     )
-    prepared = backend.prepare(profile)
+    prepared = backend.prepare(profile, ["echo", "test"])
     assert prepared.preexec_fn is not None
 
 
@@ -70,7 +70,7 @@ def test_null_backend_prepare_allows_unrestricted_network_profile():
         trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
         network=NetworkAuthority.UNRESTRICTED,
     )
-    prepared = backend.prepare(profile)
+    prepared = backend.prepare(profile, ["echo", "test"])
     assert prepared.backend_name == "none"
 
 
@@ -84,7 +84,7 @@ def test_null_backend_prepare_blocks_network_denied_profile():
         network=NetworkAuthority.DENIED,
     )
     with pytest.raises(BackendUnavailableError):
-        backend.prepare(profile)
+        backend.prepare(profile, ["echo", "test"])
 
 
 def test_null_backend_prepare_blocks_dependency_registry_only_profile():
@@ -94,7 +94,7 @@ def test_null_backend_prepare_blocks_dependency_registry_only_profile():
         network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY,
     )
     with pytest.raises(BackendUnavailableError):
-        backend.prepare(profile)
+        backend.prepare(profile, ["echo", "test"])
 
 
 def test_null_backend_block_is_a_containment_setup_error():
@@ -108,7 +108,7 @@ def test_null_backend_block_is_a_containment_setup_error():
         network=NetworkAuthority.DENIED,
     )
     try:
-        backend.prepare(profile)
+        backend.prepare(profile, ["echo", "test"])
         assert False, "expected BackendUnavailableError"
     except ContainmentSetupError:
         pass
@@ -124,7 +124,7 @@ def test_null_backend_prepare_partial_rlimit_profile_leaves_unset_dimension_unto
         trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
         cpu_seconds=60, memory_mb=None, network=NetworkAuthority.UNRESTRICTED,
     )
-    prepared = backend.prepare(profile)
+    prepared = backend.prepare(profile, ["echo", "test"])
     assert prepared.preexec_fn is not None
 
     import sys
@@ -145,14 +145,14 @@ def test_test_backend_configured_to_fail_raises_backend_unavailable():
     backend = DummyContainmentBackend(should_fail=True, failure_message="simulated outage")
     profile = ContainmentProfile(trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp")
     with pytest.raises(BackendUnavailableError, match="simulated outage"):
-        backend.prepare(profile)
+        backend.prepare(profile, ["echo", "test"])
     assert backend.prepared_profiles == []  # never recorded as prepared
 
 
 def test_test_backend_configured_to_succeed_records_the_profile():
     backend = DummyContainmentBackend(should_fail=False)
     profile = ContainmentProfile(trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp")
-    prepared = backend.prepare(profile)
+    prepared = backend.prepare(profile, ["echo", "test"])
     assert prepared.backend_name == "test"
     assert backend.prepared_profiles == [profile]
 

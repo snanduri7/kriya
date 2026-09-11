@@ -74,9 +74,12 @@ class ManagedProcess:
     started the process; the drain threads never touch anything but their
     own buffer."""
 
-    def __init__(self, popen: subprocess.Popen, *, max_output_chars: int) -> None:
+    def __init__(
+        self, popen: subprocess.Popen, *, max_output_chars: int, cleanup: Optional[Callable[[], None]] = None,
+    ) -> None:
         self._popen = popen
         self._max_output_chars = max_output_chars
+        self._cleanup = cleanup
         self._stdout_chunks: List[str] = []
         self._stderr_chunks: List[str] = []
         self._lock = threading.Lock()
@@ -143,35 +146,52 @@ class ManagedProcess:
         continued-uncertain process tree means for its own result, this
         method's only job is to try and honestly report whether it
         worked."""
-        if self._popen.poll() is not None:
-            return True
-        ProcessController._terminate_tree(self._popen)
         try:
-            self._popen.wait(timeout=reap_timeout)
-            return True
-        except subprocess.TimeoutExpired:
-            return False
+            if self._popen.poll() is not None:
+                return True
+            ProcessController._terminate_tree(self._popen)
+            try:
+                self._popen.wait(timeout=reap_timeout)
+                return True
+            except subprocess.TimeoutExpired:
+                return False
+        finally:
+            if self._cleanup is not None:
+                self._cleanup()
+
+
+@dataclass(frozen=True)
+class _ResolvedExecution:
+    env: Optional[Dict[str, str]]
+    preexec_fn: Optional[Callable[[], None]]
+    command: List[str]
+    cleanup: Optional[Callable[[], None]] = None
 
 
 def _prepare_env_and_preexec(
     *,
+    command: List[str],
     containment_profile: Optional[ContainmentProfile],
     containment_backend: Optional[ContainmentBackend],
     env: Optional[Dict[str, str]],
     preexec_fn: Optional[Callable[[], None]],
-) -> Tuple[Optional[Dict[str, str]], Optional[Callable[[], None]]]:
-    """The single place `env`/`preexec_fn` get resolved, for every caller
-    of every lifecycle in this module. A caller passes EITHER a raw
-    `env`/`preexec_fn` pair directly (every pre-SEC-001 caller, unchanged
-    behavior) OR a `ContainmentProfile` + `ContainmentBackend` (new,
-    SEC-001-aware callers) - never both; a caller supplying a profile
+) -> _ResolvedExecution:
+    """The single place `env`/`preexec_fn`/`command` get resolved, for
+    every caller of every lifecycle in this module. A caller passes EITHER
+    a raw `env`/`preexec_fn` pair directly (every pre-SEC-001 caller,
+    unchanged behavior) OR a `ContainmentProfile` + `ContainmentBackend`
+    (new, SEC-001-aware callers) - never both; a caller supplying a profile
     without a backend (or vice versa) is a programming error, not a
     silent no-op. `backend.prepare()` raising `ContainmentSetupError` is
     NOT caught here - it propagates to the caller, which must fail the
     command closed rather than run it (Invariant: containment/resource
-    setup failure must block execution)."""
+    setup failure must block execution). SEC-001-P6: a backend may also
+    return a `command_prefix` (e.g. `docker run ...` ahead of the real
+    command, for a container backend) - composed onto `command` HERE, the
+    one place every caller's actual spawned argv is decided, and a
+    `cleanup` hook the caller must run in `finally` regardless of outcome."""
     if containment_profile is None and containment_backend is None:
-        return env, preexec_fn
+        return _ResolvedExecution(env=env, preexec_fn=preexec_fn, command=command)
     if containment_profile is None or containment_backend is None:
         raise ValueError(
             "containment_profile and containment_backend must both be provided together, or neither."
@@ -180,8 +200,11 @@ def _prepare_env_and_preexec(
         raise ValueError(
             "Pass either (env, preexec_fn) or (containment_profile, containment_backend), never both."
         )
-    prepared: PreparedContainment = containment_backend.prepare(containment_profile)
-    return prepared.env, prepared.preexec_fn
+    prepared: PreparedContainment = containment_backend.prepare(containment_profile, command)
+    effective_command = (list(prepared.command_prefix) + command) if prepared.command_prefix else command
+    return _ResolvedExecution(
+        env=prepared.env, preexec_fn=prepared.preexec_fn, command=effective_command, cleanup=prepared.cleanup,
+    )
 
 
 def _spawn_popen(*args: Any, **kwargs: Any) -> subprocess.Popen:
@@ -243,28 +266,37 @@ class ProcessController:
         # that never reads it, so this is a strict improvement for every
         # existing caller (compile/test/pom-validate/version-check), not
         # just the one that supplies a real payload.
-        env, preexec_fn = _prepare_env_and_preexec(
-            containment_profile=containment_profile, containment_backend=containment_backend,
+        resolved = _prepare_env_and_preexec(
+            command=command, containment_profile=containment_profile, containment_backend=containment_backend,
             env=env, preexec_fn=preexec_fn,
         )
-        process = _spawn_popen(
-            command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE, text=True, env=env, preexec_fn=preexec_fn,
-            start_new_session=(os.name == "posix"),
-        )
-        timed_out = False
         try:
-            stdout, stderr = process.communicate(input=stdin_payload or "", timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            self._terminate_tree(process)
+            process = _spawn_popen(
+                resolved.command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE, text=True, env=resolved.env, preexec_fn=resolved.preexec_fn,
+                start_new_session=(os.name == "posix"),
+            )
+            timed_out = False
             try:
-                stdout, stderr = process.communicate(timeout=self.reap_timeout)
-            except subprocess.TimeoutExpired as reap_ex:
-                stdout = reap_ex.output or ""
-                stderr = (reap_ex.stderr or "") + (
-                    "\n[REAP TIMEOUT] Process tree did not exit after termination."
-                )
+                stdout, stderr = process.communicate(input=stdin_payload or "", timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                self._terminate_tree(process)
+                try:
+                    stdout, stderr = process.communicate(timeout=self.reap_timeout)
+                except subprocess.TimeoutExpired as reap_ex:
+                    stdout = reap_ex.output or ""
+                    stderr = (reap_ex.stderr or "") + (
+                        "\n[REAP TIMEOUT] Process tree did not exit after termination."
+                    )
+        finally:
+            # SEC-001-P6: a container backend's own authoritative teardown
+            # (e.g. `docker rm -f`) - not optional even on the happy path,
+            # see PreparedContainment.cleanup's own docstring for why
+            # `_terminate_tree`'s host-side process-group kill alone is not
+            # sufficient for a VM-mediated container runtime.
+            if resolved.cleanup is not None:
+                resolved.cleanup()
         stdout, stdout_truncated = _bounded_tail(stdout or "", self.max_output_chars)
         stderr, stderr_truncated = _bounded_tail(stderr or "", self.max_output_chars)
         if timed_out:
@@ -302,30 +334,34 @@ class ProcessController:
         per Invariant 14. This is what `ShellTool`/`MCPClient` (both async
         callers) route through instead of their own raw
         `asyncio.create_subprocess_*` calls."""
-        env, preexec_fn = _prepare_env_and_preexec(
-            containment_profile=containment_profile, containment_backend=containment_backend,
+        resolved = _prepare_env_and_preexec(
+            command=command, containment_profile=containment_profile, containment_backend=containment_backend,
             env=env, preexec_fn=preexec_fn,
         )
-        process = await _spawn_subprocess_exec(
-            *command, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.PIPE, env=env, preexec_fn=preexec_fn,
-            start_new_session=(os.name == "posix"),
-        )
-        timed_out = False
-        stdin_bytes = (stdin_payload or "").encode("utf-8")
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                process.communicate(input=stdin_bytes), timeout=timeout,
+            process = await _spawn_subprocess_exec(
+                *resolved.command, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.PIPE, env=resolved.env, preexec_fn=resolved.preexec_fn,
+                start_new_session=(os.name == "posix"),
             )
-        except asyncio.TimeoutError:
-            timed_out = True
-            self._terminate_tree(process)
+            timed_out = False
+            stdin_bytes = (stdin_payload or "").encode("utf-8")
             try:
                 stdout_b, stderr_b = await asyncio.wait_for(
-                    process.communicate(), timeout=self.reap_timeout,
+                    process.communicate(input=stdin_bytes), timeout=timeout,
                 )
             except asyncio.TimeoutError:
-                stdout_b, stderr_b = b"", b"[REAP TIMEOUT] Process tree did not exit after termination.".encode()
+                timed_out = True
+                self._terminate_tree(process)
+                try:
+                    stdout_b, stderr_b = await asyncio.wait_for(
+                        process.communicate(), timeout=self.reap_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    stdout_b, stderr_b = b"", b"[REAP TIMEOUT] Process tree did not exit after termination.".encode()
+        finally:
+            if resolved.cleanup is not None:
+                resolved.cleanup()
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
         stdout, stdout_truncated = _bounded_tail(stdout, self.max_output_chars)
@@ -368,16 +404,20 @@ class ProcessController:
         an explicit closed pipe (run()'s own fix for the same hang class) -
         a managed service is never fed a payload the way a finite
         command's last step can be, so there's nothing to close after."""
-        env, preexec_fn = _prepare_env_and_preexec(
-            containment_profile=containment_profile, containment_backend=containment_backend,
+        resolved = _prepare_env_and_preexec(
+            command=command, containment_profile=containment_profile, containment_backend=containment_backend,
             env=env, preexec_fn=preexec_fn,
         )
+        # Unlike run()/run_async(), a managed process is still running when
+        # this method returns - cleanup can't fire in a finally here. It's
+        # handed to ManagedProcess instead, to run when the CALLER eventually
+        # tears the service down via ManagedProcess.terminate().
         process = _spawn_popen(
-            command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL, text=True, env=env, preexec_fn=preexec_fn,
+            resolved.command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL, text=True, env=resolved.env, preexec_fn=resolved.preexec_fn,
             start_new_session=(os.name == "posix"),
         )
-        return ManagedProcess(process, max_output_chars=self.max_output_chars)
+        return ManagedProcess(process, max_output_chars=self.max_output_chars, cleanup=resolved.cleanup)
 
     @staticmethod
     def _terminate_tree(process: Any) -> None:

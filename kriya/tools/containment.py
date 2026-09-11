@@ -103,28 +103,63 @@ class ContainmentProfile:
 @dataclass(frozen=True)
 class PreparedContainment:
     """What a backend hands back to `ProcessController` once a profile is
-    successfully prepared - the exact `env`/`preexec_fn` shape
-    `subprocess.Popen`/`asyncio.create_subprocess_exec` already accept, so
-    no caller needs new subprocess-launch code paths."""
+    successfully prepared.
+
+    `env`/`preexec_fn` are the shape `subprocess.Popen`/
+    `asyncio.create_subprocess_exec` already accept for a HOST-process
+    backend (`NullContainmentBackend`) - unchanged from the original
+    foundation package.
+
+    `command_prefix`/`cleanup` (SEC-001-P6, 2026-09-11) exist for a backend
+    whose real enforcement mechanism is a SEPARATE process the command runs
+    inside of (a container) rather than the host process itself:
+    - `command_prefix`: prepended to the caller's own command before
+      `ProcessController` spawns it - e.g. `["docker", "run", "--rm",
+      "--name", ..., "--network", "none", ..., image]` ahead of the
+      caller's real `["mvn", "install"]`. `ProcessController` still owns
+      the ONE spawn point (`_spawn_popen`/`_spawn_subprocess_exec`) - this
+      only changes what argv it spawns, not who spawns it (Invariant: no
+      parallel execution architecture).
+    - `cleanup`: a best-effort, no-raise callable `ProcessController` runs
+      in `finally` after the command completes OR times out. For a
+      container backend this is NOT optional even with `docker run --rm`:
+      `ProcessController`'s own timeout path kills the HOST `docker` CLI
+      process's process group (`_terminate_tree`), which does not reliably
+      propagate into a VM-mediated container runtime (Docker Desktop) and
+      can leave the container itself still running - `cleanup` is the
+      backend's own authoritative "make sure the container is actually
+      gone" step (e.g. `docker rm -f <name>`), checked adversarially via
+      `docker ps` from the host, not by trusting the CLI's own exit code.
+    """
 
     env: Optional[Dict[str, str]]
     preexec_fn: Optional[Callable[[], None]]
     backend_name: str
+    command_prefix: Optional[List[str]] = None
+    cleanup: Optional[Callable[[], None]] = None
 
 
 class ContainmentBackend(Protocol):
     """One implementation per real enforcement mechanism (sandbox-exec,
     OCI, none). Deliberately NOT an abstract base class with shared state -
-    a backend is a pure `profile -> PreparedContainment` function with a
-    name, nothing about a specific mechanism belongs in this contract."""
+    a backend is a pure `(profile, command) -> PreparedContainment`
+    function with a name, nothing about a specific mechanism belongs in
+    this contract."""
 
     @property
     def name(self) -> str: ...
 
-    def prepare(self, profile: ContainmentProfile) -> PreparedContainment:
+    def prepare(self, profile: ContainmentProfile, command: List[str]) -> PreparedContainment:
         """Raises `ContainmentSetupError` (or a subclass) if this backend
         cannot honor `profile` - never returns a partially-honored
-        result."""
+        result. `command` (SEC-001-P6) is the real argv about to run -
+        NOT a decision input for policy/authorization (that stays
+        ExecutionPolicy's job, Invariant: authorization/containment stay
+        separate layers) - a backend may use it only for backend-internal
+        setup choices with no security meaning of their own, e.g. an OCI
+        backend picking which base image has the right toolchain
+        (`mvn` vs `python`) preinstalled. `NullContainmentBackend`/
+        `DummyContainmentBackend` ignore it entirely."""
         ...
 
 
@@ -141,7 +176,7 @@ class NullContainmentBackend:
 
     name = "none"
 
-    def prepare(self, profile: ContainmentProfile) -> PreparedContainment:
+    def prepare(self, profile: ContainmentProfile, command: List[str]) -> PreparedContainment:
         # SEC-001 foundation gate (2026-09-11): this backend provides NO
         # filesystem or network isolation at all - only env allowlisting and
         # best-effort rlimits. A profile that asks for anything stronger
@@ -191,7 +226,7 @@ class DummyContainmentBackend:
         self.failure_message = failure_message
         self.prepared_profiles: List[ContainmentProfile] = []
 
-    def prepare(self, profile: ContainmentProfile) -> PreparedContainment:
+    def prepare(self, profile: ContainmentProfile, command: List[str]) -> PreparedContainment:
         if self.should_fail:
             raise BackendUnavailableError(self.failure_message)
         self.prepared_profiles.append(profile)
@@ -199,8 +234,21 @@ class DummyContainmentBackend:
         return PreparedContainment(env=env, preexec_fn=None, backend_name=self.name)
 
 
+def _oci_backend_factory() -> ContainmentBackend:
+    # Deferred import: containment_oci.py's module-level work (locating the
+    # docker binary) has no business running for callers that never select
+    # "oci" - and it keeps kriya/tools/containment.py itself free of any
+    # container-specific import, matching this file's own "no Docker/
+    # sandbox-exec-specific concepts" charter for the CONTRACT, even though
+    # the concrete "oci" backend obviously has to know about Docker somewhere.
+    from kriya.tools.containment_oci import OCIContainmentBackend
+
+    return OCIContainmentBackend()
+
+
 _PRODUCTION_BACKEND_REGISTRY: Dict[str, Callable[[], ContainmentBackend]] = {
     "none": NullContainmentBackend,
+    "oci": _oci_backend_factory,
 }
 
 
