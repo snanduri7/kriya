@@ -299,32 +299,63 @@ class PolymorphicValidator:
         dependency problem (e.g. a nonexistent package/version the model
         wrote), which the caller fails the gate on so the retry loop sees it,
         mirroring the Ruby bundle-install precedent exactly."""
-        venv_dir = os.path.join(self.workspace_path, ".kriya", "venv")
-        venv_python = os.path.join(venv_dir, "bin", "python")
-        if not os.path.exists(venv_python):
+        # SEC-001-P6 Stage 3 (2026-09-11): execution-environment-aware venv
+        # creation/reference - the ONE thing this needed to NOT be is a
+        # host-path-translation hack (this stage's own explicit
+        # instruction). Kriya's own `sys.executable` is a host macOS/ARM64
+        # binary that does not exist inside a Linux container at all; a
+        # host-ABSOLUTE venv_dir handed to a container's own `venv`
+        # invocation would be created under that literal path INSIDE the
+        # container's ephemeral rootfs (no /Users tree exists there) - NOT
+        # under the persisted workspace bind mount - since the container
+        # has no knowledge of what that host path even means. The fix is
+        # not translation, it's using paths that are ALREADY correct in
+        # both modes: `venv_dir_host` (used for every `os.path.exists`
+        # check - Kriya itself always inspects the real, shared host
+        # directory, contained or not) versus a workspace-RELATIVE path
+        # (used as the actual command argv, resolved by whichever `cwd`/
+        # `-w` the command already runs under - `self.workspace_path` on
+        # the host, the OCI backend's own fixed container workdir when
+        # contained - exactly the same mechanism `cwd=self.workspace_path`
+        # already relies on for every other command this class runs).
+        contained = self.autonomy_cfg.contained_execution_required
+        venv_dir_host = os.path.join(self.workspace_path, ".kriya", "venv")
+        venv_python_host = os.path.join(venv_dir_host, "bin", "python")
+        venv_relative = os.path.join(".kriya", "venv")
+        venv_python_relative = os.path.join(venv_relative, "bin", "python")
+        create_interpreter = "python3" if contained else sys.executable
+        create_target = venv_relative if contained else venv_dir_host
+        venv_python = venv_python_relative if contained else venv_python_host
+
+        if not os.path.exists(venv_python_host):
             try:
                 create_res = self._run_cmd_with_timeout(
-                    [sys.executable, "-m", "venv", venv_dir], cwd=self.workspace_path, timeout=60,
+                    [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60,
                 )
-                if create_res["returncode"] != 0 or not os.path.exists(venv_python):
+                if create_res["returncode"] != 0 or not os.path.exists(venv_python_host):
                     logger.warning(
-                        f"Failed to create project-local venv at {venv_dir} - falling back to "
-                        f"Kriya's own interpreter for this test run: {create_res['stderr']}"
+                        f"Failed to create project-local venv at {venv_dir_host} - falling back to "
+                        f"the default interpreter for this test run: {create_res['stderr']}"
                     )
                     return None, None
             except Exception as e:
                 logger.warning(
-                    f"Failed to create project-local venv at {venv_dir} - falling back to "
-                    f"Kriya's own interpreter for this test run: {e}"
+                    f"Failed to create project-local venv at {venv_dir_host} - falling back to "
+                    f"the default interpreter for this test run: {e}"
                 )
                 return None, None
 
         # Re-run on every call, even when the venv already existed - a retry
         # may have just edited requirements.txt/pyproject.toml, and pip itself
         # is a fast no-op when nothing actually changed since the last install.
+        # network=UNRESTRICTED (SEC-001-P6 Stage 2): this is the ACQUISITION
+        # step - a no-op under contained_execution_required=False (default
+        # network stays irrelevant there), and under containment this is
+        # the one call in this method that genuinely needs to reach a
+        # package registry; still fully filesystem/process-contained.
         install_res = self._run_cmd_with_timeout(
             [venv_python, "-m", "pip", "install", "-q", *install_args, "pytest"],
-            cwd=self.workspace_path, timeout=300,
+            cwd=self.workspace_path, timeout=300, network=NetworkAuthority.UNRESTRICTED,
         )
         if install_res["returncode"] != 0:
             return None, (
@@ -366,24 +397,45 @@ class PolymorphicValidator:
         sys.executable with nothing installed, so every attempt's test gate
         failed with `ModuleNotFoundError: No module named 'django'`
         regardless of source-file correctness."""
+        # SEC-001-P6 Stage 3: the "no project-local venv" fallback must
+        # also be execution-environment aware - Kriya's own `sys.executable`
+        # (host mode) versus a generic "python3" token resolved by the
+        # container image's own PATH (contained mode). This is the one
+        # path a project with literally no requirements.txt/pyproject.toml
+        # dependency declaration falls back to - it will not have `pytest`
+        # preinstalled under containment the way Kriya's own host
+        # environment happens to (a real, smaller, documented residual
+        # limitation distinct from the venv case above, which always
+        # installs pytest explicitly regardless of mode).
+        contained = self.autonomy_cfg.contained_execution_required
+        default_interpreter = "python3" if contained else sys.executable
         requirements_path = os.path.join(self.workspace_path, "requirements.txt")
         if os.path.exists(requirements_path) and _has_real_requirements(requirements_path):
-            venv_python, install_error = self._ensure_project_venv(["-r", requirements_path])
+            # SEC-001-P6 Stage 3: the host-absolute requirements_path (used
+            # for the existence/content check just above, which is always a
+            # real Kriya-side/host filesystem read regardless of mode) is
+            # meaningless as a PIP ARGUMENT inside the container - only
+            # switched to a workspace-relative "requirements.txt" when
+            # contained; host mode keeps passing the exact absolute path
+            # unchanged (existing test coverage pins this exact argv shape,
+            # and there is no reason to touch behavior that already works).
+            pip_requirements_arg = "requirements.txt" if contained else requirements_path
+            venv_python, install_error = self._ensure_project_venv(["-r", pip_requirements_arg])
             if install_error:
-                return sys.executable, install_error
+                return default_interpreter, install_error
             if venv_python:
                 return venv_python, None
-            return sys.executable, None
+            return default_interpreter, None
         pyproject_path = os.path.join(self.workspace_path, "pyproject.toml")
         if os.path.exists(pyproject_path):
             dependencies = _pyproject_dependencies(pyproject_path)
             if dependencies:
                 venv_python, install_error = self._ensure_project_venv(dependencies)
                 if install_error:
-                    return sys.executable, install_error
+                    return default_interpreter, install_error
                 if venv_python:
                     return venv_python, None
-        return sys.executable, None
+        return default_interpreter, None
 
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
@@ -555,7 +607,7 @@ class PolymorphicValidator:
         return env, preexec_fn
 
     def build_containment_profile_and_backend(
-        self,
+        self, *, network: NetworkAuthority = NetworkAuthority.DENIED,
     ) -> Tuple[Optional[ContainmentProfile], Optional[ContainmentBackend]]:
         """SEC-001-P6 (2026-09-11): the real-containment counterpart to
         `build_subprocess_env_and_preexec`, gated by
@@ -582,34 +634,32 @@ class PolymorphicValidator:
         `java_home_override` is getting the container's JDK, and that is
         what this docstring documents).
 
-        SECOND residual limitation, larger and NOT fixed this pass:
-        `_ensure_project_venv`/`resolve_python_interpreter`'s existing
-        Python-interpreter-selection logic (see their own docstrings)
-        falls back to `sys.executable` - Kriya's OWN host interpreter
-        path - whenever no project-local venv exists yet, or venv
-        creation fails. Under `contained_execution_required=True`, that
-        HOST path is meaningless inside a Linux container (wrong OS/
-        architecture, does not exist at that path) and the command fails
-        immediately and loudly (a real, visible "no such file or
-        directory", never a silent bypass or false success) rather than
-        running uncontained. This package did not redesign that
-        interpreter-selection logic to be container-aware (out of scope:
-        it is upstream of the call sites this package changed, not one of
-        them) - `contained_execution_required=True` is therefore proven
-        end-to-end for Maven/Java repos
-        (tests/test_dependency_execution.py, tests/test_containment_oci.py)
-        and for `dependency_execution.py`'s own standalone Python two-phase
-        functions (which always use a fixed "python3"/"pip" argv, never
-        `sys.executable`), but NOT yet for a Python repo going through
-        THIS validator's own venv-based compile/test path - see this
-        package's own RETURN for the explicit NEW-RISK-CANDIDATE this is
-        reported as, not silently left unstated."""
+        SECOND residual limitation, CLOSED this pass (SEC-001-P6 Stage 3,
+        2026-09-11): `_ensure_project_venv`/`_resolve_python_interpreter`
+        are now execution-environment aware - contained mode creates the
+        venv with the container's own "python3" (never Kriya's host
+        `sys.executable`, which does not exist inside a Linux container)
+        and references it by a workspace-relative path
+        (`.kriya/venv/bin/python`), resolved by whichever cwd/workdir the
+        command already runs under - the SAME mechanism already used for
+        every other contained command, not a host-path-translation hack.
+        Proven end-to-end through the real `run_tests()` entry point, see
+        tests/test_validate_oci.py.
+
+        `network` (SEC-001-P6 Stage 2, 2026-09-11): defaults to DENIED
+        (the execution-phase posture every OTHER contained command in this
+        class uses) - `_ensure_project_venv`'s own `pip install` call is
+        the one exception, passing UNRESTRICTED explicitly (it is a real
+        dependency-ACQUISITION step, not execution of already-resolved
+        code, matching kriya/tools/dependency_execution.py's own
+        acquisition/execution split - still fully filesystem/process-
+        contained throughout, only network differs)."""
         if not self.autonomy_cfg.contained_execution_required:
             return None, None
         profile = ContainmentProfile(
             trust_class=TrustClass.UNTRUSTED_EXECUTION,
             workspace_path=self.workspace_path,
-            network=NetworkAuthority.DENIED,
+            network=network,
             env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
             cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
             memory_mb=self.autonomy_cfg.sandbox_memory_mb,
@@ -619,9 +669,10 @@ class PolymorphicValidator:
 
     def _run_cmd_with_timeout(
         self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
+        network: NetworkAuthority = NetworkAuthority.DENIED,
     ) -> Dict[str, Any]:
         self._audit_run_command(cmd, cwd)
-        profile, backend = self.build_containment_profile_and_backend()
+        profile, backend = self.build_containment_profile_and_backend(network=network)
         if profile is not None:
             return ProcessController().run(
                 cmd, cwd=cwd, timeout=timeout, stdin_payload=stdin_payload,
@@ -1196,8 +1247,16 @@ class PolymorphicValidator:
         interpreter, install_error = self._resolve_python_interpreter()
         if install_error:
             return None, install_error
+        # "python3" added to the match set (SEC-001-P6 Stage 3, 2026-09-11):
+        # a model-authored command can just as easily say "python3" as
+        # "python" - without this, a command already spelled "python3"
+        # would silently skip substitution and run against the container's
+        # bare interpreter even when a project-local venv exists to use
+        # instead (pre-existing gap, not contained-mode-specific, but only
+        # actually noticed once "python3" itself became a real return value
+        # of _resolve_python_interpreter's own default-interpreter case).
         rewritten = [
-            ([interpreter] + cmd[1:]) if cmd and cmd[0] in ("python", sys.executable) else cmd
+            ([interpreter] + cmd[1:]) if cmd and cmd[0] in ("python", "python3", sys.executable) else cmd
             for cmd in commands
         ]
         return rewritten, None
