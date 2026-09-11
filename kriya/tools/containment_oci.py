@@ -70,6 +70,13 @@ _TMPFS_SIZE = "512m"
 _MAVEN_EXE_RE = re.compile(r"\b(mvn|mvnw|javac|java|jar)\b")
 _PYTHON_EXE_RE = re.compile(r"\b(python3?|pytest|pip3?)\b")
 
+# Public (not underscore-prefixed) - kriya/tools/dependency_execution.py
+# imports these directly so its own `--dest`/`--find-links` flags always
+# agree with wherever THIS module actually mounts the cache, rather than
+# two modules each hard-coding the same path string and risking drift.
+MAVEN_CACHE_MOUNT = "/root/.m2"
+PIP_CACHE_MOUNT = "/root/.cache/pip"
+
 
 def _select_image_and_cache_mount(command: List[str]) -> Tuple[str, Optional[str]]:
     """Picks a base image (and, for the FIRST declared dependency-cache
@@ -89,18 +96,18 @@ def _select_image_and_cache_mount(command: List[str]) -> Tuple[str, Optional[str
     commands still work there."""
     exe = os.path.basename(command[0]) if command else ""
     if exe in ("mvn", "mvnw", "mvn.cmd"):
-        return _MAVEN_IMAGE, "/root/.m2"
+        return _MAVEN_IMAGE, MAVEN_CACHE_MOUNT
     if exe in ("java", "javac", "jar"):
         return _MAVEN_IMAGE, None
     if exe in ("python", "python3", "pytest", "pip", "pip3"):
-        return _PYTHON_IMAGE, "/root/.cache/pip"
+        return _PYTHON_IMAGE, PIP_CACHE_MOUNT
 
     script = " ".join(command[2:]) if len(command) >= 3 and command[1] == "-c" else ""
     if script:
         if _MAVEN_EXE_RE.search(script):
-            return _MAVEN_IMAGE, "/root/.m2"
+            return _MAVEN_IMAGE, MAVEN_CACHE_MOUNT
         if _PYTHON_EXE_RE.search(script):
-            return _PYTHON_IMAGE, "/root/.cache/pip"
+            return _PYTHON_IMAGE, PIP_CACHE_MOUNT
 
     return _DEFAULT_IMAGE, None
 
