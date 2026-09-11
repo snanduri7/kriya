@@ -23,9 +23,18 @@ def build_restricted_env(allowlist: List[str]) -> Dict[str, str]:
     return restricted
 
 
-def posix_resource_limits_preexec_fn(cpu_seconds: int, memory_mb: int) -> Optional[Callable[[], None]]:
-    """Returns a preexec_fn that caps CPU time and address space for a subprocess,
-    or None on non-POSIX platforms (preexec_fn isn't supported on Windows).
+def posix_resource_limits_preexec_fn(
+    cpu_seconds: Optional[int], memory_mb: Optional[int]
+) -> Optional[Callable[[], None]]:
+    """Returns a preexec_fn that caps CPU time and/or address space for a
+    subprocess, or None on non-POSIX platforms (preexec_fn isn't supported
+    on Windows).
+
+    `cpu_seconds`/`memory_mb` are independently optional - passing None for
+    one leaves that specific limit untouched rather than coercing it to 0
+    (a literal `setrlimit(..., (0, 0))` call, which would make the process
+    unable to run at all rather than "unlimited"). A caller that only wants
+    to bound one dimension must pass None, not 0, for the other.
 
     SEC-001 fail-closed correction (2026-09-11): a `setrlimit` failure here
     now RAISES instead of being logged and swallowed - the prior behavior
@@ -72,19 +81,21 @@ def posix_resource_limits_preexec_fn(cpu_seconds: int, memory_mb: int) -> Option
     def _set_limits() -> None:
         import resource
 
-        resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+        if cpu_seconds is not None:
+            resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
 
-        memory_bytes = memory_mb * 1024 * 1024
-        try:
-            resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-        except (ValueError, OSError) as e:
-            if sys.platform == "darwin":
-                logger.debug(
-                    f"RLIMIT_AS could not be set on macOS (known platform "
-                    f"limitation, memory containment stays advisory-only "
-                    f"here): {e}"
-                )
-            else:
-                raise
+        if memory_mb is not None:
+            memory_bytes = memory_mb * 1024 * 1024
+            try:
+                resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
+            except (ValueError, OSError) as e:
+                if sys.platform == "darwin":
+                    logger.debug(
+                        f"RLIMIT_AS could not be set on macOS (known platform "
+                        f"limitation, memory containment stays advisory-only "
+                        f"here): {e}"
+                    )
+                else:
+                    raise
 
     return _set_limits

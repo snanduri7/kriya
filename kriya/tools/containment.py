@@ -146,7 +146,7 @@ class NullContainmentBackend:
         preexec_fn = None
         if profile.cpu_seconds is not None or profile.memory_mb is not None:
             preexec_fn = posix_resource_limits_preexec_fn(
-                profile.cpu_seconds or 0, profile.memory_mb or 0
+                profile.cpu_seconds, profile.memory_mb
             )
         return PreparedContainment(env=env, preexec_fn=preexec_fn, backend_name=self.name)
 

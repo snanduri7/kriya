@@ -125,3 +125,34 @@ def test_posix_resource_limits_preexec_fn_still_fails_closed_on_macos_cpu_limit_
         with patch.object(sys, "platform", "darwin"):
             with pytest.raises(OSError, match="not permitted"):
                 fn()
+
+
+def test_posix_resource_limits_preexec_fn_cpu_only_never_touches_rlimit_as():
+    """A caller that wants only a CPU bound must pass memory_mb=None, not 0 -
+    0 would literally mean setrlimit(RLIMIT_AS, (0, 0)), which makes the
+    process unable to allocate memory at all rather than 'unlimited'. This
+    was a live trap in NullContainmentBackend.prepare before this fix (it
+    coalesced an unset field to 0 instead of leaving it untouched)."""
+    fn = posix_resource_limits_preexec_fn(cpu_seconds=60, memory_mb=None)
+
+    mock_resource = MagicMock()
+    mock_resource.RLIMIT_CPU = "RLIMIT_CPU"
+    mock_resource.RLIMIT_AS = "RLIMIT_AS"
+
+    with patch.dict(sys.modules, {"resource": mock_resource}):
+        fn()
+
+    mock_resource.setrlimit.assert_called_once_with("RLIMIT_CPU", (60, 60))
+
+
+def test_posix_resource_limits_preexec_fn_memory_only_never_touches_rlimit_cpu():
+    fn = posix_resource_limits_preexec_fn(cpu_seconds=None, memory_mb=256)
+
+    mock_resource = MagicMock()
+    mock_resource.RLIMIT_CPU = "RLIMIT_CPU"
+    mock_resource.RLIMIT_AS = "RLIMIT_AS"
+
+    with patch.dict(sys.modules, {"resource": mock_resource}):
+        fn()
+
+    mock_resource.setrlimit.assert_called_once_with("RLIMIT_AS", (256 * 1024 * 1024, 256 * 1024 * 1024))

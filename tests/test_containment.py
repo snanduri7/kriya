@@ -59,6 +59,31 @@ def test_null_backend_prepare_builds_rlimit_preexec_when_requested():
     assert prepared.preexec_fn is not None
 
 
+def test_null_backend_prepare_partial_rlimit_profile_leaves_unset_dimension_untouched():
+    """A profile that only bounds cpu_seconds (memory_mb=None) must not
+    silently become setrlimit(RLIMIT_AS, (0, 0)) - fixed by threading the
+    real Optional value through to posix_resource_limits_preexec_fn instead
+    of coalescing an unset field to 0 ('cpu_seconds or 0')."""
+    backend = NullContainmentBackend()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/tmp",
+        cpu_seconds=60, memory_mb=None,
+    )
+    prepared = backend.prepare(profile)
+    assert prepared.preexec_fn is not None
+
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    mock_resource = MagicMock()
+    mock_resource.RLIMIT_CPU = "RLIMIT_CPU"
+    mock_resource.RLIMIT_AS = "RLIMIT_AS"
+    with patch.dict(sys.modules, {"resource": mock_resource}):
+        prepared.preexec_fn()
+
+    mock_resource.setrlimit.assert_called_once_with("RLIMIT_CPU", (60, 60))
+
+
 def test_test_backend_configured_to_fail_raises_backend_unavailable():
     """Scope item 5's own explicit allowance: a test/dummy backend proving
     fail-closed semantics."""
