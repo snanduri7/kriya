@@ -3336,7 +3336,21 @@ class WorkflowEngine:
             review_batches, _ = build_review_batches(
                 file_contents_for_review, int(self.kernel.config.llm.context_window * 0.75),
             )
-            reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
+            # Demo-01 Finding 3 follow-up (2026-09-11): a rejected/unapplied
+            # candidate's review must never stream raw, unfiltered LLM
+            # tokens live to the user - extract_rejected_candidate_
+            # diagnostic() below only ever filters the FINAL joined text
+            # (review_text), so leaving live streaming on here would still
+            # leak the exact unfiltered "How to Run"/success-language
+            # content Finding 3 already closed for the final output, just
+            # earlier, token by token. Suppressed entirely for this case
+            # (not filtered after the fact - the raw tokens are simply
+            # never sent to stream_callback at all); the accepted-candidate
+            # path is completely unaffected.
+            reviewer_stream = (
+                (lambda token: stream_callback("Review", token))
+                if stream_callback and not state.final_attempt_contents else None
+            )
             # Authoritative disposition override (2026-09-11, Demo-01 Run A
             # finding): state.final_attempt_contents is populated ONLY on the
             # terminal-failure paths (retry_strategy.py's scope-conflict and
@@ -3362,6 +3376,17 @@ class WorkflowEngine:
                     temperature_override=self.kernel.config.llm.reviewer_temperature,
                     system_prompt_override=reviewer_system_prompt_override,
                 )
+                # Demo-01 Finding 3 (2026-09-11): the structural enforcement
+                # boundary itself - applied per-batch (not to the joined
+                # final text) so one batch's non-compliance with the marker
+                # contract doesn't discard another batch's compliant
+                # diagnostic content. Streamed tokens above (reviewer_stream)
+                # are real-time progress display and are not retroactively
+                # filtered - this governs the FINAL text that reaches
+                # res["review"]/the CLI, which is what Finding 3 is actually
+                # about.
+                if state.final_attempt_contents:
+                    review_text = self.reviewer.extract_rejected_candidate_diagnostic(review_text)
                 # R1 Deliverable 5 - observational only, same posture as the
                 # pre-approval reviewer wrapper above.
                 state.reviewer_calls += 1
@@ -3416,10 +3441,28 @@ class WorkflowEngine:
                 bool(state.environment_failure)
                 and state.environment_failure.startswith("CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE:")
             )
+            # Demo-01 Finding 4 (2026-09-11): GENERATION TIME BUDGET EXHAUSTED
+            # (kriya/workflow/attempt.py::_ensure_generation_time_budget)
+            # reuses state.environment_failure/STOP_ENVIRONMENT purely as its
+            # stop mechanism, same as the two categories above - but it is a
+            # TERMINAL STOP CONDITION (the retry loop itself ran out of
+            # configured time), never an ENVIRONMENT/TOOLCHAIN failure, and
+            # must not be reported or traced as one (kriya/cli.py's generic
+            # branch prints "[ENVIRONMENT/TOOLCHAIN ISSUE]" with `kriya
+            # doctor` advice, which cannot help a budget problem). Checked by
+            # the exact message prefix _ensure_generation_time_budget's own
+            # Failure.message always starts with, same convention as the two
+            # categories above - no new state field, no retry/budget
+            # behavior change.
+            is_generation_budget_exhausted_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("GENERATION TIME BUDGET EXHAUSTED:")
+            )
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
                 else "unauthorized_generation_target" if is_scope_defect_stop
                 else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure
+                else "generation_budget_exhausted" if is_generation_budget_exhausted_stop
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )

@@ -330,6 +330,59 @@ def test_fix_labels_rejected_candidate_review_distinctly(runner, tmp_path):
     assert "=== Reviewer Report & Run Instructions ===" not in result.output
 
 
+# --- Demo-01 Finding 4 (2026-09-11): budget exhaustion is a terminal stop --
+# condition, not an environment/toolchain failure.
+
+def test_generate_budget_exhausted_shows_no_toolchain_advice(runner, tmp_path):
+    """Budget exhaustion must not trigger the generic [ENVIRONMENT/
+    TOOLCHAIN ISSUE]/`kriya doctor` advice - running `kriya doctor` cannot
+    help a run that simply ran out of configured time."""
+    rejected_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        failure_category="generation_budget_exhausted",
+        environment_failure=(
+            "GENERATION TIME BUDGET EXHAUSTED: refusing to start a 2-file generation pass "
+            "with 10.0s remaining; estimated generation plus gate reserve requires 258.6s."
+        ),
+        review="",
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert "[GENERATION BUDGET EXHAUSTED]" in result.output
+    assert "[ENVIRONMENT/TOOLCHAIN ISSUE]" not in result.output
+    # Not a bare "kriya doctor" substring check - the budget message itself
+    # legitimately says "`kriya doctor` will not help" as a clarification.
+    # The actual invariant is that it's never *recommended*.
+    assert "run `kriya doctor`" not in result.output
+
+
+def test_generate_genuine_environment_failure_still_shows_toolchain_advice(runner, tmp_path):
+    """Non-regression: a REAL toolchain/environment failure (any
+    failure_category other than the three now-excluded ones) must keep
+    its existing [ENVIRONMENT/TOOLCHAIN ISSUE]/`kriya doctor` advice."""
+    rejected_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        failure_category="environment_failure",
+        environment_failure="mvn: command not found",
+        review="",
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.LLMClient"):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert "[ENVIRONMENT/TOOLCHAIN ISSUE]" in result.output
+    assert "kriya doctor" in result.output
+    assert "[GENERATION BUDGET EXHAUSTED]" not in result.output
+
+
 def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tmp_path):
     """Independent review caught a real gap in the Finding 5 fix above: a
     human-rejected approval-gate run sets "review" to a one-line rejection notice

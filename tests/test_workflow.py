@@ -9252,7 +9252,16 @@ async def test_workflow_terminal_regression_failure_is_not_reported_or_applied_a
         '[{"filepath": "app.py", "content": "print(1)\\n"}]',     # Developer, attempt 1
         "Review A - stale, must not be reused",                   # Reviewer at 4.5, attempt 1
         '[{"filepath": "app.py", "content": "print(2)\\n"}]',     # Developer, attempt 2
-        "Review B - fresh, describes the real final failure",     # Reviewer at "5.", after the loop ends
+        # Demo-01 Finding 3 (2026-09-11): attempt 2's environment_failure
+        # populates state.final_attempt_contents, so this final review now
+        # goes through ReviewerAgent.rejected_candidate_system_prompt() and
+        # extract_rejected_candidate_diagnostic() - the mocked LLM response
+        # must use the required DIAGNOSTIC FINDINGS markers or the fail-
+        # closed path (correctly) discards it, which is not what THIS
+        # test is about (freshness of the review, not F3's own structure -
+        # see tests/test_agents.py and the dedicated F3 workflow tests for
+        # that). res["review"] below still resolves to the unwrapped text.
+        "=== DIAGNOSTIC FINDINGS ===\nReview B - fresh, describes the real final failure\n=== END DIAGNOSTIC FINDINGS ===",
     ])
 
     jvm_error = (
@@ -10076,6 +10085,268 @@ async def test_workflow_accepted_candidate_reviewer_gets_no_disposition_override
     assert res["quality_gates_passed"] is True
     assert len(captured_reviewer_calls) >= 1
     assert captured_reviewer_calls[-1].get("system_prompt_override") is None
+    # Demo-01 Finding 3 (F3-C, 2026-09-21): the accepted-candidate path must
+    # never route through extract_rejected_candidate_diagnostic() at all -
+    # the model's raw review (which uses no markers, realistically, since
+    # it was never told to) must pass through completely unmodified, not
+    # fall into the fail-closed "did not follow the required structure"
+    # notice that would fire if extraction ran on it.
+    assert res["review"] == "Looks fine."
+
+
+# --- F3: structural (marker-based) enforcement, end-to-end ----------------
+
+@pytest.mark.asyncio
+async def test_workflow_rejected_candidate_review_excludes_run_instructions_via_markers(tmp_path):
+    """Demo-01 Finding 3, end-to-end: reproduces the exact live-observed
+    non-compliance (a hedged 'How to Run' section written OUTSIDE the
+    required markers) and proves the ACTUAL wiring - not just the pure
+    extraction function in isolation - keeps it out of res["review"]."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "this is not valid python("}
+    ])
+
+    async def noncompliant_reviewer_run(*args, **kwargs):
+        return (
+            "=== DIAGNOSTIC FINDINGS ===\n"
+            "Syntax error in app.py prevented compilation - the candidate was never applied.\n"
+            "=== END DIAGNOSTIC FINDINGS ===\n"
+            "## How to Run the Application (Speculative)\n"
+            "mvn exec:java\nExpected output: [VERIFICATION] PASS\n"
+        )
+
+    we.reviewer.run = noncompliant_reviewer_run
+
+    res = await we.run_generation_workflow(
+        goal="Write a small Python script (deliberately broken for this test)",
+        workspace_path=str(tmp_path),
+    )
+
+    assert res["quality_gates_passed"] is False
+    # F3-B: useful diagnostic content survives.
+    assert "Syntax error in app.py" in res["review"]
+    # F3-A: deliverable-only content is structurally excluded, regardless
+    # of it being hedged as "Speculative".
+    assert "How to Run" not in res["review"]
+    assert "[VERIFICATION] PASS" not in res["review"]
+    assert "mvn exec:java" not in res["review"]
+
+
+# --- F3 follow-up (2026-09-11): live streaming must not leak the raw, -----
+# unfiltered Reviewer text for a rejected candidate. extract_rejected_
+# candidate_diagnostic() only ever filters the FINAL joined text - a real
+# stream_callback consumer would otherwise still see the unfiltered tokens
+# as they arrive, before that filtering happens. These mocks call
+# kwargs["stream_callback"] themselves (simulating what the real, un-mocked
+# ReviewerAgent.run()/call_with_escalation would do when given one) so the
+# test actually proves WHAT workflow.py passes as stream_callback to
+# reviewer.run() - not just that the final res["review"] is filtered
+# (already covered above).
+
+@pytest.mark.asyncio
+async def test_workflow_rejected_candidate_review_suppresses_live_streaming(tmp_path):
+    """Test 1: rejected review containing out-of-marker run instructions ->
+    stream emits none; final output contains only the diagnostic."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "this is not valid python("}
+    ])
+
+    raw_noncompliant_text = (
+        "=== DIAGNOSTIC FINDINGS ===\n"
+        "Syntax error in app.py prevented compilation.\n"
+        "=== END DIAGNOSTIC FINDINGS ===\n"
+        "## How to Run the Application (Speculative)\nmvn exec:java\nExpected output: [VERIFICATION] PASS\n"
+    )
+
+    async def reviewer_run_streams_if_given_callback(*args, **kwargs):
+        cb = kwargs.get("stream_callback")
+        if cb is not None:
+            cb(raw_noncompliant_text)
+        return raw_noncompliant_text
+
+    we.reviewer.run = reviewer_run_streams_if_given_callback
+
+    streamed_events = []
+    res = await we.run_generation_workflow(
+        goal="Write a small Python script (deliberately broken for this test)",
+        workspace_path=str(tmp_path),
+        stream_callback=lambda step, token: streamed_events.append((step, token)),
+    )
+
+    assert res["quality_gates_passed"] is False
+    review_stream_events = [t for (step, t) in streamed_events if step == "Review"]
+    assert review_stream_events == [], f"expected no live-streamed Review tokens, got {review_stream_events}"
+    assert "Syntax error in app.py" in res["review"]
+    assert "How to Run" not in res["review"]
+    assert "[VERIFICATION] PASS" not in res["review"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_rejected_candidate_missing_markers_suppresses_live_streaming(tmp_path):
+    """Test 2: rejected, malformed/missing markers -> no raw Reviewer
+    output reaches the stream either, matching the fail-closed final
+    output (already covered by tests/test_agents.py's own unit test)."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "this is not valid python("}
+    ])
+
+    raw_text_no_markers = "The application successfully starts and prints the expected value."
+
+    async def reviewer_run_streams_if_given_callback(*args, **kwargs):
+        cb = kwargs.get("stream_callback")
+        if cb is not None:
+            cb(raw_text_no_markers)
+        return raw_text_no_markers
+
+    we.reviewer.run = reviewer_run_streams_if_given_callback
+
+    streamed_events = []
+    res = await we.run_generation_workflow(
+        goal="Write a small Python script (deliberately broken for this test)",
+        workspace_path=str(tmp_path),
+        stream_callback=lambda step, token: streamed_events.append((step, token)),
+    )
+
+    assert res["quality_gates_passed"] is False
+    review_stream_events = [t for (step, t) in streamed_events if step == "Review"]
+    assert review_stream_events == [], f"expected no live-streamed Review tokens, got {review_stream_events}"
+    assert "successfully" not in res["review"]
+    assert "did not follow the required" in res["review"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_accepted_candidate_streaming_unchanged(tmp_path):
+    """Test 3: accepted review -> existing live streaming is unaffected by
+    the Finding 3 suppression logic (which is scoped to the rejected path
+    only)."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+
+    async def reviewer_run_streams_if_given_callback(*args, **kwargs):
+        cb = kwargs.get("stream_callback")
+        if cb is not None:
+            cb("Looks fine.")
+        return "Looks fine."
+
+    we.reviewer.run = reviewer_run_streams_if_given_callback
+
+    streamed_events = []
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        res = await we.run_generation_workflow(
+            goal="Write a small Python script that prints hi",
+            workspace_path=str(tmp_path),
+            stream_callback=lambda step, token: streamed_events.append((step, token)),
+        )
+
+    assert res["quality_gates_passed"] is True
+    review_stream_events = [t for (step, t) in streamed_events if step == "Review"]
+    assert review_stream_events == ["Looks fine."]
+    assert res["review"] == "Looks fine."
+
+
+# --- F4: budget exhaustion is a terminal stop condition, not an ------------
+# environment/toolchain failure.
+
+@pytest.mark.asyncio
+async def test_workflow_time_budget_exhausted_is_not_environment_failure_category(tmp_path):
+    """Demo-01 Finding 4 (D, E): GENERATION TIME BUDGET EXHAUSTED must get
+    its own failure_category, distinct from "environment_failure" - the
+    reused state.environment_failure/STOP_ENVIRONMENT mechanism is a shared
+    plumbing detail, not evidence this is a toolchain problem."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.logs = str(tmp_path / "logs")
+    cfg.autonomy.generation_time_budget_seconds = 1  # trips on attempt 1's own preflight check
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "app.py", "content": "print('hi')\n"}
+    ])
+
+    res = await we.run_generation_workflow(
+        goal="Write a small Python script",
+        workspace_path=str(tmp_path),
+    )
+
+    assert res["quality_gates_passed"] is False
+    assert res["failure_category"] == "generation_budget_exhausted"
+    assert res["failure_category"] != "environment_failure"
+    assert "GENERATION TIME BUDGET EXHAUSTED" in (res.get("environment_failure") or "")
+    # The preflight check fires before Developer is ever asked to generate.
+    assert we.developer.run_generation.await_count == 0
+
+
+def test_gate_outcomes_preserve_earlier_distinct_failure_alongside_later_budget_exhaustion():
+    """Demo-01 Finding 4 (G): "preserve/distinguish both if supported by
+    current outcome model." Verified directly against the real
+    GenerationState/Failure shapes retry_strategy.py's ordinary failure
+    handling and attempt.py's _ensure_generation_time_budget actually
+    produce (state.gate_outcomes is append-only - confirmed by direct
+    source read of retry_strategy.py::handle_attempt_failure) - not via a
+    full two-stage live retry loop, which this specific interaction (a
+    real failure on one attempt, budget exhaustion on a strictly later
+    one) is inherently sensitive to real wall-clock timing to reproduce
+    deterministically under fully-mocked, near-instant LLM calls."""
+    from kriya.workflow.state import GenerationState
+    from kriya.workflow.failure import Failure
+
+    state = GenerationState()
+    primary_failure = Failure(
+        type="compile_error", source="developer", attempt=1,
+        message="COMPILATION FAILURE: Syntax error in App.java line 12",
+    )
+    state.gate_outcomes.append(primary_failure.to_gate_outcome())
+
+    terminal_stop = Failure(
+        type="time_budget_exhausted", source="orchestrator", attempt=2,
+        message="GENERATION TIME BUDGET EXHAUSTED: refusing to start a 2-file generation pass...",
+    )
+    state.gate_outcomes.append(terminal_stop.to_gate_outcome())
+
+    assert len(state.gate_outcomes) == 2
+    assert state.gate_outcomes[0]["type"] == "compile_error"
+    assert "COMPILATION FAILURE" in state.gate_outcomes[0]["output"]
+    assert state.gate_outcomes[1]["type"] == "time_budget_exhausted"
+    assert "GENERATION TIME BUDGET EXHAUSTED" in state.gate_outcomes[1]["output"]
+    # The earlier, real failure was never overwritten by the later stop.
+    assert state.gate_outcomes[0]["output"] != state.gate_outcomes[1]["output"]
 
 
 @pytest.mark.asyncio

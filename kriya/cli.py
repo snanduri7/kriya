@@ -1658,6 +1658,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 # advice must not fire for it.
                 if res.get("environment_failure") and res.get("failure_category") not in (
                     "unauthorized_generation_target", "candidate_independent_deterministic_failure",
+                    "generation_budget_exhausted",
                 ):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
@@ -1681,6 +1682,32 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         "identical failure, proving no further Developer regeneration could "
                         "have fixed it - the defect is in the validator or build configuration "
                         "itself, not the generated code.",
+                        fg="yellow", bold=True
+                    )
+                # Demo-01 Finding 4 (2026-09-11): GENERATION TIME BUDGET
+                # EXHAUSTED was previously funneled into the same
+                # state.environment_failure field the genuine toolchain
+                # cases above use (retry_strategy.py reuses that field/the
+                # STOP_ENVIRONMENT mechanism deliberately for any stop
+                # reason no further retry can fix), so it inherited the
+                # SAME "[ENVIRONMENT/TOOLCHAIN ISSUE]"/`kriya doctor`
+                # message even though running `kriya doctor` cannot help a
+                # run that simply ran out of configured time - a terminal
+                # STOP CONDITION, not a root ENVIRONMENT/TOOLCHAIN failure.
+                # This is a distinct, dedicated message, not toolchain
+                # advice repurposed.
+                if res.get("failure_category") == "generation_budget_exhausted":
+                    click.secho(
+                        f"\n[GENERATION BUDGET EXHAUSTED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying because the configured generation time budget "
+                        "ran out before another repair attempt could safely begin - this is a "
+                        "terminal stop condition, not an environment/toolchain problem; running "
+                        "`kriya doctor` will not help. Increase autonomy."
+                        "generation_time_budget_seconds if this goal genuinely needs more time, "
+                        "or reduce the plan's file scope. Any earlier, still-unresolved "
+                        "engineering failure from a prior attempt (if one occurred) remains in "
+                        "this run's own persisted gate_outcomes/trace record, distinct from this "
+                        "stop reason.",
                         fg="yellow", bold=True
                     )
                 if res.get("run_id"):
@@ -2684,6 +2711,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             # problem, and must not print this Java/Maven-specific advice.
             if res.get("environment_failure") and res.get("failure_category") not in (
                 "unauthorized_generation_target", "candidate_independent_deterministic_failure",
+                "generation_budget_exhausted",
             ):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
@@ -2702,6 +2730,22 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                     "identical failure, proving no further Developer regeneration could "
                     "have fixed it - the defect is in the validator or build configuration "
                     "itself, not the generated code.",
+                    fg="yellow", bold=True
+                )
+            # Demo-01 Finding 4 (2026-09-11): see the matching branch above
+            # in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "generation_budget_exhausted":
+                click.secho(
+                    f"\n[GENERATION BUDGET EXHAUSTED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying because the configured generation time budget "
+                    "ran out before another repair attempt could safely begin - this is a "
+                    "terminal stop condition, not an environment/toolchain problem; running "
+                    "`kriya doctor` will not help. Increase autonomy."
+                    "generation_time_budget_seconds if this goal genuinely needs more time, "
+                    "or reduce the plan's file scope. Any earlier, still-unresolved "
+                    "engineering failure from a prior attempt (if one occurred) remains in "
+                    "this run's own persisted gate_outcomes/trace record, distinct from this "
+                    "stop reason.",
                     fg="yellow", bold=True
                 )
             if res.get("run_id"):

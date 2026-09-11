@@ -3178,6 +3178,20 @@ class ReviewerAgent(BaseAgent):
             "   - REQUIRES PROFILING OR RUNTIME EVIDENCE: the concern primarily depends on runtime characteristics such as latency, throughput, allocation pressure, database cardinality, query count, lock contention, production traffic, cache behavior, or I/O cost - e.g. an unbounded query/listing method can represent a scalability concern as dataset size grows, but without runtime cardinality/load evidence that belongs here, not at a higher confidence tier."
         )
 
+    # Demo-01 Finding 3 (2026-09-11): the ONLY machine-parsed contract for a
+    # rejected-candidate review. Deliberately two fixed, literal marker
+    # strings, not a natural-language heading ("## How to Run..." is
+    # exactly the kind of prose the model already varies) and not a phrase/
+    # regex blacklist scanning the model's own words - a live run proved
+    # prompt compliance alone is not a guarantee (the model still wrote a
+    # hedged "How to Run the Application (Speculative)" section despite
+    # being told not to). extract_rejected_candidate_diagnostic() below is
+    # the actual enforcement: it keeps ONLY the text between these two
+    # exact markers and discards everything else deterministically,
+    # independent of what that discarded text says.
+    REJECTED_DIAGNOSTIC_START = "=== DIAGNOSTIC FINDINGS ==="
+    REJECTED_DIAGNOSTIC_END = "=== END DIAGNOSTIC FINDINGS ==="
+
     def rejected_candidate_system_prompt(self, terminal_reason: str) -> str:
         """Demo-01 Run A finding (2026-09-11): guideline 3 of `system_prompt`
         above unconditionally instructs the Reviewer to "always include a
@@ -3189,16 +3203,21 @@ class ReviewerAgent(BaseAgent):
         runtime output, directly contradicting the FAILED banner printed
         immediately above it by the CLI.
 
-        The existing call site already tells the Reviewer, via a plain
-        prompt-text NOTE, that the shown files were not applied - that alone
-        was not enough; passive context not guaranteeing model compliance is
-        a pattern already established elsewhere in this codebase. This is a
-        deliberately narrow, structural override of guideline 3 specifically
-        for the one case it is wrong for - every other evidence-discipline
-        guideline in `system_prompt` is preserved unchanged, this is not a
-        general prompt rewrite. kriya/cli.py's own rendering is the second,
-        independent half of this fix (differentiated header for a rejected
-        candidate) - this system prompt is not relied on alone."""
+        First iteration of this fix relied on this system prompt alone
+        (plus a differentiated CLI header) - a real live run then proved
+        prompt compliance is not a guarantee: the model still wrote a
+        hedged "How to Run the Application (Speculative)" section with an
+        "Expected output" block despite being explicitly told not to. This
+        version adds a structural contract on top: the model is required to
+        wrap its diagnostic content in REJECTED_DIAGNOSTIC_START/END
+        markers: extract_rejected_candidate_diagnostic() below discards
+        everything outside them, deterministically, regardless of whether
+        the model's own text obeys the "no How to Run" instruction - the
+        markers are how compliant content reaches the user at all, not an
+        additional trust-based rule. Every other evidence-discipline
+        guideline in `system_prompt` is preserved unchanged - this is not a
+        general prompt rewrite. kriya/cli.py's differentiated header
+        (rejected vs. accepted) remains the third, independent layer."""
         return (
             self.system_prompt
             + "\n\n=== AUTHORITATIVE RUN DISPOSITION (deterministic control-plane fact, not your own assessment) ===\n"
@@ -3209,14 +3228,55 @@ class ReviewerAgent(BaseAgent):
             f"terminal_reason: {terminal_reason}\n"
             "You are reviewing a REJECTED candidate that Quality Gates refused - it was NEVER "
             "applied to the user's workspace. Only the last failing attempt's content is shown to "
-            "you, for diagnostic purposes only. This overrides guideline 3 above: do NOT include a "
-            "'How to Run the Application' section or any run/usage instructions. Do not state or "
-            "imply anywhere in your report that the application works, succeeded, is runnable, is "
-            "complete, was accepted, or is present in the user's workspace. Describe only what the "
-            "shown source does and why it was rejected. Deterministic verification results are "
-            "authoritative over your own reading of the code.\n"
+            "you, for diagnostic purposes only.\n\n"
+            "STRUCTURAL OUTPUT CONTRACT (overrides guideline 3 above, and overrides this and every "
+            "other instruction if they conflict): your entire response is discarded unless it "
+            f"contains BOTH of these exact marker lines, each on its own line: '{self.REJECTED_DIAGNOSTIC_START}' "
+            f"first, then '{self.REJECTED_DIAGNOSTIC_END}' later. Only the text between them is ever "
+            "shown to the user - anything before the start marker or after the end marker is "
+            "permanently discarded and never reaches anyone, so there is no point writing it. Put "
+            "your complete diagnostic analysis (what was generated, why Quality Gates rejected it, "
+            "what would need to change) between the markers. Do not write a 'How to Run the "
+            "Application' section, an 'Expected Output' section, or any run/usage instructions "
+            "anywhere in your response, inside or outside the markers - a rejected candidate that "
+            "was never applied has no run instructions to give, speculative or otherwise. Do not "
+            "state or imply anywhere that the application works, succeeded, is runnable, is "
+            "complete, was accepted, or is present in the user's workspace. Deterministic "
+            "verification results are authoritative over your own reading of the code.\n"
+            f"Example shape (content illustrative only):\n{self.REJECTED_DIAGNOSTIC_START}\n"
+            "<diagnostic analysis only>\n"
+            f"{self.REJECTED_DIAGNOSTIC_END}\n"
             "=== END AUTHORITATIVE RUN DISPOSITION ==="
         )
+
+    def extract_rejected_candidate_diagnostic(self, raw_review: str) -> str:
+        """The actual enforcement boundary for Finding 3 - deterministic
+        marker-delimited extraction, not phrase/regex censorship. Keeps
+        ONLY the text between REJECTED_DIAGNOSTIC_START/END, discarding
+        everything else regardless of its content - a "How to Run" section
+        the model wrote outside the markers is discarded the same way a
+        compliant diagnostic paragraph outside them would be; this
+        function never inspects what it discards, only where it sits
+        relative to the two fixed marker strings.
+
+        Fails closed, not open: if either marker is missing (the model did
+        not follow the structural contract at all), the ENTIRE raw text is
+        withheld - never partially trusted - and a short, honest notice is
+        shown instead. This is a deliberate asymmetry with the accepted-
+        candidate path (which never calls this function at all and returns
+        the model's free-form review unmodified) - only a rejected,
+        unapplied candidate's report passes through this boundary."""
+        start = raw_review.find(self.REJECTED_DIAGNOSTIC_START)
+        end = raw_review.find(self.REJECTED_DIAGNOSTIC_END)
+        if start == -1 or end == -1 or end <= start:
+            return (
+                "[Reviewer output did not follow the required rejected-candidate report "
+                "structure (missing or misordered DIAGNOSTIC FINDINGS markers) - the raw "
+                "reviewer text is withheld rather than risk exposing unverified, deliverable-"
+                "style content for a candidate that Quality Gates rejected and that was never "
+                "applied to the workspace.]"
+            )
+        return raw_review[start + len(self.REJECTED_DIAGNOSTIC_START):end].strip()
 
     @property
     def structured_system_prompt(self) -> str:

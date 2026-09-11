@@ -1054,7 +1054,7 @@ def test_reviewer_rejected_candidate_prompt_forbids_run_instructions_and_success
     assert "candidate_status: REJECTED" in sp
     assert "workspace_applied: false" in sp
     assert "GENERATION TIME BUDGET EXHAUSTED" in sp
-    assert "do NOT include a 'How to Run the Application' section" in sp
+    assert "Do not write a 'How to Run the Application' section" in sp
     assert "works, succeeded, is runnable, is complete, was accepted" in sp
     assert "overrides guideline 3 above" in sp
 
@@ -1098,6 +1098,72 @@ def test_reviewer_agent_system_prompt_requires_condition_and_consequence_for_pro
     assert "a syntactic pattern match is not itself a proven consequence" in sp
     assert "what exact condition is proven" in sp
     assert "what exact adverse consequence is proven" in sp
+
+
+# --- extract_rejected_candidate_diagnostic (Demo-01 Finding 3, 2026-09-11) ---
+# Structural, marker-based enforcement - the fix after a real live run
+# proved system-prompt compliance alone is not a guarantee: the model
+# still wrote a hedged "How to Run the Application (Speculative)" section
+# with an expected-output block despite being told not to. These tests
+# prove the ENFORCEMENT (deterministic extraction), not just the prompt
+# wording - and deliberately do NOT test via a growing phrase/regex
+# blacklist (explicitly rejected as fragile) - only marker position.
+
+def test_reviewer_extract_rejected_candidate_diagnostic_excludes_content_outside_markers():
+    """The exact live-observed failure mode reproduced: a compliant
+    diagnostic section AND a hedged 'How to Run' section with an expected-
+    output block outside it. Extraction must discard the latter regardless
+    of its own wording."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    raw = (
+        "## Review Summary\nThis was rejected.\n\n"
+        "=== DIAGNOSTIC FINDINGS ===\n"
+        "The generated App.java is missing required --add-opens JVM flags for Ignite's "
+        "Unsafe-based initialization; this would crash at runtime with InaccessibleObjectException.\n"
+        "=== END DIAGNOSTIC FINDINGS ===\n\n"
+        "### How to Run the Application (Speculative)\n"
+        "1. mvn clean compile\n2. mvn exec:java\n\n"
+        "Expected output:\n```\n[VERIFICATION] PASS\n```\n"
+    )
+    result = reviewer.extract_rejected_candidate_diagnostic(raw)
+    assert "InaccessibleObjectException" in result
+    assert "How to Run" not in result
+    assert "[VERIFICATION] PASS" not in result
+    assert "mvn exec:java" not in result
+
+
+def test_reviewer_extract_rejected_candidate_diagnostic_fails_closed_when_markers_missing():
+    """Do not rely on prompt compliance: if the model used no markers at
+    all, the entire raw text is withheld, never partially trusted."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    raw = "The application successfully starts and prints the expected value. How to run: mvn exec:java"
+    result = reviewer.extract_rejected_candidate_diagnostic(raw)
+    assert "successfully" not in result
+    assert "mvn exec:java" not in result
+    assert "did not follow the required" in result
+
+
+def test_reviewer_extract_rejected_candidate_diagnostic_fails_closed_when_markers_misordered():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    raw = f"{ReviewerAgent.REJECTED_DIAGNOSTIC_END}\nsome text\n{ReviewerAgent.REJECTED_DIAGNOSTIC_START}"
+    result = reviewer.extract_rejected_candidate_diagnostic(raw)
+    assert "did not follow the required" in result
+
+
+def test_reviewer_rejected_candidate_prompt_requires_structural_markers():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.rejected_candidate_system_prompt("some failure")
+    assert ReviewerAgent.REJECTED_DIAGNOSTIC_START in sp
+    assert ReviewerAgent.REJECTED_DIAGNOSTIC_END in sp
+    assert "entire response is discarded unless it" in sp
 
 
 def test_reviewer_agent_system_prompt_requires_runtime_evidence_downgrade():
