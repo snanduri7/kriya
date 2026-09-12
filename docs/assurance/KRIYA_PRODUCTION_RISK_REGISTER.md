@@ -225,7 +225,7 @@ Evidence Validity note, not silently reconciled either direction.
 
 ---
 
-## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (18, added SEC-009 this pass)
+## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (17, SEC-009 moved out this pass — CLOSED)
 
 `CORR-016` PRV-08 transitive revalidation (**moved into this list** — its
 own row disposition already reads `NEEDS_IMPLEMENTATION` since commit
@@ -236,8 +236,6 @@ certification · `OBS-001` enforce-mode telemetry gap · `OBS-002` operator
 run summary · `OBS-004` resource budgets · `REL-002` `doctor
 --production` · `SEC-001` hostile-code containment · `SEC-003` MCP
 environment isolation · `SEC-005` package/network containment ·
-`SEC-009` untrusted repository configuration can acquire control-plane
-authority (**new this pass**, registered not implemented — see §6) ·
 `STATE-003` deterministic replay · `TOOL-001` policy-mediated TOOL
 execution (reclassified Pass 2 — see its own entry) · `TOOL-002`
 ToolBroker · `TOOL-003` MCP capability authorization · `TOOL-004` plugin
@@ -245,8 +243,35 @@ manifest/provenance · `TOP-001` Gradle support. `POL-001` **moved out of
 this list this pass** — CLOSED, see §7 below (it had actually been
 `NEEDS_EVIDENCE`, not `NEEDS_IMPLEMENTATION`, since P1; this prose list
 was never corrected at the time, a pre-existing drift unrelated to this
-pass's own POL-001 work, found and fixed here). `VER-004` stays out (see
-§0.7) and `ORCH-001`/`ORCH-002` stay out (reclassified `OPTIONAL`, Pass 2).
+pass's own POL-001 work, found and fixed here). `SEC-009` **moved out of
+this list, 2026-09-12** — untrusted repository configuration acquiring
+control-plane authority: registered NEEDS_IMPLEMENTATION earlier this
+pass, now **CLOSED** after P1 (fail-closed default) + P2 (durable
+digest-bound approval + CI trust path) + a full source-to-sink
+bypass/closure review that found and fixed one real gap (`logging.file`
+containment) + independent full-suite pytest confirmation — see §6 for
+the complete closure record. `VER-004` stays out (see §0.7) and
+`ORCH-001`/`ORCH-002` stay out (reclassified `OPTIONAL`, Pass 2).
+
+**Known pre-existing drift, not corrected by this update (out of this
+pass's scope — flagged, not silently patched):** the §0.4 master table
+below (`Total risks 71`, `SEC 5` by-domain, `CLOSED 27`/
+`NEEDS_IMPLEMENTATION 20`/`REQUIRED+CLOSED 25`/
+`REQUIRED+NEEDS_IMPLEMENTATION 17`) predates `SEC-006`, `SEC-007`,
+`SEC-008`, and `SEC-009`'s registration entirely — none of the four were
+ever folded into those totals when added (confirmed: no `Total risks
+X→Y`-style update line exists for any of them, unlike the pattern
+`VER-006`'s own addition used). `SEC-006`/`SEC-007`/`SEC-008` are each
+independently `CLOSED` per their own rows, so this drift does not affect
+any REQUIRED+NEEDS_IMPLEMENTATION/REQUIRED+NEEDS_EVIDENCE count above —
+it is purely a stale `Total risks`/by-domain figure. `SEC-009`'s own
+addition-then-closure nets to zero effect on `REQUIRED+
+NEEDS_IMPLEMENTATION` specifically (never incremented in, now correctly
+not present), which is why 17 above already matches without further
+arithmetic. A full re-parse (the same `POL-001-P4`-style script-based
+recount this document has used before) is needed to correct `Total
+risks`/`SEC` domain/`CLOSED` cleanly — not attempted here, since this
+package's scope is SEC-009's own closure, not a full register audit.
 
 ## §0.1b REQUIRED + NEEDS_EVIDENCE (20, SEC-002 moved out this pass — CLOSED)
 
@@ -629,7 +654,7 @@ compile/test still ran under the deliberately tight `sandbox_memory_mb:
 inferred.
 
 **SEC-009 — Untrusted Repository Configuration Can Acquire Kriya Control-Plane Authority**
-Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (real, unmodified `kriya` CLI, real subprocess, real end-to-end reproduction - no mocks anywhere in the chain) · Disposition: **NEEDS_IMPLEMENTATION (P1 done, 2026-09-12 — repository-originated security authority now denied by default; P2 explicit trust/approval and CI trust manifest not started)** · Severity: HIGH.
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 for the adversarial CLI matrix, the confirmed `logging.file` finding, and its fix (real, unmodified `kriya` CLI, real subprocess, real sentinel/side-effect evidence throughout); E3 for plugin/MCP full-path denial via production-path tracing; E1 for the construction/mutation/entry-point/exception-handling inventory (static trace) · Disposition: **CLOSED (2026-09-12 — P1 fail-closed default + P2 durable digest-bound approval/CI trust path + bypass/closure review + `logging.file` containment fix, all independent-pytest-confirmed)** · Severity: HIGH (closed).
 Scope: registered per the 2026-09-12 SEC-002/003/004/005 DEEP DESIGN_INVESTIGATION's own findings. `kriya/config/config.py::load_config()` auto-discovers `kriya.yaml`/`kriya.yml` from the current working directory whenever `--config` is not explicitly passed; `kriya/core/kernel.py::Kernel.start()` unconditionally starts every configured MCP server (`kriya/mcp/mcp.py`) with zero confirmation, zero trust-source distinction, on the very first kernel-starting CLI command (`generate`, `fix`, `repl`, `tools list`, `tools execute`). Confirmed live via the real, unmodified `kriya` CLI: a repository-planted `kriya.yaml` (simulating a hostile/compromised repository being analyzed) auto-started a fully attacker-controlled subprocess (arbitrary `command`/`args`/`env`) and, via an unconfirmed `kriya tools execute` call, exfiltrated a synthetic ambient secret - full chain, no internal APIs called directly. Kriya had no mechanism distinguishing "a config file the user explicitly pointed `--config` at" from "a config file that happened to be sitting in the analyzed repository's own root" - the two were structurally indistinguishable to the config loader. The same investigation also found MCP subprocesses inherit full ambient `os.environ` unconditionally (SEC-003-adjacent), have no request/startup/shutdown timeout and no process-group isolation - both plain and fully-detached child processes survive Kriya's own termination (SEC-004-adjacent), and have neither invocation-authority (`ExecutionPolicy` consultation, `requires_confirmation`) nor execution-authority (containment) wiring at all (SEC-005-adjacent) - those three remain unimplemented; this entry's P1 does not touch MCP containment itself, only whether the repository can cause an MCP process (or a plugin module import) to be reached at all.
 
 **2026-09-12 P1 — repository-originated security authority denied by default.** Implemented the mandatory architectural foundation from the same-day DEEP design pass (source → provenance → expansion → field classification → authority resolution → `AppConfig`), owned by a new `kriya/config/authority.py` module, deliberately not folded into `ExecutionPolicy` (configuration provenance is a load-time concern, prior to and separate from `ExecutionPolicy`'s runtime action decisions).
@@ -684,6 +709,15 @@ Candidate Next Action: run the SEC-009 bypass/closure review above; only then de
 **Scope note:** anchoring `logging.file` containment to `config_dir` (the directory the setting config file lives in) rather than the workspace root means an explicit `--config` living outside the workspace can direct log writes into *its own* directory without approval - this is the identical, already-established semantics `paths.*` already has today (locked in by the `test_explicit_config_outside_cwd_with_relative_path_next_to_it_works`-style tests), not a new allowance introduced by this fix.
 
 **Closure recheck (narrow, `logging.file`-specific only, per this fix's own scope):** source → provenance → classification → P2 approval → resolved path → `configure_logging()` → `FileHandler` re-verified end to end — no approval makes an outside write structurally impossible (real CLI evidence, both the directory and file absent), a valid exact approval makes the intended target reachable (real CLI evidence, file created), any drift in the approved target is denied, and no alternate `logging.file` consumer exists in production code (`configure_logging()` is the only reader — grep-confirmed) that could bypass this classification. The broader 17-task SEC-009 bypass inventory was not repeated; this change touches only `logging.file`'s classification and canonicalization and introduces no new construction/entry-point/mutation surface.
+
+**Independent full-suite pytest confirmation received (2026-09-12, post-logging.file-fix):** user-run full suite — `3680 passed, 5 deselected, 112 warnings in 508.73s (0:08:28)` — no failures. `3680 = 3666` (the prior P1+P2 confirmation) `+ 14` (this fix's new tests), consistent with the focused-matrix evidence above; no unrelated drift. Commits covered: `2021ade` (the `logging.file` containment fix) and `922b4b0` (risk-register evidence-count correction).
+
+**SEC-009 CLOSED (2026-09-12).** All four closure gates met: focused SEC-009 test matrix passes (84/84), real-CLI outside-write denial/approval evidence passes in both directions, the `logging.file` source-to-sink recheck has no bypass, and independent full-suite pytest confirms `3680 passed, 5 deselected, 0 failures`. Final disposition:
+- **P1 — CLOSED**: repository-originated security authority denied by default (fail-closed floor, unconditional).
+- **P2 — CLOSED**: explicit, durable, digest-bound approval, including deterministic non-interactive CI authorization.
+- **Closure correction — CLOSED**: the one bypass the closure review found (`logging.file` unconditionally `REPOSITORY_SAFE`, no containment override) is fixed using the identical `paths.*` mechanism, with dedicated regression tests and real-CLI side-effect evidence in both the denied and approved directions.
+
+SEC-003/004/005 (MCP environment isolation, request timeout/lifecycle, package/network containment) remain entirely separate, unimplemented risks — SEC-009 closing means reaching MCP/plugin execution now requires real, narrow, revocable, non-repo-forgeable configuration authority; it does not mean MCP execution itself is contained. Next security sequence: **SEC-003 → SEC-004 → SEC-005**, in that order — SEC-003 establishes what environment an MCP process may receive, SEC-004 establishes lifecycle/resource/process-tree safety, SEC-005 then governs whether and under what authority MCP may execute at all, handled as three scoped increments rather than one combined MCP security subsystem.
 
 ---
 
