@@ -61,11 +61,33 @@ def test_baseline_never_includes_unlisted_ambient_vars(monkeypatch):
 
 
 def test_baseline_allowlist_variables_included_when_present(monkeypatch):
-    monkeypatch.setenv("HOME", "/synthetic/home")
     monkeypatch.setenv("LANG", "en_US.UTF-8")
+    monkeypatch.setenv("TMPDIR", "/synthetic/tmp")
     result = build_mcp_subprocess_env(None)
-    assert result["HOME"] == "/synthetic/home"
     assert result["LANG"] == "en_US.UTF-8"
+    assert result["TMPDIR"] == "/synthetic/tmp"
+
+
+def test_ambient_home_never_in_baseline(monkeypatch):
+    """HOME is deliberately excluded from MCP_BASELINE_ENV_ALLOWLIST
+    (2026-09-12 user decision) - unlike LANG/TMPDIR, it is the implicit
+    discovery root for a huge range of third-party tooling
+    (.ssh/.gitconfig/package-manager/cloud-CLI/SDK config), and the
+    shipped MCP server does not need it. The real operator HOME must
+    never reach an MCP child merely because it is ambient."""
+    monkeypatch.setenv("HOME", "/synthetic/private/home")
+    result = build_mcp_subprocess_env(None)
+    assert "HOME" not in result
+
+
+def test_explicit_home_allowed_via_configured_env():
+    """The other half of the ambient-denied/explicit-allowed differential:
+    an operator with a genuine reason to expose HOME to one specific
+    server can still do so explicitly, subject to SEC-009 authority like
+    any other configured value - HOME is excluded from the BASELINE, not
+    forbidden outright."""
+    result = build_mcp_subprocess_env({"HOME": "/explicit/home"})
+    assert result["HOME"] == "/explicit/home"
 
 
 def test_path_always_present_regardless_of_allowlist(monkeypatch):
@@ -169,6 +191,36 @@ async def test_explicit_sentinel_present_in_real_child(monkeypatch):
             assert report[name] is None, f"LEAK: real MCP child saw ambient {name}"
     finally:
         await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_home_ambient_denied_explicit_allowed_real_child(monkeypatch):
+    """The HOME-specific differential (2026-09-12 user decision): the
+    operator's REAL home path must never reach an MCP child merely because
+    it is ambient, even though the same variable can still be explicitly
+    authorized via mcp.<server>.env for a server that genuinely needs it."""
+    monkeypatch.setenv("HOME", "/synthetic/private/home")
+
+    ambient_client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER])
+    await ambient_client.start()
+    try:
+        res = await ambient_client.call_tool("report_env", {"names": "HOME"})
+        report = json.loads(res["content"][0]["text"])
+        assert report["HOME"] is None, "LEAK: real MCP child saw ambient HOME"
+    finally:
+        await ambient_client.stop()
+
+    explicit_client = MCPClient(
+        name="probe", command=sys.executable, args=[ENV_REPORT_SERVER],
+        env={"HOME": "/explicit/home"},
+    )
+    await explicit_client.start()
+    try:
+        res = await explicit_client.call_tool("report_env", {"names": "HOME"})
+        report = json.loads(res["content"][0]["text"])
+        assert report["HOME"] == "/explicit/home"
+    finally:
+        await explicit_client.stop()
 
 
 @pytest.mark.asyncio

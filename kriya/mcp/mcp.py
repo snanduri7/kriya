@@ -18,26 +18,47 @@ logger = logging.getLogger(__name__)
 # build-toolchain-specific entries (JAVA_HOME, M2_HOME, GRADLE_HOME,
 # VIRTUAL_ENV, PYTHONPATH) that have no established need for launching an
 # MCP server and that a hostile/misconfigured MCP command could abuse
-# (e.g. a spoofed PYTHONPATH redirecting the server's own imports). This
-# is the general-purpose subset of that same allowlist only - HOME,
-# locale, and temp-directory variables that common language runtimes
-# (Python, Node) read for basic, non-security-relevant operation (cache
-# dirs, locale-aware stdio encoding) - confirmed empirically that Kriya's
-# own shipped MCP server (kriya/mcp/server.py) launches and completes the
-# handshake with NONE of these set at all (a completely empty
-# environment, not even PATH, still worked when `command` is an absolute
-# path); they are included anyway because other real-world MCP servers
-# (commonly Node/npx-based) are not guaranteed to behave as cleanly, and
-# this exact variable set already has established, safe precedent as
-# "reasonable to forward to a third-party subprocess Kriya spawns" via
-# `autonomy.sandbox_env_allowlist`'s own default - not a new or broader
-# exposure. Proxy variables (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY)
-# are deliberately excluded - inheriting them merely because they exist
-# in the parent would be an indirect network-authority bypass; an
-# operator who needs one sets it explicitly via `mcp.<server>.env`,
-# subject to SEC-009 authority like any other configured value.
+# (e.g. a spoofed PYTHONPATH redirecting the server's own imports).
+# Locale and temp-directory variables that common language runtimes
+# (Python, Node) read for basic, non-security-relevant operation
+# (locale-aware stdio encoding, scratch-file location) - confirmed
+# empirically that Kriya's own shipped MCP server (kriya/mcp/server.py)
+# launches and completes the handshake with NONE of these set at all (a
+# completely empty environment, not even PATH, still worked when
+# `command` is an absolute path); included anyway because other
+# real-world MCP servers (commonly Node/npx-based) are not guaranteed to
+# behave as cleanly, and this narrow variable set has established, safe
+# precedent as "reasonable to forward to a third-party subprocess Kriya
+# spawns" via `autonomy.sandbox_env_allowlist`'s own default.
+#
+# HOME is deliberately EXCLUDED, unlike its sibling variables above -
+# reviewed and corrected 2026-09-12 (user decision). The empirical
+# evidence is the same (the shipped server needs none of these), but
+# HOME is not merely another low-authority compatibility variable the
+# way LANG/TMPDIR are: it is the implicit discovery root a huge range of
+# third-party tooling uses for configuration/credential-store locations
+# (`.ssh`, `.gitconfig`, package-manager config, cloud-CLI state, SDK
+# config files) - forwarding the operator's REAL home path to an
+# authorized-but-arbitrary MCP command grants it that implicit discovery
+# surface even though nothing in this codebase demonstrates a need for
+# it. SEC-003's invariant is "MCP receives the environment Kriya
+# explicitly needs or grants," not "MCP receives whatever SEC-001's
+# target-code allowlist happens to already trust" - the two subprocess
+# roles are not equivalent (target-code execution is the repository's
+# OWN declared build/test tooling; an MCP server is an arbitrary,
+# SEC-009-approved but otherwise unvetted third-party command). Do not
+# invent a fake/isolated HOME here either - that is SEC-005/containment's
+# concern if a real MCP runtime is ever found to need one. An operator
+# who has a genuine reason to expose HOME to a specific server sets it
+# explicitly via `mcp.<server>.env.HOME`, subject to SEC-009 authority
+# like any other configured value - the ambient-denied/explicit-allowed
+# differential this module's own tests prove for every other sentinel.
+# Proxy variables (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY) are also
+# deliberately excluded - inheriting them merely because they exist in
+# the parent would be an indirect network-authority bypass; same
+# explicit-override path applies.
 MCP_BASELINE_ENV_ALLOWLIST: List[str] = [
-    "HOME", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
+    "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
 ]
 
 
