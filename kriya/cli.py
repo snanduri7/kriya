@@ -106,13 +106,28 @@ def configure_logging(cfg: AppConfig) -> None:
 
 @click.group(invoke_without_command=True)
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')
+@click.option('--trust-file', type=click.Path(), default=None,
+              help="SEC-009 P2: path to an operator/CI-supplied approval artifact "
+              "(see `kriya authority approve --out`), for non-interactive authorization "
+              "of security-authority configuration. Must resolve outside the workspace - "
+              "an in-repository path is refused, never silently ignored. Defaults to the "
+              "KRIYA_TRUST_FILE environment variable when not passed.")
 @click.pass_context
-def main(ctx: click.Context, config: Optional[str]) -> None:
+def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -> None:
     """Kriya - Production-Grade AI Engineering Platform CLI."""
     ctx.ensure_object(dict)
     ctx.obj['config_path'] = config
+    ctx.obj['trust_file'] = trust_file
+    # SEC-009 P2: `kriya authority inspect/approve/revoke` must stay reachable
+    # even when the CURRENT configuration has pending/denied security-authority
+    # fields - otherwise a user could never run the one command that lets them
+    # see and resolve exactly the problem being reported. Every other
+    # subcommand still goes through the normal, potentially-denying
+    # load_config() below, unchanged.
+    if ctx.invoked_subcommand == 'authority':
+        return
     try:
-        ctx.obj['config'] = load_config(config)
+        ctx.obj['config'] = load_config(config, trust_file=trust_file)
     except Exception as e:
         click.secho(f"Error loading configuration: {e}", fg="red", err=True)
         sys.exit(1)
@@ -2215,6 +2230,166 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
     except Exception as e:
         click.secho(f"Review failed: {e}", fg="red", err=True)
         sys.exit(1)
+
+@main.group(name="authority")
+def authority_group() -> None:
+    """SEC-009 P2: inspect and explicitly, durably approve security-authority
+    configuration (mcp.*, plugins.*, execution_policy.*, runtime_profile, and
+    similar fields kriya/config/authority.py classifies SECURITY_AUTHORITY/
+    PLATFORM_POLICY) that a repository-equivalent source (auto-discovered
+    kriya.yaml, an explicit --config) cannot grant itself. Approval is bound
+    to the EXACT current effective security configuration (a digest over the
+    complete set, not a blanket "trust this repo" bit) and is stored outside
+    the workspace, never inside it - see kriya/config/authority_approval.py's
+    module docstring for why. Reachable even when the current configuration
+    has pending/denied security fields, so this is always the way out of a
+    "Configuration-authority denied" error."""
+    pass
+
+
+def _authority_state(ctx: click.Context):
+    from kriya.config.config import resolve_config_state
+    return resolve_config_state(ctx.obj.get('config_path'))
+
+
+def _print_pending(pending) -> None:
+    if not pending:
+        click.echo("No pending security-authority fields - current configuration is fully authorized.")
+        return
+    click.secho(f"{len(pending)} security-authority field(s) pending approval:", bold=True)
+    for p in pending:
+        click.echo(f"  - {p.field_path}")
+        click.echo(f"      classification: {p.classification}")
+        click.echo(f"      source:         {p.source}")
+        click.echo(f"      value:          {json.dumps(p.redacted_value, default=str)}")
+
+
+@authority_group.command(name="inspect")
+@click.pass_context
+def authority_inspect(ctx: click.Context) -> None:
+    """Display the CURRENT effective configuration's pending security-authority
+    fields (field path, classification, provenance, and a secret-redacted
+    value) and whether an existing local approval currently covers them.
+    Read-only - never writes anything, never itself approves."""
+    from kriya.config.authority import compute_violations
+    from kriya.config.authority_approval import (
+        default_local_approval_path,
+        describe_pending,
+        is_approval_current_for,
+        load_approval_artifact,
+    )
+
+    state = _authority_state(ctx)
+    pending = describe_pending(state.violations, state.config_dict)
+    _print_pending(pending)
+
+    if not state.violations:
+        return
+
+    path = default_local_approval_path(state.workspace_root)
+    try:
+        artifact = load_approval_artifact(path)
+    except Exception as e:
+        click.secho(f"\nLocal approval store at {path}: present but invalid ({e}).", fg="yellow")
+        return
+
+    if artifact is None:
+        click.echo(f"\nNo local approval on file at {path}.")
+        click.echo("Run 'kriya authority approve' to grant it.")
+        return
+
+    if is_approval_current_for(artifact, state.violations, state.config_dict, state.workspace_root):
+        click.secho(f"\nLocal approval at {path} is CURRENT and covers all pending fields.", fg="green")
+    else:
+        click.secho(
+            f"\nLocal approval at {path} exists but does NOT cover the current configuration "
+            "(it is stale, tampered, or was granted for a different security-field set) - "
+            "the fields above remain denied. Run 'kriya authority approve' again.",
+            fg="yellow",
+        )
+
+
+@authority_group.command(name="approve")
+@click.option('--out', type=click.Path(), default=None,
+              help="Write the approval artifact to this path instead of the default local "
+              "per-workspace store (~/.kriya/authority/ by default, override via "
+              "KRIYA_AUTHORITY_HOME) - for producing a portable artifact to ship to CI via "
+              "your own external channel. Must resolve outside the workspace, same rule as "
+              "--trust-file; refused otherwise.")
+@click.option('--confirm', is_flag=True, default=False,
+              help="Skip the interactive confirmation prompt (for scripted/operator use). "
+              "This is a dedicated flag for this command only - it has no relationship to "
+              "and is never satisfied by generate/fix's -y flag.")
+@click.pass_context
+def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> None:
+    """Explicitly approve the CURRENT effective security-authority configuration.
+
+    Always re-resolves the configuration fresh (never reuses a prior `inspect`
+    call's output - closes the TOCTOU window by construction: what you approve
+    is recomputed at the moment of approval, not shown once and trusted
+    later). Approval binds to the EXACT set of security-relevant fields and
+    their current values - adding, removing, or changing ANY of them
+    afterward invalidates this approval entirely; it is not a blanket grant
+    to the repository, the config file, or any future field."""
+    from kriya.config.authority_approval import (
+        build_approval_artifact,
+        default_local_approval_path,
+        describe_pending,
+        save_approval_artifact,
+        validate_trust_path_outside_workspace,
+    )
+
+    state = _authority_state(ctx)
+    pending = describe_pending(state.violations, state.config_dict)
+    _print_pending(pending)
+
+    if not state.violations:
+        click.echo("Nothing to approve.")
+        return
+
+    out_path = out or default_local_approval_path(state.workspace_root)
+    if out:
+        validate_trust_path_outside_workspace(out_path, state.workspace_root)
+
+    if not confirm:
+        if not click.confirm(
+            "\nGrant explicit approval to exactly the security-authority field(s) listed above? "
+            "Any later change to any of them will require re-approval."
+        ):
+            click.echo("Not approved - no artifact written.")
+            sys.exit(1)
+
+    artifact = build_approval_artifact(state.violations, state.config_dict, state.workspace_root)
+    save_approval_artifact(out_path, artifact)
+    click.secho(
+        f"\nApproved. Artifact written to {out_path} (set digest {artifact.set_digest[:16]}...).",
+        fg="green", bold=True,
+    )
+    if not out:
+        click.echo(
+            "This is the default local store for this workspace - ordinary `kriya generate`/`fix`/etc. "
+            "will now honor it automatically. For CI, copy this file via your own external channel and "
+            "pass it with --trust-file (or set KRIYA_TRUST_FILE) - Kriya never ships or auto-provisions it."
+        )
+
+
+@authority_group.command(name="revoke")
+@click.pass_context
+def authority_revoke(ctx: click.Context) -> None:
+    """Immediately revoke this workspace's local approval, if any - future
+    `load_config()` calls fall back to P1 fail-closed denial for every
+    security-authority field, with no need to touch the config itself.
+    Idempotent: revoking when nothing is approved is not an error."""
+    from kriya.config.authority_approval import default_local_approval_path, revoke_local_approval
+
+    state = _authority_state(ctx)
+    removed = revoke_local_approval(state.workspace_root)
+    path = default_local_approval_path(state.workspace_root)
+    if removed:
+        click.secho(f"Revoked local approval at {path}.", fg="yellow", bold=True)
+    else:
+        click.echo(f"No local approval on file at {path} - nothing to revoke.")
+
 
 @main.group(name="proposal")
 def proposal_group() -> None:

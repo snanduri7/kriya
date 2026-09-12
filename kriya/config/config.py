@@ -1,5 +1,6 @@
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import yaml
@@ -679,28 +680,36 @@ def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
     return {}
 
 
-def load_config(config_path: Optional[str] = None) -> AppConfig:
-    """Load configuration from a YAML file, merging with default configs.
+@dataclass
+class ConfigResolutionState:
+    """Everything load_config() resolves BEFORE authority is checked -
+    extracted into its own function (resolve_config_state()) so both
+    load_config() and `kriya authority inspect`/`approve` (kriya/cli.py)
+    share exactly one code path for what counts as a violation and what the
+    live effective value of each field is. approve() in particular must see
+    EXACTLY what load_config() would compute - a second, slightly-different
+    re-implementation here would be a real correctness risk, not just
+    duplication."""
+    config_dict: Dict[str, Any]
+    workspace_root: str
+    violations: List[Any]  # List[ConfigAuthorityViolation] - Any to avoid a module-level authority.py import
 
-    SEC-009 P1: source -> provenance -> expansion -> field classification ->
-    authority resolution -> AppConfig. Every field set by a repository-
-    equivalent source (auto-discovered kriya.yaml, an explicit --config path
-    inside or outside the workspace, or a runtime_profile preset expanded
-    from a repository-controlled value) is checked against
-    kriya/config/authority.py's classification before AppConfig is ever
-    constructed; anything other than an explicit REPOSITORY_SAFE field from
-    such a source raises ConfigAuthorityError. See authority.py's module
-    docstring for the full rule and why AUTO_DISCOVERED_INSTALL_DIR is
-    treated the same as repository provenance in P1.
+
+def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionState:
+    """Source -> provenance -> expansion -> field classification -> violation
+    list. Never raises for a violation (that's load_config()'s job, after
+    consulting SEC-009 P2 approval) and never constructs AppConfig - pure
+    resolution, safe to call from `kriya authority inspect`/`approve` even
+    when the config would ultimately be denied.
     """
     from kriya.config.authority import (
         ConfigSource,
         FieldClassification,
         FieldPath,
         agent_role_field_classification,
+        compute_violations,
         explicit_config_source,
         path_field_classification,
-        resolve_authority,
     )
 
     config_dict: Dict[str, Any] = {}
@@ -870,11 +879,44 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             config_dict.setdefault(top, {})[leaf] = value
             provenance[(top, leaf)] = derived_source
 
-    # --- SEC-009 P1 authority resolution: BEFORE AppConfig construction, ---
-    # BEFORE Kernel/PluginManager/MCPManager ever see this configuration.
-    resolve_authority(provenance, classification_overrides)
+    violations = compute_violations(provenance, classification_overrides)
+    return ConfigResolutionState(config_dict=config_dict, workspace_root=workspace_root, violations=violations)
 
-    cfg = AppConfig(**config_dict)
+
+def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = None) -> AppConfig:
+    """Resolves config_path via resolve_config_state(), then applies SEC-009
+    P1/P2 authority: any violation is checked against a valid, digest-
+    matching, currently-valid approval artifact (kriya/config/
+    authority_approval.py) - the local per-workspace store, or `trust_file`
+    for CI/operator-supplied trust (defaulting to the KRIYA_TRUST_FILE env
+    var if not passed explicitly). Only violations that remain uncovered
+    after that check raise ConfigAuthorityError, BEFORE AppConfig is ever
+    constructed and therefore BEFORE Kernel/PluginManager/MCPManager can see
+    this configuration. With no valid approval, behavior is byte-identical
+    to P1 (fail closed is the unconditional floor - see
+    authority_approval.py's module docstring for why the trust sources
+    supported here cannot become blanket repository trust).
+    """
+    from kriya.config.authority import ConfigAuthorityError
+    from kriya.config.authority_approval import resolve_with_approval, validate_trust_path_outside_workspace
+
+    state = resolve_config_state(config_path)
+
+    if state.violations:
+        effective_trust_file = trust_file or os.environ.get("KRIYA_TRUST_FILE")
+        if effective_trust_file:
+            # Refuses a trust-file path resolving inside the workspace root -
+            # the load-bearing guard against a checked-out branch shipping
+            # both a hostile config and its own matching "approval" (see
+            # authority_approval.py's module docstring). Raises before any
+            # approval lookup even happens - never silently falls through to
+            # the local store when an explicit trust_file is itself unsafe.
+            validate_trust_path_outside_workspace(effective_trust_file, state.workspace_root)
+        remaining = resolve_with_approval(state.violations, state.config_dict, state.workspace_root, effective_trust_file)
+        if remaining:
+            raise ConfigAuthorityError(remaining)
+
+    cfg = AppConfig(**state.config_dict)
 
     # Enforce baseline sensitive paths inheritance
     baseline_sensitive = [

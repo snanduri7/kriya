@@ -269,16 +269,16 @@ class ConfigAuthorityViolation:
 
 class ConfigAuthorityError(ValueError):
     """Raised by load_config() when a repository-equivalent source attempts
-    to set a field that is not REPOSITORY_SAFE. Never includes the actual
-    configured value - only field path, provenance, classification, and a
-    fixed, non-value-bearing reason string, per SEC-009 P1's denial-semantics
-    requirement (no secret values in the error)."""
+    to set a field that is not REPOSITORY_SAFE and no valid SEC-009 P2
+    approval covers it. Never includes the actual configured value - only
+    field path, provenance, classification, and a fixed, non-value-bearing
+    reason string (no secret values in the error)."""
 
     def __init__(self, violations: List[ConfigAuthorityViolation]) -> None:
         self.violations = violations
         lines = [
-            "Configuration-authority denied - repository-controlled configuration "
-            "cannot grant itself Kriya control-plane authority (SEC-009 P1). "
+            "Configuration-authority denied (SEC-009) - repository-controlled configuration "
+            "cannot grant itself Kriya control-plane authority without explicit approval. "
             f"{len(violations)} field(s) rejected:",
         ]
         for v in sorted(violations, key=lambda x: x.field_path):
@@ -286,28 +286,35 @@ class ConfigAuthorityError(ValueError):
                 f"  - {v.field_path}: source={v.source.value}, "
                 f"classification={v.classification.value} - {v.reason}"
             )
+        lines.append(
+            "Run 'kriya authority inspect' to see pending security-authority fields, or "
+            "'kriya authority approve' to grant explicit, digest-bound approval."
+        )
         super().__init__("\n".join(lines))
 
 
-def resolve_authority(
+def compute_violations(
     provenance: Dict[FieldPath, ConfigSource],
     classification_overrides: Optional[Dict[FieldPath, FieldClassification]] = None,
-) -> None:
-    """Walk every tracked field's provenance and raise ConfigAuthorityError
-    if any repository-equivalent source set a non-REPOSITORY_SAFE field.
-    Collects ALL violations before raising (a single deterministic error
-    listing everything denied, not just the first hit).
+) -> List[ConfigAuthorityViolation]:
+    """Pure - walks every tracked field's provenance and returns every
+    repository-equivalent-sourced, non-REPOSITORY_SAFE field as a
+    ConfigAuthorityViolation. Never raises; this is P1's classification
+    logic exactly as it was (still the sole authority for WHAT counts as a
+    violation) - SEC-009 P2 adds an approval-covered check on TOP of this
+    list (kriya/config/authority_approval.py), it never changes what this
+    function considers a violation in the first place.
 
     `classification_overrides` lets the caller supply a runtime-resolved
     classification for fields whose safety depends on a resolved value, not
-    just the field name - specifically paths.{skills,memory,logs}, whose
-    classification depends on whether the resolved realpath stays inside the
-    workspace root (see path_field_classification()). Static fields are
-    classified via classify_field() as usual.
+    just the field name - specifically paths.{skills,memory,logs} and
+    agent_llms.<role>, whose classification depends on a resolved value
+    (see path_field_classification()/agent_role_field_classification()).
+    Static fields are classified via classify_field() as usual.
     """
     overrides = classification_overrides or {}
     violations: List[ConfigAuthorityViolation] = []
-    for (top_key, leaf_key), source in provenance.items():
+    for (top_key, leaf_key), source in sorted(provenance.items(), key=lambda kv: (kv[0][0] or "", kv[0][1])):
         if source in _TRUSTED_SOURCES:
             continue
         field_key = (top_key, leaf_key)
@@ -323,9 +330,35 @@ def resolve_authority(
         else:
             reason = (
                 f"classification {classification.value} requires a trusted or explicitly "
-                "authorized source; P1 has no approval mechanism, so repository-equivalent "
-                "provenance is always denied for this field"
+                "authorized source - see 'kriya authority inspect'/'kriya authority approve'"
             )
         violations.append(ConfigAuthorityViolation(field_path, source, classification, reason))
+    return violations
+
+
+def resolve_authority(
+    provenance: Dict[FieldPath, ConfigSource],
+    classification_overrides: Optional[Dict[FieldPath, FieldClassification]] = None,
+) -> None:
+    """P1 behavior, preserved exactly: raises ConfigAuthorityError if
+    compute_violations() finds anything, with no approval mechanism
+    consulted at all. Not called by load_config() directly anymore (P2
+    inserts an approval-coverage check between computing violations and
+    raising) - kept as a thin wrapper so any caller wanting P1's original,
+    approval-blind all-or-nothing behavior still has it available."""
+    violations = compute_violations(provenance, classification_overrides)
     if violations:
         raise ConfigAuthorityError(violations)
+
+
+def get_field_value(config_dict: Dict[str, Any], top_key: Optional[str], leaf_key: str) -> Any:
+    """The effective value load_config() resolved for a given field path,
+    read from the fully merged+expanded config_dict - used by SEC-009 P2 to
+    build an approval artifact's security subset. Never used for the P1
+    error message (which never includes values)."""
+    if top_key is None:
+        return config_dict.get(leaf_key)
+    section = config_dict.get(top_key)
+    if isinstance(section, dict):
+        return section.get(leaf_key)
+    return None
