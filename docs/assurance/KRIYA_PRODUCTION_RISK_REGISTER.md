@@ -127,14 +127,16 @@ relevances, or language-scope values out of 68).
 | REQUIRED | 63 |
 | OPTIONAL | 6 |
 | OUT_OF_SCOPE | 2 |
-| CLOSED | 27 |
+| CLOSED | 28 |
 | NEEDS_EVIDENCE | 22 |
-| NEEDS_IMPLEMENTATION | 20 |
+| NEEDS_IMPLEMENTATION | 19 |
 | SUPERSEDED | 0 (row-level) |
 | DEFERRED | 2 |
-| **REQUIRED + CLOSED** | **25** |
+| **REQUIRED + CLOSED** | **26** |
 | **REQUIRED + NEEDS_EVIDENCE** | **21** |
-| **REQUIRED + NEEDS_IMPLEMENTATION** | **17** |
+| **REQUIRED + NEEDS_IMPLEMENTATION** | **16** |
+
+**SEC-003 update (2026-09-12)**: `SEC-003` moved `NEEDS_IMPLEMENTATION`→`CLOSED` (MCP environment isolation implemented, independent-pytest-confirmed - see §6). Unlike the `SEC-006`/`SEC-007`/`SEC-008`/`SEC-009` drift noted in §0.1a below, `SEC-003` predates those additions and was already counted in this table's prior figures (confirmed: part of the original `SEC 5` by-domain count, §0.4 above, before `SEC-006`+ existed) - this is a clean one-row disposition move, not an addition, so `Total risks`/`REQUIRED` are unchanged and only `CLOSED`/`NEEDS_IMPLEMENTATION` (and their `REQUIRED+` cross-tabs) shift by one each. Verification identity re-holds: `CLOSED(28) + NEEDS_EVIDENCE(22) + NEEDS_IMPLEMENTATION(19) + SUPERSEDED(0) + DEFERRED(2) = 71` ✓; `REQUIRED+CLOSED(26) + REQUIRED+NEEDS_EVIDENCE(21) + REQUIRED+NEEDS_IMPLEMENTATION(16) = 63 = REQUIRED` ✓.
 
 **Pass 3 update**: `VER-004` moved `NEEDS_IMPLEMENTATION`→`NEEDS_EVIDENCE`
 (the confirmed-defect claim was wrong, corrected in §0.7). All other Pass 2
@@ -225,7 +227,7 @@ Evidence Validity note, not silently reconciled either direction.
 
 ---
 
-## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (17, SEC-009 moved out this pass — CLOSED)
+## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (16, SEC-003 moved out this pass — CLOSED)
 
 `CORR-016` PRV-08 transitive revalidation (**moved into this list** — its
 own row disposition already reads `NEEDS_IMPLEMENTATION` since commit
@@ -234,44 +236,57 @@ own row disposition already reads `NEEDS_IMPLEMENTATION` since commit
 · `CTX-001` context/graph freshness · `MODEL-001` model capability
 certification · `OBS-001` enforce-mode telemetry gap · `OBS-002` operator
 run summary · `OBS-004` resource budgets · `REL-002` `doctor
---production` · `SEC-001` hostile-code containment · `SEC-003` MCP
-environment isolation · `SEC-005` package/network containment ·
-`STATE-003` deterministic replay · `TOOL-001` policy-mediated TOOL
-execution (reclassified Pass 2 — see its own entry) · `TOOL-002`
-ToolBroker · `TOOL-003` MCP capability authorization · `TOOL-004` plugin
-manifest/provenance · `TOP-001` Gradle support. `POL-001` **moved out of
-this list this pass** — CLOSED, see §7 below (it had actually been
-`NEEDS_EVIDENCE`, not `NEEDS_IMPLEMENTATION`, since P1; this prose list
-was never corrected at the time, a pre-existing drift unrelated to this
-pass's own POL-001 work, found and fixed here). `SEC-009` **moved out of
-this list, 2026-09-12** — untrusted repository configuration acquiring
-control-plane authority: registered NEEDS_IMPLEMENTATION earlier this
-pass, now **CLOSED** after P1 (fail-closed default) + P2 (durable
-digest-bound approval + CI trust path) + a full source-to-sink
-bypass/closure review that found and fixed one real gap (`logging.file`
-containment) + independent full-suite pytest confirmation — see §6 for
-the complete closure record. `VER-004` stays out (see §0.7) and
+--production` · `SEC-001` hostile-code containment · `SEC-005` package/
+network containment · `STATE-003` deterministic replay · `TOOL-001`
+policy-mediated TOOL execution (reclassified Pass 2 — see its own entry)
+· `TOOL-002` ToolBroker · `TOOL-003` MCP capability authorization ·
+`TOOL-004` plugin manifest/provenance · `TOP-001` Gradle support.
+`POL-001` **moved out of this list this pass** — CLOSED, see §7 below
+(it had actually been `NEEDS_EVIDENCE`, not `NEEDS_IMPLEMENTATION`, since
+P1; this prose list was never corrected at the time, a pre-existing
+drift unrelated to this pass's own POL-001 work, found and fixed here).
+`SEC-009` **moved out of this list, 2026-09-12** — untrusted repository
+configuration acquiring control-plane authority: registered
+NEEDS_IMPLEMENTATION earlier this pass, now **CLOSED** after P1
+(fail-closed default) + P2 (durable digest-bound approval + CI trust
+path) + a full source-to-sink bypass/closure review that found and fixed
+one real gap (`logging.file` containment) + independent full-suite
+pytest confirmation — see §6 for the complete closure record. `SEC-003`
+**moved out of this list, 2026-09-12** — MCP environment isolation: the
+single MCP subprocess creation site's `{**os.environ, **self.env}`
+ambient merge replaced with restricted, explicit environment authority
+(Kriya-required baseline UNION SEC-009-authorized `mcp.<server>.env`,
+reusing SEC-001's `build_restricted_env()` primitive), a real-subprocess
+ambient-denied/explicit-allowed differential proven (including a
+dedicated HOME correction after user review — HOME excluded from the
+baseline, still available via explicit config), cross-server isolation
+proven, and independent full-suite pytest confirmed — see §6 for the
+complete closure record. `VER-004` stays out (see §0.7) and
 `ORCH-001`/`ORCH-002` stay out (reclassified `OPTIONAL`, Pass 2).
 
 **Known pre-existing drift, not corrected by this update (out of this
-pass's scope — flagged, not silently patched):** the §0.4 master table
-below (`Total risks 71`, `SEC 5` by-domain, `CLOSED 27`/
-`NEEDS_IMPLEMENTATION 20`/`REQUIRED+CLOSED 25`/
-`REQUIRED+NEEDS_IMPLEMENTATION 17`) predates `SEC-006`, `SEC-007`,
-`SEC-008`, and `SEC-009`'s registration entirely — none of the four were
-ever folded into those totals when added (confirmed: no `Total risks
-X→Y`-style update line exists for any of them, unlike the pattern
-`VER-006`'s own addition used). `SEC-006`/`SEC-007`/`SEC-008` are each
-independently `CLOSED` per their own rows, so this drift does not affect
-any REQUIRED+NEEDS_IMPLEMENTATION/REQUIRED+NEEDS_EVIDENCE count above —
-it is purely a stale `Total risks`/by-domain figure. `SEC-009`'s own
-addition-then-closure nets to zero effect on `REQUIRED+
-NEEDS_IMPLEMENTATION` specifically (never incremented in, now correctly
-not present), which is why 17 above already matches without further
-arithmetic. A full re-parse (the same `POL-001-P4`-style script-based
-recount this document has used before) is needed to correct `Total
-risks`/`SEC` domain/`CLOSED` cleanly — not attempted here, since this
-package's scope is SEC-009's own closure, not a full register audit.
+pass's scope — flagged, not silently patched):** the §0.4 master table's
+`Total risks 71` and `SEC 5` by-domain figures predate `SEC-006`,
+`SEC-007`, `SEC-008`, and `SEC-009`'s registration entirely — none of
+the four were ever folded into `Total risks`/by-domain when added
+(confirmed: no `Total risks X→Y`-style update line exists for any of
+them, unlike the pattern `VER-006`'s own addition used). `SEC-006`/
+`SEC-007`/`SEC-008` are each independently `CLOSED` per their own rows,
+and `SEC-009` closed 2026-09-12 (its own addition-then-closure netted to
+zero effect on `REQUIRED+NEEDS_IMPLEMENTATION` specifically — never
+incremented in, now correctly not present), so this drift does not
+affect any disposition-count cross-tab — it is purely a stale `Total
+risks`/by-domain figure. `SEC-003`'s move to `CLOSED` this pass is
+different in kind and WAS folded directly into the master table above
+(`CLOSED 27→28`, `NEEDS_IMPLEMENTATION 20→19`, `REQUIRED+CLOSED 25→26`,
+`REQUIRED+NEEDS_IMPLEMENTATION 17→16`) — unlike `SEC-006`-`SEC-009`,
+`SEC-003` predates those additions and was already counted in the prior
+figures, so moving its disposition is a clean, directly-attributable
+one-row shift, not a re-parse. A full re-parse (the same
+`POL-001-P4`-style script-based recount this document has used before)
+is still needed to correct `Total risks`/`SEC` domain cleanly for the
+`SEC-006`-`SEC-009` registration gap — not attempted here, since this
+package's scope is SEC-003's own closure, not a full register audit.
 
 ## §0.1b REQUIRED + NEEDS_EVIDENCE (20, SEC-002 moved out this pass — CLOSED)
 
@@ -579,7 +594,22 @@ Neither defect ever caused generated/target code to execute uncontained (every p
 **Evidence**: 15 new deterministic tests (`tests/test_sec002_fail_closed_evidence.py`, no Docker, no live model, mocked at the `_run_maven_cmd`/`_run_cmd_with_timeout` boundary) directly executed and confirmed passing - covering the most severe reproduction (Maven failure + no `.java` files can no longer PASS), every other affected path (Maven-with-.java-files, Gradle, Ruby compile, `run_pom_validate`, `run_tests` Python/Ruby, `run_app`) correctly raising instead of falling through or falsely passing, `run_app_sequence`'s existing safety net reconfirmed, and regression coverage proving ordinary compile/test/runtime failures and genuine toolchain-inapplicability fallback (real `javac` invocation via the actual JDK on this host) are both completely unaffected. E3, not E4: this is real-code, deterministic, mocked-exception evidence - no live Docker/local-model production run was performed for this specific fix (not required per this task's own scope; SEC-006's own live-validation precedent remains the model for what E4 requires, not repeated here since no new containment mechanism was introduced).
 
 **SEC-003 — MCP environment isolation**
-Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Current mechanism: `full_env = {**os.environ, **self.env}`, `kriya/mcp/mcp.py:41`, re-confirmed by grep this session · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: **E4** for the adversarial sentinel differential (real disposable MCP subprocess, both direct-client and real production-CLI paths) and cross-server isolation; E3 for the deterministic environment-builder unit tests (self-verified via standalone harness, independent-pytest-confirmed as part of the full suite, not individually re-run by an independent reviewer) · Disposition: **CLOSED** (2026-09-12) · Severity: MEDIUM-HIGH (unrestricted ambient credential/token exposure to an authorized-but-otherwise-unvetted subprocess).
+
+**Prior defect**: `kriya/mcp/mcp.py:41`, `full_env = {**os.environ, **self.env}` inside `MCPClient.start()` - the sole MCP subprocess creation site in the codebase (grep-confirmed: exactly one `MCPClient(` construction site, `MCPManager.start_all()`; `kriya/mcp/server.py`, the `kriya-mcp` server-side console script, creates zero subprocesses of its own). Every configured MCP server received the FULL parent Kriya process environment unconditionally - host credentials, cloud/CI tokens, proxy configuration, and any other ambient variable, regardless of whether `cfg.mcp.<server>.env` authorized it.
+
+**2026-09-12 fix — restricted, explicit environment authority.** New `build_mcp_subprocess_env(configured_env)` (`kriya/mcp/mcp.py`) replaces the ambient merge: `Kriya-required baseline UNION SEC-009-authorized mcp.<server>.env`, never ambient `os.environ`. Reuses `build_restricted_env()` (`kriya/tools/sandbox.py`, SEC-001) as the one common restricted-env primitive rather than duplicating filtering logic - that function always forwards real `PATH` verbatim (SEC-001's existing, unchanged policy; empirically confirmed `subprocess`/`create_subprocess_exec` honors the passed `env`'s own `PATH` for bare-command resolution, not the parent's) plus any allowlisted name present in `os.environ`.
+
+- **MCP-specific baseline** (`MCP_BASELINE_ENV_ALLOWLIST`): `LANG, LC_ALL, TMPDIR, TEMP, TMP` - deliberately NOT `autonomy.sandbox_env_allowlist`'s full default (excludes `JAVA_HOME`/`M2_HOME`/`GRADLE_HOME`/`VIRTUAL_ENV`/`PYTHONPATH`, build-toolchain-specific, no established MCP-launch need, and `PYTHONPATH` specifically a plausible import-hijack vector for a spawned Python-based MCP server). Empirically confirmed (real subprocess, not assumed) that Kriya's own shipped MCP server launches and completes the full handshake with a completely empty environment - the baseline variables are included anyway on `sandbox_env_allowlist`'s own established precedent for what's reasonable to forward to a third-party subprocess.
+- **HOME deliberately excluded** (corrected after user review, same session): HOME is not a low-authority compatibility variable the way LANG/TMPDIR are - it is the implicit discovery root for a wide range of third-party tooling (`.ssh`, `.gitconfig`, package-manager config, cloud-CLI state, SDK config files). Forwarding the operator's real HOME to an authorized-but-otherwise-unvetted MCP command was not justified by SEC-001's own precedent, since target-code execution (the repository's own declared build/test tooling) and MCP execution (an arbitrary, SEC-009-approved but otherwise unvetted third-party command) are not the same trust tier. No fake/isolated HOME was invented - that remains SEC-005/containment's concern if a real MCP runtime is ever found to need one; an operator with a genuine need still sets it explicitly via `mcp.<server>.env.HOME`, subject to SEC-009 authority like any other configured value.
+- **Proxy variables** (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are never in the baseline - inheriting them merely because they exist in the parent would be an indirect network-authority bypass; excluded by construction (absent from the allowlist), not by a special-case check.
+- **No expansion/interpolation**: traced and confirmed no `$VAR`/`${VAR}` environment expansion exists anywhere in this path - configured values are used verbatim.
+- **SEC-009 ordering preserved, not duplicated**: config provenance → SEC-009 authority (`load_config()`) → `MCPManager.start_all(self.config.mcp)` → `MCPClient(env=cfg_dict["env"])` → `build_mcp_subprocess_env(self.env)` → subprocess. SEC-003 never re-decides whether `mcp.<server>.env` is authorized, only what environment the already-authorized process receives.
+- **Fail-closed**: `build_mcp_subprocess_env()` is pure and non-raising by construction (no I/O, no external calls) - no fallback path exists that could retry with ambient `os.environ` on any failure. `MCPClient.start()`'s existing `except Exception as e: ... await self.stop(); raise e` is unchanged.
+
+**Evidence**: 22 new tests (`tests/test_sec003_mcp_env_isolation.py`, plus a disposable fixture server `tests/env_report_mcp_server.py` mirroring the pre-existing `tests/mock_mcp_server.py`'s shape) covering: deterministic unit tests against `build_mcp_subprocess_env()` (baseline inclusion/exclusion, PATH always present, proxy never present, configured-value override, empty-config-doesn't-restore-ambient, build-toolchain-variable exclusion, the HOME ambient-denied/explicit-allowed pair), real-subprocess differential tests via production `MCPClient`/`MCPManager` (an ambient synthetic sentinel - matching `AWS_ACCESS_KEY_ID`/`GITHUB_TOKEN`/`SSH_AUTH_SOCK`/proxy/unrelated-variable shapes - proven absent in a real spawned child; the same variable explicitly authorized via config proven present with the exact configured value; the dedicated HOME differential via a real child; cross-server isolation - server A's configured env never reaches server B - via a real two-server `MCPManager`; an empty configured env dict proven not to restore ambient inheritance), a structural regression lock (the specific `{**os.environ`/`os.environ.copy()`/`dict(os.environ)` ambient-merge shapes must never reappear in `kriya/mcp/mcp.py`), and one real production-CLI end-to-end test (`kriya authority approve` → `kriya tools execute`, real subprocess, no mocks) proving the decisive ambient-absent/explicit-present differential through the actual entry point. Both pre-existing `tests/test_mcp.py` tests re-verified passing unmodified. **Independent full-suite pytest confirmation received (2026-09-12)**: `3699 passed, 5 deselected, 0 failures` (`3680` prior SEC-009-closure baseline `+ 19` new SEC-003 tests exactly, no unrelated drift) - covering both the initial fix (commit `87f703f`) and the HOME correction (commit `58e6506`).
+
+**SEC-004/SEC-005 scope boundary preserved**: this pass recorded, without fixing, four SEC-004-scoped findings found while reading `MCPClient` closely - no startup/request timeout anywhere in `_send_request()`/`_handshake()` (`await future` can hang indefinitely), no process-group/session isolation on `create_subprocess_exec`, `stop()`'s `terminate()`→`wait()` has no timeout/fallback `kill()`, and no output-size/CPU/memory bounds on the MCP subprocess. No new SEC-005 findings beyond what SEC-009's own prior evidence already recorded (MCP tool calls have neither `ExecutionPolicy` consultation nor containment wiring). One new, unrelated risk candidate recorded (not SEC-003/004/005): `MCPManager.start_all()` registers tools into a shared kernel registry with no cross-server name-collision check - not an environment-isolation defect, needs its own owner.
 
 **SEC-004 — MCP request timeout / non-responsive server**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE first (line numbers not re-checked this pass either).
