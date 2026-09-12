@@ -5,12 +5,16 @@ and the invariant that `DENIED`/`UNRESTRICTED` argv shapes are unaffected by
 this risk's own changes. Real end-to-end proxy/firewall/privilege-drop
 behavior lives in tests/test_containment_oci.py (requires real Docker).
 """
+import os
+
 import pytest
 
-from kriya.tools.containment import ContainmentProfile, NetworkAuthority, TrustClass
+from kriya.tools.containment import BackendUnavailableError, ContainmentProfile, NetworkAuthority, TrustClass
 from kriya.tools.containment_oci import (
     RegistryAcquisitionSetupError,
     _SETUP_FAILURE_EXIT_CODE,
+    _render_setup_script,
+    _resolve_acquisition_identity,
     compute_authority_id,
     finalize_registry_acquisition_result,
 )
@@ -65,6 +69,65 @@ def test_finalize_does_not_raise_on_success_with_step_markers():
         stderr="", timeout=False,
     )
     finalize_registry_acquisition_result(result)  # must not raise
+
+
+# --- SEC-008: acquisition identity must match real host ownership, never a
+# fixed value, and must fail closed rather than mutate host permissions ---
+
+def test_render_setup_script_contains_no_chmod_of_host_mounts():
+    """SEC-008's own regression guard: the rendered script must never
+    contain a recursive/broadening chmod of /kriya/workspace or
+    /kriya/cache (the bind-mounted host content) - only its own
+    container-private tmpfs scratch dir may be chmod'd."""
+    script = _render_setup_script("172.19.0.2", 501, 20)
+    assert "chmod -R" not in script
+    assert "chown" not in script
+    assert "/kriya/workspace" not in script  # only ever mounted, never touched by the setup script
+    chmod_lines = [l for l in script.splitlines() if l.strip().startswith("chmod")]
+    assert chmod_lines, "expected the tmpfs-only chmod line to still be present"
+    assert all("/kriya/tmp/acqhome" in l for l in chmod_lines)  # the one allowed chmod targets tmpfs only
+
+
+def test_render_setup_script_uses_the_given_uid_and_gid_not_a_fixed_constant():
+    script = _render_setup_script("172.19.0.2", 4242, 4343)
+    assert "setpriv --reuid=4242 --regid=4343" in script
+
+
+def test_resolve_acquisition_identity_matches_the_invoking_process(tmp_path):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    uid, gid = _resolve_acquisition_identity(str(ws), [])
+    assert (uid, gid) == (os.getuid(), os.getgid())
+
+
+def test_resolve_acquisition_identity_accepts_matching_cache_paths(tmp_path):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    uid, gid = _resolve_acquisition_identity(str(ws), [str(cache)])
+    assert (uid, gid) == (os.getuid(), os.getgid())
+
+
+def test_resolve_acquisition_identity_fails_closed_on_ownership_mismatch(tmp_path):
+    """A workspace/cache path owned by a DIFFERENT real uid than the
+    invoking Kriya process must fail closed, never guess/fall back to a
+    fixed identity that could either fail to write or silently
+    impersonate a different real user. `/usr` is a real, always-present
+    root-owned directory - a reliable non-matching-owner fixture without
+    needing root privileges to construct one."""
+    if os.getuid() == 0:
+        pytest.skip("running as root - no non-matching-owner path available for this check")
+    with pytest.raises(BackendUnavailableError, match="does not match"):
+        _resolve_acquisition_identity("/usr", [])
+
+
+def test_resolve_acquisition_identity_fails_closed_when_invoking_process_is_root(tmp_path, monkeypatch):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    with pytest.raises(BackendUnavailableError, match="root"):
+        _resolve_acquisition_identity(str(ws), [])
 
 
 # --- Invariant: DENIED profiles are unaffected by SEC-006 (test R) ---

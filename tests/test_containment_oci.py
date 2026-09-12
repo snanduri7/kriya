@@ -490,3 +490,123 @@ def test_missing_workspace_directory_blocks_execution(tmp_path):
             ["/bin/sh", "-c", "echo should-not-run"],
             cwd=".", timeout=10, containment_profile=profile, containment_backend=OCIContainmentBackend(),
         )
+
+
+# --- SEC-008: acquisition adapts to host ownership, never mutates host permissions ---
+
+def _snapshot(root):
+    import os as _os
+    out = {}
+    for dirpath, dirnames, filenames in _os.walk(root):
+        for name in dirnames + filenames:
+            p = _os.path.join(dirpath, name)
+            st = _os.lstat(p)
+            out[p] = (st.st_uid, st.st_gid, st.st_mode & 0o7777)
+        st = _os.lstat(dirpath)
+        out[dirpath] = (st.st_uid, st.st_gid, st.st_mode & 0o7777)
+    return out
+
+
+def test_registry_scoped_runs_as_real_host_uid_not_a_fixed_value(workspace):
+    """SEC-008: the acquisition process's uid/gid must match the REAL
+    invoking host process's own uid/gid - never a fixed constant (the
+    prior 65532 this replaces)."""
+    controller = ProcessController()
+    profile = _registry_profile(workspace, ["repo.maven.apache.org"])
+    result = controller.run(
+        ["/bin/sh", "-c", "id -u; id -g"], cwd=str(workspace), timeout=60,
+        containment_profile=profile, containment_backend=OCIContainmentBackend(),
+    )
+    lines = [l for l in result.stdout.strip().splitlines() if not l.startswith("KRIYA_STEP")]
+    assert lines[0] == str(os.getuid()), result.stdout
+    assert lines[1] == str(os.getgid()), result.stdout
+
+
+def test_registry_scoped_never_mutates_preexisting_host_permissions_on_success(tmp_path):
+    """SEC-008's core proof: a restrictively-permissioned, pre-existing
+    host file/directory keeps its EXACT mode/ownership after a real,
+    successful acquisition - no chmod-based workaround is needed because
+    the container adapts to the host identity instead."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "pom.xml").write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.kriya.test</groupId><artifactId>sec008-fixture</artifactId><version>1.0.0</version>
+  <packaging>jar</packaging>
+  <dependencies><dependency><groupId>org.apache.commons</groupId>
+  <artifactId>commons-lang3</artifactId><version>3.14.0</version></dependency></dependencies>
+</project>"""
+    )
+    private = workspace / "private"
+    private.mkdir()
+    private.chmod(0o700)
+    secret = private / "secret.txt"
+    secret.write_text("s3cr3t")
+    secret.chmod(0o600)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    cache.chmod(0o700)
+
+    before = _snapshot(str(tmp_path))
+    controller = ProcessController()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=str(workspace),
+        dependency_cache_paths=[str(cache)], dependency_cache_writable=True,
+        network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, network_destinations=("repo.maven.apache.org",),
+    )
+    result = controller.run(
+        ["mvn", "-B", "-Dmaven.repo.local=/kriya/cache/m2", "dependency:go-offline"],
+        cwd=str(workspace), timeout=180, containment_profile=profile, containment_backend=OCIContainmentBackend(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    after = _snapshot(str(tmp_path))
+    for path, meta in before.items():
+        assert after.get(path) == meta, f"{path} metadata changed: {meta} -> {after.get(path)}"
+    new_paths = set(after) - set(before)
+    for p in new_paths:
+        mode = after[p][2]
+        assert mode & 0o002 == 0, f"newly created {p} is unnecessarily world-writable (mode {oct(mode)})"
+
+
+def test_registry_scoped_never_mutates_host_permissions_on_timeout(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    private = workspace / "private"
+    private.mkdir()
+    private.chmod(0o700)
+    before = _snapshot(str(tmp_path))
+    controller = ProcessController()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=str(workspace),
+        network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, network_destinations=("repo.maven.apache.org",),
+    )
+    result = controller.run(
+        ["/bin/sh", "-c", "sleep 120"], cwd=str(workspace), timeout=5,
+        containment_profile=profile, containment_backend=OCIContainmentBackend(),
+    )
+    assert result.timeout is True
+    after = _snapshot(str(tmp_path))
+    assert before == after
+
+
+def test_registry_scoped_ownership_mismatch_fails_closed_before_any_container_starts(tmp_path):
+    """SEC-008: rather than falling back to a fixed UID (which would
+    reintroduce exactly the write-failure this risk exists to fix
+    without a chmod), a workspace owned by a different real uid than the
+    invoking process must fail closed BEFORE any docker resource is
+    created."""
+    controller = ProcessController()
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path="/usr",
+        network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, network_destinations=("repo.maven.apache.org",),
+    )
+    if os.getuid() == 0:
+        pytest.skip("running as root - no non-matching-owner path available for this check")
+    with pytest.raises(BackendUnavailableError, match="does not match"):
+        controller.run(
+            ["/bin/sh", "-c", "true"], cwd="/usr", timeout=10,
+            containment_profile=profile, containment_backend=OCIContainmentBackend(),
+        )

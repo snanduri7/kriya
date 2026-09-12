@@ -201,21 +201,25 @@ _SETUP_FAILURE_EXIT_CODE = 97
 _SETUP_FAILURE_MARKER = "KRIYA_CONTAINMENT_SETUP_FAILED:"
 _STEP_MARKER_RE = re.compile(r"KRIYA_STEP_([A-Z_]+)=(\S+)")
 
-# UID/GID the untrusted acquisition command actually runs as, after setup
-# - fixed, not host-UID-matched (no reliable cross-platform way to learn
-# the invoking host user's UID from inside this module). Chosen from the
-# conventional "nonroot" range (matches distroless's own `nonroot` UID)
-# rather than a UID likely to collide with an image's own real accounts.
-_ACQUISITION_UID = 65532
-
-# Residual, explicitly-accepted side effect of the non-root requirement
-# (ACQUISITION NETWORK step 7: "execute acquisition as non-root"): the
-# setup script chmods the bind-mounted workspace/cache trees world-
-# writable (permission bits only - ownership is left untouched) so UID
-# 65532, which cannot be reliably mapped to the invoking host user's own
-# UID from inside this module, can still write into them. This is a
-# PERMISSION change, not an OWNERSHIP change, and is scoped to the
-# acquisition step only - see this module's own RETURN/DISCOVERIES entry.
+# SEC-008 (2026-09-12): the untrusted acquisition command runs as the
+# REAL host-owning UID/GID of the bind-mounted content (computed in
+# `_prepare_registry_scoped` via `os.stat`/`os.getuid()`/`os.getgid()` -
+# never a fixed constant), NOT a fixed arbitrary UID. This is what makes
+# non-root acquisition able to write into the bind-mounted workspace/
+# cache trees WITHOUT ever touching a single host file's mode or
+# ownership bit: on a real Linux bind mount (native Linux/CI - the same
+# inode, real POSIX DAC enforcement), a container process only gets
+# owner-level write access if its UID actually matches the file's real
+# owning UID - so the container must adapt TO that ownership, not the
+# other way around (this risk's own stated invariant). Confirmed
+# empirically on this macOS Docker Desktop host too (`--user <real-uid>`
+# gets owner-level access to files as restrictive as mode 700/600) -
+# though also confirmed that this platform's virtiofs bind-mount
+# implementation does not enforce ANY per-UID restriction on arbitrary,
+# non-matching container UIDs either (a real, live platform difference,
+# not assumed) - so host-UID-matching is the one strategy proven correct
+# on the strict platform (native Linux) and never observed to break on
+# the loose one (macOS Docker Desktop).
 _SETUP_SCRIPT_TEMPLATE = r"""#!/bin/sh
 set -e
 FAIL() {
@@ -284,11 +288,14 @@ if ! nc -z -w2 "$PROXY_IP" "$PROXY_PORT" 2>/dev/null; then
 fi
 echo "KRIYA_STEP_SELFTEST=OK"
 
-# --- Step 6: drop privileges ---
+# --- Step 6: prepare for privilege drop ---
+# /kriya/tmp is this container's OWN tmpfs (never host-mounted storage -
+# see OCIContainmentBackend.prepare's own --tmpfs flag), so creating/
+# chmod-ing a fresh directory under it is ordinary container-internal
+# scratch-space setup, not a host filesystem mutation of any kind - SEC-008
+# only prohibits mutating HOST bind-mounted content's ownership/mode.
 mkdir -p /kriya/tmp/acqhome
 chmod 0777 /kriya/tmp/acqhome
-chmod -R a+rwX /kriya/workspace 2>/dev/null || true
-chmod -R a+rwX /kriya/cache 2>/dev/null || true
 
 # Maven's own resolver-transport-http does NOT reliably honor
 # http.proxyHost/https.proxyHost JVM system properties (confirmed
@@ -330,8 +337,11 @@ export HTTP_PROXY="$http_proxy"
 export HTTPS_PROXY="$https_proxy"
 export MAVEN_OPTS="-Dhttp.proxyHost=$PROXY_IP -Dhttp.proxyPort=$PROXY_PORT -Dhttps.proxyHost=$PROXY_IP -Dhttps.proxyPort=$PROXY_PORT -Dhttp.nonProxyHosts="
 
-# --- Step 7: execute the untrusted acquisition command - non-root, no NET_ADMIN ---
-exec setpriv --reuid=__UID__ --regid=__UID__ --clear-groups --no-new-privs -- "$@"
+# --- Step 7: execute the untrusted acquisition command - non-root, no
+# NET_ADMIN, running as the REAL host-owning identity of the bind-mounted
+# content (SEC-008) so it can write there without any host permission
+# change at all.
+exec setpriv --reuid=__ACQ_UID__ --regid=__ACQ_GID__ --clear-groups --no-new-privs -- "$@"
 """
 
 
@@ -490,13 +500,57 @@ def _extract_denied_hosts(proxy_log: str) -> List[str]:
     return sorted(hosts)
 
 
-def _render_setup_script(proxy_ip: str) -> str:
+def _render_setup_script(proxy_ip: str, acquisition_uid: int, acquisition_gid: int) -> str:
     return (
         _SETUP_SCRIPT_TEMPLATE
         .replace("__PROXY_IP__", proxy_ip)
         .replace("__PROXY_PORT__", str(_PROXY_PORT))
-        .replace("__UID__", str(_ACQUISITION_UID))
+        .replace("__ACQ_UID__", str(acquisition_uid))
+        .replace("__ACQ_GID__", str(acquisition_gid))
     )
+
+
+def _resolve_acquisition_identity(workspace_host: str, cache_hosts: List[str]) -> Tuple[int, int]:
+    """SEC-008: the acquisition process's UID/GID must match the REAL
+    host-owning identity of every bind-mounted path it needs to write to
+    - never a fixed/arbitrary value, and never accompanied by a host
+    permission/ownership change. Uses `os.getuid()`/`os.getgid()` (the
+    Kriya PROCESS's own real identity - the same identity that created
+    the workspace/cache directories via plain `os.makedirs` calls
+    elsewhere in this codebase) as the candidate identity, then verifies
+    it against every mount rather than assuming agreement: a workspace or
+    cache path owned by a DIFFERENT real UID than the invoking Kriya
+    process would silently produce permission failures inside the
+    container that look like ordinary command failures, not a containment
+    issue - checked here, host-side, so a mismatch fails closed with a
+    clear message instead.
+
+    Fails closed if the identity resolves to UID 0 (root) - matching
+    "root" would mean running the untrusted command AS root, which the
+    non-root invariant forbids outright; there is no safe identity to
+    adapt to in that case (a real, narrow deployment constraint: Kriya
+    itself running as root makes registry-scoped acquisition unusable,
+    not a bug to work around here)."""
+    uid, gid = os.getuid(), os.getgid()
+    if uid == 0:
+        raise BackendUnavailableError(
+            "NetworkAuthority.DEPENDENCY_REGISTRY_ONLY cannot resolve a safe non-root "
+            "acquisition identity - the invoking Kriya process itself is running as root (uid 0), "
+            "so matching its real ownership would mean running the untrusted acquisition command "
+            "as root too, which the non-root invariant forbids. Run Kriya as a non-root user to "
+            "use registry-scoped acquisition."
+        )
+    for path in [workspace_host, *cache_hosts]:
+        st = os.stat(path)
+        if st.st_uid != uid:
+            raise BackendUnavailableError(
+                f"NetworkAuthority.DEPENDENCY_REGISTRY_ONLY: {path!r} is owned by uid {st.st_uid}, "
+                f"which does not match the invoking Kriya process's own uid {uid} - refusing to "
+                "guess an acquisition identity that would either fail to write there or (if it "
+                "happened to match) unintentionally impersonate a different real user. Ensure "
+                "workspace/cache paths are owned by the user running Kriya."
+            )
+    return uid, gid
 
 
 def finalize_registry_acquisition_result(result: ProcessResult) -> None:
@@ -737,6 +791,18 @@ class OCIContainmentBackend:
                 f"ContainmentProfile.workspace_path {workspace_host!r} does not exist or is "
                 "not a directory - refusing to start a container with no valid workspace mount."
             )
+        cache_hosts = [os.path.abspath(p) for p in profile.dependency_cache_paths]
+        for cache_host in cache_hosts:
+            if not os.path.isdir(cache_host):
+                raise BackendUnavailableError(
+                    f"ContainmentProfile.dependency_cache_paths entry {cache_host!r} does not "
+                    "exist or is not a directory."
+                )
+        # SEC-008: resolved and validated BEFORE any docker resource
+        # (network/proxy/image) is created - a bad identity fails fast,
+        # never after already standing up infrastructure for a run that
+        # cannot proceed.
+        acquisition_uid, acquisition_gid = _resolve_acquisition_identity(workspace_host, cache_hosts)
 
         authority_id = compute_authority_id(hosts)
         image, cache_mount_point = _select_image_and_cache_mount(command)
@@ -856,7 +922,7 @@ class OCIContainmentBackend:
             _remove_network()
             raise BackendUnavailableError(f"Registry proxy readiness check failed: {e}") from e
 
-        setup_script = _render_setup_script(proxy_ip)
+        setup_script = _render_setup_script(proxy_ip, acquisition_uid, acquisition_gid)
 
         args: List[str] = [
             docker_path, "run", "--rm", "--name", container_name,
