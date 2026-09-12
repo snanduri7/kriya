@@ -225,7 +225,7 @@ Evidence Validity note, not silently reconciled either direction.
 
 ---
 
-## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (17, corrected POL-001-P4 — regenerated from each row's own current Disposition, not hand-patched)
+## §0.1a REQUIRED + NEEDS_IMPLEMENTATION (18, added SEC-009 this pass)
 
 `CORR-016` PRV-08 transitive revalidation (**moved into this list** — its
 own row disposition already reads `NEEDS_IMPLEMENTATION` since commit
@@ -236,6 +236,8 @@ certification · `OBS-001` enforce-mode telemetry gap · `OBS-002` operator
 run summary · `OBS-004` resource budgets · `REL-002` `doctor
 --production` · `SEC-001` hostile-code containment · `SEC-003` MCP
 environment isolation · `SEC-005` package/network containment ·
+`SEC-009` untrusted repository configuration can acquire control-plane
+authority (**new this pass**, registered not implemented — see §6) ·
 `STATE-003` deterministic replay · `TOOL-001` policy-mediated TOOL
 execution (reclassified Pass 2 — see its own entry) · `TOOL-002`
 ToolBroker · `TOOL-003` MCP capability authorization · `TOOL-004` plugin
@@ -246,7 +248,7 @@ was never corrected at the time, a pre-existing drift unrelated to this
 pass's own POL-001 work, found and fixed here). `VER-004` stays out (see
 §0.7) and `ORCH-001`/`ORCH-002` stay out (reclassified `OPTIONAL`, Pass 2).
 
-## §0.1b REQUIRED + NEEDS_EVIDENCE (21, updated VER-006 — new row added)
+## §0.1b REQUIRED + NEEDS_EVIDENCE (20, SEC-002 moved out this pass — CLOSED)
 
 `CORR-006` semantic-contract protection · `CORR-019` Reviewer
 self-assigned evidence confidence (A1-E2) · `CTX-002` large-repo scale ·
@@ -258,7 +260,7 @@ handling (downgraded from CLOSED, Pass 2 — PRV-02's manual check was
 never confirmed) · `RECV-002` MA9 coordinated repair (downgraded from
 CLOSED, Pass 2 — PRV-11's own result states plan recovery was not
 exercised) · `REL-001` release packaging · `REPO-004` workspace
-isolation · `SEC-002` fail-closed sandbox failure · `SEC-004` MCP timeout
+isolation · `SEC-004` MCP timeout
 · `STATE-001` crash/resume · `STATE-002` multi-store consistency
 (reframed Pass 2 to evidence-first) · `TOP-002` framework-neutral Java ·
 `TOP-005` CI operating requirements · `VER-004` Python
@@ -268,7 +270,9 @@ Python end-to-end validation · `VER-006` runtime-verification LLM
 fallback distrust containment (new, this pass — implemented, not yet
 independently pytest-confirmed). `CORR-016` **moved out of this list** (see
 §0.1a above — its own row has read `NEEDS_IMPLEMENTATION` since commit
-`5210faa`). `POL-001` was never actually added to this list despite
+`5210faa`). `SEC-002` **moved out of this list this pass** — CLOSED, see
+§6 (containment-failure propagation defects found and fixed, 2026-09-12).
+`POL-001` was never actually added to this list despite
 becoming `NEEDS_EVIDENCE` at P1 (the same pre-existing drift as above) —
 moot now, since it goes straight to `CLOSED` this pass (see §7). Note
 `RECV-004` is `NEEDS_EVIDENCE` too (downgraded Pass 2), but its `OPTIONAL`
@@ -536,7 +540,18 @@ this HEAD: 3532 passed, 9 failed (the same proven pre-existing baseline:
 failures.
 
 **SEC-002 — Fail-closed behavior under sandbox/policy failure**
-Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE first.
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: **E3** (real, reproduced defects fixed; deterministic mocked-exception regression tests for every affected path; no live-model/Docker run performed for this specific fix, so not claimed as E4) · Disposition: **CLOSED** (2026-09-12).
+
+**2026-09-12 — root cause, fix, and closure.** A prior DEEP DESIGN_INVESTIGATION (same day) traced every production containment entry point and found two real, reproduced defects in `kriya/tools/validate.py`'s validation wrappers - not merely missing evidence for already-correct behavior:
+
+1. `run_compile_check`'s Java path: a bare `except Exception as e: logger.warning(...)` (no `return`) around the Maven compile call let a genuine `ContainmentSetupError` (docker daemon unreachable, `NET_ADMIN` unavailable, proxy/firewall setup failure, etc.) fall through to the Gradle check, then the raw `javac` fallback. When `files` contained no `.java` entries (an ordinary shape - e.g. a pom.xml-only change), this reached `if not java_files: return {"success": True, ...}` - **a genuine containment-setup failure was reported as gate PASS.** Reproduced live via a mocked `BackendUnavailableError` before any fix was applied.
+2. `run_pom_validate`'s catch-all was worse and unconditional: `except Exception as e: ...; return {"success": True, ...}` for ANY exception at all, including `ContainmentSetupError` - found while tracing the same anti-pattern elsewhere in the same file, per this task's own "adjacent trace" requirement.
+
+Neither defect ever caused generated/target code to execute uncontained (every path that DIDN'T false-pass still ultimately re-hit the same failing containment backend via its own fallback's `_run_cmd_with_timeout` call) - the defect was specifically "converts containment failure into success" (case 1, 2) and, more broadly, "suppresses the security-significant failure's classification" (`run_compile_check`'s Gradle/javac/Ruby branches, `run_tests`, `run_app` all swallowed `ContainmentSetupError` into an ordinary-looking failure dict that never reached `kriya.workflow.retry_strategy.handle_attempt_failure`'s existing `containment_setup_failed` classification, instead wasting retry budget on doomed Developer-repair regeneration).
+
+**Fix**: an `except ContainmentSetupError: raise` clause was added immediately before every one of these generic `except Exception` handlers - the same, already-established pattern this file already used for Maven acquisition (`_acquire_for_this_goal`, SEC-006/SEC-008). Not a new classifier, not a duplicate of `handle_attempt_failure` - a pure re-raise, so the existing classification (already covered by `tests/test_workflow.py::test_handle_attempt_failure_classifies_containment_setup_error_deterministically`) is reached unchanged. Fixed in: `run_compile_check` (Maven, Gradle, javac, Ruby branches), `run_pom_validate`, `run_tests` (outer handler + the Ruby bundle-exec-to-plain-rspec inner fallback), `run_app`. `run_app_sequence` was deliberately left unchanged - its existing swallow-into-a-step-dict behavior is already correctly recognized as an infrastructure failure by `kriya.workflow.acceptance.runtime_verification_infrastructure_reason` (confirmed, not assumed), and changing it to raise would touch callers outside this fix's narrow scope. Ordinary toolchain-applicability fallback (Maven/Gradle genuinely absent, `mvn`/`gradle` not on PATH via `FileNotFoundError`) is untouched and still works exactly as before.
+
+**Evidence**: 15 new deterministic tests (`tests/test_sec002_fail_closed_evidence.py`, no Docker, no live model, mocked at the `_run_maven_cmd`/`_run_cmd_with_timeout` boundary) directly executed and confirmed passing - covering the most severe reproduction (Maven failure + no `.java` files can no longer PASS), every other affected path (Maven-with-.java-files, Gradle, Ruby compile, `run_pom_validate`, `run_tests` Python/Ruby, `run_app`) correctly raising instead of falling through or falsely passing, `run_app_sequence`'s existing safety net reconfirmed, and regression coverage proving ordinary compile/test/runtime failures and genuine toolchain-inapplicability fallback (real `javac` invocation via the actual JDK on this host) are both completely unaffected. E3, not E4: this is real-code, deterministic, mocked-exception evidence - no live Docker/local-model production run was performed for this specific fix (not required per this task's own scope; SEC-006's own live-validation precedent remains the model for what E4 requires, not repeated here since no new containment mechanism was introduced).
 
 **SEC-003 — MCP environment isolation**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Current mechanism: `full_env = {**os.environ, **self.env}`, `kriya/mcp/mcp.py:41`, re-confirmed by grep this session · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
@@ -612,6 +627,10 @@ defeated acquisition before this fix) resolved cleanly under
 compile/test still ran under the deliberately tight `sandbox_memory_mb:
 256` target cap - both confirmed via real production log lines, not
 inferred.
+
+**SEC-009 — Untrusted Repository Configuration Can Acquire Kriya Control-Plane Authority**
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (real, unmodified `kriya` CLI, real subprocess, real end-to-end reproduction - no mocks anywhere in the chain) · Disposition: NEEDS_IMPLEMENTATION · Severity: HIGH.
+Scope: registered per the 2026-09-12 SEC-002/003/004/005 DEEP DESIGN_INVESTIGATION's own findings - **not implemented in this pass** (that investigation's config-loading/MCP findings are explicitly out of scope for the SEC-002 FAST fix this entry accompanies). `kriya/config/config.py::load_config()` auto-discovers `kriya.yaml`/`kriya.yml` from the current working directory whenever `--config` is not explicitly passed; `kriya/core/kernel.py::Kernel.start()` unconditionally starts every configured MCP server (`kriya/mcp/mcp.py`) with zero confirmation, zero trust-source distinction, on the very first kernel-starting CLI command (`generate`, `fix`, `repl`, `tools list`, `tools execute`). Confirmed live via the real, unmodified `kriya` CLI: a repository-planted `kriya.yaml` (simulating a hostile/compromised repository being analyzed) auto-started a fully attacker-controlled subprocess (arbitrary `command`/`args`/`env`) and, via an unconfirmed `kriya tools execute` call, exfiltrated a synthetic ambient secret - full chain, no internal APIs called directly. Kriya has no mechanism distinguishing "a config file the user explicitly pointed `--config` at" from "a config file that happened to be sitting in the analyzed repository's own root" - the two are structurally indistinguishable to the config loader today. The same investigation also found MCP subprocesses inherit full ambient `os.environ` unconditionally (SEC-003-adjacent), have no request/startup/shutdown timeout and no process-group isolation - both plain and fully-detached child processes survive Kriya's own termination (SEC-004-adjacent), and have neither invocation-authority (`ExecutionPolicy` consultation, `requires_confirmation`) nor execution-authority (containment) wiring at all (SEC-005-adjacent) - this entry specifically names the upstream, config-loading-layer root cause common to all of them, not yet owned by any existing risk ID. Candidate Next Action (not started): a config-source trust classification (KRIYA/USER/REPOSITORY/UNKNOWN, per that investigation's own Task 6) is very likely a prerequisite for any MCP containment fix, since the exposure begins before MCP-specific code ever runs.
 
 ---
 

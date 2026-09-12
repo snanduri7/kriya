@@ -943,6 +943,18 @@ class PolymorphicValidator:
             # must be returned, not silently swallowed, or a real toolchain
             # gap gets misread as a code-content bug.
             return {"success": False, "output": f"Failed to invoke mvn validate: {e}"}
+        except ContainmentSetupError:
+            # SEC-002 (2026-09-12): a containment/resource setup failure
+            # (docker daemon unreachable, NET_ADMIN unavailable, proxy/
+            # firewall setup failure, etc.) must never be treated as an
+            # ordinary "mvn validate could not be run, skip it" toolchain
+            # gap - unlike FileNotFoundError above, this is not a benign
+            # "tool missing" case, it is a security-significant setup
+            # failure that must propagate to the same containment-failure
+            # classification every other contained call site uses
+            # (kriya/workflow/retry_strategy.py's handle_attempt_failure),
+            # never silently reported as gate PASS.
+            raise
         except Exception as e:
             logger.warning(f"Failed to invoke mvn validate: {e}")
             return {"success": True, "output": f"mvn validate could not be run ({e}) - skipped, not confirmed valid."}
@@ -1195,6 +1207,16 @@ class PolymorphicValidator:
                     # exactly like a code/import bug, sending the retry loop
                     # hunting for something that was never there.
                     return {"success": False, "output": f"Failed to invoke mvn compile: {e}"}
+                except ContainmentSetupError:
+                    # SEC-002 (2026-09-12): a containment/resource setup
+                    # failure must never be swallowed into the generic
+                    # warning-and-fall-through below - that would let
+                    # execution continue on to the Gradle check, then the
+                    # raw javac fallback, which (when `files` contains no
+                    # .java entries) reaches "No Java files to compile" ->
+                    # success:True, silently reporting a real security-
+                    # significant setup failure as gate PASS.
+                    raise
                 except Exception as e:
                     logger.warning(f"Failed to invoke mvn compile: {e}")
 
@@ -1210,9 +1232,15 @@ class PolymorphicValidator:
                     # Same reasoning as the mvn case above - don't silently fall
                     # through to the misleading raw javac fallback.
                     return {"success": False, "output": f"Failed to invoke {gradle_cmd} compileJava: {e}"}
+                except ContainmentSetupError:
+                    # SEC-002 (2026-09-12): same reasoning as the mvn case
+                    # above - must not silently fall through to the javac
+                    # fallback, which can report success:True for a real
+                    # containment/setup failure.
+                    raise
                 except Exception as e:
                     logger.warning(f"Failed to invoke gradle compileJava: {e}")
-            
+
             # 3. Fallback to raw javac syntax check (for simple single-class projects)
             # `files` can include controller-provided established-file context
             # used to inform planning and runtime judgment. Only pass sources
@@ -1249,6 +1277,14 @@ class PolymorphicValidator:
                         logger.warning(f"Resolver failed to run: {ree}")
                     return {"success": False, "output": error_output}
                 return {"success": True, "output": "Java classes compiled successfully."}
+            except ContainmentSetupError:
+                # SEC-002 (2026-09-12): must propagate as the distinct
+                # containment-setup failure it is, not be reported as an
+                # ordinary "javac tool invocation failed" toolchain problem -
+                # that framing hides the real root cause and never reaches
+                # handle_attempt_failure's containment_setup_failed
+                # classification.
+                raise
             except Exception as e:
                 return {"success": False, "output": f"Javac compilation tool invocation failed: {e}"}
 
@@ -1262,6 +1298,11 @@ class PolymorphicValidator:
                             res = self._run_cmd_with_timeout(["ruby", "-c", full], cwd=self.workspace_path)
                             if res["returncode"] != 0:
                                 errors.append(f"Ruby syntax error in {f}:\n{res['stderr']}")
+                        except ContainmentSetupError:
+                            # SEC-002 (2026-09-12): must propagate, not be
+                            # reported as an ordinary "Ruby runtime
+                            # execution failed" toolchain/code problem.
+                            raise
                         except Exception as e:
                             return {"success": False, "output": f"Ruby runtime execution failed: {e}"}
             if errors:
@@ -1420,6 +1461,15 @@ class PolymorphicValidator:
                     cmd.append(target_test)
                 try:
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                except ContainmentSetupError:
+                    # SEC-002 (2026-09-12): a containment/resource setup
+                    # failure is not the ordinary "bundle exec rspec isn't
+                    # set up right, try plain rspec" case this fallback
+                    # exists for - falling through here would only ever
+                    # re-hit the same unavailable backend via the plain
+                    # rspec invocation below, wasting an attempt while
+                    # hiding the real cause; must propagate immediately.
+                    raise
                 except Exception as e:
                     logger.debug(f"'bundle exec rspec' failed, falling back to plain 'rspec': {e}")
                     cmd = ["rspec"]
@@ -1439,6 +1489,14 @@ class PolymorphicValidator:
                 ),
             }
 
+        except ContainmentSetupError:
+            # SEC-002 (2026-09-12): must propagate to the existing
+            # containment-failure classification (handle_attempt_failure),
+            # never be reported as an ordinary "failed to execute local
+            # test suite" gate failure - that framing would feed a real
+            # infrastructure problem back into the model-repair retry loop
+            # as if it were a fixable test/code defect.
+            raise
         except Exception as e:
             return {"success": False, "output": f"Failed to execute local test suite: {e}"}
 
@@ -1504,6 +1562,11 @@ class PolymorphicValidator:
         command = commands[0]
         try:
             res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
+        except ContainmentSetupError:
+            # SEC-002 (2026-09-12): must propagate to the existing
+            # containment-failure classification, not be reported as an
+            # ordinary "failed to execute run command" runtime failure.
+            raise
         except Exception as e:
             return {"success": False, "timed_out": False, "returncode": None, "output": f"Failed to execute run command: {e}"}
         return {
