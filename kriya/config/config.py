@@ -801,6 +801,28 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
                             user_data["plugins"]["directory"] = os.path.realpath(os.path.join(config_dir, v))
 
+                    # logging.file - SEC-009 bypass-closure fix (2026-09-12).
+                    # Canonicalize to ONE resolved absolute realpath (anchored
+                    # to config_dir, not process CWD) BEFORE classification
+                    # and BEFORE configure_logging() ever sees it, so the
+                    # value authority resolution inspects and the value
+                    # execution actually opens are always identical - unlike
+                    # paths.*/plugins.directory above (which only rewrite a
+                    # "./"-or-"../"-prefixed value), this resolves ANY string
+                    # value (bare-relative, absolute, or already "./"-
+                    # prefixed) uniformly, because configure_logging()'s own
+                    # os.path.abspath() would otherwise anchor a bare-relative
+                    # value to CWD instead of config_dir - the exact
+                    # classify-here/execute-there split this fix must not
+                    # introduce. A value of `null`/non-string (explicitly
+                    # disabling file logging) is left untouched here and
+                    # handled directly in the classification_overrides block
+                    # below - disabling a feature grants no authority.
+                    if isinstance(user_data.get("logging"), dict) and isinstance(user_data["logging"].get("file"), str):
+                        lf = user_data["logging"]["file"]
+                        resolved_lf = lf if os.path.isabs(lf) else os.path.join(config_dir, lf)
+                        user_data["logging"]["file"] = os.path.realpath(resolved_lf)
+
                     # paths.{skills,memory,logs} classification depends on the
                     # resolved value (in-workspace vs. escaping) - resolve
                     # non-relative values too (an absolute path or a
@@ -828,6 +850,22 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     if isinstance(user_data.get("agent_llms"), dict):
                         for role, role_val in user_data["agent_llms"].items():
                             classification_overrides[("agent_llms", role)] = agent_role_field_classification(role_val)
+
+                    # logging.file classification - same value-sensitive
+                    # containment check as paths.* above, now that the value
+                    # (if a string) has already been canonicalized to a
+                    # single resolved realpath anchored at config_dir. An
+                    # explicit `null` (disable file logging entirely) is
+                    # REPOSITORY_SAFE outright - it grants no filesystem
+                    # authority, it removes a capability.
+                    if isinstance(user_data.get("logging"), dict) and "file" in user_data["logging"]:
+                        lf = user_data["logging"]["file"]
+                        if isinstance(lf, str):
+                            classification_overrides[("logging", "file")] = path_field_classification(
+                                "file", lf, config_dir
+                            )
+                        else:
+                            classification_overrides[("logging", "file")] = FieldClassification.REPOSITORY_SAFE
 
                     # Simple deep merge of level-1 dicts, tracking provenance
                     # at the exact same granularity the merge itself uses.

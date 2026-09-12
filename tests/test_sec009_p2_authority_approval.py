@@ -443,6 +443,101 @@ def test_24_unknown_future_security_field_not_covered_by_older_approval(tmp_path
             load_config()
 
 
+# --- 25/26/27: logging.file approval cycle (SEC-009 bypass-closure fix, ----
+# 2026-09-12) - mirrors the MCP approve/deny/invalidate cycle above (tests
+# 1-4), plus the no-grandfathering case unique to this fix: an approval
+# whose security subset never included logging.file (because it was
+# in-workspace, i.e. not a violation at all, at approval time) must not
+# silently authorize it once it becomes an escaping, SECURITY_AUTHORITY
+# target - Option A's whole-set digest (compute_set_digest()) makes this
+# automatic, this test proves it rather than just inferring it.
+
+def test_25_exact_logging_file_approval_succeeds(tmp_path):
+    ws = tmp_path / "ws"
+    outside_dir = tmp_path / "log25_outside"
+    target = outside_dir / "kriya.log"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
+        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+            load_config()
+        _approve()
+        cfg = load_config()
+        assert os.path.realpath(cfg.logging.file) == os.path.realpath(str(target))
+
+
+def test_26_logging_file_target_change_invalidates(tmp_path):
+    ws = tmp_path / "ws"
+    outside_dir = tmp_path / "log26_outside"
+    target = outside_dir / "kriya.log"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
+        _approve()
+        load_config()  # sanity - works before change
+        target2 = outside_dir / "renamed.log"
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target2)}})
+        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+            load_config()
+
+
+def test_27_older_approval_without_logging_file_in_security_subset_does_not_grandfather_it(tmp_path):
+    """The requirement-11 case: approve a config where logging.file resolves
+    INSIDE the workspace (so it is REPOSITORY_SAFE, not part of the
+    approved security subset at all - only `mcp.hostile` is), then flip
+    logging.file to an escaping target without re-approving. The old
+    approval's set_digest was computed over {mcp.hostile} only, so it
+    cannot possibly match the new set {mcp.hostile, logging.file} -
+    Option A denies the whole thing, not just the new field."""
+    ws = tmp_path / "ws"
+    outside_dir = tmp_path / "log27_outside"
+    target = outside_dir / "kriya.log"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {
+            "logging": {"file": "logs/kriya.log"},  # in-workspace: not a violation
+            "mcp": {"hostile": {"command": "/bin/sh"}},
+        })
+        _approve()
+        cfg = load_config()
+        assert cfg.mcp["hostile"].command == "/bin/sh"
+
+        _write_yaml(ws / "kriya.yaml", {
+            "logging": {"file": str(target)},  # now escapes - newly SECURITY_AUTHORITY
+            "mcp": {"hostile": {"command": "/bin/sh"}},
+        })
+        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+            load_config()
+    assert not outside_dir.exists()
+
+
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+def test_cli_logging_file_approval_reaches_configure_logging_end_to_end(tmp_path, monkeypatch):
+    """Real production CLI, real approval artifact, real outside-workspace
+    target: proves the SIDE_EFFECT invariant in both directions through the
+    actual entry point - denied means no directory/file, approved means the
+    real log target is created. `kriya plugins` never reaches an LLM call."""
+    home = tmp_path / "_home"
+    ws = tmp_path / "repo"
+    ws.mkdir()
+    outside_dir = tmp_path / "cli_log_outside"
+    target = outside_dir / "attacker.log"
+    _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
+    env = {"KRIYA_AUTHORITY_HOME": str(home)}
+
+    code, out, err = _run_cli(["plugins"], cwd=str(ws), extra_env=env)
+    assert code != 0
+    assert "Configuration-authority denied" in err
+    assert not outside_dir.exists()
+    assert not target.exists()
+
+    approve_code, approve_out, approve_err = _run_cli(
+        ["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env,
+    )
+    assert approve_code == 0, approve_err
+
+    code2, out2, err2 = _run_cli(["plugins"], cwd=str(ws), extra_env=env)
+    assert code2 == 0, err2
+    assert target.exists(), "approved logging.file target must actually be created by configure_logging()"
+
+
 # --- Resume: same authority resolver, no stale-approval inheritance --------
 
 @pytest.mark.asyncio

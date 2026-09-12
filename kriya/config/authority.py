@@ -111,7 +111,17 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     ("autonomy", "sandbox_cpu_seconds"), ("autonomy", "sandbox_memory_mb"),
     ("autonomy", "acquisition_cpu_seconds"), ("autonomy", "acquisition_memory_mb"),
     ("skills", "load_global"), ("skills", "load_cwd"),
-    ("logging", "level"), ("logging", "file"),
+    ("logging", "level"),
+    # logging.file is NOT listed here - its classification depends on a
+    # resolved value (in-workspace vs. escaping), exactly like
+    # paths.{skills,memory,logs} below. config.py always supplies an
+    # explicit classification_overrides entry for it via
+    # path_field_classification() (SEC-009 bypass-closure fix,
+    # 2026-09-12: a repository could set an arbitrary outside-workspace
+    # logging.file and configure_logging() would mkdir/open it
+    # unconditionally - see kriya/cli.py::configure_logging()). Deliberately
+    # absent from this static table so a skipped override fails CLOSED
+    # (_SECURITY_AUTHORITY_FIELDS below), not open.
     ("embedding", "model"),
     ("routing", "enabled"), ("routing", "embed_model"),
     ("routing", "reject_threshold"), ("routing", "ask_margin"),
@@ -163,6 +173,12 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("engineering_triage", "shadow_mode"),
     # paths escaping the workspace (see containment check note above)
     ("paths", "skills"), ("paths", "memory"), ("paths", "logs"),
+    # logging.file escaping the workspace - same containment treatment as
+    # paths.* above (see the _REPOSITORY_SAFE_FIELDS comment for this
+    # field). Listed here too, purely for accurate is_known_field()
+    # labeling and as the fail-closed static fallback if config.py's
+    # runtime override were ever skipped by a bug.
+    ("logging", "file"),
 })
 
 # NOTE: there is currently no AppConfig field for an "LSP executable path" -

@@ -364,6 +364,138 @@ def test_absolute_outside_path_denied(tmp_path):
             load_config()
 
 
+# --- logging.file containment (SEC-009 bypass-closure fix, 2026-09-12) -----
+# Mirrors the paths.*/16-17-18 section above exactly: logging.file's
+# classification depends on the resolved value (in-workspace vs. escaping),
+# not the field name alone - see kriya/config/authority.py's
+# _REPOSITORY_SAFE_FIELDS comment and kriya/config/config.py's
+# resolve_config_state() for the mechanism. configure_logging()
+# (kriya/cli.py) is the sink: unconditional os.makedirs + FileHandler open
+# on every CLI invocation, which is exactly why an unclassified logging.file
+# was a real, live filesystem-write-authority bypass before this fix.
+
+def test_logging_file_relative_inside_workspace_allowed(tmp_path):
+    ws = tmp_path / "log_rel_inside_ws"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": "logs/kriya.log"}})
+        cfg = load_config()
+        assert os.path.realpath(cfg.logging.file) == os.path.realpath(str(ws / "logs" / "kriya.log"))
+
+
+def test_logging_file_absolute_inside_workspace_allowed(tmp_path):
+    ws = tmp_path / "log_abs_inside_ws"
+    ws.mkdir()
+    target = ws / "logs" / "kriya.log"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
+        cfg = load_config()
+        assert os.path.realpath(cfg.logging.file) == os.path.realpath(str(target))
+
+
+def test_logging_file_traversal_escape_denied(tmp_path):
+    ws = tmp_path / "log_traversal_ws"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": "../../etc/outside.log"}})
+        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+            load_config()
+
+
+def test_logging_file_absolute_outside_workspace_denied(tmp_path):
+    ws = tmp_path / "log_abs_outside_ws"
+    outside_dir = tmp_path / "log_abs_outside_target"
+    target = outside_dir / "attacker.log"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
+        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+            load_config()
+    assert not outside_dir.exists(), "denied logging.file must never mkdir its target directory"
+    assert not target.exists()
+
+
+def test_logging_file_symlink_escape_denied(tmp_path):
+    ws = tmp_path / "log_symlink_escape_ws"
+    ws.mkdir()
+    outside = tmp_path / "log_symlink_outside_target"
+    outside.mkdir()
+    link = ws / "logs_link"
+    os.symlink(outside, link)
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": "logs_link/kriya.log"}})
+        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+            load_config()
+
+
+def test_logging_file_symlink_inside_workspace_accepted(tmp_path):
+    ws = tmp_path / "log_symlink_inside_ws"
+    ws.mkdir()
+    real_target = ws / "real_logs"
+    real_target.mkdir()
+    link = ws / "logs_link"
+    os.symlink(real_target, link)
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": "logs_link/kriya.log"}})
+        cfg = load_config()
+        assert os.path.realpath(cfg.logging.file) == os.path.realpath(str(real_target / "kriya.log"))
+
+
+def test_logging_file_explicit_config_different_cwd_resolves_to_config_dir(tmp_path):
+    """The load-bearing canonicalization this fix adds: a BARE relative
+    logging.file value (no './'/'../' prefix - unlike paths.*'s narrower
+    rewrite condition) must still resolve against config_dir, not process
+    CWD, or classification and configure_logging()'s execution would anchor
+    to two different directories."""
+    external_dir = tmp_path / "log_external_config_dir"
+    external_dir.mkdir()
+    cfg_file = _write_yaml(external_dir / "kriya.yaml", {"logging": {"file": "logs/kriya.log"}})
+    with _cwd(tmp_path / "log_unrelated_cwd"):
+        cfg = load_config(cfg_file)
+        assert os.path.realpath(cfg.logging.file) == os.path.realpath(str(external_dir / "logs" / "kriya.log"))
+
+
+def test_logging_level_only_unchanged(tmp_path):
+    """Negative control - only the filesystem TARGET requires this
+    treatment; logging.level is untouched, unconditionally REPOSITORY_SAFE
+    as before."""
+    ws = tmp_path / "log_level_only_ws"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"level": "DEBUG"}})
+        cfg = load_config()
+        assert cfg.logging.level == "DEBUG"
+
+
+def test_logging_file_explicit_null_disables_safely(tmp_path):
+    """Explicitly disabling file logging (`logging.file: null`) removes a
+    capability rather than granting one - must stay REPOSITORY_SAFE, not
+    fall through to the SECURITY_AUTHORITY static-table fallback now that
+    logging.file is no longer unconditionally REPOSITORY_SAFE."""
+    ws = tmp_path / "log_null_ws"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"file": None, "level": "INFO"}})
+        cfg = load_config()
+        assert cfg.logging.file is None
+
+
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+def test_cli_logging_file_outside_write_denied_end_to_end(tmp_path):
+    """Real production CLI (`kriya plugins` - no live LLM), real
+    outside-workspace target. Proves configure_logging()'s FileHandler is
+    never reached and neither the target file nor its parent directory is
+    ever created when denied."""
+    ws = tmp_path / "cli_logging_repo"
+    ws.mkdir()
+    outside_dir = tmp_path / "cli_logging_outside_target"
+    target = outside_dir / "attacker.log"
+    _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
+
+    result = _run_cli(["plugins"], cwd=str(ws))
+
+    assert result.returncode != 0
+    assert "Configuration-authority denied" in result.stderr
+    assert "logging.file" in result.stderr
+    assert not outside_dir.exists()
+    assert not target.exists()
+
+
 # --- 19: explicit --config, relative and absolute, is not automatic trust --
 
 def test_relative_explicit_config_remains_untrusted(tmp_path):
