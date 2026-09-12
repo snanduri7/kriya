@@ -1,15 +1,77 @@
 import asyncio
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel, Field, create_model
 
 from kriya.core.kernel import Kernel
+from kriya.tools.sandbox import build_restricted_env
 from kriya.tools.tool import BaseTool, ToolExecutionError
 
 logger = logging.getLogger(__name__)
+
+# SEC-003 (2026-09-12): the required Kriya baseline environment for
+# launching an MCP subprocess - deliberately NOT reused from
+# `autonomy.sandbox_env_allowlist` (kriya/config/config.py), which is
+# scoped to sandboxed TARGET-CODE build/test execution and carries
+# build-toolchain-specific entries (JAVA_HOME, M2_HOME, GRADLE_HOME,
+# VIRTUAL_ENV, PYTHONPATH) that have no established need for launching an
+# MCP server and that a hostile/misconfigured MCP command could abuse
+# (e.g. a spoofed PYTHONPATH redirecting the server's own imports). This
+# is the general-purpose subset of that same allowlist only - HOME,
+# locale, and temp-directory variables that common language runtimes
+# (Python, Node) read for basic, non-security-relevant operation (cache
+# dirs, locale-aware stdio encoding) - confirmed empirically that Kriya's
+# own shipped MCP server (kriya/mcp/server.py) launches and completes the
+# handshake with NONE of these set at all (a completely empty
+# environment, not even PATH, still worked when `command` is an absolute
+# path); they are included anyway because other real-world MCP servers
+# (commonly Node/npx-based) are not guaranteed to behave as cleanly, and
+# this exact variable set already has established, safe precedent as
+# "reasonable to forward to a third-party subprocess Kriya spawns" via
+# `autonomy.sandbox_env_allowlist`'s own default - not a new or broader
+# exposure. Proxy variables (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY)
+# are deliberately excluded - inheriting them merely because they exist
+# in the parent would be an indirect network-authority bypass; an
+# operator who needs one sets it explicitly via `mcp.<server>.env`,
+# subject to SEC-009 authority like any other configured value.
+MCP_BASELINE_ENV_ALLOWLIST: List[str] = [
+    "HOME", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
+]
+
+
+def build_mcp_subprocess_env(configured_env: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """SEC-003: the environment an MCP subprocess actually receives -
+    `Kriya-required baseline UNION explicitly authorized MCP environment`,
+    never ambient `os.environ`. Reuses `build_restricted_env()`
+    (kriya/tools/sandbox.py, SEC-001) as the one common restricted-env
+    primitive rather than re-implementing environment filtering here -
+    that function always includes real PATH verbatim (unconditionally,
+    regardless of allowlist) plus any allowlisted name present in the
+    real process environment; nothing else from `os.environ` reaches the
+    result. `configured_env` is `cfg.mcp.<server>.env` - already
+    SEC-009-authorized before this function is ever called (this function
+    does not re-decide whether that env is authorized, only what
+    environment the already-authorized subprocess receives) - and is
+    applied LAST, so an explicit configured value legitimately overrides
+    a baseline variable of the same name (e.g. a server wanting its own
+    TMPDIR), per existing `mcp.<server>.env` override semantics. No
+    environment-variable expansion/interpolation ($VAR, ${VAR}) is
+    performed anywhere in this path - `configured_env`'s values are used
+    verbatim, so a configured value can never reach back into ambient
+    os.environ through interpolation. An empty/missing `configured_env`
+    never restores ambient inheritance - the baseline alone is already a
+    strict subset of `os.environ`, never `os.environ` itself. Pure and
+    non-raising by construction (no I/O, no external calls) - there is no
+    failure path here that could tempt a caller into falling back to
+    ambient `os.environ`; if this function's inputs are ever malformed,
+    the natural `TypeError`/`AttributeError` propagates to the caller
+    exactly like any other Kriya construction error, never silently
+    substituting the unrestricted environment."""
+    restricted = build_restricted_env(MCP_BASELINE_ENV_ALLOWLIST)
+    restricted.update(configured_env or {})
+    return restricted
 
 # =====================================================================
 # 1. Native Stdio JSON-RPC 2.0 MCP Client
@@ -36,10 +98,11 @@ class MCPClient:
             return
 
         logger.info(f"Starting MCP server '{self.name}' using command: {self.command} {self.args}")
-        
-        # Merge current process environment with config env
-        full_env = {**os.environ, **self.env}
-        
+
+        # SEC-003: restricted-env construction, never ambient os.environ -
+        # see build_mcp_subprocess_env()'s own docstring for the invariant.
+        full_env = build_mcp_subprocess_env(self.env)
+
         try:
             self._process = await asyncio.create_subprocess_exec(
                 self.command,
