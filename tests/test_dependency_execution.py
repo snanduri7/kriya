@@ -83,7 +83,7 @@ def test_python_two_phase_acquire_then_offline_execute(tmp_path):
 
     acquire_result = python_acquire_dependencies(
         str(workspace), "requirements.txt", str(cache), controller=controller, containment_backend=backend,
-        timeout=120,
+        registry_hosts=["pypi.org", "files.pythonhosted.org"], timeout=120,
     )
     assert acquire_result.returncode == 0, acquire_result.stderr
     assert any(cache.iterdir()), "acquisition produced no cached wheels"
@@ -137,7 +137,8 @@ def test_maven_two_phase_acquire_then_offline_execute(tmp_path):
     backend = OCIContainmentBackend()
 
     acquire_result = maven_acquire_dependencies(
-        str(workspace), str(cache), controller=controller, containment_backend=backend, timeout=180,
+        str(workspace), str(cache), controller=controller, containment_backend=backend,
+        registry_hosts=["repo.maven.apache.org"], timeout=180,
     )
     assert acquire_result.returncode == 0, acquire_result.stderr
 

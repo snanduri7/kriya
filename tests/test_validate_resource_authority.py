@@ -69,15 +69,28 @@ def test_default_acquisition_limits_are_more_generous_than_a_deliberately_tight_
 
 
 def test_python_acquisition_profile_uses_acquisition_resource_limits():
-    profile = _acquisition_profile("/tmp/fake-workspace", "/tmp/fake-cache", [])
+    profile = _acquisition_profile("/tmp/fake-workspace", "/tmp/fake-cache", [], registry_hosts=["pypi.org"])
     assert profile.cpu_seconds == 300
     assert profile.memory_mb == 2048
 
 
 def test_python_acquisition_profile_resource_limits_are_overridable():
-    profile = _acquisition_profile("/tmp/fake-workspace", "/tmp/fake-cache", [], cpu_seconds=9, memory_mb=17)
+    profile = _acquisition_profile(
+        "/tmp/fake-workspace", "/tmp/fake-cache", [], cpu_seconds=9, memory_mb=17, registry_hosts=["pypi.org"],
+    )
     assert profile.cpu_seconds == 9
     assert profile.memory_mb == 17
+
+
+# --- SEC-006: registry-scoped acquisition authority ---
+
+def test_acquisition_profile_uses_dependency_registry_only_network():
+    from kriya.tools.containment import NetworkAuthority
+    profile = _acquisition_profile(
+        "/tmp/fake-workspace", "/tmp/fake-cache", [], registry_hosts=["pypi.org", "files.pythonhosted.org"],
+    )
+    assert profile.network == NetworkAuthority.DEPENDENCY_REGISTRY_ONLY
+    assert profile.network_destinations == ("files.pythonhosted.org", "pypi.org")
 
 
 # --- OBS-005: acquisition outcome evidence ---

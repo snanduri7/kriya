@@ -34,10 +34,14 @@ import re
 import shlex
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple
 
 from kriya.tools.containment import ContainmentBackend, ContainmentProfile, NetworkAuthority, TrustClass
-from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, PIP_CACHE_MOUNT
+from kriya.tools.containment_oci import (
+    MAVEN_CACHE_MOUNT,
+    PIP_CACHE_MOUNT,
+    finalize_registry_acquisition_result,
+)
 from kriya.tools.process import ProcessController, ProcessResult
 
 
@@ -206,13 +210,23 @@ def log_acquisition_outcome(
 def _acquisition_profile(
     workspace_path: str, cache_path: str, env_allowlist: List[str],
     cpu_seconds: Optional[int] = _ACQUISITION_CPU_SECONDS, memory_mb: Optional[int] = _ACQUISITION_MEMORY_MB,
+    *, registry_hosts: Sequence[str],
 ) -> ContainmentProfile:
+    """SEC-006: `registry_hosts` is a REQUIRED keyword-only parameter, not
+    a default - this module has no `AutonomyConfig` reference of its own
+    (by design, see the module docstring), so it can never silently invent
+    or widen registry authority on its own; every caller must pass
+    whatever `AutonomyConfig.acquisition_registry_hosts` already
+    authorizes. An empty sequence is accepted here (the backend itself
+    fails closed on an empty `network_destinations` set) rather than
+    validated twice."""
     return ContainmentProfile(
         trust_class=TrustClass.UNTRUSTED_EXECUTION,
         workspace_path=workspace_path,
         dependency_cache_paths=[cache_path],
         dependency_cache_writable=True,
-        network=NetworkAuthority.UNRESTRICTED,
+        network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY,
+        network_destinations=tuple(sorted(set(registry_hosts))),
         env_allowlist=env_allowlist,
         cpu_seconds=cpu_seconds,
         memory_mb=memory_mb,
@@ -248,23 +262,32 @@ def _execution_profile(
 
 def maven_acquire_dependencies(
     workspace_path: str, cache_path: str, *, controller: ProcessController,
-    containment_backend: ContainmentBackend, timeout: int = 600, env_allowlist: Optional[List[str]] = None,
+    containment_backend: ContainmentBackend, registry_hosts: Sequence[str],
+    timeout: int = 600, env_allowlist: Optional[List[str]] = None,
 ) -> ProcessResult:
     """Phase 1: `mvn dependency:go-offline` populates `cache_path` (mounted
-    as Maven's own local repository, /root/.m2, by OCIContainmentBackend's
-    own image/cache-path detection) - real network access, still fully
-    filesystem/process-contained. Does NOT guarantee every subsequent
-    offline build will succeed (a plugin invoked only during a later
-    lifecycle phase, e.g. `package`, may not be resolved by
+    as Maven's own local repository at MAVEN_CACHE_MOUNT by
+    OCIContainmentBackend's own image/cache-path detection) - real,
+    registry-scoped network access (SEC-006: `registry_hosts` is the ONLY
+    source of destination authority - the caller's own
+    `AutonomyConfig.acquisition_registry_hosts`, never inferred here),
+    still fully filesystem/process-contained. Does NOT guarantee every
+    subsequent offline build will succeed (a plugin invoked only during a
+    later lifecycle phase, e.g. `package`, may not be resolved by
     `dependency:go-offline` alone) - that is `maven_execute_offline`'s own
     `OfflineFailureKind.MISSING_DEPENDENCY` evidence to surface, not
     something this phase can guarantee away."""
-    profile = _acquisition_profile(workspace_path, cache_path, env_allowlist or [])
+    profile = _acquisition_profile(workspace_path, cache_path, env_allowlist or [], registry_hosts=registry_hosts)
     result = controller.run(
         ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", "dependency:go-offline"],
         cwd=workspace_path, timeout=timeout,
         containment_profile=profile, containment_backend=containment_backend,
     )
+    # SEC-006: raises RegistryAcquisitionSetupError before this function
+    # ever returns a value if the acquisition container's own trusted
+    # setup (firewall/proxy/IPv6/privilege-drop) failed - never let that
+    # be mistaken for an ordinary `mvn` failure.
+    finalize_registry_acquisition_result(result)
     log_acquisition_outcome("maven", "mvn dependency:go-offline", returncode=result.returncode, timed_out=result.timeout)
     return result
 
@@ -291,7 +314,8 @@ def maven_execute_offline(
 
 def python_acquire_dependencies(
     workspace_path: str, requirements_path: str, cache_path: str, *, controller: ProcessController,
-    containment_backend: ContainmentBackend, timeout: int = 600, env_allowlist: Optional[List[str]] = None,
+    containment_backend: ContainmentBackend, registry_hosts: Sequence[str],
+    timeout: int = 600, env_allowlist: Optional[List[str]] = None,
 ) -> ProcessResult:
     """Phase 1: `pip download` into `cache_path` (mounted at pip's own
     cache location by OCIContainmentBackend). Prefers wheels only
@@ -301,14 +325,17 @@ def python_acquire_dependencies(
     backend as part of producing a downloadable artifact) - that fallback
     attempt still runs through the exact same containment as every other
     untrusted command here (filesystem/process-contained throughout,
-    network open only because this IS the acquisition phase), never
-    "trusted" and never uncontained, per this module's own docstring."""
-    profile = _acquisition_profile(workspace_path, cache_path, env_allowlist or [])
+    registry-scoped network access only because this IS the acquisition
+    phase - SEC-006: `registry_hosts` is the ONLY source of destination
+    authority, never inferred here), never "trusted" and never
+    uncontained, per this module's own docstring."""
+    profile = _acquisition_profile(workspace_path, cache_path, env_allowlist or [], registry_hosts=registry_hosts)
     wheels_only = controller.run(
         ["python3", "-m", "pip", "download", "--dest", PIP_CACHE_MOUNT, "--only-binary=:all:", "-r", requirements_path],
         cwd=workspace_path, timeout=timeout,
         containment_profile=profile, containment_backend=containment_backend,
     )
+    finalize_registry_acquisition_result(wheels_only)
     log_acquisition_outcome("python", "pip download --only-binary=:all:", returncode=wheels_only.returncode, timed_out=wheels_only.timeout)
     if wheels_only.returncode == 0:
         return wheels_only
@@ -317,6 +344,7 @@ def python_acquire_dependencies(
         cwd=workspace_path, timeout=timeout,
         containment_profile=profile, containment_backend=containment_backend,
     )
+    finalize_registry_acquisition_result(fallback)
     log_acquisition_outcome("python", "pip download (fallback, sdist allowed)", returncode=fallback.returncode, timed_out=fallback.timeout)
     return fallback
 

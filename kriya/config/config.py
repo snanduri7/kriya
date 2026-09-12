@@ -127,6 +127,73 @@ class AutonomyConfig(BaseModel):
     # without being unbounded.
     acquisition_cpu_seconds: int = Field(default=300)
     acquisition_memory_mb: int = Field(default=2048)
+    # SEC-006 (2026-09-12): the ONLY source of destination authority for
+    # NetworkAuthority.DEPENDENCY_REGISTRY_ONLY acquisition - a hostile
+    # repository's pom.xml/requirements.txt/settings.xml/pip.conf can never
+    # enlarge this set (Invariant: repository content cannot enlarge
+    # authority). Exact hostnames only, empirically the minimum needed for
+    # real Maven Central + PyPI acquisition (verified live, 2026-09-12):
+    # `repo.maven.apache.org` (Maven Central itself), `pypi.org` (the PyPI
+    # index), `files.pythonhosted.org` (the Fastly CDN PyPI actually serves
+    # wheels from - NOT reachable via pypi.org's own host). Deliberately NO
+    # organizational wildcard (`.apache.org`/`.python.org`) even though one
+    # would be more convenient - the packaged default must contain only
+    # what was empirically required, per this risk's own explicit
+    # instruction. A private/internal registry needs an explicit additional
+    # entry here; it is never inferred from repository content.
+    acquisition_registry_hosts: List[str] = Field(
+        default_factory=lambda: ["repo.maven.apache.org", "pypi.org", "files.pythonhosted.org"],
+        # validate_default: without this, pydantic v2 does not run
+        # field_validator over a DEFAULT value at all (only over an
+        # explicitly-supplied one) - the packaged default would then stay
+        # in its literal declaration order while any explicit config value
+        # gets canonicalized (sorted/deduped/lowercased), a real
+        # inconsistency for a field whose canonical form doubles as the
+        # authority-identity hash input (kriya/tools/containment_oci.py's
+        # compute_authority_id).
+        validate_default=True,
+    )
+
+    @field_validator("acquisition_registry_hosts")
+    @classmethod
+    def _validate_acquisition_registry_hosts(cls, hosts: List[str]) -> List[str]:
+        """Normalizes to a canonical form (lowercase, no trailing dot,
+        deduped, sorted) - this exact canonical form is also the input to
+        the per-run authority-identity hash (kriya/tools/containment_oci.py),
+        so two configs naming the same hosts in a different order/case
+        always produce the same authority identity. Rejects anything that
+        isn't a bare exact hostname: no scheme/path (a URL smuggling a
+        different real destination than it appears to), no port, no
+        wildcard/leading-dot convenience entries (this risk's own explicit
+        instruction - a wildcard is a materially larger authority grant
+        than the exact host it looks like), no empty/whitespace entries."""
+        normalized = []
+        for raw in hosts:
+            host = raw.strip().lower()
+            if not host:
+                raise ValueError("autonomy.acquisition_registry_hosts: empty hostname entry is not allowed.")
+            if "://" in host or "/" in host:
+                raise ValueError(
+                    f"autonomy.acquisition_registry_hosts: {raw!r} looks like a URL, not a bare "
+                    "hostname - registry authority must be an exact hostname (e.g. 'pypi.org'), "
+                    "never a URL/path."
+                )
+            if ":" in host:
+                raise ValueError(
+                    f"autonomy.acquisition_registry_hosts: {raw!r} includes a port - registry "
+                    "authority must be a bare hostname with no port."
+                )
+            if host.startswith(".") or host.startswith("*"):
+                raise ValueError(
+                    f"autonomy.acquisition_registry_hosts: {raw!r} is a wildcard/organizational "
+                    "entry - this risk's own instruction forbids convenience wildcards (e.g. "
+                    "'.apache.org'). List each exact registry hostname explicitly."
+                )
+            host = host.rstrip(".")
+            if not host:
+                raise ValueError("autonomy.acquisition_registry_hosts: empty hostname entry is not allowed.")
+            normalized.append(host)
+        return sorted(set(normalized))
     # SEC-001 foundation (2026-09-11): which ContainmentBackend
     # (kriya/tools/containment.py) ProcessController composes for a
     # profile that requires one. "none" (NullContainmentBackend) is the

@@ -19,11 +19,12 @@ from kriya.tools.process import ProcessController
 from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
+    ContainmentSetupError,
     NetworkAuthority,
     TrustClass,
     resolve_containment_backend,
 )
-from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT
+from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, finalize_registry_acquisition_result
 from kriya.tools.dependency_execution import (
     OfflineFailureKind,
     classify_maven_offline_failure_text,
@@ -367,7 +368,7 @@ class PolymorphicValidator:
         # suspected-hostile application.
         install_res = self._run_cmd_with_timeout(
             [venv_python, "-m", "pip", "install", "-q", *install_args, "pytest"],
-            cwd=self.workspace_path, timeout=300, network=NetworkAuthority.UNRESTRICTED, acquisition=True,
+            cwd=self.workspace_path, timeout=300, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
         )
         log_acquisition_outcome(
             "python", f"pip install {' '.join(install_args)}",
@@ -697,10 +698,22 @@ class PolymorphicValidator:
         else:
             cpu_seconds = self.autonomy_cfg.sandbox_cpu_seconds
             memory_mb = self.autonomy_cfg.sandbox_memory_mb
+        # SEC-006 (2026-09-12): the ONLY place destination authority enters
+        # a real ContainmentProfile for this validator - always
+        # AutonomyConfig.acquisition_registry_hosts (already normalized/
+        # validated by its own field_validator), NEVER derived from the
+        # command/goal/repository content about to run. A caller cannot
+        # widen this by passing its own host list; there is no parameter
+        # for that.
+        network_destinations: Tuple[str, ...] = (
+            tuple(self.autonomy_cfg.acquisition_registry_hosts)
+            if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY else ()
+        )
         profile = ContainmentProfile(
             trust_class=TrustClass.UNTRUSTED_EXECUTION,
             workspace_path=self.workspace_path,
             network=network,
+            network_destinations=network_destinations,
             env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
             cpu_seconds=cpu_seconds,
             memory_mb=memory_mb,
@@ -722,10 +735,18 @@ class PolymorphicValidator:
             dependency_cache_writable=dependency_cache_writable, acquisition=acquisition,
         )
         if profile is not None:
-            return ProcessController().run(
+            result = ProcessController().run(
                 cmd, cwd=cwd, timeout=timeout, stdin_payload=stdin_payload,
                 containment_profile=profile, containment_backend=backend,
-            ).to_dict()
+            )
+            if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY:
+                # SEC-006: raises RegistryAcquisitionSetupError (a
+                # ContainmentSetupError) rather than returning if the
+                # acquisition container's own trusted setup script
+                # (firewall/IPv6/privilege-drop) failed - never let that
+                # failure be misread as an ordinary mvn/pip result.
+                finalize_registry_acquisition_result(result)
+            return result.to_dict()
         env, preexec_fn = self.build_subprocess_env_and_preexec()
         return ProcessController().run(
             cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn, stdin_payload=stdin_payload,
@@ -800,19 +821,30 @@ class PolymorphicValidator:
         goal_desc = f"mvn {' '.join(goals)}"
 
         def _acquire_for_this_goal() -> None:
-            # PREPARATION/ACQUISITION ONLY - network=UNRESTRICTED, same
-            # goals as the authoritative offline run, result discarded.
-            # Never contributes Quality Gate PASS evidence: the caller
-            # never sees this call's own return value (OBS-005: its
-            # OUTCOME - exit code/timeout/likely-resource-termination - is
-            # still always recorded via _log_acquisition_outcome, just
-            # never its content).
+            # PREPARATION/ACQUISITION ONLY - network=DEPENDENCY_REGISTRY_ONLY
+            # (SEC-006: registry-scoped, not unrestricted), same goals as
+            # the authoritative offline run, result discarded. Never
+            # contributes Quality Gate PASS evidence: the caller never sees
+            # this call's own return value (OBS-005: its OUTCOME - exit
+            # code/timeout/likely-resource-termination - is still always
+            # recorded via _log_acquisition_outcome, just never its
+            # content).
             try:
                 result = self._run_cmd_with_timeout(
                     ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
-                    cwd=cwd, timeout=timeout, network=NetworkAuthority.UNRESTRICTED, acquisition=True,
+                    cwd=cwd, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
                     dependency_cache_path=cache_dir, dependency_cache_writable=True,
                 )
+            except ContainmentSetupError:
+                # SEC-006 (Invariant: containment/resource setup failure
+                # must block execution, never degrade silently): a
+                # RegistryAcquisitionSetupError (firewall/proxy/IPv6/
+                # privilege-drop failure) must propagate as the distinct
+                # containment-setup failure it is - NEVER get folded into
+                # the generic "acquisition failed to invoke" warning below,
+                # which would let a real security-mechanism failure look
+                # like an ordinary, retryable missing-dependency outcome.
+                raise
             except Exception as e:
                 logger.warning(f"Maven acquisition (goal={goal_desc!r}) failed to invoke: {e}")
                 return

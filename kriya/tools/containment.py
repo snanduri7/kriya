@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Protocol
+from typing import Callable, Dict, List, Optional, Protocol, Tuple
 
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 
@@ -84,6 +84,15 @@ class ContainmentProfile:
     dependency_cache_paths: List[str] = field(default_factory=list)
     dependency_cache_writable: bool = False
     network: NetworkAuthority = NetworkAuthority.DENIED
+    # SEC-006 (2026-09-12): the ONLY carrier of destination authority for
+    # NetworkAuthority.DEPENDENCY_REGISTRY_ONLY - exact hostnames, always
+    # sourced from Kriya's own AutonomyConfig.acquisition_registry_hosts
+    # (never repository content). A tuple, not a list - ContainmentProfile
+    # is frozen/hashable and this field must be too; it also doubles as the
+    # canonical input to the per-run authority-identity hash a backend
+    # computes for observability/isolation (kriya/tools/containment_oci.py).
+    # Meaningless (and ignored) for DENIED/UNRESTRICTED profiles.
+    network_destinations: Tuple[str, ...] = ()
     env_allowlist: List[str] = field(default_factory=list)
     cpu_seconds: Optional[int] = None
     memory_mb: Optional[int] = None
