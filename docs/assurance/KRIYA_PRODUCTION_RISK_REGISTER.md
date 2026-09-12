@@ -493,7 +493,47 @@ Language Scope: LANGUAGE_NEUTRAL (the verification-marker contract, `pass_verdic
 *(Unchanged from Pass 1 — no PRV/P-series evidence claims existed here to re-audit; all E0/E1 assignments already reflected absence of a mechanism, directly confirmed by source grep both passes.)*
 
 **SEC-001 — Hostile-code containment for generated/executed code**
-Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §7 (DE-06) · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
+Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `DEPLOYMENT_ENVELOPE` §7 (DE-06) · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (real production run, real local model, real generated hostile code genuinely executed, external host-side verification of every prohibited effect - see below) · Disposition: **CLOSED** (2026-09-12 - see below for the decisive live evidence).
+
+**2026-09-12 update — CLOSED.** Real local-model production run
+(`qwen3-coder:30b` + fallback `qwen3.6:35b-a3b-q4_K_M`, goal
+"WordFrequencyDiagnostics", `contained_execution_required: true` +
+`containment_backend: oci`, target `sandbox_memory_mb: 256` / acquisition
+`acquisition_memory_mb: 2048`) produced a real, model-generated
+`SystemDiagnostics.runSelfCheck()` exercising all 6 adversarial probe
+classes, genuinely EXECUTED (not just present in source - real captured
+stdout, multiple times across the run's own test/runtime-verification
+gates): `DIAG_HOST_READ=BLOCKED:<path>` (file does not exist inside the
+container - host sentinel confirmed unchanged and never appears anywhere
+in the run's own log), `DIAG_HOST_WRITE=OK` (succeeds only against the
+container's own ephemeral filesystem - the real host-side target path
+confirmed absent afterward), `DIAG_ENV_SECRET=NULL` (a synthetic secret
+env var, present in Kriya's own process environment but never
+allowlisted, never reached the container - confirmed absent from the
+log), `DIAG_NETWORK=BLOCKED:Network is unreachable` (a real Java
+exception from a real blocked socket connect), `DIAG_BACKGROUND_PROCESS=
+STARTED:<pid>` (a real child process inside the container - confirmed
+no surviving `kriya-oci-*` container or host process after the run),
+`DIAG_RESOURCE=BLOCKED:Java heap space` (a real `OutOfMemoryError` - a
+400MB allocation attempt genuinely terminated under the 256MB target
+cap). No `BackendUnavailableError`/fallback/uncontained-execution marker
+anywhere in the log. The SAME run's Maven build used
+`maven-surefire-plugin:3.0.0-M9` - the exact version that defeated
+acquisition before `SEC-007` was fixed - and resolved it cleanly this
+time, with `SEC-007`'s own acquisition-evidence log lines
+(`kriya.tools.dependency_execution`/`kriya.tools.validate`: "Acquisition
+(maven, ...): succeeded (exit 0)" / "authoritative offline retry
+followed and succeeded") appearing in the real production log. Legitimate
+functional behavior: real `WordFrequencyCounter.topWords()` implementation,
+Quality Gates PASSED (candidate + full regression), deterministic
+Runtime Verification PASSED via the application's own real entrypoint
+marker. No Kriya source modification or manual candidate repair was
+needed during this validation phase (the Maven/resource-authority fixes
+that made this run possible were made and tested in a separate, earlier
+implementation phase, not during this evidence-only run). Full pytest at
+this HEAD: 3532 passed, 9 failed (the same proven pre-existing baseline:
+8 PATH/FileNotFoundError, 1 Django classification test), zero new
+failures.
 
 **SEC-002 — Fail-closed behavior under sandbox/policy failure**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE first.
@@ -512,8 +552,25 @@ Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective 
 Scope: Dependency acquisition (`kriya/tools/validate.py::_run_maven_cmd`'s `dependency:go-offline` step, `kriya/tools/dependency_execution.py`'s own acquisition functions) currently receives unrestricted outbound network (`NetworkAuthority.UNRESTRICTED`) while filesystem/process containment remains active throughout. Execution/test/runtime phases remain network `DENIED` regardless. `OCIContainmentBackend` fails closed (`BackendUnavailableError`) when a profile explicitly requires `NetworkAuthority.DEPENDENCY_REGISTRY_ONLY`, rather than silently downgrading it to unrestricted, because destination-filtered (registry-scoped) egress is not implemented on any backend. Checked against `SEC-005` specifically (this design's own §9 SEC-005 reconciliation, `docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md`) — `SEC-005` names a never-built, differently-scoped broker abstraction and is not a match; no other existing register entry names registry-scoped egress, so this is filed as its own new ID rather than folded into `SEC-001` or `SEC-005`. Candidate Next Action: an egress-restricting proxy the acquisition container is pointed at (with direct outbound blocked), or per-destination firewall rules applied to the acquisition container's own network namespace — neither attempted yet; the managed-service containment work (`SEC-001`) already found Docker Desktop's VM-mediated networking stack behaves unexpectedly around related mechanisms (port-publish-vs-outbound-isolation), so this needs its own empirical investigation before implementation, not an assumption either approach works cleanly.
 
 **SEC-007 — Acquisition/build-tool resource authority coupled to target-code authority**
-Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION · Severity: MEDIUM.
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (deterministic tests plus a real live-model production run - see below) · Disposition: **CLOSED** (2026-09-12) · Severity: MEDIUM.
 Scope: build/dependency acquisition currently shares CPU/memory limits (`AutonomyConfig.sandbox_cpu_seconds`/`sandbox_memory_mb`) with target/generated execution, allowing legitimate acquisition (Maven resolving a large or unusually structured transitive plugin tree, pip resolving/building a package) to be starved by limits intentionally chosen to bound HOSTILE application execution, not the trusted build tooling that prepares for it. Confirmed live during SEC-001 revalidation (2026-09-11): a fixture's own `sandbox_memory_mb: 128` (chosen to make the application's own resource-abuse probe meaningful) OOM-killed Maven's acquisition-phase JVM (`returncode 137`, confirmed via isolated reproduction) while resolving `maven-surefire-plugin:3.0.0-M9`'s unusually large legacy transitive tree (216 artifacts) - a real, reproducible collision between a deliberately-strict target-code resource cap and legitimate build-tool resource needs, not a hypothetical.
+
+**2026-09-12 update — CLOSED.** `AutonomyConfig.acquisition_cpu_seconds`/
+`acquisition_memory_mb` (defaults 300s/2048MB) now separate acquisition's
+own resource authority from `sandbox_cpu_seconds`/`sandbox_memory_mb`,
+threaded through an explicit, caller-supplied `acquisition: bool` selector
+(never inferred from command text) at every Maven/Python acquisition call
+site. Real-Docker regression
+(`tests/test_validate_oci.py::test_sec007_maven_acquisition_survives_a_deliberately_tight_target_memory_cap`)
+reproduces the exact original incident and proves it fixed; 13 deterministic
+tests (`tests/test_validate_resource_authority.py`) pin the resource-split
+semantics precisely. Live-confirmed in the same production run that closed
+`SEC-001`: `maven-surefire-plugin:3.0.0-M9` (the exact version that
+defeated acquisition before this fix) resolved cleanly under
+`acquisition_memory_mb: 2048` while the authoritative offline
+compile/test still ran under the deliberately tight `sandbox_memory_mb:
+256` target cap - both confirmed via real production log lines, not
+inferred.
 
 ---
 
@@ -752,8 +809,21 @@ Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective 
 Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `KRP_REQUIREMENT` (KRP-024) + `DEPLOYMENT_ENVELOPE` §4 (DE-03 unattended autonomy needs bounded resource consumption to be safe — a runaway retry loop or unbounded process time is exactly the kind of thing that becomes dangerous without supervision) · Deployment Relevance: REQUIRED · Current mechanism: scattered limits exist (`generation_time_budget_seconds`, sandbox CPU/memory limits, retry ceilings) but no single governing budget object · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
 
 **OBS-005 — Dependency acquisition failure evidence incomplete** (renumbered from the requesting task's suggested "OBS-003" - that ID is already assigned to "Secret redaction in logs/traces/evidence" in §13; per this register's own immutable-ID rule, IDs are never reused, so this is filed as the next available OBS sequence number instead)
-Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION · Severity: LOW.
+Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E4 (deterministic tests plus real production log lines from the run that closed SEC-001/SEC-007 - see below) · Disposition: **CLOSED** (2026-09-12) · Severity: LOW.
 Scope: nonzero/timeout/killed dependency-acquisition subprocess results are insufficiently surfaced - `kriya/tools/validate.py::_run_maven_cmd`'s acquisition step only logs on a genuine Python-level exception (a failed invocation), never on a nonzero/killed return code, so a real infra-level acquisition failure (e.g. an OOM-killed acquisition JVM, `SEC-007` above) currently produces zero log evidence of its own - only the subsequent, separately-surfaced authoritative offline failure is visible. Confirmed live via the same SEC-007 incident: the acquisition step's own 216-line real download transcript and `returncode=137` were never logged anywhere, discoverable only via out-of-band, isolated reproduction. The authoritative offline result's own failure is never silently swallowed - this is a diagnosability gap, not a correctness/security gap.
+
+**2026-09-12 update — CLOSED.** `kriya.tools.dependency_execution.
+log_acquisition_outcome` now records exit code/timeout/a best-effort
+POSIX-128+signal resource-termination signal for every Maven/Python
+acquisition call site, metadata-only (never logs stdout/stderr, never
+touches environment variables). 8 deterministic tests
+(`tests/test_validate_resource_authority.py`) cover success/nonzero/
+timeout/signal-range/ordinary-failure paths and confirm the function's
+own signature cannot receive content to leak. Live-confirmed in the same
+production run that closed `SEC-001`/`SEC-007`: real log lines
+(`kriya.tools.dependency_execution`: "Acquisition (maven, goal=...):
+succeeded (exit 0)."; `kriya.tools.validate`: "...authoritative offline
+retry followed and succeeded.") appear in the actual run log.
 
 
 ---
