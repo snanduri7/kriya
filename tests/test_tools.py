@@ -350,33 +350,47 @@ async def test_shell_tool_sudo_still_denied_under_enforce_mode_too():
 
 # --- POL-001-P4: decisive audit-vs-enforce differential evidence -----------
 # Same ActionType (RUN_COMMAND), same shell-wrapper command, same production
-# path (BaseTool.execute -> ShellTool._run -> ExecutionPolicy.evaluate),
-# config loaded through the REAL load_config() (not a bare
-# ExecutionPolicyConfig(...) construction, unlike the P2 tests above) - only
-# execution_policy.mode differs between the two halves of this test. Proves,
-# with a filesystem sentinel (not just an exception message), that audit
-# mode consults the policy but still lets the subprocess run, while enforce
-# mode blocks BEFORE the subprocess ever starts.
+# path (BaseTool.execute -> ShellTool._run -> ExecutionPolicy.evaluate) -
+# only execution_policy.mode differs between the two halves of this test.
+# Proves, with a filesystem sentinel (not just an exception message), that
+# audit mode consults the policy but still lets the subprocess run, while
+# enforce mode blocks BEFORE the subprocess ever starts.
+#
+# SEC-009 P1 note: this previously built its AppConfig by writing a
+# kriya.yaml to a tmp_path and loading it through the real load_config() -
+# execution_policy.mode/enabled are now SECURITY_AUTHORITY fields, and an
+# arbitrary external file can no longer set them through load_config()
+# without an approval mechanism (P2, not yet implemented). This test's own
+# subject is ShellTool/GitTool's audit-vs-enforce behavior, not config
+# loading/authority itself, so it now builds the AppConfig directly -
+# programmatic construction is not repository provenance and is unaffected
+# by SEC-009's file-provenance authority gate. See
+# tests/test_sec009_config_authority.py for coverage proving execution_policy
+# fields ARE denied when set through a real load_config() file.
 
-def _write_execution_policy_kriya_yaml(cfg_dir, mode: str) -> str:
+def _execution_policy_app_config(cfg_dir, mode: str) -> "AppConfig":
+    from kriya.config.config import AppConfig
+
     cfg_dir.mkdir()
-    (cfg_dir / "kriya.yaml").write_text(
-        f"execution_policy:\n  enabled: true\n  mode: {mode}\n"
-        f"paths:\n  logs: {cfg_dir}/logs\n  memory: {cfg_dir}/memory\n  skills: {cfg_dir}/skills\n"
+    return AppConfig(
+        execution_policy={"enabled": True, "mode": mode},
+        paths={
+            "logs": str(cfg_dir / "logs"),
+            "memory": str(cfg_dir / "memory"),
+            "skills": str(cfg_dir / "skills"),
+        },
     )
-    return str(cfg_dir / "kriya.yaml")
 
 
 @pytest.mark.asyncio
 async def test_shell_tool_wrapper_audit_vs_enforce_differential_through_load_config(tmp_path):
-    from kriya.config.config import load_config
     from kriya.policy.model import PolicyDecision
 
     sentinel = tmp_path / "wrapper_ran.txt"
     command = f"bash -c 'touch {sentinel}'"
 
     # --- audit half: consults the policy, does not block ---
-    audit_cfg = load_config(_write_execution_policy_kriya_yaml(tmp_path / "audit_cfg", "audit"))
+    audit_cfg = _execution_policy_app_config(tmp_path / "audit_cfg", "audit")
     assert audit_cfg.execution_policy.mode == "audit"
     audit_tool = ShellTool(autonomy_cfg=audit_cfg.autonomy, execution_policy_cfg=audit_cfg.execution_policy)
     captured_audit = []
@@ -399,7 +413,7 @@ async def test_shell_tool_wrapper_audit_vs_enforce_differential_through_load_con
     sentinel.unlink()
 
     # --- enforce half: exact same command, only mode differs ---
-    enforce_cfg = load_config(_write_execution_policy_kriya_yaml(tmp_path / "enforce_cfg", "enforce"))
+    enforce_cfg = _execution_policy_app_config(tmp_path / "enforce_cfg", "enforce")
     assert enforce_cfg.execution_policy.mode == "enforce"
     enforce_tool = ShellTool(autonomy_cfg=enforce_cfg.autonomy, execution_policy_cfg=enforce_cfg.execution_policy)
     captured_enforce = []
@@ -432,7 +446,6 @@ async def test_git_tool_commit_audit_vs_enforce_differential_through_load_config
     (never a user repository)."""
     import subprocess
 
-    from kriya.config.config import load_config
     from kriya.policy.model import PolicyDecision
 
     async def run_phase(mode: str):
@@ -444,7 +457,9 @@ async def test_git_tool_commit_audit_vs_enforce_differential_through_load_config
         (repo_dir / "f.txt").write_text("evidence")
         subprocess.run(["git", "add", "f.txt"], cwd=str(repo_dir), check=True)
 
-        cfg = load_config(_write_execution_policy_kriya_yaml(tmp_path / f"cfg_{mode}", mode))
+        # SEC-009 P1: see the ShellTool differential test above for why this
+        # builds AppConfig directly rather than through load_config().
+        cfg = _execution_policy_app_config(tmp_path / f"cfg_{mode}", mode)
         assert cfg.execution_policy.mode == mode
         tool = GitTool(execution_policy_cfg=cfg.execution_policy)
         captured = []

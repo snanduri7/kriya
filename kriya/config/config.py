@@ -645,14 +645,79 @@ class AppConfig(BaseModel):
             raise ValueError(f"runtime_profile must be one of {_VALID_RUNTIME_PROFILES!r}, got {v!r}")
         return v
 
+def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
+    """The exact (top_key, leaf_key) -> value mapping a runtime_profile
+    preset expands to - see AppConfig's own docstring for what each preset
+    means. Extracted as its own function so it can be tested directly
+    without going through load_config() (whose SEC-009 P1 authority
+    resolution denies a repository-sourced runtime_profile outright,
+    independent of what it would have expanded to - see
+    tests/test_sec009_config_authority.py) or through AppConfig's
+    constructor (which does not itself apply this expansion - only
+    load_config() does, deliberately, post-merge/pre-authority)."""
+    if profile == "legacy":
+        return {
+            ("engineering_triage", "shadow_mode"): True,
+            ("process_profiles", "enabled"): False,
+            ("workflow_controller", "enabled"): False,
+            ("workflow_controller", "mode"): "shadow",
+        }
+    if profile == "validated":
+        return {
+            ("engineering_triage", "shadow_mode"): False,
+            ("process_profiles", "enabled"): True,
+            ("workflow_controller", "enabled"): True,
+            ("workflow_controller", "mode"): "shadow",
+        }
+    if profile == "hardened":
+        return {
+            ("engineering_triage", "shadow_mode"): False,
+            ("process_profiles", "enabled"): True,
+            ("workflow_controller", "enabled"): True,
+            ("workflow_controller", "mode"): "enforce",
+        }
+    return {}
+
+
 def load_config(config_path: Optional[str] = None) -> AppConfig:
-    """Load configuration from a YAML file, merging with default configs."""
-    config_dict = {}
+    """Load configuration from a YAML file, merging with default configs.
+
+    SEC-009 P1: source -> provenance -> expansion -> field classification ->
+    authority resolution -> AppConfig. Every field set by a repository-
+    equivalent source (auto-discovered kriya.yaml, an explicit --config path
+    inside or outside the workspace, or a runtime_profile preset expanded
+    from a repository-controlled value) is checked against
+    kriya/config/authority.py's classification before AppConfig is ever
+    constructed; anything other than an explicit REPOSITORY_SAFE field from
+    such a source raises ConfigAuthorityError. See authority.py's module
+    docstring for the full rule and why AUTO_DISCOVERED_INSTALL_DIR is
+    treated the same as repository provenance in P1.
+    """
+    from kriya.config.authority import (
+        ConfigSource,
+        FieldClassification,
+        FieldPath,
+        explicit_config_source,
+        path_field_classification,
+        resolve_authority,
+    )
+
+    config_dict: Dict[str, Any] = {}
     user_data: Dict[str, Any] = {}
-    
+    # provenance[(top_key, leaf_key)] = ConfigSource that set that field.
+    # top_key is None for scalar/list top-level fields (runtime_profile,
+    # llm_chain). Granularity mirrors the merge loop below exactly - this is
+    # the actual unit a source can independently set.
+    provenance: Dict[FieldPath, ConfigSource] = {}
+    # Runtime-resolved overrides for fields whose classification depends on a
+    # resolved value, not just the field name (paths.* containment check).
+    classification_overrides: Dict[FieldPath, FieldClassification] = {}
+
+    workspace_root = os.path.realpath(os.getcwd())
+
     # Determine Kriya Installation Directory
     KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    
+
     # Try to load default configuration from package path
     default_path = os.path.join(os.path.dirname(__file__), "default_config.yaml")
     if os.path.exists(default_path):
@@ -664,26 +729,34 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                     if "paths" in default_data:
                         for k, v in default_data["paths"].items():
                             if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
-                                default_data["paths"][k] = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, v))
+                                default_data["paths"][k] = os.path.realpath(os.path.join(KRIYA_INSTALL_DIR, v))
                     if "plugins" in default_data and "directory" in default_data["plugins"]:
                         v = default_data["plugins"]["directory"]
                         if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
-                            default_data["plugins"]["directory"] = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, v))
+                            default_data["plugins"]["directory"] = os.path.realpath(os.path.join(KRIYA_INSTALL_DIR, v))
                     config_dict.update(default_data)
+                    for top_key, val in default_data.items():
+                        if isinstance(val, dict):
+                            for leaf_key in val:
+                                provenance[(top_key, leaf_key)] = ConfigSource.PACKAGED_DEFAULT
+                        else:
+                            provenance[(None, top_key)] = ConfigSource.PACKAGED_DEFAULT
         except Exception as e:
             logger.warning(f"Failed to load packaged default configuration at '{default_path}', falling back to bare defaults: {e}")
-            
+
     # If no config_path is explicitly provided, look for 'kriya.yaml' or 'kriya.yml' in current directory
     # If not found, look for it in the Kriya Installation Directory
     config_dir = os.getcwd()
+    source: Optional["ConfigSource"] = None
     if not config_path:
         for filename in ["kriya.yaml", "kriya.yml"]:
             path = os.path.join(os.getcwd(), filename)
             if os.path.exists(path):
                 config_path = path
                 config_dir = os.getcwd()
+                source = ConfigSource.AUTO_DISCOVERED_CWD
                 break
-        
+
         if not config_path:
             # Fall back to Kriya installation directory
             for filename in ["kriya.yaml", "kriya.yml"]:
@@ -691,10 +764,15 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                 if os.path.exists(path):
                     config_path = path
                     config_dir = KRIYA_INSTALL_DIR
+                    source = ConfigSource.AUTO_DISCOVERED_INSTALL_DIR
                     break
     else:
-        config_path = os.path.abspath(config_path)
+        # realpath (not just abspath) so a symlinked --config path is
+        # classified and resolved by its REAL target, not its apparent
+        # location - closes the symlinked-config gap (SEC-009 P1).
+        config_path = os.path.realpath(config_path)
         config_dir = os.path.dirname(config_path)
+        source = explicit_config_source(config_path, workspace_root)
 
     # Load user config if specified and exists
     if config_path and os.path.exists(config_path):
@@ -702,28 +780,59 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             with open(config_path, "r") as f:
                 user_data = yaml.safe_load(f) or {}
                 if user_data:
-                    # Resolve relative paths in user config to config_dir
+                    # Resolve relative paths in user config to config_dir (realpath -
+                    # resolves symlinks in the resulting path, not just abspath).
                     if "paths" in user_data:
                         for k, v in user_data["paths"].items():
                             if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
-                                user_data["paths"][k] = os.path.abspath(os.path.join(config_dir, v))
+                                user_data["paths"][k] = os.path.realpath(os.path.join(config_dir, v))
                     if "plugins" in user_data and "directory" in user_data["plugins"]:
                         v = user_data["plugins"]["directory"]
                         if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
-                            user_data["plugins"]["directory"] = os.path.abspath(os.path.join(config_dir, v))
-                    
-                    # Simple deep merge of level-1 dicts
+                            user_data["plugins"]["directory"] = os.path.realpath(os.path.join(config_dir, v))
+
+                    # paths.{skills,memory,logs} classification depends on the
+                    # resolved value (in-workspace vs. escaping) - resolve
+                    # non-relative values too (an absolute path or a
+                    # symlinked one) so containment is checked against the
+                    # real target in every case, not just the "./"-prefixed
+                    # relative-path branch above.
+                    if isinstance(user_data.get("paths"), dict):
+                        for k, v in user_data["paths"].items():
+                            if k in ("skills", "memory", "logs") and isinstance(v, str):
+                                resolved = v if os.path.isabs(v) else os.path.join(config_dir, v)
+                                classification_overrides[("paths", k)] = path_field_classification(
+                                    k, resolved, workspace_root
+                                )
+
+                    # Simple deep merge of level-1 dicts, tracking provenance
+                    # at the exact same granularity the merge itself uses.
                     for key, val in user_data.items():
                         if isinstance(val, dict) and key in config_dict and isinstance(config_dict[key], dict):
                             config_dict[key].update(val)
+                            for leaf_key in val:
+                                provenance[(key, leaf_key)] = source
                         else:
                             config_dict[key] = val
+                            if isinstance(val, dict):
+                                for leaf_key in val:
+                                    provenance[(key, leaf_key)] = source
+                            else:
+                                provenance[(None, key)] = source
         except Exception as e:
             raise ValueError(f"Failed to load configuration at {config_path}: {e}") from e
-            
-    cfg = AppConfig(**config_dict)
 
-    if cfg.runtime_profile is not None:
+    # --- runtime_profile expansion (dict-level, BEFORE AppConfig/authority) ---
+    # Applied before AppConfig construction so authority resolution below
+    # inspects the FULLY EXPANDED effective configuration - a repository
+    # setting runtime_profile cannot launder a security-sensitive field
+    # change through preset expansion and have it slip past classification
+    # simply because the raw `runtime_profile` scalar was the only thing
+    # checked. Derived fields inherit RUNTIME_PROFILE_OVERRIDE provenance
+    # (itself denied for any repository-equivalent source) whenever the
+    # runtime_profile value itself did not come from a trusted source.
+    runtime_profile = config_dict.get("runtime_profile")
+    if runtime_profile is not None:
         conflicting = sorted(
             key for key in ("engineering_triage", "process_profiles", "workflow_controller")
             if key in user_data
@@ -734,35 +843,31 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                 "or configure the individual subsystems"
             )
 
-    # runtime_profile="hardened" (2026-08-25, external review P2) - see
-    # AppConfig's own docstring for exactly what this does and does not
-    # cover. Applied AFTER the normal default+user merge/validation, as an
-    # unconditional override - deliberately not a config_dict-level merge
-    # trick, so it behaves identically regardless of how the user's own
-    # kriya.yaml happened to set these same fields.
-    if cfg.runtime_profile == "legacy":
-        cfg.engineering_triage.shadow_mode = True
-        cfg.process_profiles.enabled = False
-        cfg.workflow_controller.enabled = False
-        cfg.workflow_controller.mode = "shadow"
-    elif cfg.runtime_profile == "validated":
-        cfg.engineering_triage.shadow_mode = False
-        cfg.process_profiles.enabled = True
-        cfg.workflow_controller.enabled = True
-        cfg.workflow_controller.mode = "shadow"
-    elif cfg.runtime_profile == "hardened":
-        cfg.engineering_triage.shadow_mode = False
-        cfg.process_profiles.enabled = True
-        cfg.workflow_controller.enabled = True
-        cfg.workflow_controller.mode = "enforce"
+        rp_source = provenance.get((None, "runtime_profile"), ConfigSource.PACKAGED_DEFAULT)
+        derived_source = (
+            ConfigSource.RUNTIME_PROFILE_OVERRIDE if rp_source not in (
+                ConfigSource.PACKAGED_DEFAULT, ConfigSource.PLATFORM_FLOOR
+            ) else rp_source
+        )
+
+        preset_fields = runtime_profile_preset_fields(runtime_profile)
+        for (top, leaf), value in preset_fields.items():
+            config_dict.setdefault(top, {})[leaf] = value
+            provenance[(top, leaf)] = derived_source
+
+    # --- SEC-009 P1 authority resolution: BEFORE AppConfig construction, ---
+    # BEFORE Kernel/PluginManager/MCPManager ever see this configuration.
+    resolve_authority(provenance, classification_overrides)
+
+    cfg = AppConfig(**config_dict)
 
     # Enforce baseline sensitive paths inheritance
     baseline_sensitive = [
-        r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile", 
+        r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile",
         r".*credentials.*", r".*password.*"
     ]
     for pattern in baseline_sensitive:
         if pattern not in cfg.autonomy.sensitive_paths:
             cfg.autonomy.sensitive_paths.append(pattern)
-            
+
     return cfg
