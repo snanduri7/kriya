@@ -203,18 +203,47 @@ def is_known_field(top_key: Optional[str], leaf_key: str) -> bool:
     return key in _REPOSITORY_SAFE_FIELDS or key in _PLATFORM_POLICY_FIELDS or key in _SECURITY_AUTHORITY_FIELDS
 
 
-def path_field_classification(leaf_key: str, resolved_value: str, workspace_root: str) -> FieldClassification:
+def path_field_classification(leaf_key: str, resolved_value: str, container_root: str) -> FieldClassification:
     """paths.{skills,memory,logs} - REPOSITORY_SAFE only if the value's real
-    target stays inside the workspace root; SECURITY_AUTHORITY (workspace
-    escape) otherwise. Never applied to plugins.directory - that field is
-    unconditionally SECURITY_AUTHORITY regardless of containment, because
-    the malicious payload it would load is typically INSIDE the same
-    repository/workspace that is under attack."""
+    target stays inside `container_root`; SECURITY_AUTHORITY (escape)
+    otherwise. `container_root` is the directory the SETTING config file
+    itself lives in (config_dir), not necessarily the process's CWD - for an
+    auto-discovered kriya.yaml these are the same directory by construction,
+    but for an explicit --config living elsewhere, its own relative paths
+    (the existing, pre-SEC-009 convention) are already resolved against its
+    own directory, and containment must be checked against that same
+    anchor - checking against CWD instead would deny an ordinary relative
+    `paths.skills: ./skills` in a config file that simply doesn't live in
+    the process's CWD, which is not an authority escape, just an operator's
+    config living somewhere else. Never applied to plugins.directory - that
+    field is unconditionally SECURITY_AUTHORITY regardless of containment,
+    because the malicious payload it would load is typically INSIDE the
+    same repository/workspace that is under attack."""
     real_value = os.path.realpath(resolved_value)
-    real_workspace = os.path.realpath(workspace_root)
-    if real_value == real_workspace or real_value.startswith(real_workspace + os.sep):
+    real_root = os.path.realpath(container_root)
+    if real_value == real_root or real_value.startswith(real_root + os.sep):
         return FieldClassification.REPOSITORY_SAFE
     return FieldClassification.SECURITY_AUTHORITY
+
+
+def agent_role_field_classification(role_value: object) -> FieldClassification:
+    """agent_llms.<role> (planner/architect/reviewer/run_verifier/skill_gap/
+    spec_compliance) is one atomic merge unit (AgentModelConfig) - the merge
+    never goes deeper than this leaf, so provenance can't distinguish
+    "just picked a model name" from "also redirected the network
+    destination" by field path alone. REPOSITORY_SAFE unless the role value
+    sets a base_url anywhere within it (its own `llm.base_url`, or any
+    `llm_chain` entry's base_url) - that is the same SECURITY_AUTHORITY
+    concern as the top-level llm.base_url, just nested one level deeper."""
+    if not isinstance(role_value, dict):
+        return FieldClassification.SECURITY_AUTHORITY
+    llm_val = role_value.get("llm")
+    if isinstance(llm_val, dict) and "base_url" in llm_val:
+        return FieldClassification.SECURITY_AUTHORITY
+    for chain_entry in role_value.get("llm_chain") or []:
+        if isinstance(chain_entry, dict) and "base_url" in chain_entry:
+            return FieldClassification.SECURITY_AUTHORITY
+    return FieldClassification.REPOSITORY_SAFE
 
 
 def explicit_config_source(resolved_config_path: str, workspace_root: str) -> ConfigSource:

@@ -697,6 +697,7 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         ConfigSource,
         FieldClassification,
         FieldPath,
+        agent_role_field_classification,
         explicit_config_source,
         path_field_classification,
         resolve_authority,
@@ -796,14 +797,28 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                     # non-relative values too (an absolute path or a
                     # symlinked one) so containment is checked against the
                     # real target in every case, not just the "./"-prefixed
-                    # relative-path branch above.
+                    # relative-path branch above. Anchored to config_dir (the
+                    # directory the SETTING config file lives in), not
+                    # workspace_root/CWD - see path_field_classification()'s
+                    # own docstring for why: an explicit --config living
+                    # outside CWD with an ordinary relative `./skills` value
+                    # is not an authority escape, just a config that lives
+                    # somewhere else.
                     if isinstance(user_data.get("paths"), dict):
                         for k, v in user_data["paths"].items():
                             if k in ("skills", "memory", "logs") and isinstance(v, str):
                                 resolved = v if os.path.isabs(v) else os.path.join(config_dir, v)
                                 classification_overrides[("paths", k)] = path_field_classification(
-                                    k, resolved, workspace_root
+                                    k, resolved, config_dir
                                 )
+
+                    # agent_llms.<role> is one atomic merge unit (see
+                    # agent_role_field_classification()'s docstring) -
+                    # REPOSITORY_SAFE unless it redirects a network
+                    # destination (base_url) somewhere within it.
+                    if isinstance(user_data.get("agent_llms"), dict):
+                        for role, role_val in user_data["agent_llms"].items():
+                            classification_overrides[("agent_llms", role)] = agent_role_field_classification(role_val)
 
                     # Simple deep merge of level-1 dicts, tracking provenance
                     # at the exact same granularity the merge itself uses.
