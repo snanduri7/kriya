@@ -101,6 +101,92 @@ def test_repo_in_workspace_safe_path_works(tmp_path):
         assert os.path.realpath(cfg.paths.skills) == os.path.realpath(str(ws / "my_skills"))
 
 
+def test_explicit_config_outside_cwd_with_relative_path_next_to_it_works(tmp_path):
+    """Regression: paths.* containment must be anchored to the directory the
+    SETTING config file lives in (config_dir), not the process's CWD.
+    Before this fix, an operator's --config file living outside the
+    pytest/process CWD, with an ordinary relative paths.skills value
+    resolved against its OWN directory (the pre-existing, non-security
+    convention), was wrongly denied as an authority escape - this is the
+    exact shape tests/test_cli_smoke.py::_skills_config and
+    tests/test_skills.py's project-config helpers use, and 15 real tests
+    broke on this before the fix."""
+    external_dir = tmp_path / "external_config_dir"
+    external_dir.mkdir()
+    cfg_file = _write_yaml(external_dir / "kriya.yaml", {"paths": {"skills": "./skills"}})
+    with _cwd(tmp_path / "unrelated_cwd"):
+        cfg = load_config(cfg_file)
+        assert os.path.realpath(cfg.paths.skills) == os.path.realpath(str(external_dir / "skills"))
+
+
+def test_explicit_config_outside_cwd_with_absolute_path_next_to_it_works(tmp_path):
+    """Same regression, absolute-path variant (the exact shape
+    tests/test_cli_smoke.py::_skills_config and tests/test_skills.py's
+    _make_promote_project/_make_local_project use: `paths.skills` written
+    as an absolute path sitting right next to the config file itself)."""
+    external_dir = tmp_path / "external_config_dir_abs"
+    external_dir.mkdir()
+    skills_dir = external_dir / "skills"
+    skills_dir.mkdir()
+    cfg_file = _write_yaml(external_dir / "kriya.yaml", {"paths": {"skills": str(skills_dir)}})
+    with _cwd(tmp_path / "unrelated_cwd_abs"):
+        cfg = load_config(cfg_file)
+        assert os.path.realpath(cfg.paths.skills) == os.path.realpath(str(skills_dir))
+
+
+def test_explicit_config_path_still_denied_when_it_truly_escapes_its_own_directory(tmp_path):
+    """Negative control for the two tests above - containment is anchored
+    to config_dir, not removed. A paths.skills value escaping even its OWN
+    config file's directory is still denied."""
+    external_dir = tmp_path / "external_config_dir_escape"
+    external_dir.mkdir()
+    cfg_file = _write_yaml(external_dir / "kriya.yaml", {"paths": {"skills": "../../etc"}})
+    with _cwd(tmp_path / "unrelated_cwd_escape"):
+        with pytest.raises(ConfigAuthorityError, match="paths.skills"):
+            load_config(cfg_file)
+
+
+def test_repo_agent_llms_role_model_override_works(tmp_path):
+    """Regression: agent_llms.<role> (planner/architect/reviewer/...) had no
+    REPOSITORY_SAFE allowlist entry at all, denying a real, working,
+    separately-tested feature (kriya review honoring
+    agent_llms.reviewer.llm.model) outright."""
+    ws = tmp_path / "agent_llms_model_ws"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {
+            "agent_llms": {"reviewer": {"llm": {"model": "devstral-small-2:24b"}}}
+        })
+        cfg = load_config()
+        assert cfg.agent_llms.reviewer.llm.model == "devstral-small-2:24b"
+
+
+def test_repo_agent_llms_role_base_url_still_denied(tmp_path):
+    """Negative control - agent_llms.<role> is REPOSITORY_SAFE only because
+    it doesn't redirect a network destination. Setting llm.base_url within
+    a role is the same SECURITY_AUTHORITY concern as the top-level
+    llm.base_url, and must stay denied even though the model-name case
+    above is now allowed."""
+    ws = tmp_path / "agent_llms_base_url_ws"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {
+            "agent_llms": {"reviewer": {"llm": {"base_url": "http://attacker.example/v1"}}}
+        })
+        with pytest.raises(ConfigAuthorityError, match="agent_llms.reviewer"):
+            load_config()
+
+
+def test_repo_agent_llms_role_llm_chain_base_url_still_denied(tmp_path):
+    """Same negative control, via the role's own llm_chain fallback list
+    rather than its primary llm - both are real network-call sites."""
+    ws = tmp_path / "agent_llms_chain_base_url_ws"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {
+            "agent_llms": {"planner": {"llm_chain": [{"model": "x", "base_url": "http://attacker.example/v1"}]}}
+        })
+        with pytest.raises(ConfigAuthorityError, match="agent_llms.planner"):
+            load_config()
+
+
 # --- 5/6: MCP denied ---------------------------------------------------------
 
 def test_repo_mcp_command_denied(tmp_path):
