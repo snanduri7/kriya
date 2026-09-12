@@ -83,7 +83,8 @@ def test_run_maven_cmd_ordinary_failure_never_triggers_acquisition(tmp_path):
 
 def test_run_maven_cmd_bounded_reacquisition_then_offline_success(tmp_path):
     """First offline attempt misses a dependency -> exactly ONE
-    acquisition (network=UNRESTRICTED, the SAME goals) -> exactly one
+    acquisition (network=DEPENDENCY_REGISTRY_ONLY - SEC-006, registry-
+    scoped rather than unrestricted - the SAME goals) -> exactly one
     more offline attempt (network=DENIED), which succeeds. Exactly 3
     calls total, never more."""
     validator = _contained_validator(tmp_path)
@@ -99,7 +100,9 @@ def test_run_maven_cmd_bounded_reacquisition_then_offline_success(tmp_path):
     assert result["stdout"] == "BUILD SUCCESS"  # the OFFLINE retry's result, not the acquisition's
     assert mock_run.call_count == 3
     networks_used = [c.kwargs["network"] for c in mock_run.call_args_list]
-    assert networks_used == [NetworkAuthority.DENIED, NetworkAuthority.UNRESTRICTED, NetworkAuthority.DENIED]
+    assert networks_used == [
+        NetworkAuthority.DENIED, NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, NetworkAuthority.DENIED,
+    ]
     # Same real goal used for acquisition as for the authoritative attempts
     # - never a static plugin list, never a different, narrower proxy goal.
     for call in mock_run.call_args_list:
@@ -107,8 +110,9 @@ def test_run_maven_cmd_bounded_reacquisition_then_offline_success(tmp_path):
 
 
 def test_run_maven_cmd_acquisition_result_never_returned_as_pass(tmp_path):
-    """The acquisition call (network=UNRESTRICTED) reporting success must
-    NEVER be mistaken for Quality Gate PASS evidence - only a SUBSEQUENT
+    """The acquisition call (network=DEPENDENCY_REGISTRY_ONLY) reporting
+    success must NEVER be mistaken for Quality Gate PASS evidence - only
+    a SUBSEQUENT
     offline (network=DENIED) attempt's own result is ever returned. Here
     the acquisition step (with network) would "pass", but the real
     offline retry afterward still fails - the function must return the

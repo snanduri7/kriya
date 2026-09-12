@@ -135,7 +135,9 @@ def test_contained_maven_compile_succeeds_via_transparent_two_phase_acquisition(
     point - proves _run_maven_cmd's offline-first, acquire-on-miss cycle
     works transparently, with zero unrestricted networking during the
     authoritative compile attempt itself (only the bounded acquisition
-    call, using the SAME goals, ever gets NetworkAuthority.UNRESTRICTED)."""
+    call, using the SAME goals, ever gets network access at all - SEC-006:
+    NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, registry-scoped, not
+    unrestricted)."""
     src_dir = tmp_path / "src" / "main" / "java" / "com" / "kriya" / "test"
     src_dir.mkdir(parents=True)
     (tmp_path / "pom.xml").write_text(_POM_WITH_A_REAL_DEPENDENCY)
@@ -158,8 +160,8 @@ def test_contained_maven_compile_succeeds_via_transparent_two_phase_acquisition(
 def test_contained_maven_offline_missing_dependency_triggers_bounded_reacquisition(tmp_path):
     """A compile call against a genuinely cold, freshly-created cache
     (nothing warmed yet) - proves the offline-first attempt fails, the
-    ONE bounded acquisition recovers it (network=UNRESTRICTED, same
-    goals), and the retried offline attempt then succeeds - rather than
+    ONE bounded acquisition recovers it (network=DEPENDENCY_REGISTRY_ONLY -
+    SEC-006, registry-scoped - same goals), and the retried offline attempt then succeeds - rather than
     failing outright or falling back to unrestricted networking for the
     authoritative compile step itself."""
     src_dir = tmp_path / "src" / "main" / "java" / "com" / "kriya" / "test"
